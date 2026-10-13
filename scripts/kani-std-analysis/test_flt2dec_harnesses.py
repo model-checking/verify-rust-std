@@ -15,17 +15,33 @@ class Flt2decHarnessesTests(unittest.TestCase):
 
     def test_complete_disjoint_batches_on_both_platforms(self):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
-        self.assertEqual(len(self.groups), 93)
-        self.assertEqual(len({group["name"] for group in self.groups}), 93)
-        self.assertEqual(len(self.dedicated), 322)
-        self.assertEqual(len(set(self.dedicated)), 322)
+        self.assertEqual(len(self.groups), 107)
+        self.assertEqual(len({group["name"] for group in self.groups}), 107)
+        self.assertEqual(len(self.dedicated), 569)
+        self.assertEqual(len(set(self.dedicated)), 569)
         self.assertLessEqual(len(self.groups) * len(OPERATING_SYSTEMS), 256)
         for group in self.groups:
             minutes = group["timeout_minutes"]
             with self.subTest(group=group["name"]):
                 self.assertTrue(group["harnesses"])
-                self.assertIn(minutes, (30, 60, 120))
+                self.assertIn(minutes, (7, 30, 60, 120))
                 self.assertLessEqual(minutes * len(group["harnesses"]), 240)
+
+    def test_shift_models_cover_all_safe_whole_limb_offsets(self):
+        for width, limbs in ((16, 40), (32, 40), (64, 20)):
+            groups = proof_groups(pointer_width=width)
+            cases = [harness for group in groups
+                     if group["name"].startswith("bigint-shift-equivalence-")
+                     for harness in group["harnesses"]]
+            positions = [(int(name.split("::")[-2].rsplit("_", 1)[1]),
+                          int(name.rsplit("_", 1)[1])) for name in cases]
+            routed = {(size, total - size) for total, size in positions}
+            expected = {(size, digits) for size in range(limbs + 1)
+                        for digits in range(limbs) if size + digits <= limbs}
+            with self.subTest(pointer_width=width):
+                self.assertEqual(routed, expected)
+                self.assertEqual(len(cases), len(expected))
+                self.assertLessEqual(len(groups) * len(OPERATING_SYSTEMS), 256)
 
     def test_all_float_partitions_and_equivalence_cases_remain(self):
         generators = [group for group in self.groups if group["kind"].startswith("generator-")]
@@ -58,7 +74,7 @@ class Flt2decHarnessesTests(unittest.TestCase):
         scaling = [harness for group in self.groups
                    if group["name"].startswith("grisu-shortest-scaling-contract-")
                    for harness in group["harnesses"]]
-        self.assertEqual({int(harness.rsplit("_", 1)[1]) for harness in scaling}, set(range(66)))
+        self.assertEqual({int(harness.rsplit("_", 1)[1]) for harness in scaling}, set(range(80)))
 
     def test_only_exact_catalog_names_are_removed(self):
         retained = ["num::imp::flt2dec::check_wrapper", "num::imp::flt2dec::check_future_proof",

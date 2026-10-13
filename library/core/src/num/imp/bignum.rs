@@ -466,6 +466,20 @@ impl Big {
         Self { size, base: crate::kani::any() }
     }
 
+    pub(crate) fn kani_valid_with_size(size: usize) -> Self {
+        assert!(size <= KANI_LIMBS);
+        let mut value = Self { size, base: [0; KANI_LIMBS] };
+        macro_rules! initialize_limbs {
+            ($($index:literal),+ $(,)?) => {{
+                $(
+                    value.base[$index] = if $index < size { crate::kani::any() } else { 0 };
+                )+
+            }};
+        }
+        kani_for_each_limb!(initialize_limbs);
+        value
+    }
+
     pub(crate) fn kani_size(&self) -> usize {
         self.size
     }
@@ -632,6 +646,48 @@ impl Big {
 
     // Contract proofs include every storage size, including the empty zero
     // representation. Leading zero limbs within the active prefix are valid.
+    pub(crate) fn kani_mul_pow2_model(&mut self, bits: usize) -> &mut Self {
+        assert!(self.kani_valid_storage());
+        let size = kani_loop_size(self.size);
+        let bits = kani_pow2_bits(bits);
+        let digit_bits = Digit::BITS as usize;
+        let digits = bits / digit_bits;
+        let bits = bits % digit_bits;
+        assert!(digits < KANI_LIMBS);
+        assert!(size + digits <= KANI_LIMBS);
+        assert!(bits == 0 || size + digits > 0);
+        assert!(bits == 0 || (self.base[KANI_LIMBS - digits - 1] >> (digit_bits - bits)) == 0);
+
+        let old = self.base;
+        let overflow = if bits > 0 && size > 0 { old[size - 1] >> (digit_bits - bits) } else { 0 };
+        let new_size = size + digits + usize::from(overflow > 0);
+        assert!(new_size <= KANI_LIMBS);
+
+        macro_rules! shift_limbs {
+            ($($index:literal),+ $(,)?) => {{
+                $(
+                    self.base[$index] = if $index < digits {
+                        0
+                    } else if bits == 0 {
+                        old[$index - digits]
+                    } else {
+                        let high = old[$index - digits] << bits;
+                        let low = if $index > digits {
+                            old[$index - digits - 1] >> (digit_bits - bits)
+                        } else {
+                            0
+                        };
+                        high | low
+                    };
+                )+
+            }};
+        }
+
+        kani_for_each_limb!(shift_limbs);
+        self.size = new_size;
+        self
+    }
+
     pub(crate) fn kani_any_valid() -> Self {
         let value: Self = crate::kani::any();
         crate::kani::assume(value.kani_valid_storage());

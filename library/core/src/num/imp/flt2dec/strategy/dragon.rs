@@ -294,6 +294,10 @@ pub fn format_shortest<'a>(
     (unsafe { buf[..i].assume_init_ref() }, k)
 }
 
+fn fill_zeroes(buf: &mut [MaybeUninit<u8>]) {
+    buf.fill(MaybeUninit::new(b'0'));
+}
+
 /// The exact and fixed mode implementation for Dragon.
 pub fn format_exact<'a>(
     d: &Decoded,
@@ -365,9 +369,7 @@ pub fn format_exact<'a>(
             if mant.is_zero() {
                 // following digits are all zeroes, we stop here
                 // do *not* try to perform rounding! rather, fill remaining digits.
-                for c in &mut buf[i..len] {
-                    *c = MaybeUninit::new(b'0');
-                }
+                fill_zeroes(&mut buf[i..len]);
                 // SAFETY: we initialized that memory above.
                 return (unsafe { buf[..len].assume_init_ref() }, k);
             }
@@ -534,6 +536,1103 @@ pub mod dragon_verify {
         assert!(actual.kani_same_storage(&modeled));
     }
 
+    fn fill_zeroes_model(buf: &mut [MaybeUninit<u8>]) {
+        assert!(buf.len() <= PROOF_BUFLEN);
+        // SAFETY: MaybeUninit<u8> has byte size and alignment. The mutable
+        // slice covers exactly buf.len() writable bytes, including an empty slice.
+        unsafe { crate::ptr::write_bytes(buf.as_mut_ptr(), b'0', buf.len()) };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(33)]
+    #[kani::solver(kissat)]
+    fn check_fill_zeroes_model_agrees() {
+        let initial = kani::any::<[u8; PROOF_BUFLEN]>();
+        let mut actual = initial.map(MaybeUninit::new);
+        let mut modeled = initial.map(MaybeUninit::new);
+        let start = usize::from(kani::any::<u8>());
+        let end = usize::from(kani::any::<u8>());
+        kani::assume(start <= end && end <= PROOF_BUFLEN);
+        fill_zeroes(&mut actual[start..end]);
+        fill_zeroes_model(&mut modeled[start..end]);
+        macro_rules! compare_bytes {
+            ($($index:literal),+ $(,)?) => {
+                $(
+                    // SAFETY: Both arrays began initialized, and zero filling
+                    // preserves initialization of every byte.
+                    assert_eq!(unsafe { actual[$index].assume_init() }, unsafe {
+                        modeled[$index].assume_init()
+                    });
+                )+
+            };
+        }
+        compare_bytes!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31
+        );
+        kani::cover(start == end, "zero filling accepts an empty slice");
+        kani::cover(start == 0 && end == PROOF_BUFLEN, "zero filling reaches every byte");
+        kani::cover(
+            start > 0 && end < PROOF_BUFLEN && start < end,
+            "zero filling preserves both edges",
+        );
+    }
+
+    fn check_mul_pow2_model_agrees<const SIZE: usize, const DIGITS: usize>() {
+        let mut value = Big::kani_valid_with_size(SIZE);
+        let shift = usize::from(kani::any::<u8>()) & (Digit::BITS as usize - 1);
+        let bits = (DIGITS * Digit::BITS as usize) | shift;
+        let digits = DIGITS;
+        let size = value.kani_size();
+        // Use the real method's safe shift domain for valid bigint storage.
+        kani::assume(digits < KANI_LIMBS && size + digits <= KANI_LIMBS);
+        kani::assume(shift == 0 || size + digits > 0);
+        kani::assume(
+            shift == 0
+                || (value.kani_limbs_mut()[KANI_LIMBS - digits - 1]
+                    >> (Digit::BITS as usize - shift))
+                    == 0,
+        );
+        let mut expected = value.clone();
+        let mut actual = value;
+        expected.mul_pow2(bits);
+        actual.kani_mul_pow2_model(bits);
+        assert!(actual.kani_same_storage(&expected));
+        kani::cover(shift == 0, "shift preserves whole limbs");
+        kani::cover(shift == Digit::BITS as usize - 1, "shift uses the largest partial limb");
+        kani::cover(digits == KANI_LIMBS - 1, "shift reaches the last stored limb");
+    }
+
+    // A case fixes the active size and whole-limb shift, leaving every
+    // partial-limb shift symbolic. Each real loop visits at most max(SIZE,
+    // DIGITS) limbs. Unwinding assertions verify the bound for every case.
+    macro_rules! check_shift_width {
+        ($module:ident, $($(#[$cfg:meta])* ($name:ident, $guide:ident, $size:literal, $digits:literal, $unwind:literal)),+ $(,)?) => {
+            mod $module {
+                use crate::kani;
+
+                $(
+                    $(#[$cfg])*
+                    fn $guide(size: usize) -> usize {
+                        assert_eq!(size, $size);
+                        $size
+                    }
+
+                    $(#[$cfg])*
+                    #[kani::proof]
+                    #[kani::unwind($unwind)]
+                    #[kani::solver(kissat)]
+                    #[kani::stub(crate::num::imp::bignum::kani_loop_size, $guide)]
+                    fn $name() {
+                        super::check_mul_pow2_model_agrees::<$size, $digits>();
+                    }
+                )+
+            }
+        };
+    }
+
+    check_shift_width!(shift_width_00, (size_00, guide_size_00, 0, 0, 1),);
+    check_shift_width!(
+        shift_width_01,
+        (size_00, guide_size_00, 0, 1, 2),
+        (size_01, guide_size_01, 1, 0, 2),
+    );
+    check_shift_width!(
+        shift_width_02,
+        (size_00, guide_size_00, 0, 2, 3),
+        (size_01, guide_size_01, 1, 1, 2),
+        (size_02, guide_size_02, 2, 0, 3),
+    );
+    check_shift_width!(
+        shift_width_03,
+        (size_00, guide_size_00, 0, 3, 4),
+        (size_01, guide_size_01, 1, 2, 3),
+        (size_02, guide_size_02, 2, 1, 3),
+        (size_03, guide_size_03, 3, 0, 4),
+    );
+    check_shift_width!(
+        shift_width_04,
+        (size_00, guide_size_00, 0, 4, 5),
+        (size_01, guide_size_01, 1, 3, 4),
+        (size_02, guide_size_02, 2, 2, 3),
+        (size_03, guide_size_03, 3, 1, 4),
+        (size_04, guide_size_04, 4, 0, 5),
+    );
+    check_shift_width!(
+        shift_width_05,
+        (size_00, guide_size_00, 0, 5, 6),
+        (size_01, guide_size_01, 1, 4, 5),
+        (size_02, guide_size_02, 2, 3, 4),
+        (size_03, guide_size_03, 3, 2, 4),
+        (size_04, guide_size_04, 4, 1, 5),
+        (size_05, guide_size_05, 5, 0, 6),
+    );
+    check_shift_width!(
+        shift_width_06,
+        (size_00, guide_size_00, 0, 6, 7),
+        (size_01, guide_size_01, 1, 5, 6),
+        (size_02, guide_size_02, 2, 4, 5),
+        (size_03, guide_size_03, 3, 3, 4),
+        (size_04, guide_size_04, 4, 2, 5),
+        (size_05, guide_size_05, 5, 1, 6),
+        (size_06, guide_size_06, 6, 0, 7),
+    );
+    check_shift_width!(
+        shift_width_07,
+        (size_00, guide_size_00, 0, 7, 8),
+        (size_01, guide_size_01, 1, 6, 7),
+        (size_02, guide_size_02, 2, 5, 6),
+        (size_03, guide_size_03, 3, 4, 5),
+        (size_04, guide_size_04, 4, 3, 5),
+        (size_05, guide_size_05, 5, 2, 6),
+        (size_06, guide_size_06, 6, 1, 7),
+        (size_07, guide_size_07, 7, 0, 8),
+    );
+    check_shift_width!(
+        shift_width_08,
+        (size_00, guide_size_00, 0, 8, 9),
+        (size_01, guide_size_01, 1, 7, 8),
+        (size_02, guide_size_02, 2, 6, 7),
+        (size_03, guide_size_03, 3, 5, 6),
+        (size_04, guide_size_04, 4, 4, 5),
+        (size_05, guide_size_05, 5, 3, 6),
+        (size_06, guide_size_06, 6, 2, 7),
+        (size_07, guide_size_07, 7, 1, 8),
+        (size_08, guide_size_08, 8, 0, 9),
+    );
+    check_shift_width!(
+        shift_width_09,
+        (size_00, guide_size_00, 0, 9, 10),
+        (size_01, guide_size_01, 1, 8, 9),
+        (size_02, guide_size_02, 2, 7, 8),
+        (size_03, guide_size_03, 3, 6, 7),
+        (size_04, guide_size_04, 4, 5, 6),
+        (size_05, guide_size_05, 5, 4, 6),
+        (size_06, guide_size_06, 6, 3, 7),
+        (size_07, guide_size_07, 7, 2, 8),
+        (size_08, guide_size_08, 8, 1, 9),
+        (size_09, guide_size_09, 9, 0, 10),
+    );
+    check_shift_width!(
+        shift_width_10,
+        (size_00, guide_size_00, 0, 10, 11),
+        (size_01, guide_size_01, 1, 9, 10),
+        (size_02, guide_size_02, 2, 8, 9),
+        (size_03, guide_size_03, 3, 7, 8),
+        (size_04, guide_size_04, 4, 6, 7),
+        (size_05, guide_size_05, 5, 5, 6),
+        (size_06, guide_size_06, 6, 4, 7),
+        (size_07, guide_size_07, 7, 3, 8),
+        (size_08, guide_size_08, 8, 2, 9),
+        (size_09, guide_size_09, 9, 1, 10),
+        (size_10, guide_size_10, 10, 0, 11),
+    );
+    check_shift_width!(
+        shift_width_11,
+        (size_00, guide_size_00, 0, 11, 12),
+        (size_01, guide_size_01, 1, 10, 11),
+        (size_02, guide_size_02, 2, 9, 10),
+        (size_03, guide_size_03, 3, 8, 9),
+        (size_04, guide_size_04, 4, 7, 8),
+        (size_05, guide_size_05, 5, 6, 7),
+        (size_06, guide_size_06, 6, 5, 7),
+        (size_07, guide_size_07, 7, 4, 8),
+        (size_08, guide_size_08, 8, 3, 9),
+        (size_09, guide_size_09, 9, 2, 10),
+        (size_10, guide_size_10, 10, 1, 11),
+        (size_11, guide_size_11, 11, 0, 12),
+    );
+    check_shift_width!(
+        shift_width_12,
+        (size_00, guide_size_00, 0, 12, 13),
+        (size_01, guide_size_01, 1, 11, 12),
+        (size_02, guide_size_02, 2, 10, 11),
+        (size_03, guide_size_03, 3, 9, 10),
+        (size_04, guide_size_04, 4, 8, 9),
+        (size_05, guide_size_05, 5, 7, 8),
+        (size_06, guide_size_06, 6, 6, 7),
+        (size_07, guide_size_07, 7, 5, 8),
+        (size_08, guide_size_08, 8, 4, 9),
+        (size_09, guide_size_09, 9, 3, 10),
+        (size_10, guide_size_10, 10, 2, 11),
+        (size_11, guide_size_11, 11, 1, 12),
+        (size_12, guide_size_12, 12, 0, 13),
+    );
+    check_shift_width!(
+        shift_width_13,
+        (size_00, guide_size_00, 0, 13, 14),
+        (size_01, guide_size_01, 1, 12, 13),
+        (size_02, guide_size_02, 2, 11, 12),
+        (size_03, guide_size_03, 3, 10, 11),
+        (size_04, guide_size_04, 4, 9, 10),
+        (size_05, guide_size_05, 5, 8, 9),
+        (size_06, guide_size_06, 6, 7, 8),
+        (size_07, guide_size_07, 7, 6, 8),
+        (size_08, guide_size_08, 8, 5, 9),
+        (size_09, guide_size_09, 9, 4, 10),
+        (size_10, guide_size_10, 10, 3, 11),
+        (size_11, guide_size_11, 11, 2, 12),
+        (size_12, guide_size_12, 12, 1, 13),
+        (size_13, guide_size_13, 13, 0, 14),
+    );
+    check_shift_width!(
+        shift_width_14,
+        (size_00, guide_size_00, 0, 14, 15),
+        (size_01, guide_size_01, 1, 13, 14),
+        (size_02, guide_size_02, 2, 12, 13),
+        (size_03, guide_size_03, 3, 11, 12),
+        (size_04, guide_size_04, 4, 10, 11),
+        (size_05, guide_size_05, 5, 9, 10),
+        (size_06, guide_size_06, 6, 8, 9),
+        (size_07, guide_size_07, 7, 7, 8),
+        (size_08, guide_size_08, 8, 6, 9),
+        (size_09, guide_size_09, 9, 5, 10),
+        (size_10, guide_size_10, 10, 4, 11),
+        (size_11, guide_size_11, 11, 3, 12),
+        (size_12, guide_size_12, 12, 2, 13),
+        (size_13, guide_size_13, 13, 1, 14),
+        (size_14, guide_size_14, 14, 0, 15),
+    );
+    check_shift_width!(
+        shift_width_15,
+        (size_00, guide_size_00, 0, 15, 16),
+        (size_01, guide_size_01, 1, 14, 15),
+        (size_02, guide_size_02, 2, 13, 14),
+        (size_03, guide_size_03, 3, 12, 13),
+        (size_04, guide_size_04, 4, 11, 12),
+        (size_05, guide_size_05, 5, 10, 11),
+        (size_06, guide_size_06, 6, 9, 10),
+        (size_07, guide_size_07, 7, 8, 9),
+        (size_08, guide_size_08, 8, 7, 9),
+        (size_09, guide_size_09, 9, 6, 10),
+        (size_10, guide_size_10, 10, 5, 11),
+        (size_11, guide_size_11, 11, 4, 12),
+        (size_12, guide_size_12, 12, 3, 13),
+        (size_13, guide_size_13, 13, 2, 14),
+        (size_14, guide_size_14, 14, 1, 15),
+        (size_15, guide_size_15, 15, 0, 16),
+    );
+    check_shift_width!(
+        shift_width_16,
+        (size_00, guide_size_00, 0, 16, 17),
+        (size_01, guide_size_01, 1, 15, 16),
+        (size_02, guide_size_02, 2, 14, 15),
+        (size_03, guide_size_03, 3, 13, 14),
+        (size_04, guide_size_04, 4, 12, 13),
+        (size_05, guide_size_05, 5, 11, 12),
+        (size_06, guide_size_06, 6, 10, 11),
+        (size_07, guide_size_07, 7, 9, 10),
+        (size_08, guide_size_08, 8, 8, 9),
+        (size_09, guide_size_09, 9, 7, 10),
+        (size_10, guide_size_10, 10, 6, 11),
+        (size_11, guide_size_11, 11, 5, 12),
+        (size_12, guide_size_12, 12, 4, 13),
+        (size_13, guide_size_13, 13, 3, 14),
+        (size_14, guide_size_14, 14, 2, 15),
+        (size_15, guide_size_15, 15, 1, 16),
+        (size_16, guide_size_16, 16, 0, 17),
+    );
+    check_shift_width!(
+        shift_width_17,
+        (size_00, guide_size_00, 0, 17, 18),
+        (size_01, guide_size_01, 1, 16, 17),
+        (size_02, guide_size_02, 2, 15, 16),
+        (size_03, guide_size_03, 3, 14, 15),
+        (size_04, guide_size_04, 4, 13, 14),
+        (size_05, guide_size_05, 5, 12, 13),
+        (size_06, guide_size_06, 6, 11, 12),
+        (size_07, guide_size_07, 7, 10, 11),
+        (size_08, guide_size_08, 8, 9, 10),
+        (size_09, guide_size_09, 9, 8, 10),
+        (size_10, guide_size_10, 10, 7, 11),
+        (size_11, guide_size_11, 11, 6, 12),
+        (size_12, guide_size_12, 12, 5, 13),
+        (size_13, guide_size_13, 13, 4, 14),
+        (size_14, guide_size_14, 14, 3, 15),
+        (size_15, guide_size_15, 15, 2, 16),
+        (size_16, guide_size_16, 16, 1, 17),
+        (size_17, guide_size_17, 17, 0, 18),
+    );
+    check_shift_width!(
+        shift_width_18,
+        (size_00, guide_size_00, 0, 18, 19),
+        (size_01, guide_size_01, 1, 17, 18),
+        (size_02, guide_size_02, 2, 16, 17),
+        (size_03, guide_size_03, 3, 15, 16),
+        (size_04, guide_size_04, 4, 14, 15),
+        (size_05, guide_size_05, 5, 13, 14),
+        (size_06, guide_size_06, 6, 12, 13),
+        (size_07, guide_size_07, 7, 11, 12),
+        (size_08, guide_size_08, 8, 10, 11),
+        (size_09, guide_size_09, 9, 9, 10),
+        (size_10, guide_size_10, 10, 8, 11),
+        (size_11, guide_size_11, 11, 7, 12),
+        (size_12, guide_size_12, 12, 6, 13),
+        (size_13, guide_size_13, 13, 5, 14),
+        (size_14, guide_size_14, 14, 4, 15),
+        (size_15, guide_size_15, 15, 3, 16),
+        (size_16, guide_size_16, 16, 2, 17),
+        (size_17, guide_size_17, 17, 1, 18),
+        (size_18, guide_size_18, 18, 0, 19),
+    );
+    check_shift_width!(
+        shift_width_19,
+        (size_00, guide_size_00, 0, 19, 20),
+        (size_01, guide_size_01, 1, 18, 19),
+        (size_02, guide_size_02, 2, 17, 18),
+        (size_03, guide_size_03, 3, 16, 17),
+        (size_04, guide_size_04, 4, 15, 16),
+        (size_05, guide_size_05, 5, 14, 15),
+        (size_06, guide_size_06, 6, 13, 14),
+        (size_07, guide_size_07, 7, 12, 13),
+        (size_08, guide_size_08, 8, 11, 12),
+        (size_09, guide_size_09, 9, 10, 11),
+        (size_10, guide_size_10, 10, 9, 11),
+        (size_11, guide_size_11, 11, 8, 12),
+        (size_12, guide_size_12, 12, 7, 13),
+        (size_13, guide_size_13, 13, 6, 14),
+        (size_14, guide_size_14, 14, 5, 15),
+        (size_15, guide_size_15, 15, 4, 16),
+        (size_16, guide_size_16, 16, 3, 17),
+        (size_17, guide_size_17, 17, 2, 18),
+        (size_18, guide_size_18, 18, 1, 19),
+        (size_19, guide_size_19, 19, 0, 20),
+    );
+    check_shift_width!(
+        shift_width_20,
+        #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+        (size_00, guide_size_00, 0, 20, 21),
+        (size_01, guide_size_01, 1, 19, 20),
+        (size_02, guide_size_02, 2, 18, 19),
+        (size_03, guide_size_03, 3, 17, 18),
+        (size_04, guide_size_04, 4, 16, 17),
+        (size_05, guide_size_05, 5, 15, 16),
+        (size_06, guide_size_06, 6, 14, 15),
+        (size_07, guide_size_07, 7, 13, 14),
+        (size_08, guide_size_08, 8, 12, 13),
+        (size_09, guide_size_09, 9, 11, 12),
+        (size_10, guide_size_10, 10, 10, 11),
+        (size_11, guide_size_11, 11, 9, 12),
+        (size_12, guide_size_12, 12, 8, 13),
+        (size_13, guide_size_13, 13, 7, 14),
+        (size_14, guide_size_14, 14, 6, 15),
+        (size_15, guide_size_15, 15, 5, 16),
+        (size_16, guide_size_16, 16, 4, 17),
+        (size_17, guide_size_17, 17, 3, 18),
+        (size_18, guide_size_18, 18, 2, 19),
+        (size_19, guide_size_19, 19, 1, 20),
+        (size_20, guide_size_20, 20, 0, 21),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_21,
+        (size_00, guide_size_00, 0, 21, 22),
+        (size_01, guide_size_01, 1, 20, 21),
+        (size_02, guide_size_02, 2, 19, 20),
+        (size_03, guide_size_03, 3, 18, 19),
+        (size_04, guide_size_04, 4, 17, 18),
+        (size_05, guide_size_05, 5, 16, 17),
+        (size_06, guide_size_06, 6, 15, 16),
+        (size_07, guide_size_07, 7, 14, 15),
+        (size_08, guide_size_08, 8, 13, 14),
+        (size_09, guide_size_09, 9, 12, 13),
+        (size_10, guide_size_10, 10, 11, 12),
+        (size_11, guide_size_11, 11, 10, 12),
+        (size_12, guide_size_12, 12, 9, 13),
+        (size_13, guide_size_13, 13, 8, 14),
+        (size_14, guide_size_14, 14, 7, 15),
+        (size_15, guide_size_15, 15, 6, 16),
+        (size_16, guide_size_16, 16, 5, 17),
+        (size_17, guide_size_17, 17, 4, 18),
+        (size_18, guide_size_18, 18, 3, 19),
+        (size_19, guide_size_19, 19, 2, 20),
+        (size_20, guide_size_20, 20, 1, 21),
+        (size_21, guide_size_21, 21, 0, 22),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_22,
+        (size_00, guide_size_00, 0, 22, 23),
+        (size_01, guide_size_01, 1, 21, 22),
+        (size_02, guide_size_02, 2, 20, 21),
+        (size_03, guide_size_03, 3, 19, 20),
+        (size_04, guide_size_04, 4, 18, 19),
+        (size_05, guide_size_05, 5, 17, 18),
+        (size_06, guide_size_06, 6, 16, 17),
+        (size_07, guide_size_07, 7, 15, 16),
+        (size_08, guide_size_08, 8, 14, 15),
+        (size_09, guide_size_09, 9, 13, 14),
+        (size_10, guide_size_10, 10, 12, 13),
+        (size_11, guide_size_11, 11, 11, 12),
+        (size_12, guide_size_12, 12, 10, 13),
+        (size_13, guide_size_13, 13, 9, 14),
+        (size_14, guide_size_14, 14, 8, 15),
+        (size_15, guide_size_15, 15, 7, 16),
+        (size_16, guide_size_16, 16, 6, 17),
+        (size_17, guide_size_17, 17, 5, 18),
+        (size_18, guide_size_18, 18, 4, 19),
+        (size_19, guide_size_19, 19, 3, 20),
+        (size_20, guide_size_20, 20, 2, 21),
+        (size_21, guide_size_21, 21, 1, 22),
+        (size_22, guide_size_22, 22, 0, 23),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_23,
+        (size_00, guide_size_00, 0, 23, 24),
+        (size_01, guide_size_01, 1, 22, 23),
+        (size_02, guide_size_02, 2, 21, 22),
+        (size_03, guide_size_03, 3, 20, 21),
+        (size_04, guide_size_04, 4, 19, 20),
+        (size_05, guide_size_05, 5, 18, 19),
+        (size_06, guide_size_06, 6, 17, 18),
+        (size_07, guide_size_07, 7, 16, 17),
+        (size_08, guide_size_08, 8, 15, 16),
+        (size_09, guide_size_09, 9, 14, 15),
+        (size_10, guide_size_10, 10, 13, 14),
+        (size_11, guide_size_11, 11, 12, 13),
+        (size_12, guide_size_12, 12, 11, 13),
+        (size_13, guide_size_13, 13, 10, 14),
+        (size_14, guide_size_14, 14, 9, 15),
+        (size_15, guide_size_15, 15, 8, 16),
+        (size_16, guide_size_16, 16, 7, 17),
+        (size_17, guide_size_17, 17, 6, 18),
+        (size_18, guide_size_18, 18, 5, 19),
+        (size_19, guide_size_19, 19, 4, 20),
+        (size_20, guide_size_20, 20, 3, 21),
+        (size_21, guide_size_21, 21, 2, 22),
+        (size_22, guide_size_22, 22, 1, 23),
+        (size_23, guide_size_23, 23, 0, 24),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_24,
+        (size_00, guide_size_00, 0, 24, 25),
+        (size_01, guide_size_01, 1, 23, 24),
+        (size_02, guide_size_02, 2, 22, 23),
+        (size_03, guide_size_03, 3, 21, 22),
+        (size_04, guide_size_04, 4, 20, 21),
+        (size_05, guide_size_05, 5, 19, 20),
+        (size_06, guide_size_06, 6, 18, 19),
+        (size_07, guide_size_07, 7, 17, 18),
+        (size_08, guide_size_08, 8, 16, 17),
+        (size_09, guide_size_09, 9, 15, 16),
+        (size_10, guide_size_10, 10, 14, 15),
+        (size_11, guide_size_11, 11, 13, 14),
+        (size_12, guide_size_12, 12, 12, 13),
+        (size_13, guide_size_13, 13, 11, 14),
+        (size_14, guide_size_14, 14, 10, 15),
+        (size_15, guide_size_15, 15, 9, 16),
+        (size_16, guide_size_16, 16, 8, 17),
+        (size_17, guide_size_17, 17, 7, 18),
+        (size_18, guide_size_18, 18, 6, 19),
+        (size_19, guide_size_19, 19, 5, 20),
+        (size_20, guide_size_20, 20, 4, 21),
+        (size_21, guide_size_21, 21, 3, 22),
+        (size_22, guide_size_22, 22, 2, 23),
+        (size_23, guide_size_23, 23, 1, 24),
+        (size_24, guide_size_24, 24, 0, 25),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_25,
+        (size_00, guide_size_00, 0, 25, 26),
+        (size_01, guide_size_01, 1, 24, 25),
+        (size_02, guide_size_02, 2, 23, 24),
+        (size_03, guide_size_03, 3, 22, 23),
+        (size_04, guide_size_04, 4, 21, 22),
+        (size_05, guide_size_05, 5, 20, 21),
+        (size_06, guide_size_06, 6, 19, 20),
+        (size_07, guide_size_07, 7, 18, 19),
+        (size_08, guide_size_08, 8, 17, 18),
+        (size_09, guide_size_09, 9, 16, 17),
+        (size_10, guide_size_10, 10, 15, 16),
+        (size_11, guide_size_11, 11, 14, 15),
+        (size_12, guide_size_12, 12, 13, 14),
+        (size_13, guide_size_13, 13, 12, 14),
+        (size_14, guide_size_14, 14, 11, 15),
+        (size_15, guide_size_15, 15, 10, 16),
+        (size_16, guide_size_16, 16, 9, 17),
+        (size_17, guide_size_17, 17, 8, 18),
+        (size_18, guide_size_18, 18, 7, 19),
+        (size_19, guide_size_19, 19, 6, 20),
+        (size_20, guide_size_20, 20, 5, 21),
+        (size_21, guide_size_21, 21, 4, 22),
+        (size_22, guide_size_22, 22, 3, 23),
+        (size_23, guide_size_23, 23, 2, 24),
+        (size_24, guide_size_24, 24, 1, 25),
+        (size_25, guide_size_25, 25, 0, 26),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_26,
+        (size_00, guide_size_00, 0, 26, 27),
+        (size_01, guide_size_01, 1, 25, 26),
+        (size_02, guide_size_02, 2, 24, 25),
+        (size_03, guide_size_03, 3, 23, 24),
+        (size_04, guide_size_04, 4, 22, 23),
+        (size_05, guide_size_05, 5, 21, 22),
+        (size_06, guide_size_06, 6, 20, 21),
+        (size_07, guide_size_07, 7, 19, 20),
+        (size_08, guide_size_08, 8, 18, 19),
+        (size_09, guide_size_09, 9, 17, 18),
+        (size_10, guide_size_10, 10, 16, 17),
+        (size_11, guide_size_11, 11, 15, 16),
+        (size_12, guide_size_12, 12, 14, 15),
+        (size_13, guide_size_13, 13, 13, 14),
+        (size_14, guide_size_14, 14, 12, 15),
+        (size_15, guide_size_15, 15, 11, 16),
+        (size_16, guide_size_16, 16, 10, 17),
+        (size_17, guide_size_17, 17, 9, 18),
+        (size_18, guide_size_18, 18, 8, 19),
+        (size_19, guide_size_19, 19, 7, 20),
+        (size_20, guide_size_20, 20, 6, 21),
+        (size_21, guide_size_21, 21, 5, 22),
+        (size_22, guide_size_22, 22, 4, 23),
+        (size_23, guide_size_23, 23, 3, 24),
+        (size_24, guide_size_24, 24, 2, 25),
+        (size_25, guide_size_25, 25, 1, 26),
+        (size_26, guide_size_26, 26, 0, 27),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_27,
+        (size_00, guide_size_00, 0, 27, 28),
+        (size_01, guide_size_01, 1, 26, 27),
+        (size_02, guide_size_02, 2, 25, 26),
+        (size_03, guide_size_03, 3, 24, 25),
+        (size_04, guide_size_04, 4, 23, 24),
+        (size_05, guide_size_05, 5, 22, 23),
+        (size_06, guide_size_06, 6, 21, 22),
+        (size_07, guide_size_07, 7, 20, 21),
+        (size_08, guide_size_08, 8, 19, 20),
+        (size_09, guide_size_09, 9, 18, 19),
+        (size_10, guide_size_10, 10, 17, 18),
+        (size_11, guide_size_11, 11, 16, 17),
+        (size_12, guide_size_12, 12, 15, 16),
+        (size_13, guide_size_13, 13, 14, 15),
+        (size_14, guide_size_14, 14, 13, 15),
+        (size_15, guide_size_15, 15, 12, 16),
+        (size_16, guide_size_16, 16, 11, 17),
+        (size_17, guide_size_17, 17, 10, 18),
+        (size_18, guide_size_18, 18, 9, 19),
+        (size_19, guide_size_19, 19, 8, 20),
+        (size_20, guide_size_20, 20, 7, 21),
+        (size_21, guide_size_21, 21, 6, 22),
+        (size_22, guide_size_22, 22, 5, 23),
+        (size_23, guide_size_23, 23, 4, 24),
+        (size_24, guide_size_24, 24, 3, 25),
+        (size_25, guide_size_25, 25, 2, 26),
+        (size_26, guide_size_26, 26, 1, 27),
+        (size_27, guide_size_27, 27, 0, 28),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_28,
+        (size_00, guide_size_00, 0, 28, 29),
+        (size_01, guide_size_01, 1, 27, 28),
+        (size_02, guide_size_02, 2, 26, 27),
+        (size_03, guide_size_03, 3, 25, 26),
+        (size_04, guide_size_04, 4, 24, 25),
+        (size_05, guide_size_05, 5, 23, 24),
+        (size_06, guide_size_06, 6, 22, 23),
+        (size_07, guide_size_07, 7, 21, 22),
+        (size_08, guide_size_08, 8, 20, 21),
+        (size_09, guide_size_09, 9, 19, 20),
+        (size_10, guide_size_10, 10, 18, 19),
+        (size_11, guide_size_11, 11, 17, 18),
+        (size_12, guide_size_12, 12, 16, 17),
+        (size_13, guide_size_13, 13, 15, 16),
+        (size_14, guide_size_14, 14, 14, 15),
+        (size_15, guide_size_15, 15, 13, 16),
+        (size_16, guide_size_16, 16, 12, 17),
+        (size_17, guide_size_17, 17, 11, 18),
+        (size_18, guide_size_18, 18, 10, 19),
+        (size_19, guide_size_19, 19, 9, 20),
+        (size_20, guide_size_20, 20, 8, 21),
+        (size_21, guide_size_21, 21, 7, 22),
+        (size_22, guide_size_22, 22, 6, 23),
+        (size_23, guide_size_23, 23, 5, 24),
+        (size_24, guide_size_24, 24, 4, 25),
+        (size_25, guide_size_25, 25, 3, 26),
+        (size_26, guide_size_26, 26, 2, 27),
+        (size_27, guide_size_27, 27, 1, 28),
+        (size_28, guide_size_28, 28, 0, 29),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_29,
+        (size_00, guide_size_00, 0, 29, 30),
+        (size_01, guide_size_01, 1, 28, 29),
+        (size_02, guide_size_02, 2, 27, 28),
+        (size_03, guide_size_03, 3, 26, 27),
+        (size_04, guide_size_04, 4, 25, 26),
+        (size_05, guide_size_05, 5, 24, 25),
+        (size_06, guide_size_06, 6, 23, 24),
+        (size_07, guide_size_07, 7, 22, 23),
+        (size_08, guide_size_08, 8, 21, 22),
+        (size_09, guide_size_09, 9, 20, 21),
+        (size_10, guide_size_10, 10, 19, 20),
+        (size_11, guide_size_11, 11, 18, 19),
+        (size_12, guide_size_12, 12, 17, 18),
+        (size_13, guide_size_13, 13, 16, 17),
+        (size_14, guide_size_14, 14, 15, 16),
+        (size_15, guide_size_15, 15, 14, 16),
+        (size_16, guide_size_16, 16, 13, 17),
+        (size_17, guide_size_17, 17, 12, 18),
+        (size_18, guide_size_18, 18, 11, 19),
+        (size_19, guide_size_19, 19, 10, 20),
+        (size_20, guide_size_20, 20, 9, 21),
+        (size_21, guide_size_21, 21, 8, 22),
+        (size_22, guide_size_22, 22, 7, 23),
+        (size_23, guide_size_23, 23, 6, 24),
+        (size_24, guide_size_24, 24, 5, 25),
+        (size_25, guide_size_25, 25, 4, 26),
+        (size_26, guide_size_26, 26, 3, 27),
+        (size_27, guide_size_27, 27, 2, 28),
+        (size_28, guide_size_28, 28, 1, 29),
+        (size_29, guide_size_29, 29, 0, 30),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_30,
+        (size_00, guide_size_00, 0, 30, 31),
+        (size_01, guide_size_01, 1, 29, 30),
+        (size_02, guide_size_02, 2, 28, 29),
+        (size_03, guide_size_03, 3, 27, 28),
+        (size_04, guide_size_04, 4, 26, 27),
+        (size_05, guide_size_05, 5, 25, 26),
+        (size_06, guide_size_06, 6, 24, 25),
+        (size_07, guide_size_07, 7, 23, 24),
+        (size_08, guide_size_08, 8, 22, 23),
+        (size_09, guide_size_09, 9, 21, 22),
+        (size_10, guide_size_10, 10, 20, 21),
+        (size_11, guide_size_11, 11, 19, 20),
+        (size_12, guide_size_12, 12, 18, 19),
+        (size_13, guide_size_13, 13, 17, 18),
+        (size_14, guide_size_14, 14, 16, 17),
+        (size_15, guide_size_15, 15, 15, 16),
+        (size_16, guide_size_16, 16, 14, 17),
+        (size_17, guide_size_17, 17, 13, 18),
+        (size_18, guide_size_18, 18, 12, 19),
+        (size_19, guide_size_19, 19, 11, 20),
+        (size_20, guide_size_20, 20, 10, 21),
+        (size_21, guide_size_21, 21, 9, 22),
+        (size_22, guide_size_22, 22, 8, 23),
+        (size_23, guide_size_23, 23, 7, 24),
+        (size_24, guide_size_24, 24, 6, 25),
+        (size_25, guide_size_25, 25, 5, 26),
+        (size_26, guide_size_26, 26, 4, 27),
+        (size_27, guide_size_27, 27, 3, 28),
+        (size_28, guide_size_28, 28, 2, 29),
+        (size_29, guide_size_29, 29, 1, 30),
+        (size_30, guide_size_30, 30, 0, 31),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_31,
+        (size_00, guide_size_00, 0, 31, 32),
+        (size_01, guide_size_01, 1, 30, 31),
+        (size_02, guide_size_02, 2, 29, 30),
+        (size_03, guide_size_03, 3, 28, 29),
+        (size_04, guide_size_04, 4, 27, 28),
+        (size_05, guide_size_05, 5, 26, 27),
+        (size_06, guide_size_06, 6, 25, 26),
+        (size_07, guide_size_07, 7, 24, 25),
+        (size_08, guide_size_08, 8, 23, 24),
+        (size_09, guide_size_09, 9, 22, 23),
+        (size_10, guide_size_10, 10, 21, 22),
+        (size_11, guide_size_11, 11, 20, 21),
+        (size_12, guide_size_12, 12, 19, 20),
+        (size_13, guide_size_13, 13, 18, 19),
+        (size_14, guide_size_14, 14, 17, 18),
+        (size_15, guide_size_15, 15, 16, 17),
+        (size_16, guide_size_16, 16, 15, 17),
+        (size_17, guide_size_17, 17, 14, 18),
+        (size_18, guide_size_18, 18, 13, 19),
+        (size_19, guide_size_19, 19, 12, 20),
+        (size_20, guide_size_20, 20, 11, 21),
+        (size_21, guide_size_21, 21, 10, 22),
+        (size_22, guide_size_22, 22, 9, 23),
+        (size_23, guide_size_23, 23, 8, 24),
+        (size_24, guide_size_24, 24, 7, 25),
+        (size_25, guide_size_25, 25, 6, 26),
+        (size_26, guide_size_26, 26, 5, 27),
+        (size_27, guide_size_27, 27, 4, 28),
+        (size_28, guide_size_28, 28, 3, 29),
+        (size_29, guide_size_29, 29, 2, 30),
+        (size_30, guide_size_30, 30, 1, 31),
+        (size_31, guide_size_31, 31, 0, 32),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_32,
+        (size_00, guide_size_00, 0, 32, 33),
+        (size_01, guide_size_01, 1, 31, 32),
+        (size_02, guide_size_02, 2, 30, 31),
+        (size_03, guide_size_03, 3, 29, 30),
+        (size_04, guide_size_04, 4, 28, 29),
+        (size_05, guide_size_05, 5, 27, 28),
+        (size_06, guide_size_06, 6, 26, 27),
+        (size_07, guide_size_07, 7, 25, 26),
+        (size_08, guide_size_08, 8, 24, 25),
+        (size_09, guide_size_09, 9, 23, 24),
+        (size_10, guide_size_10, 10, 22, 23),
+        (size_11, guide_size_11, 11, 21, 22),
+        (size_12, guide_size_12, 12, 20, 21),
+        (size_13, guide_size_13, 13, 19, 20),
+        (size_14, guide_size_14, 14, 18, 19),
+        (size_15, guide_size_15, 15, 17, 18),
+        (size_16, guide_size_16, 16, 16, 17),
+        (size_17, guide_size_17, 17, 15, 18),
+        (size_18, guide_size_18, 18, 14, 19),
+        (size_19, guide_size_19, 19, 13, 20),
+        (size_20, guide_size_20, 20, 12, 21),
+        (size_21, guide_size_21, 21, 11, 22),
+        (size_22, guide_size_22, 22, 10, 23),
+        (size_23, guide_size_23, 23, 9, 24),
+        (size_24, guide_size_24, 24, 8, 25),
+        (size_25, guide_size_25, 25, 7, 26),
+        (size_26, guide_size_26, 26, 6, 27),
+        (size_27, guide_size_27, 27, 5, 28),
+        (size_28, guide_size_28, 28, 4, 29),
+        (size_29, guide_size_29, 29, 3, 30),
+        (size_30, guide_size_30, 30, 2, 31),
+        (size_31, guide_size_31, 31, 1, 32),
+        (size_32, guide_size_32, 32, 0, 33),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_33,
+        (size_00, guide_size_00, 0, 33, 34),
+        (size_01, guide_size_01, 1, 32, 33),
+        (size_02, guide_size_02, 2, 31, 32),
+        (size_03, guide_size_03, 3, 30, 31),
+        (size_04, guide_size_04, 4, 29, 30),
+        (size_05, guide_size_05, 5, 28, 29),
+        (size_06, guide_size_06, 6, 27, 28),
+        (size_07, guide_size_07, 7, 26, 27),
+        (size_08, guide_size_08, 8, 25, 26),
+        (size_09, guide_size_09, 9, 24, 25),
+        (size_10, guide_size_10, 10, 23, 24),
+        (size_11, guide_size_11, 11, 22, 23),
+        (size_12, guide_size_12, 12, 21, 22),
+        (size_13, guide_size_13, 13, 20, 21),
+        (size_14, guide_size_14, 14, 19, 20),
+        (size_15, guide_size_15, 15, 18, 19),
+        (size_16, guide_size_16, 16, 17, 18),
+        (size_17, guide_size_17, 17, 16, 18),
+        (size_18, guide_size_18, 18, 15, 19),
+        (size_19, guide_size_19, 19, 14, 20),
+        (size_20, guide_size_20, 20, 13, 21),
+        (size_21, guide_size_21, 21, 12, 22),
+        (size_22, guide_size_22, 22, 11, 23),
+        (size_23, guide_size_23, 23, 10, 24),
+        (size_24, guide_size_24, 24, 9, 25),
+        (size_25, guide_size_25, 25, 8, 26),
+        (size_26, guide_size_26, 26, 7, 27),
+        (size_27, guide_size_27, 27, 6, 28),
+        (size_28, guide_size_28, 28, 5, 29),
+        (size_29, guide_size_29, 29, 4, 30),
+        (size_30, guide_size_30, 30, 3, 31),
+        (size_31, guide_size_31, 31, 2, 32),
+        (size_32, guide_size_32, 32, 1, 33),
+        (size_33, guide_size_33, 33, 0, 34),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_34,
+        (size_00, guide_size_00, 0, 34, 35),
+        (size_01, guide_size_01, 1, 33, 34),
+        (size_02, guide_size_02, 2, 32, 33),
+        (size_03, guide_size_03, 3, 31, 32),
+        (size_04, guide_size_04, 4, 30, 31),
+        (size_05, guide_size_05, 5, 29, 30),
+        (size_06, guide_size_06, 6, 28, 29),
+        (size_07, guide_size_07, 7, 27, 28),
+        (size_08, guide_size_08, 8, 26, 27),
+        (size_09, guide_size_09, 9, 25, 26),
+        (size_10, guide_size_10, 10, 24, 25),
+        (size_11, guide_size_11, 11, 23, 24),
+        (size_12, guide_size_12, 12, 22, 23),
+        (size_13, guide_size_13, 13, 21, 22),
+        (size_14, guide_size_14, 14, 20, 21),
+        (size_15, guide_size_15, 15, 19, 20),
+        (size_16, guide_size_16, 16, 18, 19),
+        (size_17, guide_size_17, 17, 17, 18),
+        (size_18, guide_size_18, 18, 16, 19),
+        (size_19, guide_size_19, 19, 15, 20),
+        (size_20, guide_size_20, 20, 14, 21),
+        (size_21, guide_size_21, 21, 13, 22),
+        (size_22, guide_size_22, 22, 12, 23),
+        (size_23, guide_size_23, 23, 11, 24),
+        (size_24, guide_size_24, 24, 10, 25),
+        (size_25, guide_size_25, 25, 9, 26),
+        (size_26, guide_size_26, 26, 8, 27),
+        (size_27, guide_size_27, 27, 7, 28),
+        (size_28, guide_size_28, 28, 6, 29),
+        (size_29, guide_size_29, 29, 5, 30),
+        (size_30, guide_size_30, 30, 4, 31),
+        (size_31, guide_size_31, 31, 3, 32),
+        (size_32, guide_size_32, 32, 2, 33),
+        (size_33, guide_size_33, 33, 1, 34),
+        (size_34, guide_size_34, 34, 0, 35),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_35,
+        (size_00, guide_size_00, 0, 35, 36),
+        (size_01, guide_size_01, 1, 34, 35),
+        (size_02, guide_size_02, 2, 33, 34),
+        (size_03, guide_size_03, 3, 32, 33),
+        (size_04, guide_size_04, 4, 31, 32),
+        (size_05, guide_size_05, 5, 30, 31),
+        (size_06, guide_size_06, 6, 29, 30),
+        (size_07, guide_size_07, 7, 28, 29),
+        (size_08, guide_size_08, 8, 27, 28),
+        (size_09, guide_size_09, 9, 26, 27),
+        (size_10, guide_size_10, 10, 25, 26),
+        (size_11, guide_size_11, 11, 24, 25),
+        (size_12, guide_size_12, 12, 23, 24),
+        (size_13, guide_size_13, 13, 22, 23),
+        (size_14, guide_size_14, 14, 21, 22),
+        (size_15, guide_size_15, 15, 20, 21),
+        (size_16, guide_size_16, 16, 19, 20),
+        (size_17, guide_size_17, 17, 18, 19),
+        (size_18, guide_size_18, 18, 17, 19),
+        (size_19, guide_size_19, 19, 16, 20),
+        (size_20, guide_size_20, 20, 15, 21),
+        (size_21, guide_size_21, 21, 14, 22),
+        (size_22, guide_size_22, 22, 13, 23),
+        (size_23, guide_size_23, 23, 12, 24),
+        (size_24, guide_size_24, 24, 11, 25),
+        (size_25, guide_size_25, 25, 10, 26),
+        (size_26, guide_size_26, 26, 9, 27),
+        (size_27, guide_size_27, 27, 8, 28),
+        (size_28, guide_size_28, 28, 7, 29),
+        (size_29, guide_size_29, 29, 6, 30),
+        (size_30, guide_size_30, 30, 5, 31),
+        (size_31, guide_size_31, 31, 4, 32),
+        (size_32, guide_size_32, 32, 3, 33),
+        (size_33, guide_size_33, 33, 2, 34),
+        (size_34, guide_size_34, 34, 1, 35),
+        (size_35, guide_size_35, 35, 0, 36),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_36,
+        (size_00, guide_size_00, 0, 36, 37),
+        (size_01, guide_size_01, 1, 35, 36),
+        (size_02, guide_size_02, 2, 34, 35),
+        (size_03, guide_size_03, 3, 33, 34),
+        (size_04, guide_size_04, 4, 32, 33),
+        (size_05, guide_size_05, 5, 31, 32),
+        (size_06, guide_size_06, 6, 30, 31),
+        (size_07, guide_size_07, 7, 29, 30),
+        (size_08, guide_size_08, 8, 28, 29),
+        (size_09, guide_size_09, 9, 27, 28),
+        (size_10, guide_size_10, 10, 26, 27),
+        (size_11, guide_size_11, 11, 25, 26),
+        (size_12, guide_size_12, 12, 24, 25),
+        (size_13, guide_size_13, 13, 23, 24),
+        (size_14, guide_size_14, 14, 22, 23),
+        (size_15, guide_size_15, 15, 21, 22),
+        (size_16, guide_size_16, 16, 20, 21),
+        (size_17, guide_size_17, 17, 19, 20),
+        (size_18, guide_size_18, 18, 18, 19),
+        (size_19, guide_size_19, 19, 17, 20),
+        (size_20, guide_size_20, 20, 16, 21),
+        (size_21, guide_size_21, 21, 15, 22),
+        (size_22, guide_size_22, 22, 14, 23),
+        (size_23, guide_size_23, 23, 13, 24),
+        (size_24, guide_size_24, 24, 12, 25),
+        (size_25, guide_size_25, 25, 11, 26),
+        (size_26, guide_size_26, 26, 10, 27),
+        (size_27, guide_size_27, 27, 9, 28),
+        (size_28, guide_size_28, 28, 8, 29),
+        (size_29, guide_size_29, 29, 7, 30),
+        (size_30, guide_size_30, 30, 6, 31),
+        (size_31, guide_size_31, 31, 5, 32),
+        (size_32, guide_size_32, 32, 4, 33),
+        (size_33, guide_size_33, 33, 3, 34),
+        (size_34, guide_size_34, 34, 2, 35),
+        (size_35, guide_size_35, 35, 1, 36),
+        (size_36, guide_size_36, 36, 0, 37),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_37,
+        (size_00, guide_size_00, 0, 37, 38),
+        (size_01, guide_size_01, 1, 36, 37),
+        (size_02, guide_size_02, 2, 35, 36),
+        (size_03, guide_size_03, 3, 34, 35),
+        (size_04, guide_size_04, 4, 33, 34),
+        (size_05, guide_size_05, 5, 32, 33),
+        (size_06, guide_size_06, 6, 31, 32),
+        (size_07, guide_size_07, 7, 30, 31),
+        (size_08, guide_size_08, 8, 29, 30),
+        (size_09, guide_size_09, 9, 28, 29),
+        (size_10, guide_size_10, 10, 27, 28),
+        (size_11, guide_size_11, 11, 26, 27),
+        (size_12, guide_size_12, 12, 25, 26),
+        (size_13, guide_size_13, 13, 24, 25),
+        (size_14, guide_size_14, 14, 23, 24),
+        (size_15, guide_size_15, 15, 22, 23),
+        (size_16, guide_size_16, 16, 21, 22),
+        (size_17, guide_size_17, 17, 20, 21),
+        (size_18, guide_size_18, 18, 19, 20),
+        (size_19, guide_size_19, 19, 18, 20),
+        (size_20, guide_size_20, 20, 17, 21),
+        (size_21, guide_size_21, 21, 16, 22),
+        (size_22, guide_size_22, 22, 15, 23),
+        (size_23, guide_size_23, 23, 14, 24),
+        (size_24, guide_size_24, 24, 13, 25),
+        (size_25, guide_size_25, 25, 12, 26),
+        (size_26, guide_size_26, 26, 11, 27),
+        (size_27, guide_size_27, 27, 10, 28),
+        (size_28, guide_size_28, 28, 9, 29),
+        (size_29, guide_size_29, 29, 8, 30),
+        (size_30, guide_size_30, 30, 7, 31),
+        (size_31, guide_size_31, 31, 6, 32),
+        (size_32, guide_size_32, 32, 5, 33),
+        (size_33, guide_size_33, 33, 4, 34),
+        (size_34, guide_size_34, 34, 3, 35),
+        (size_35, guide_size_35, 35, 2, 36),
+        (size_36, guide_size_36, 36, 1, 37),
+        (size_37, guide_size_37, 37, 0, 38),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_38,
+        (size_00, guide_size_00, 0, 38, 39),
+        (size_01, guide_size_01, 1, 37, 38),
+        (size_02, guide_size_02, 2, 36, 37),
+        (size_03, guide_size_03, 3, 35, 36),
+        (size_04, guide_size_04, 4, 34, 35),
+        (size_05, guide_size_05, 5, 33, 34),
+        (size_06, guide_size_06, 6, 32, 33),
+        (size_07, guide_size_07, 7, 31, 32),
+        (size_08, guide_size_08, 8, 30, 31),
+        (size_09, guide_size_09, 9, 29, 30),
+        (size_10, guide_size_10, 10, 28, 29),
+        (size_11, guide_size_11, 11, 27, 28),
+        (size_12, guide_size_12, 12, 26, 27),
+        (size_13, guide_size_13, 13, 25, 26),
+        (size_14, guide_size_14, 14, 24, 25),
+        (size_15, guide_size_15, 15, 23, 24),
+        (size_16, guide_size_16, 16, 22, 23),
+        (size_17, guide_size_17, 17, 21, 22),
+        (size_18, guide_size_18, 18, 20, 21),
+        (size_19, guide_size_19, 19, 19, 20),
+        (size_20, guide_size_20, 20, 18, 21),
+        (size_21, guide_size_21, 21, 17, 22),
+        (size_22, guide_size_22, 22, 16, 23),
+        (size_23, guide_size_23, 23, 15, 24),
+        (size_24, guide_size_24, 24, 14, 25),
+        (size_25, guide_size_25, 25, 13, 26),
+        (size_26, guide_size_26, 26, 12, 27),
+        (size_27, guide_size_27, 27, 11, 28),
+        (size_28, guide_size_28, 28, 10, 29),
+        (size_29, guide_size_29, 29, 9, 30),
+        (size_30, guide_size_30, 30, 8, 31),
+        (size_31, guide_size_31, 31, 7, 32),
+        (size_32, guide_size_32, 32, 6, 33),
+        (size_33, guide_size_33, 33, 5, 34),
+        (size_34, guide_size_34, 34, 4, 35),
+        (size_35, guide_size_35, 35, 3, 36),
+        (size_36, guide_size_36, 36, 2, 37),
+        (size_37, guide_size_37, 37, 1, 38),
+        (size_38, guide_size_38, 38, 0, 39),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_39,
+        (size_00, guide_size_00, 0, 39, 40),
+        (size_01, guide_size_01, 1, 38, 39),
+        (size_02, guide_size_02, 2, 37, 38),
+        (size_03, guide_size_03, 3, 36, 37),
+        (size_04, guide_size_04, 4, 35, 36),
+        (size_05, guide_size_05, 5, 34, 35),
+        (size_06, guide_size_06, 6, 33, 34),
+        (size_07, guide_size_07, 7, 32, 33),
+        (size_08, guide_size_08, 8, 31, 32),
+        (size_09, guide_size_09, 9, 30, 31),
+        (size_10, guide_size_10, 10, 29, 30),
+        (size_11, guide_size_11, 11, 28, 29),
+        (size_12, guide_size_12, 12, 27, 28),
+        (size_13, guide_size_13, 13, 26, 27),
+        (size_14, guide_size_14, 14, 25, 26),
+        (size_15, guide_size_15, 15, 24, 25),
+        (size_16, guide_size_16, 16, 23, 24),
+        (size_17, guide_size_17, 17, 22, 23),
+        (size_18, guide_size_18, 18, 21, 22),
+        (size_19, guide_size_19, 19, 20, 21),
+        (size_20, guide_size_20, 20, 19, 21),
+        (size_21, guide_size_21, 21, 18, 22),
+        (size_22, guide_size_22, 22, 17, 23),
+        (size_23, guide_size_23, 23, 16, 24),
+        (size_24, guide_size_24, 24, 15, 25),
+        (size_25, guide_size_25, 25, 14, 26),
+        (size_26, guide_size_26, 26, 13, 27),
+        (size_27, guide_size_27, 27, 12, 28),
+        (size_28, guide_size_28, 28, 11, 29),
+        (size_29, guide_size_29, 29, 10, 30),
+        (size_30, guide_size_30, 30, 9, 31),
+        (size_31, guide_size_31, 31, 8, 32),
+        (size_32, guide_size_32, 32, 7, 33),
+        (size_33, guide_size_33, 33, 6, 34),
+        (size_34, guide_size_34, 34, 5, 35),
+        (size_35, guide_size_35, 35, 4, 36),
+        (size_36, guide_size_36, 36, 3, 37),
+        (size_37, guide_size_37, 37, 2, 38),
+        (size_38, guide_size_38, 38, 1, 39),
+        (size_39, guide_size_39, 39, 0, 40),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_40,
+        (size_01, guide_size_01, 1, 39, 40),
+        (size_02, guide_size_02, 2, 38, 39),
+        (size_03, guide_size_03, 3, 37, 38),
+        (size_04, guide_size_04, 4, 36, 37),
+        (size_05, guide_size_05, 5, 35, 36),
+        (size_06, guide_size_06, 6, 34, 35),
+        (size_07, guide_size_07, 7, 33, 34),
+        (size_08, guide_size_08, 8, 32, 33),
+        (size_09, guide_size_09, 9, 31, 32),
+        (size_10, guide_size_10, 10, 30, 31),
+        (size_11, guide_size_11, 11, 29, 30),
+        (size_12, guide_size_12, 12, 28, 29),
+        (size_13, guide_size_13, 13, 27, 28),
+        (size_14, guide_size_14, 14, 26, 27),
+        (size_15, guide_size_15, 15, 25, 26),
+        (size_16, guide_size_16, 16, 24, 25),
+        (size_17, guide_size_17, 17, 23, 24),
+        (size_18, guide_size_18, 18, 22, 23),
+        (size_19, guide_size_19, 19, 21, 22),
+        (size_20, guide_size_20, 20, 20, 21),
+        (size_21, guide_size_21, 21, 19, 22),
+        (size_22, guide_size_22, 22, 18, 23),
+        (size_23, guide_size_23, 23, 17, 24),
+        (size_24, guide_size_24, 24, 16, 25),
+        (size_25, guide_size_25, 25, 15, 26),
+        (size_26, guide_size_26, 26, 14, 27),
+        (size_27, guide_size_27, 27, 13, 28),
+        (size_28, guide_size_28, 28, 12, 29),
+        (size_29, guide_size_29, 29, 11, 30),
+        (size_30, guide_size_30, 30, 10, 31),
+        (size_31, guide_size_31, 31, 9, 32),
+        (size_32, guide_size_32, 32, 8, 33),
+        (size_33, guide_size_33, 33, 7, 34),
+        (size_34, guide_size_34, 34, 6, 35),
+        (size_35, guide_size_35, 35, 5, 36),
+        (size_36, guide_size_36, 36, 4, 37),
+        (size_37, guide_size_37, 37, 3, 38),
+        (size_38, guide_size_38, 38, 2, 39),
+        (size_39, guide_size_39, 39, 1, 40),
+        (size_40, guide_size_40, 40, 0, 41),
+    );
+
     fn check_mul_small_model_agrees<const SIZE: usize>() {
         assert!(SIZE < KANI_LIMBS);
         let source = Big::kani_with_arbitrary_limbs(SIZE);
@@ -678,7 +1777,11 @@ pub mod dragon_verify {
         (sum as Digit, (sum >> Digit::BITS) as Digit)
     }
 
-    fn carrying_mul_model(digit: Digit, multiplier: Digit, carry: Digit) -> (Digit, Digit) {
+    pub(crate) fn carrying_mul_model(
+        digit: Digit,
+        multiplier: Digit,
+        carry: Digit,
+    ) -> (Digit, Digit) {
         carrying_mul_add_model(digit, multiplier, carry, 0)
     }
 
@@ -1024,6 +2127,7 @@ pub mod dragon_verify {
                     #[kani::stub(Big::add, Big::kani_add_model)]
                     #[kani::stub(Big::sub, Big::kani_sub_model)]
                     #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
+                    #[kani::stub(Big::mul_pow2, Big::kani_mul_pow2_model)]
                 )?
                 #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
                 #[kani::stub(crate::num::imp::bignum::kani_pow2_bits, stub_pow2_bits)]
@@ -1070,6 +2174,7 @@ pub mod dragon_verify {
                     #[kani::stub(Big::add, Big::kani_add_model)]
                     #[kani::stub(Big::sub, Big::kani_sub_model)]
                     #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
+                    #[kani::stub(Big::mul_pow2, Big::kani_mul_pow2_model)]
                 )?
                 #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
                 #[kani::stub(crate::num::imp::bignum::kani_pow2_bits, stub_pow2_bits)]
@@ -1093,6 +2198,7 @@ pub mod dragon_verify {
                     crate::num::imp::flt2dec::rounding_verify::stub_round_up
                 )]
                 #[kani::stub_verified(crate::num::imp::flt2dec::rounding_verify::round_up_contract)]
+                #[kani::stub(fill_zeroes, fill_zeroes_model)]
                 #[kani::stub(div_2pow10, stub_div_2pow10)]
                 #[kani::stub_verified(div_2pow10_contract)]
                 #[kani::solver(kissat)]

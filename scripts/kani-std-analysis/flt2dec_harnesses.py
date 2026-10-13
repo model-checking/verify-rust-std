@@ -52,18 +52,32 @@ def proof_groups(pointer_width=None):
         ("rounding-contract", "num::imp::flt2dec::rounding_verify", "check_round_up_contract", "contract"),
         ("grisu-exact-rounding-contract", GRISU, "check_round_exact_contract", "contract"),
         ("grisu-shortest-rounding-contract", GRISU, "check_round_shortest_contract", "contract"),
+        ("grisu-shortest-normalization-contract", GRISU, "check_normalize_shortest", "contract"),
+        ("grisu-shortest-scaling-partitioning", GRISU, "check_scale_shortest_partitioning", "equivalence"),
         ("comparison-equivalence", DRAGON, "check_comparison_models_agree", "equivalence"),
+        ("zero-fill-equivalence", DRAGON, "check_fill_zeroes_model_agrees", "equivalence"),
         ("addition-equivalence", DRAGON, "check_add_model_agrees", "equivalence"),
         ("subtraction-equivalence", DRAGON, "check_sub_model_agrees", "equivalence"),
         ("bit-scan-equivalence", "num::imp::flt2dec::bit_scan_verify", "check_leading_zeros_models_agree", "equivalence"),
     ]:
         add(name, kind, [f"{module}::{proof}"], 30)
 
-    for first in range(0, 66, 4):
-        last = min(first + 3, 65)
+    for first in range(0, 80, 4):
+        last = min(first + 3, 79)
         add(f"grisu-shortest-scaling-contract-{first:02d}-{last:02d}", "contract", [
             f"{GRISU}::check_scale_shortest_{group:02d}" for group in range(first, last + 1)
         ], 60)
+
+    shift_cases = [
+        f"{DRAGON}::shift_width_{total:02d}::size_{size:02d}"
+        for total in range(limb_count + 1)
+        for size in range(total + 1)
+        if total - size < limb_count
+    ]
+    for first in range(0, len(shift_cases), 32):
+        last = min(first + 31, len(shift_cases) - 1)
+        add(f"bigint-shift-equivalence-{first:03d}-{last:03d}", "equivalence",
+            shift_cases[first:last + 1], 7)
 
     for first in range(0, limb_count, 8):
         last = min(first + 7, limb_count - 1)
