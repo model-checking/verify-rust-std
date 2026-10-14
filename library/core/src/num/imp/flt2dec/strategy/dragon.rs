@@ -566,7 +566,7 @@ pub mod dragon_verify {
     // uses the division contract below for initial fixup. Neither termination
     // nor the buffer index is assumed. Bigint unwind assertions remain enabled.
     // Lengths above 32 require a separate proof; these harnesses are bounded.
-    const PROOF_BUFLEN: usize = 32;
+    pub(super) const PROOF_BUFLEN: usize = 32;
     const _: () = assert!(PROOF_BUFLEN <= u8::MAX as usize);
 
     #[kani::proof]
