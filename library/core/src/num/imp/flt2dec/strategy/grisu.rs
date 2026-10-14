@@ -7,6 +7,8 @@
 
 use flt2dec::{Decoded, MAX_SIG_DIGITS, round_up};
 
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::MaybeUninit;
 use crate::num::imp::diy_float::Fp;
 use crate::num::imp::flt2dec;
@@ -264,6 +266,56 @@ fn scale_shortest(d: &Decoded) -> ShortestScaled {
     ShortestScaled { plus, minus, v, minusk }
 }
 
+fn generate_integral_digits(
+    plus1int: u32,
+    plus1frac: u64,
+    delta1: u64,
+    e: usize,
+    max_kappa: usize,
+    max_ten_kappa: u32,
+    buf: &mut [MaybeUninit<u8>],
+) -> (usize, Option<(u64, u64)>) {
+    let mut i = 0;
+    let mut ten_kappa = max_ten_kappa;
+    let mut remainder = plus1int;
+    // The loop contract takes this local's address before the first digit.
+    #[cfg(kani)]
+    let mut plus1rem = 0;
+    #[cfg(not(kani))]
+    let mut plus1rem;
+    #[cfg_attr(kani, kani::loop_invariant(
+        i <= max_kappa as usize
+            && ten_kappa as u64 == grisu_verify::proof_power10(max_kappa as usize - i)
+            && ten_kappa <= max_ten_kappa
+            && (remainder as u64) < 10 * ten_kappa as u64
+            && remainder <= plus1int
+            && ((remainder as u128) << e) + plus1frac as u128 >= delta1 as u128
+            && grisu_verify::initialized_digits(buf, i)
+    ))]
+    #[cfg_attr(kani, kani::loop_modifies(
+        &i, &ten_kappa, &remainder, &plus1rem,
+        crate::ptr::slice_from_raw_parts(buf.as_ptr(), MAX_SIG_DIGITS)
+    ))]
+    loop {
+        let (q, r) = div_rem_pow10(remainder, ten_kappa);
+        debug_assert!(q < 10);
+        buf[i] = MaybeUninit::new(b'0' + q as u8);
+        i += 1;
+        plus1rem = ((r as u64) << e) + plus1frac;
+        if plus1rem < delta1 || i > max_kappa as usize {
+            let rounding = if plus1rem < delta1 {
+                Some((plus1rem, (ten_kappa as u64) << e))
+            } else {
+                debug_assert_eq!(ten_kappa, 1);
+                None
+            };
+            break (i, rounding);
+        }
+        ten_kappa /= 10;
+        remainder = r;
+    }
+}
+
 fn generate_shortest<'a>(d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> ShortestRounding<'a> {
     assert!(d.mant > 0);
     assert!(d.minus > 0);
@@ -312,7 +364,6 @@ fn generate_shortest<'a>(d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> Shortes
     // this is an upper bound of `kappa` below.
     let (max_kappa, max_ten_kappa) = max_pow10_no_more_than(plus1int);
 
-    let mut i = 0;
     let exp = max_kappa as i16 - minusk + 1;
 
     // Theorem 6.2: if `k` is the greatest integer s.t. `0 <= y mod 10^k <= y - x`,
@@ -328,47 +379,26 @@ fn generate_shortest<'a>(d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> Shortes
     let delta1frac = delta1 & ((1 << e) - 1);
 
     // render integral parts, while checking for the accuracy at each step.
-    let mut ten_kappa = max_ten_kappa; // 10^kappa
-    let mut remainder = plus1int; // digits yet to be rendered
-    loop {
-        // we always have at least one digit to render, as `plus1 >= 10^kappa`
-        // invariants:
-        // - `delta1int <= remainder < 10^(kappa+1)`
-        // - `plus1int = d[0..n-1] * 10^(kappa+1) + remainder`
-        //   (it follows that `remainder = plus1int % 10^(kappa+1)`)
-
-        // divide `remainder` by `10^kappa`. both are scaled by `2^-e`.
-        let (q, r) = div_rem_pow10(remainder, ten_kappa);
-        debug_assert!(q < 10);
-        buf[i] = MaybeUninit::new(b'0' + q as u8);
-        i += 1;
-
-        let plus1rem = ((r as u64) << e) + plus1frac; // == (plus1 % 10^kappa) * 2^e
-        if plus1rem < delta1 {
-            // `plus1 % 10^kappa < delta1 = plus1 - minus1`; we've found the correct `kappa`.
-            let ten_kappa = (ten_kappa as u64) << e; // scale 10^kappa back to the shared exponent
-            return ShortestRounding {
-                // SAFETY: we initialized that memory above.
-                digits: unsafe { buf[..i].assume_init_mut() },
-                exp,
-                remainder: plus1rem,
-                threshold: delta1,
-                plus1v: plus1 - v.f,
-                ten_kappa,
-                ulp: 1,
-            };
-        }
-
-        // break the loop when we have rendered all integral digits.
-        // the exact number of digits is `max_kappa + 1` as `plus1 < 10^(max_kappa+1)`.
-        if i > max_kappa as usize {
-            debug_assert_eq!(ten_kappa, 1);
-            break;
-        }
-
-        // restore invariants
-        ten_kappa /= 10;
-        remainder = r;
+    let (mut i, integral_rounding) = generate_integral_digits(
+        plus1int,
+        plus1frac,
+        delta1,
+        e,
+        max_kappa as usize,
+        max_ten_kappa,
+        buf,
+    );
+    if let Some((remainder, ten_kappa)) = integral_rounding {
+        return ShortestRounding {
+            // SAFETY: the integral generator initialized this prefix.
+            digits: unsafe { buf[..i].assume_init_mut() },
+            exp,
+            remainder,
+            threshold: delta1,
+            plus1v: plus1 - v.f,
+            ten_kappa,
+            ulp: 1,
+        };
     }
 
     // render fractional parts, while checking for the accuracy at each step.
@@ -376,6 +406,18 @@ fn generate_shortest<'a>(d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> Shortes
     let mut remainder = plus1frac;
     let mut threshold = delta1frac;
     let mut ulp = 1;
+    #[cfg_attr(kani, kani::loop_invariant(
+        i >= max_kappa as usize + 1 && i <= 16
+            && remainder < 1u64 << e
+            && threshold <= remainder
+            && threshold as u128 == delta1frac as u128 * ulp as u128
+            && ulp == grisu_verify::proof_power10(i - max_kappa as usize - 1)
+            && grisu_verify::initialized_digits(buf, i)
+    ))]
+    #[cfg_attr(kani, kani::loop_modifies(
+        &i, &remainder, &threshold, &ulp,
+        crate::ptr::slice_from_raw_parts(buf.as_ptr(), MAX_SIG_DIGITS)
+    ))]
     loop {
         // the next digit should be significant as we've tested that before breaking out
         // invariants, where `m = max_kappa + 1` (# of digits in the integral part):
@@ -389,18 +431,18 @@ fn generate_shortest<'a>(d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> Shortes
         // divide `remainder` by `10^kappa`.
         // both are scaled by `2^e / 10^kappa`, so the latter is implicit here.
         let q = remainder >> e;
-        let r = remainder & ((1 << e) - 1);
+        remainder &= (1 << e) - 1;
         debug_assert!(q < 10);
         buf[i] = MaybeUninit::new(b'0' + q as u8);
         i += 1;
 
-        if r < threshold {
+        if remainder < threshold {
             let ten_kappa = 1 << e; // implicit divisor
             return ShortestRounding {
                 // SAFETY: we initialized that memory above.
                 digits: unsafe { buf[..i].assume_init_mut() },
                 exp,
-                remainder: r,
+                remainder,
                 threshold,
                 plus1v: (plus1 - v.f) * ulp,
                 ten_kappa,
@@ -409,7 +451,6 @@ fn generate_shortest<'a>(d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> Shortes
         }
 
         // restore invariants
-        remainder = r;
     }
 }
 
@@ -903,6 +944,43 @@ pub mod grisu_verify {
     // not arbitrary slice lengths. Unwinding assertions remain enabled.
     const PROOF_BUFLEN: usize = 32;
     const _: () = assert!(PROOF_BUFLEN <= u8::MAX as usize);
+
+    pub(super) fn initialized_digits(buf: &[MaybeUninit<u8>], len: usize) -> bool {
+        macro_rules! check_digit {
+            ($($index:literal),+ $(,)?) => {
+                true $(&& (len <= $index || (
+                    kani::mem::can_dereference(unsafe { buf.as_ptr().add($index).cast::<u8>() })
+                        && unsafe { buf[$index].assume_init() >= b'0' && buf[$index].assume_init() <= b'9' }
+                )))+
+            };
+        }
+        len <= MAX_SIG_DIGITS
+            && buf.len() >= MAX_SIG_DIGITS
+            && check_digit!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16)
+    }
+
+    pub(super) fn proof_power10(exponent: usize) -> u64 {
+        match exponent {
+            0 => 1,
+            1 => 10,
+            2 => 100,
+            3 => 1000,
+            4 => 10000,
+            5 => 100000,
+            6 => 1000000,
+            7 => 10000000,
+            8 => 100000000,
+            9 => 1000000000,
+            10 => 10000000000,
+            11 => 100000000000,
+            12 => 1000000000000,
+            13 => 10000000000000,
+            14 => 100000000000000,
+            15 => 1000000000000000,
+            16 => 10000000000000000,
+            _ => 0,
+        }
+    }
 
     // Decode gives minus = 1. Only normal powers of two have plus = 2,
     // with the f32 or f64 significand shifted by two. Callers prove these

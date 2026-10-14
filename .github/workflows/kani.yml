@@ -17,6 +17,8 @@ on:
       - 'scripts/kani-std-analysis/overflow-result.rs'
       - 'scripts/kani-std-analysis/flt2dec_harnesses.py'
       - 'scripts/kani-std-analysis/test_flt2dec_harnesses.py'
+      - 'scripts/kani-std-analysis/test_flt2dec_runtime.rs'
+      - 'scripts/kani-std-analysis/test_flt2dec_runtime.sh'
       - 'scripts/kani-std-analysis/test_run_kani_list.sh'
       - 'scripts/kani-std-analysis/test_cbmc_tap_retry.sh'
       - 'scripts/kani-std-analysis/test_kani_runtime_reuse.sh'
@@ -29,6 +31,19 @@ defaults:
     shell: bash
 
 jobs:
+  flt2dec_runtime:
+    name: Test flt2dec runtime (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install nightly-2026-09-25 --profile minimal
+      - run: bash scripts/kani-std-analysis/test_flt2dec_runtime.sh
+
   build-flat-smt-cbmc:
     name: Build patched CBMC (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -147,13 +162,9 @@ jobs:
       KANI_FLAT_SMT_CVC5: ${{ matrix.group.backend == 'cvc5' && 'true' || 'false' }}
       KANI_HARNESS_TIMEOUT: ${{ matrix.group.timeout_minutes }}m
       KANI_OBJECT_BITS: ${{ (matrix.group.kind == 'contract' || matrix.group.kind == 'equivalence') && '12' || '14' }}
-      KANI_SYMEX_CACHE_DEREFERENCES: ${{ (matrix.group.backend == 'cvc5' || matrix.group.kind == 'probe' || startsWith(matrix.group.name, 'bigint-shift-equivalence-') || startsWith(matrix.group.name, 'grisu-shortest-scaling-') || startsWith(matrix.group.name, 'grisu-exact-')) && 'true' || 'false' }}
+      KANI_SYMEX_CACHE_DEREFERENCES: ${{ (matrix.group.backend == 'cvc5' || matrix.group.kind == 'probe' || startsWith(matrix.group.name, 'bigint-shift-equivalence-') || startsWith(matrix.group.name, 'grisu-')) && 'true' || 'false' }}
       # Dragon's fixed limb indices can use the default array field splitting.
-      KANI_ARRAY_FIELD_SENSITIVITY: ${{ matrix.group.kind == 'probe' && startsWith(matrix.group.name, 'grisu-') && 'false' || 'true' }}
-      # Use SAT arithmetic refinement for the full Grisu shortest domain.
-      KANI_ARITHMETIC_REFINEMENT: ${{ startsWith(matrix.group.name, 'grisu-shortest-') && startsWith(matrix.group.kind, 'generator-') && 'true' || 'false' }}
-      # Test datatype-free SMT encoding on the two Grisu shortest probes first.
-      KANI_FLAT_SMT_Z3: ${{ matrix.group.kind == 'probe' && startsWith(matrix.group.name, 'grisu-shortest-') && 'true' || 'false' }}
+      KANI_ARRAY_FIELD_SENSITIVITY: 'true'
       HARNESS_GROUP: ${{ matrix.group.name }}
       HARNESS_KIND: ${{ matrix.group.kind }}
     steps:
