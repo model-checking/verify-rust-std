@@ -214,7 +214,21 @@ retry-max-time = 300
 connect-timeout = 30
 max-time = 120
 EOF
-    CURL_HOME="$kani_download_config" "$@"
+    # Homebrew's API refresh uses its own curl policy. Retry the installer too,
+    # so a transient brew update failure does not abort the proof job.
+    local attempt status=0
+    for attempt in 1 2 3; do
+        if CURL_HOME="$kani_download_config" "$@"; then
+            return 0
+        else
+            status=$?
+        fi
+        echo "Kani dependency installation failed (attempt $attempt of 3)" >&2
+        if [[ "$attempt" -lt 3 ]]; then
+            sleep 10
+        fi
+    done
+    return "$status"
 )
 
 prepare_cbmc_tap() {
