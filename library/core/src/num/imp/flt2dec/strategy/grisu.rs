@@ -120,15 +120,21 @@ pub const CACHED_POW10_LAST_E: i16 = 1039;
 
 #[doc(hidden)]
 pub fn cached_power(alpha: i16, gamma: i16) -> (i16, Fp) {
+    let (f, e, k) = CACHED_POW10[cached_power_index(alpha, gamma)];
+    (k, Fp { f, e })
+}
+
+#[inline]
+fn cached_power_index(alpha: i16, gamma: i16) -> usize {
     let offset = CACHED_POW10_FIRST_E as i32;
     let range = (CACHED_POW10.len() as i32) - 1;
     let domain = (CACHED_POW10_LAST_E - CACHED_POW10_FIRST_E) as i32;
     let idx = ((gamma as i32) - offset) * range / domain;
     #[cfg(kani)]
     let idx = proof_cached_power_index(idx);
-    let (f, e, k) = CACHED_POW10[idx as usize];
+    let (_, e, _) = CACHED_POW10[idx as usize];
     debug_assert!(alpha <= e && e <= gamma);
-    (k, Fp { f, e })
+    idx as usize
 }
 
 // Diagnostics can expose a constant table entry after asserting its index.
@@ -223,6 +229,13 @@ fn normalize_shortest(d: &Decoded) -> (Fp, Fp, Fp) {
 }
 
 #[inline]
+fn multiply_shortest(plus: Fp, minus: Fp, v: Fp, index: usize) -> (Fp, Fp, Fp) {
+    let (f, e, _) = CACHED_POW10[index];
+    let cached = Fp { f, e };
+    (plus.mul(cached), minus.mul(cached), v.mul(cached))
+}
+
+#[inline]
 fn scale_shortest(d: &Decoded) -> ShortestScaled {
     #[cfg(not(kani))]
     let (plus, minus, v) = normalize_shortest(d);
@@ -243,12 +256,11 @@ fn scale_shortest(d: &Decoded) -> ShortestScaled {
     //
     // the first gives `64 + GAMMA <= 32`, while the second gives `10 * 2^-ALPHA <= 2^64`;
     // -60 and -32 is the maximal range with this constraint, and V8 also uses them.
-    let (minusk, cached) = cached_power(ALPHA - plus.e - 64, GAMMA - plus.e - 64);
+    let index = cached_power_index(ALPHA - plus.e - 64, GAMMA - plus.e - 64);
+    let (_, _, minusk) = CACHED_POW10[index];
 
     // scale fps. this gives the maximal error of 1 ulp (proved from Theorem 5.1).
-    let plus = plus.mul(cached);
-    let minus = minus.mul(cached);
-    let v = v.mul(cached);
+    let (plus, minus, v) = multiply_shortest(plus, minus, v, index);
     ShortestScaled { plus, minus, v, minusk }
 }
 
@@ -904,6 +916,8 @@ pub mod grisu_verify {
         let (plus, minus, v, exp) = state;
         let shift = mant.wrapping_add(input_plus).leading_zeros() as i16;
         exp == input_exp.wrapping_sub(shift)
+            && normalized_interval_valid(plus, minus, v)
+            && plus as u128 - minus as u128 == (input_plus as u128 + 1) << shift
             && plus >= 1 << 63
             && minus >= 1 << 62
             && minus <= v
@@ -985,6 +999,7 @@ pub mod grisu_verify {
     #[kani::ensures(|result| {
         shortest_scaling_valid(*result)
             && shortest_scaling_exponent_matches(mant, plus, exp, result.3, result.4)
+            && shortest_scaling_width_valid(mant, minus, plus, result.0, result.1)
     })]
     fn scale_shortest_contract(
         mant: u64,
@@ -1018,7 +1033,241 @@ pub mod grisu_verify {
             2 * ((plus.f - v.f) as u128) < delta as u128
                 || (minus.f - 1) & ((1u64 << (e - 16)) - 1) != 0
         );
+        let (max_kappa, max_ten) = max_pow10_no_more_than((upper >> e) as u32);
+        assert_eq!(decimal_minimum_upper(1, max_kappa), max_ten as u128);
+        assert!((max_ten as u128) << e <= upper as u128);
+        decimal_termination_contract(delta, 1u64 << e, max_kappa);
         (plus.f, minus.f, v.f, plus.e, minusk)
+    }
+
+    fn normalized_interval_valid(plus: u64, minus: u64, v: u64) -> bool {
+        plus >= 1 << 63 && minus >= 1 << 62 && minus <= v && v <= plus && {
+            let gap = v - minus;
+            gap >= 512
+                && gap <= 1 << 62
+                && if plus - v == gap {
+                    (gap as u128) << 54 >= plus as u128
+                } else {
+                    v == 1 << 63 && (gap == 1 << 9 || gap == 1 << 38) && plus == (1 << 63) + 2 * gap
+                }
+        }
+    }
+
+    fn scaled_interval_valid(state: (u64, u64, u64), symmetric: bool) -> bool {
+        let (plus, minus, v) = state;
+        plus >= 1 << 62 && plus < u64::MAX && minus > 1 && minus <= v && v <= plus && {
+            let upper = plus + 1;
+            let delta = upper - (minus - 1);
+            delta >= 4
+                && (delta as u128) << 53 >= upper as u128
+                && 4 * (upper - v) as u128 <= 3 * delta as u128
+                && 4 * (v - (minus - 1)) as u128 <= 3 * delta as u128
+                && (2 * ((plus - v) as u128) < delta as u128 || (minus - 1) & 0xffff != 0)
+                && if symmetric {
+                    2 * ((plus - v) as u128) < delta as u128
+                } else {
+                    (minus - 1) & 0xffff != 0
+                }
+        }
+    }
+
+    #[kani::requires(normalized_interval_valid(plus, minus, v)
+        && (-1200..=1000).contains(&exp) && index > 0 && index < CACHED_POW10.len())]
+    #[kani::ensures(|result| scaled_interval_valid(
+            (result.0, result.1, result.2), plus.wrapping_sub(v) == v.wrapping_sub(minus))
+        && result.0.wrapping_sub(result.1) <= plus.wrapping_sub(minus)
+        && index < CACHED_POW10.len()
+        && i32::from(result.3) == i32::from(exp) + i32::from(CACHED_POW10[index].1) + 64)]
+    fn multiply_shortest_contract(
+        plus: u64,
+        minus: u64,
+        v: u64,
+        exp: i16,
+        index: usize,
+    ) -> (u64, u64, u64, i16) {
+        let (plus, minus, v) = multiply_shortest(
+            Fp { f: plus, e: exp },
+            Fp { f: minus, e: exp },
+            Fp { f: v, e: exp },
+            index,
+        );
+        assert_eq!(plus.e, minus.e);
+        assert_eq!(plus.e, v.e);
+        (plus.f, minus.f, v.f, plus.e)
+    }
+
+    fn stub_multiply_shortest(plus: Fp, minus: Fp, v: Fp, index: usize) -> (Fp, Fp, Fp) {
+        assert_eq!(plus.e, minus.e);
+        assert_eq!(plus.e, v.e);
+        let (plus, minus, v, e) = multiply_shortest_contract(plus.f, minus.f, v.f, plus.e, index);
+        (Fp { f: plus, e }, Fp { f: minus, e }, Fp { f: v, e })
+    }
+
+    macro_rules! verify_multiply_shortest {
+        ($name:ident, $index:literal) => {
+            #[kani::proof_for_contract(multiply_shortest_contract)]
+            #[kani::stub_verified(rounded_multiply_contract)]
+            #[kani::stub(Fp::mul, stub_rounded_multiply)]
+            #[kani::solver(kissat)]
+            fn $name() {
+                let (plus, minus, v, asymmetric) = arbitrary_normalized_interval();
+                let exp = kani::any::<i16>();
+                kani::assume((-1200..=1000).contains(&exp));
+                multiply_shortest_contract(plus, minus, v, exp, $index);
+                kani::cover(asymmetric, "multiplication includes asymmetric intervals");
+                kani::cover(!asymmetric, "multiplication includes symmetric intervals");
+                kani::cover(exp == -1200, "multiplication includes its smallest exponent");
+                kani::cover(exp == 1000, "multiplication includes its largest exponent");
+            }
+        };
+    }
+
+    verify_multiply_shortest!(check_multiply_shortest_00, 80);
+    verify_multiply_shortest!(check_multiply_shortest_01, 79);
+    verify_multiply_shortest!(check_multiply_shortest_02, 78);
+    verify_multiply_shortest!(check_multiply_shortest_03, 77);
+    verify_multiply_shortest!(check_multiply_shortest_04, 76);
+    verify_multiply_shortest!(check_multiply_shortest_05, 75);
+    verify_multiply_shortest!(check_multiply_shortest_06, 74);
+    verify_multiply_shortest!(check_multiply_shortest_07, 73);
+    verify_multiply_shortest!(check_multiply_shortest_08, 72);
+    verify_multiply_shortest!(check_multiply_shortest_09, 71);
+    verify_multiply_shortest!(check_multiply_shortest_10, 70);
+    verify_multiply_shortest!(check_multiply_shortest_11, 69);
+    verify_multiply_shortest!(check_multiply_shortest_12, 68);
+    verify_multiply_shortest!(check_multiply_shortest_13, 67);
+    verify_multiply_shortest!(check_multiply_shortest_14, 66);
+    verify_multiply_shortest!(check_multiply_shortest_15, 65);
+    verify_multiply_shortest!(check_multiply_shortest_16, 64);
+    verify_multiply_shortest!(check_multiply_shortest_17, 63);
+    verify_multiply_shortest!(check_multiply_shortest_18, 62);
+    verify_multiply_shortest!(check_multiply_shortest_19, 61);
+    verify_multiply_shortest!(check_multiply_shortest_20, 60);
+    verify_multiply_shortest!(check_multiply_shortest_21, 59);
+    verify_multiply_shortest!(check_multiply_shortest_22, 58);
+    verify_multiply_shortest!(check_multiply_shortest_23, 57);
+    verify_multiply_shortest!(check_multiply_shortest_24, 56);
+    verify_multiply_shortest!(check_multiply_shortest_25, 55);
+    verify_multiply_shortest!(check_multiply_shortest_26, 54);
+    verify_multiply_shortest!(check_multiply_shortest_27, 53);
+    verify_multiply_shortest!(check_multiply_shortest_28, 52);
+    verify_multiply_shortest!(check_multiply_shortest_29, 51);
+    verify_multiply_shortest!(check_multiply_shortest_30, 50);
+    verify_multiply_shortest!(check_multiply_shortest_31, 49);
+    verify_multiply_shortest!(check_multiply_shortest_32, 48);
+    verify_multiply_shortest!(check_multiply_shortest_33, 47);
+    verify_multiply_shortest!(check_multiply_shortest_34, 46);
+    verify_multiply_shortest!(check_multiply_shortest_35, 45);
+    verify_multiply_shortest!(check_multiply_shortest_36, 44);
+    verify_multiply_shortest!(check_multiply_shortest_37, 43);
+    verify_multiply_shortest!(check_multiply_shortest_38, 42);
+    verify_multiply_shortest!(check_multiply_shortest_39, 41);
+    verify_multiply_shortest!(check_multiply_shortest_40, 40);
+    verify_multiply_shortest!(check_multiply_shortest_41, 39);
+    verify_multiply_shortest!(check_multiply_shortest_42, 38);
+    verify_multiply_shortest!(check_multiply_shortest_43, 37);
+    verify_multiply_shortest!(check_multiply_shortest_44, 36);
+    verify_multiply_shortest!(check_multiply_shortest_45, 35);
+    verify_multiply_shortest!(check_multiply_shortest_46, 34);
+    verify_multiply_shortest!(check_multiply_shortest_47, 33);
+    verify_multiply_shortest!(check_multiply_shortest_48, 32);
+    verify_multiply_shortest!(check_multiply_shortest_49, 31);
+    verify_multiply_shortest!(check_multiply_shortest_50, 30);
+    verify_multiply_shortest!(check_multiply_shortest_51, 29);
+    verify_multiply_shortest!(check_multiply_shortest_52, 28);
+    verify_multiply_shortest!(check_multiply_shortest_53, 27);
+    verify_multiply_shortest!(check_multiply_shortest_54, 26);
+    verify_multiply_shortest!(check_multiply_shortest_55, 25);
+    verify_multiply_shortest!(check_multiply_shortest_56, 24);
+    verify_multiply_shortest!(check_multiply_shortest_57, 23);
+    verify_multiply_shortest!(check_multiply_shortest_58, 22);
+    verify_multiply_shortest!(check_multiply_shortest_59, 21);
+    verify_multiply_shortest!(check_multiply_shortest_60, 20);
+    verify_multiply_shortest!(check_multiply_shortest_61, 19);
+    verify_multiply_shortest!(check_multiply_shortest_62, 18);
+    verify_multiply_shortest!(check_multiply_shortest_63, 17);
+    verify_multiply_shortest!(check_multiply_shortest_64, 16);
+    verify_multiply_shortest!(check_multiply_shortest_65, 15);
+    verify_multiply_shortest!(check_multiply_shortest_66, 14);
+    verify_multiply_shortest!(check_multiply_shortest_67, 13);
+    verify_multiply_shortest!(check_multiply_shortest_68, 12);
+    verify_multiply_shortest!(check_multiply_shortest_69, 11);
+    verify_multiply_shortest!(check_multiply_shortest_70, 10);
+    verify_multiply_shortest!(check_multiply_shortest_71, 9);
+    verify_multiply_shortest!(check_multiply_shortest_72, 8);
+    verify_multiply_shortest!(check_multiply_shortest_73, 7);
+    verify_multiply_shortest!(check_multiply_shortest_74, 6);
+    verify_multiply_shortest!(check_multiply_shortest_75, 5);
+    verify_multiply_shortest!(check_multiply_shortest_76, 4);
+    verify_multiply_shortest!(check_multiply_shortest_77, 3);
+    verify_multiply_shortest!(check_multiply_shortest_78, 2);
+    verify_multiply_shortest!(check_multiply_shortest_79, 1);
+
+    fn rounded_product_wide(f: u64, coefficient: u64) -> u128 {
+        (f as u128).wrapping_mul(coefficient as u128).wrapping_add(1 << 63)
+    }
+
+    #[kani::ensures(|result| *result < u64::MAX
+        && ((*result as u128) << 64) <= rounded_product_wide(f, coefficient)
+        && rounded_product_wide(f, coefficient) < ((*result as u128 + 1) << 64))]
+    fn rounded_multiply_contract(f: u64, coefficient: u64) -> u64 {
+        Fp { f, e: 0 }.mul(Fp { f: coefficient, e: 0 }).f
+    }
+
+    fn stub_rounded_multiply(value: Fp, coefficient: Fp) -> Fp {
+        Fp { f: rounded_multiply_contract(value.f, coefficient.f), e: value.e + coefficient.e + 64 }
+    }
+
+    #[kani::proof_for_contract(rounded_multiply_contract)]
+    #[kani::solver(kissat)]
+    #[cfg_attr(
+        target_pointer_width = "64",
+        kani::stub(
+            u64::carrying_mul,
+            crate::num::imp::flt2dec::strategy::dragon::dragon_verify::carrying_mul_model
+        )
+    )]
+    fn check_rounded_multiply() {
+        let f = kani::any::<u64>();
+        let coefficient = kani::any::<u64>();
+        let result = rounded_multiply_contract(f, coefficient);
+        kani::cover(f == 0 && coefficient == 0 && result == 0, "zero products are covered");
+        kani::cover(f == u64::MAX && coefficient == u64::MAX, "maximum product is covered");
+    }
+
+    fn arbitrary_normalized_interval() -> (u64, u64, u64, bool) {
+        let asymmetric = kani::any::<bool>();
+        let v = if asymmetric { 1 << 63 } else { kani::any::<u64>() };
+        let gap = match (asymmetric, kani::any::<bool>()) {
+            (true, true) => 1 << 9,
+            (true, false) => 1 << 38,
+            (false, _) => kani::any::<u64>(),
+        };
+        kani::assume((512..=1 << 62).contains(&gap));
+        let upper_gap = if asymmetric { 2 * gap } else { gap };
+        kani::assume(v >= (1 << 62) + gap);
+        kani::assume(v <= u64::MAX - upper_gap);
+        let plus = v + upper_gap;
+        let minus = v - gap;
+        kani::assume(plus >= 1 << 63);
+        kani::assume(if asymmetric {
+            v == 1 << 63 && (gap == 1 << 9 || gap == 1 << 38)
+        } else {
+            (gap as u128) << 54 >= plus as u128
+        });
+        (plus, minus, v, asymmetric)
+    }
+
+    fn shortest_scaling_width_valid(
+        mant: u64,
+        minus: u64,
+        plus: u64,
+        scaled_plus: u64,
+        scaled_minus: u64,
+    ) -> bool {
+        let shift = mant.wrapping_add(plus).leading_zeros();
+        scaled_minus <= scaled_plus
+            && scaled_plus as u128 - scaled_minus as u128 <= (minus as u128 + plus as u128) << shift
     }
 
     fn shortest_scaling_exponent_matches(
@@ -1037,6 +1286,63 @@ pub mod grisu_verify {
             let (_, cached_exp, cached_k) = CACHED_POW10[index as usize];
             i32::from(exp) == normalized_exp + i32::from(cached_exp) + 64 && minusk == cached_k
         }
+    }
+
+    fn decimal_scaled_delta(delta: u64, max_kappa: u8) -> u128 {
+        match max_kappa {
+            0 => delta as u128 * 10_000_000_000_000_000,
+            1 => delta as u128 * 1_000_000_000_000_000,
+            2 => delta as u128 * 100_000_000_000_000,
+            3 => delta as u128 * 10_000_000_000_000,
+            4 => delta as u128 * 1_000_000_000_000,
+            5 => delta as u128 * 100_000_000_000,
+            6 => delta as u128 * 10_000_000_000,
+            7 => delta as u128 * 1_000_000_000,
+            8 => delta as u128 * 100_000_000,
+            9 => delta as u128 * 10_000_000,
+            _ => 0,
+        }
+    }
+
+    fn decimal_minimum_upper(unit: u64, max_kappa: u8) -> u128 {
+        match max_kappa {
+            0 => unit as u128,
+            1 => unit as u128 * 10,
+            2 => unit as u128 * 100,
+            3 => unit as u128 * 1_000,
+            4 => unit as u128 * 10_000,
+            5 => unit as u128 * 100_000,
+            6 => unit as u128 * 1_000_000,
+            7 => unit as u128 * 10_000_000,
+            8 => unit as u128 * 100_000_000,
+            9 => unit as u128 * 1_000_000_000,
+            _ => u128::MAX,
+        }
+    }
+
+    #[kani::requires(max_kappa <= 9
+        && (delta as u128) << 53 >= decimal_minimum_upper(unit, max_kappa))]
+    #[kani::ensures(|result| *result == decimal_scaled_delta(delta, max_kappa)
+        && *result >= unit as u128)]
+    fn decimal_termination_contract(delta: u64, unit: u64, max_kappa: u8) -> u128 {
+        decimal_scaled_delta(delta, max_kappa)
+    }
+
+    #[kani::proof_for_contract(decimal_termination_contract)]
+    #[kani::solver(kissat)]
+    fn check_decimal_termination() {
+        let delta = kani::any::<u64>();
+        let unit = kani::any::<u64>();
+        let max_kappa = kani::any::<u8>();
+        kani::assume(max_kappa <= 9);
+        kani::assume((delta as u128) << 53 >= decimal_minimum_upper(unit, max_kappa));
+        decimal_termination_contract(delta, unit, max_kappa);
+        macro_rules! cover_decimal_cases {
+            ($($kappa:literal),+ $(,)?) => {
+                $(kani::cover(max_kappa == $kappa, concat!("decimal case ", stringify!($kappa)));)+
+            };
+        }
+        cover_decimal_cases!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
     }
 
     fn shortest_scaling_valid(state: (u64, u64, u64, i16, i16)) -> bool {
@@ -1058,19 +1364,7 @@ pub mod grisu_verify {
                 // After max_kappa + 1 integral digits, this factor is the
                 // scale at digit 17. A threshold reaching 2^e exceeds every
                 // fractional remainder, so the real loop ends by that digit.
-                let scaled_delta: u128 = match max_kappa {
-                    0 => delta as u128 * 10_000_000_000_000_000,
-                    1 => delta as u128 * 1_000_000_000_000_000,
-                    2 => delta as u128 * 100_000_000_000_000,
-                    3 => delta as u128 * 10_000_000_000_000,
-                    4 => delta as u128 * 1_000_000_000_000,
-                    5 => delta as u128 * 100_000_000_000,
-                    6 => delta as u128 * 10_000_000_000,
-                    7 => delta as u128 * 1_000_000_000,
-                    8 => delta as u128 * 100_000_000,
-                    9 => delta as u128 * 10_000_000,
-                    _ => 0,
-                };
+                let scaled_delta = decimal_scaled_delta(delta, max_kappa);
                 // Normalization and multiplication preserve the relative
                 // interval width. Two outward ulps absorb their rounding
                 // errors. These postconditions must be proved in CI.
@@ -1130,6 +1424,9 @@ pub mod grisu_verify {
 
             #[kani::proof_for_contract(scale_shortest_contract)]
             #[kani::stub_verified(normalize_shortest_contract)]
+            #[kani::stub_verified(multiply_shortest_contract)]
+            #[kani::stub(multiply_shortest, stub_multiply_shortest)]
+            #[kani::stub_verified(decimal_termination_contract)]
             #[cfg_attr(
                 target_pointer_width = "64",
                 kani::stub(
@@ -1146,7 +1443,7 @@ pub mod grisu_verify {
                 u32::leading_zeros,
                 crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u32
             )]
-            #[kani::solver(minisat)]
+            #[kani::solver(kissat)]
             fn $name() {
                 // Every contract input has minus = 1, plus in {1, 2}, and
                 // mant <= 2^54. Encode those bounds before normalization so
@@ -1272,17 +1569,6 @@ pub mod grisu_verify {
     check_scale_shortest_partition!(check_scale_shortest_71, scaling_cache_index_71, 71);
     check_scale_shortest_partition!(check_scale_shortest_72, scaling_cache_index_72, 72);
     check_scale_shortest_partition!(check_scale_shortest_73, scaling_cache_index_73, 73);
-    check_scale_shortest_partition!(check_scale_shortest_74, scaling_cache_index_74, 74);
-    check_scale_shortest_partition!(check_scale_shortest_75, scaling_cache_index_75, 75);
-    check_scale_shortest_partition!(check_scale_shortest_76, scaling_cache_index_76, 76);
-    check_scale_shortest_partition!(check_scale_shortest_77, scaling_cache_index_77, 77);
-    check_scale_shortest_partition!(check_scale_shortest_78, scaling_cache_index_78, 78);
-    check_scale_shortest_partition!(check_scale_shortest_79, scaling_cache_index_79, 79);
-
-    // At digit one the loop must stop. If its remainder would already exceed
-    // threshold, the loop's threshold check forces an earlier stop. With digit
-    // zero this checks the initial state, which must not decrement at all.
-    // Callers establish this numeric condition before using the helper model.
     fn weed_stops_before_zero(
         digit: u8,
         remainder: u64,

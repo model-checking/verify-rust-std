@@ -25,7 +25,14 @@ fi
 if [[ "${KANI_ARRAY_FIELD_SENSITIVITY:-true}" == false ]]; then
     kani_cbmc_args+=(--no-array-field-sensitivity)
 fi
-if [[ "${KANI_FLAT_SMT_Z3:-false}" == true ]]; then
+if [[ "${KANI_FLAT_SMT_CVC5:-false}" == true ]]; then
+    if [[ "${KANI_FLAT_SMT_Z3:-false}" == true || "${KANI_ARITHMETIC_REFINEMENT:-false}" == true ]]; then
+        echo "CVC5 cannot be combined with another arithmetic backend." >&2
+        exit 2
+    fi
+    kani_cvc5_wrapper="$(dirname "$(realpath "${BASH_SOURCE[0]}")")/kani-std-analysis/cvc5-flat-smt.sh"
+    kani_cbmc_args+=(--yices --external-smt2-solver "$kani_cvc5_wrapper")
+elif [[ "${KANI_FLAT_SMT_Z3:-false}" == true ]]; then
     if [[ "${KANI_ARITHMETIC_REFINEMENT:-false}" == true ]]; then
         echo "Flat SMT encoding cannot be combined with SAT arithmetic refinement." >&2
         exit 2
@@ -376,9 +383,14 @@ main() {
     echo "Running Kani command..."
     "$kani_path" --version
 
-    if [[ "${KANI_PATCHED_CBMC:-false}" == true || "${KANI_FLAT_SMT_Z3:-false}" == true ]]; then
+    if [[ "${KANI_PATCHED_CBMC:-false}" == true || "${KANI_FLAT_SMT_Z3:-false}" == true || "${KANI_FLAT_SMT_CVC5:-false}" == true ]]; then
         bash "$WORK_DIR/scripts/setup-flat-smt-cbmc.sh" "$WORK_DIR/cbmc_build"
         export PATH="$WORK_DIR/cbmc_build/bin:$PATH"
+    fi
+    if [[ "${KANI_FLAT_SMT_CVC5:-false}" == true ]]; then
+        bash "$WORK_DIR/scripts/setup-cvc5.sh" "$WORK_DIR/cvc5_build"
+        export KANI_CVC5_BINARY="$WORK_DIR/cvc5_build/bin/cvc5"
+        bash "$(dirname "$kani_cvc5_wrapper")/test_cvc5_flat_smt.sh"
     fi
     if [[ "${KANI_FLAT_SMT_Z3:-false}" == true ]]; then
         bash "$(dirname "$kani_flat_smt_wrapper")/test_z3_flat_smt.sh"

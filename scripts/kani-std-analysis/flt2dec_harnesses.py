@@ -18,9 +18,9 @@ def proof_groups(pointer_width=None):
     limb_count = 20 if pointer_width == 64 else 40
     groups = []
 
-    def add(name, kind, harnesses, timeout_minutes):
+    def add(name, kind, harnesses, timeout_minutes, backend="native"):
         groups.append({"name": name, "kind": kind, "harnesses": harnesses,
-                       "timeout_minutes": timeout_minutes})
+                       "timeout_minutes": timeout_minutes, "backend": backend})
 
     for name, module, proof, batch_size, timeout_minutes in [
         ("dragon-exact", DRAGON, "check_format_exact", 4, 60),
@@ -44,6 +44,7 @@ def proof_groups(pointer_width=None):
             f"{GRISU}::f64_cached_power_39::check_format_{mode}_opt"
         ], 120 if mode == "shortest" else 60)
 
+    foundations = {"contract": [], "equivalence": []}
     for name, module, proof, kind in [
         ("division-contract", DRAGON, "check_div_2pow10_contract", "contract"),
         ("limb-division-contract", DRAGON, "check_div_rem_digit_contract", "contract"),
@@ -53,6 +54,7 @@ def proof_groups(pointer_width=None):
         ("grisu-exact-rounding-contract", GRISU, "check_round_exact_contract", "contract"),
         ("grisu-shortest-rounding-contract", GRISU, "check_round_shortest_contract", "contract"),
         ("grisu-shortest-normalization-contract", GRISU, "check_normalize_shortest", "contract"),
+        ("grisu-rounded-multiplication-contract", GRISU, "check_rounded_multiply", "contract"),
         ("grisu-shortest-scaling-partitioning", GRISU, "check_scale_shortest_partitioning", "equivalence"),
         ("comparison-equivalence", DRAGON, "check_comparison_models_agree", "equivalence"),
         ("zero-fill-equivalence", DRAGON, "check_fill_zeroes_model_agrees", "equivalence"),
@@ -60,7 +62,20 @@ def proof_groups(pointer_width=None):
         ("subtraction-equivalence", DRAGON, "check_sub_model_agrees", "equivalence"),
         ("bit-scan-equivalence", "num::imp::flt2dec::bit_scan_verify", "check_leading_zeros_models_agree", "equivalence"),
     ]:
-        add(name, kind, [f"{module}::{proof}"], 30)
+        foundations[kind].append(f"{module}::{proof}")
+
+    for kind, harnesses in foundations.items():
+        for first in range(0, len(harnesses), 8):
+            add(f"foundations-{kind}-{first:02d}", kind, harnesses[first:first + 8], 30)
+
+    for first in range(0, 80, 10):
+        last = first + 9
+        harnesses = [f"{GRISU}::check_multiply_shortest_{group:02d}"
+                     for group in range(first, last + 1)]
+        if first == 0:
+            harnesses.append(f"{GRISU}::check_decimal_termination")
+        add(f"grisu-multiplication-contract-{first:02d}-{last:02d}", "contract",
+            harnesses, 7, "cvc5")
 
     for first in range(0, 80, 4):
         last = min(first + 3, 79)
