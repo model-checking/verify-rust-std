@@ -216,10 +216,33 @@ jobs:
           key: cbmc-flat-smt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('head/scripts/setup-flat-smt-cbmc.sh', 'head/scripts/cbmc-skip-unused-loop-assigns.patch') }}
           fail-on-cache-miss: true
 
+      - name: Add memory for cached multiplication equivalence
+        if: runner.os == 'Linux' && (matrix.group.catalog_name || matrix.group.name) == 'cached-multiplication-equivalence'
+        run: |
+          sudo fallocate -l 24G /mnt/pr601-proof-swap
+          sudo chmod 600 /mnt/pr601-proof-swap
+          sudo mkswap /mnt/pr601-proof-swap
+          sudo swapon /mnt/pr601-proof-swap
+          free -h
+          df -h /mnt
+
       - name: Verify selected proof groups
         env:
           RETAIN_PROOF_MODELS: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' }}
         run: |
+          if [[ "$HARNESS_GROUP" == cached-multiplication-equivalence ]]; then
+            if [[ "$RUNNER_OS" == Linux ]]; then
+              ulimit -v 33554432
+            fi
+            (
+              while sleep 30; do
+                date -u +%FT%TZ
+                ps -A -o pid=,rss=,comm= | awk '$3 ~ /(^|\/)(cbmc|cvc5|goto-instrument|goto-cc|kani-driver|kani-compiler|rustc)$/ { print "verifier RSS KiB:", $0 }'
+              done
+            ) &
+            proof_sampler_pid=$!
+            trap 'kill "$proof_sampler_pid" 2>/dev/null || true' EXIT
+          fi
           # Keep every group within four hours of proof budgets per job:
           # two 120-minute or four 60-minute generators, or eight 30-minute cases.
           harness_names=$(python3 -I head/scripts/kani-std-analysis/flt2dec_harnesses.py --group "$HARNESS_GROUP")
