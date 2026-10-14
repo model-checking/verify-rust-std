@@ -4696,4 +4696,32 @@ mod verify {
         kani::cover(s.len() > 64, "long string");
         s.replace_range((Bound::Excluded(usize::MAX), Bound::Unbounded), "");
     }
+
+    // Why these three exist: `should_panic` accepts any panic. Without the range checks of
+    // `slice::range`, the four `*_max` harnesses above still pass, through an arithmetic
+    // overflow, and so does `check_replace_range_panics_reversed`, through later checks. These
+    // ordinary harnesses check the range checks themselves: `drain` and `replace_range` convert
+    // their range with `slice::range`, which panics exactly when `slice::try_range` returns
+    // `None` (both go through `try_into_slice_range`), and here an overflow is a failure.
+    #[kani::proof]
+    fn check_range_rejects_end_included_max() {
+        let len: usize = kani::any_where(|l: &usize| *l <= MAX_ALLOC);
+        kani::cover(len > 64, "long string");
+        assert!(core::slice::try_range(..=usize::MAX, ..len).is_none());
+    }
+
+    #[kani::proof]
+    fn check_range_rejects_start_excluded_max() {
+        let len: usize = kani::any_where(|l: &usize| *l <= MAX_ALLOC);
+        kani::cover(len > 64, "long string");
+        let r = (Bound::Excluded(usize::MAX), Bound::Unbounded);
+        assert!(core::slice::try_range(r, ..len).is_none());
+    }
+
+    #[kani::proof]
+    fn check_range_rejects_reversed() {
+        let len: usize = kani::any_where(|l: &usize| *l <= MAX_ALLOC);
+        let (a, b) = any_reversed_range(len);
+        assert!(core::slice::try_range(a..b, ..len).is_none());
+    }
 }
