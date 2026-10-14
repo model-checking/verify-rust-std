@@ -3707,7 +3707,7 @@ mod verify {
     //! Restrictions. There is no `kani::assume` in this module: every restriction of an input
     //! is a `kani::any_where` domain at the point where the input is generated (sizes that fit
     //! in one CBMC object, indices inside the string, the bounds above, and in the panic
-    //! harnesses the cause of the panic: `any_inside_char`, `any_past_end` and
+    //! harnesses the cause of the panic, e.g. `any_inside_char`, `any_past_end` and
     //! `any_reversed_range`). Nothing is assumed about the result of a function under test.
     //!
     //! Stubs. One: `check_retain_bounded` replaces `core::str::from_utf8`, which `retain` calls in
@@ -3729,13 +3729,13 @@ mod verify {
     //! through their input domains: indices are at most the length (an `any_where` domain), and
     //! every such index of an all-NUL string is a char boundary by construction (the harnesses
     //! `assert!` this before the call); `with_char_at` puts a char at the index that `remove`
-    //! removes. The `check_*_panics_inside_char` and `check_*_panics_past_end` harnesses
-    //! (`#[kani::should_panic]`) show for `insert`, `insert_str`, `split_off`, `remove`, `drain`
-    //! and `replace_range` that an index strictly inside a multi-byte char panics, and separately
-    //! that an index past the end panics. Further `should_panic` harnesses show that `remove`
-    //! panics at the end of the string, and that `drain` and `replace_range` panic for a reversed
-    //! range, for `..=usize::MAX` and for `(Excluded(usize::MAX), Unbounded)`. Each harness has a
-    //! single cause of panic in its input domain.
+    //! removes. The `#[kani::should_panic]` harnesses show for `insert`, `insert_str`,
+    //! `split_off` and `remove` that an index strictly inside a multi-byte char panics, and
+    //! separately that an index past the end panics, and that `remove` panics at the end of the
+    //! string. For `drain` and `replace_range` they show the same for a range with its start,
+    //! its end, or both inside a char, for a range whose end is past the end, for a reversed
+    //! range, for `..=usize::MAX` and for `(Excluded(usize::MAX), Unbounded)`. In each harness,
+    //! every input fails the same check of the function under test.
     use core::cell::Cell;
     use core::kani;
     use core::ops::Bound;
@@ -4405,7 +4405,9 @@ mod verify {
     // every failing check is of that class (assertions, including arithmetic overflow and
     // out-of-bounds indexing), so no UB is reachable before the panic (Kani uses
     // `panic=abort`). That the failing checks are exactly the documented panics was checked in
-    // the verification logs.
+    // the verification logs. In each harness every input fails the same check (for a reversed
+    // range whose start is also past the length, `slice::range` reports that check with the
+    // message for a start out of range).
     // `pop` has no panic condition. `drain` and `replace_range` also panic for a reversed range
     // and for the two `RangeBounds` shapes whose conversion to `start..end` would overflow
     // without the checks of `slice::range`; `remove` also panics at the end of the string.
@@ -4430,22 +4432,48 @@ mod verify {
         i
     }
 
-    /// A range `a..b` with `a <= b <= len` where at least one end is inside the encoding of `c`.
-    /// Both ends are in bounds, so a panic can only come from a char-boundary check.
-    fn any_range_inside_char(len: usize, start: usize, c: char) -> (usize, usize) {
-        let bad = any_inside_char(len, start, c);
-        let other: usize = kani::any_where(|o: &usize| *o <= len);
-        let (a, b) = if bad <= other { (bad, other) } else { (other, bad) };
-        kani::cover(a == bad && b != bad, "only the start is inside a char");
-        kani::cover(b == bad && a != bad, "only the end is inside a char");
+    // For a range `a..b`, `drain` and `replace_range` check, in this order: `b <= len` and
+    // `a <= b` (both in `slice::range`), then that `a`, and then `b`, is a char boundary. The
+    // domains of `any_range_past_end`, `any_reversed_range` and the three helpers for ranges
+    // inside a char, together with the valid ranges of the main harnesses, split all pairs
+    // `(a, b)` along these checks.
+
+    // In `with_char_at`'s string, the only indices that are not char boundaries are strictly
+    // inside `c`. A range `a..b`, `a <= b <= len`, that fails a boundary check has its start
+    // inside `c` and its end at or after the end of `c`, or its start at or before the start of
+    // `c` and its end inside `c`, or both ends inside `c`: one helper and harness each, so that
+    // without the check that should fail no input of a harness panics.
+
+    /// A range whose start is strictly inside `c` and whose end is a char boundary.
+    fn any_range_start_inside_char(len: usize, start: usize, c: char) -> (usize, usize) {
+        let a = any_inside_char(len, start, c);
+        let b: usize = kani::any_where(|b: &usize| *b >= start + c.len_utf8() && *b <= len);
+        kani::cover(b > start + c.len_utf8(), "the end is after the char");
         (a, b)
     }
 
-    /// A range `a..b` with `a <= b` whose end is past the end of a string of length `len`.
+    /// A range whose start is a char boundary and whose end is strictly inside `c`.
+    fn any_range_end_inside_char(len: usize, start: usize, c: char) -> (usize, usize) {
+        let b = any_inside_char(len, start, c);
+        let a: usize = kani::any_where(|a: &usize| *a <= start);
+        kani::cover(a < start, "the start is before the char");
+        (a, b)
+    }
+
+    /// A range whose two ends are strictly inside `c` (`a <= b`).
+    fn any_range_both_inside_char(len: usize, start: usize, c: char) -> (usize, usize) {
+        let a = any_inside_char(len, start, c);
+        let b: usize = kani::any_where(|b: &usize| *b >= a && *b < start + c.len_utf8());
+        kani::cover(a < b, "two different indices inside the char");
+        (a, b)
+    }
+
+    /// A range `a..b` whose end is past the end of a string of length `len`, with any start.
     fn any_range_past_end(len: usize) -> (usize, usize) {
         let b = any_past_end(len);
-        let a: usize = kani::any_where(|a: &usize| *a <= b);
+        let a: usize = kani::any();
         kani::cover(a <= len, "only the end is past the end");
+        kani::cover(a > b, "also reversed");
         (a, b)
     }
 
@@ -4507,9 +4535,25 @@ mod verify {
 
     #[kani::proof]
     #[kani::should_panic]
-    fn check_drain_panics_inside_char() {
+    fn check_drain_panics_start_inside_char() {
         let (mut s, start, c) = with_char_at();
-        let (a, b) = any_range_inside_char(s.len(), start, c);
+        let (a, b) = any_range_start_inside_char(s.len(), start, c);
+        drop(s.drain(a..b));
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_drain_panics_end_inside_char() {
+        let (mut s, start, c) = with_char_at();
+        let (a, b) = any_range_end_inside_char(s.len(), start, c);
+        drop(s.drain(a..b));
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_drain_panics_both_inside_char() {
+        let (mut s, start, c) = with_char_at();
+        let (a, b) = any_range_both_inside_char(s.len(), start, c);
         drop(s.drain(a..b));
     }
 
@@ -4527,9 +4571,27 @@ mod verify {
     #[kani::proof]
     #[kani::should_panic]
     #[kani::unwind(1)]
-    fn check_replace_range_panics_inside_char() {
+    fn check_replace_range_panics_start_inside_char() {
         let (mut s, start, c) = with_char_at();
-        let (a, b) = any_range_inside_char(s.len(), start, c);
+        let (a, b) = any_range_start_inside_char(s.len(), start, c);
+        s.replace_range(a..b, "");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(1)]
+    fn check_replace_range_panics_end_inside_char() {
+        let (mut s, start, c) = with_char_at();
+        let (a, b) = any_range_end_inside_char(s.len(), start, c);
+        s.replace_range(a..b, "");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(1)]
+    fn check_replace_range_panics_both_inside_char() {
+        let (mut s, start, c) = with_char_at();
+        let (a, b) = any_range_both_inside_char(s.len(), start, c);
         s.replace_range(a..b, "");
     }
 
@@ -4572,12 +4634,13 @@ mod verify {
         let _ = s.remove(idx);
     }
 
-    /// A reversed range `a..b`, `b < a <= len`, of the all-NUL string `any_string`: both ends are
-    /// in bounds and char boundaries, so the reversal is the only cause of a panic.
+    /// A reversed range `a..b`, `b < a`, whose end is in bounds (`b <= len`) of the all-NUL
+    /// string `any_string`, with any start: the reversal is the only cause of a panic.
     fn any_reversed_range(len: usize) -> (usize, usize) {
-        let a: usize = kani::any_where(|a: &usize| *a > 0 && *a <= len);
-        let b: usize = kani::any_where(|b: &usize| *b < a);
+        let b: usize = kani::any_where(|b: &usize| *b <= len);
+        let a: usize = kani::any_where(|a: &usize| *a > b);
         kani::cover(len > 64 && a < len && b > 0, "reversed range inside a long string");
+        kani::cover(a > len, "the start is also past the end");
         (a, b)
     }
 
