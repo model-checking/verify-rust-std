@@ -730,7 +730,6 @@ impl Big {
         self
     }
 
-    #[rustc_force_inline]
     fn kani_mul_digits_product(ret: &mut [Digit; KANI_LIMBS], aa: &[Digit], bb: &[Digit]) -> usize {
         let mut retsz = 0;
         macro_rules! multiply_rows {
@@ -750,7 +749,6 @@ impl Big {
         retsz
     }
 
-    #[rustc_force_inline]
     fn kani_mul_digits_row(
         ret: &mut [Digit; KANI_LIMBS],
         a: Digit,
