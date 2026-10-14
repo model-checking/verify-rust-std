@@ -3677,3 +3677,1051 @@ impl From<char> for String {
         c.to_string()
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    //! Challenge 10: memory safety of `String` methods that are safe abstractions over unsafe code.
+    //!
+    //! Bounds. Strings have a symbolic length and capacity, limited only by the largest object
+    //! CBMC can represent under `--object-bits 12` (see `MAX_ALLOC`), except where stated below.
+    //!
+    //! * Unbounded: `check_insert_str` and `check_split_off` (both "unbounded" in the challenge),
+    //!   and `check_pop`, `check_remove`, `check_insert`, `check_drain_drop`, `check_drain_next`,
+    //!   `check_into_boxed_str`, `check_leak`. No loop is reachable on their verified paths, so
+    //!   no unwind bound limits the input. `check_remove` has `#[kani::unwind(2)]` only to cut an
+    //!   infeasible panic path (see the comment on it). The `check_*_panics_*` harnesses are
+    //!   unbounded too: `#[kani::unwind(1)]` on the `replace_range` ones only covers loops that
+    //!   no input reaches, and `#[kani::unwind(4)]` on `check_remove_panics_inside_char` covers a
+    //!   loop of at most 3 iterations (see the comments on them).
+    //! * Receiver of any length, bounded edit: `check_replace_range` (removed and inserted
+    //!   ranges of at most 4 bytes each) and `check_remove_matches` (at most 5 matches). Their
+    //!   loops run once per edited byte or per match, never once per receiver byte.
+    //! * Bounded because of tool limits: `check_retain_bounded` (strings of up to 5 chars) and
+    //!   the `from_utf16*` harnesses (inputs of up to 12 bytes for the little-endian and 16 bytes
+    //!   for the big-endian variants). See the comment above them.
+    //!
+    //! Every `#[kani::unwind]` bound is checked by unwinding assertions, so a bound that is too
+    //! small makes the proof fail instead of silently cutting executions.
+    //!
+    //! Restrictions. There is no `kani::assume` in this module: every restriction of an input
+    //! is a `kani::any_where` domain at the point where the input is generated (sizes that fit
+    //! in one CBMC object, indices inside the string, the bounds above, and in the panic
+    //! harnesses the cause of the panic, e.g. `any_inside_char`, `any_past_end` and
+    //! `any_reversed_range`). Nothing is assumed about the result of a function under test.
+    //!
+    //! Stubs. One: `check_retain_bounded` replaces `core::str::from_utf8`, which `retain` calls in
+    //! a `debug_assert!`, with `from_utf8_kept`, which checks that the bytes are exactly the
+    //! chars the predicate kept (see the comment on it). No function under test is replaced.
+    //!
+    //! Contents. Every generated `String` is initialized, valid UTF-8. The harnesses with a
+    //! symbolic length use a zeroed buffer, i.e. a string of NUL chars (`any_string`), and, where a
+    //! function decodes a char, put the UTF-8 encoding of an arbitrary `char` at an arbitrary
+    //! position (`with_char_at`). This is a modeling argument, not a quantification over all
+    //! contents: memory safety of these functions depends only on the length, the capacity, the
+    //! indices, the outcome of the char-boundary checks at those indices, and the one char that
+    //! `pop`, `remove` and `Drain::next` decode. Any other bytes are only copied or moved, never
+    //! used for control flow or address computation. On an all-NUL string every index up to the
+    //! length is a char boundary, so the model reaches every combination of these quantities for
+    //! which the boundary checks pass; the combinations for which they fail are the panics below.
+    //!
+    //! Panics. Panics are not UB. The harnesses stay out of the documented panic conditions
+    //! through their input domains: indices are at most the length (an `any_where` domain), and
+    //! every such index of an all-NUL string is a char boundary by construction (the harnesses
+    //! `assert!` this before the call); `with_char_at` puts a char at the index that `remove`
+    //! removes. The `#[kani::should_panic]` harnesses show for `insert`, `insert_str`,
+    //! `split_off` and `remove` that an index strictly inside a multi-byte char panics, and
+    //! separately that an index past the end panics, and that `remove` panics at the end of the
+    //! string. For `drain` and `replace_range` they show the same for a range with its start,
+    //! its end, or both inside a char, for a range whose end is past the end, for a reversed
+    //! range, for `..=usize::MAX` and for `(Excluded(usize::MAX), Unbounded)`. In each harness,
+    //! every input fails the same check of the function under test.
+    use core::cell::Cell;
+    use core::kani;
+    use core::ops::Bound;
+    use core::str::pattern::{Pattern, SearchStep, Searcher};
+
+    use crate::string::String;
+    use crate::vec::Vec;
+
+    /// Largest positive offset CBMC can represent within one object with `--object-bits 12` (the
+    /// setting used by `scripts/run-kani.sh`): 52 offset bits, signed. A limit of the memory
+    /// model, not a bound chosen for tractability (2^51 bytes = 2 PiB).
+    const MAX_ALLOC: usize = (1usize << 51) - 1;
+
+    /// A `String` with symbolic capacity (`<= MAX_ALLOC`) and symbolic length (`<= max_len`)
+    /// whose bytes are all 0 (NUL, a one-byte UTF-8 char). The buffer is a zeroed allocation
+    /// (`vec![0; cap]`), so it is initialized without a loop or a fill of symbolic size. See the
+    /// module comment on contents.
+    fn any_string_max_len(max_len: usize) -> String {
+        let cap: usize = kani::any_where(|c: &usize| *c <= MAX_ALLOC);
+        let len: usize = kani::any_where(|l: &usize| *l <= cap && *l <= max_len);
+        let mut v: Vec<u8> = vec![0u8; cap];
+        v.truncate(len);
+        // SAFETY (harness): all bytes are 0, which is valid UTF-8.
+        unsafe { String::from_utf8_unchecked(v) }
+    }
+
+    /// `any_string_max_len` without a limit on the length other than the capacity.
+    fn any_string() -> String {
+        any_string_max_len(MAX_ALLOC)
+    }
+
+    /// `prefix ++ encode_utf8(c) ++ suffix` with an arbitrary `char` `c` and all-zero `prefix`
+    /// and `suffix` of arbitrary lengths. Returns the string, the start of `c`, and `c`.
+    fn with_char_at() -> (String, usize, char) {
+        let c: char = kani::any();
+        let c_len = c.len_utf8();
+        // `prefix + c_len + suffix <= MAX_ALLOC`: the string fits in one CBMC object.
+        let prefix: usize = kani::any_where(|p: &usize| *p <= MAX_ALLOC - c_len);
+        let suffix: usize = kani::any_where(|s: &usize| *s <= MAX_ALLOC - c_len - prefix);
+        let len = prefix + c_len + suffix;
+        // `cap >= len`, so `cap == len` is possible for chars of every width.
+        let cap: usize = kani::any_where(|k: &usize| *k >= len && *k <= MAX_ALLOC);
+        let mut v: Vec<u8> = vec![0u8; cap];
+        // SAFETY (harness): `prefix + c_len <= cap = v.len()`, so the char's bytes are written
+        // inside the zeroed, initialized buffer.
+        unsafe {
+            c.encode_utf8(core::slice::from_raw_parts_mut(v.as_mut_ptr().add(prefix), c_len));
+        }
+        v.truncate(len);
+        // SAFETY (harness): zero bytes, a well-formed char encoding, zero bytes: valid UTF-8.
+        (unsafe { String::from_utf8_unchecked(v) }, prefix, c)
+    }
+
+    /// The byte range `start..end` of a string of length `len` as an arbitrary `(Bound, Bound)`
+    /// pair: every `RangeBounds` shape (`a..b`, `a..=b`, `a..`, `..b`, `..=b`, `..`, and
+    /// `Excluded` starts) that denotes this range.
+    fn any_bounds(start: usize, end: usize, len: usize) -> (Bound<usize>, Bound<usize>) {
+        let sb = if start > 0 && kani::any() {
+            Bound::Excluded(start - 1)
+        } else if start == 0 && kani::any() {
+            Bound::Unbounded
+        } else {
+            Bound::Included(start)
+        };
+        let eb = if end > 0 && kani::any() {
+            Bound::Included(end - 1)
+        } else if end == len && kani::any() {
+            Bound::Unbounded
+        } else {
+            Bound::Excluded(end)
+        };
+        kani::cover(matches!(sb, Bound::Included(_)), "start bound Included");
+        kani::cover(matches!(sb, Bound::Excluded(_)), "start bound Excluded");
+        kani::cover(matches!(sb, Bound::Unbounded), "start bound Unbounded");
+        kani::cover(matches!(eb, Bound::Included(_)), "end bound Included");
+        kani::cover(matches!(eb, Bound::Excluded(_)), "end bound Excluded");
+        kani::cover(matches!(eb, Bound::Unbounded), "end bound Unbounded");
+        (sb, eb)
+    }
+
+    #[kani::proof]
+    fn check_pop() {
+        // Either empty, or `c` is the last char, after a NUL prefix of arbitrary length.
+        let (mut s, start, c) = with_char_at();
+        let has_last_char: bool = kani::any();
+        // SAFETY (harness): shrinking the length keeps a prefix of the initialized bytes. The new
+        // length is 0 or `start + c.len_utf8()`, the end of `c`, so the kept bytes are NULs
+        // followed by the whole encoding of `c`: valid UTF-8.
+        unsafe { s.as_mut_vec().set_len(if has_last_char { start + c.len_utf8() } else { 0 }) };
+        kani::cover(has_last_char && start > 64, "pop from a long string");
+        let res = s.pop();
+        if has_last_char {
+            assert!(res == Some(c));
+            assert!(s.len() == start);
+        } else {
+            assert!(res.is_none());
+            assert!(s.len() == 0);
+        }
+    }
+
+    // `self[idx..]` has a panic path (`str::slice_error_fail_rt`) with a loop
+    // (`ceil_char_boundary`). Under this harness that path is infeasible (`idx` is the start of
+    // a well-formed char). The unwind bound only cuts that path: unwinding assertions stay
+    // enabled, so any loop that is actually reachable and needs more iterations makes the proof
+    // fail. No loop is reachable on the verified (non-panicking) path, so input sizes stay
+    // unbounded.
+    #[kani::proof]
+    #[kani::unwind(2)]
+    fn check_remove() {
+        let (mut s, idx, c) = with_char_at();
+        let len = s.len();
+        kani::cover(idx > 64 && len > idx + 64, "remove in the middle of a long string");
+        let res = s.remove(idx);
+        assert!(res == c);
+        assert!(s.len() == len - c.len_utf8());
+    }
+
+    #[kani::proof]
+    fn check_insert() {
+        // `len + 4 <= MAX_ALLOC`: the length of the result stays within `MAX_ALLOC`.
+        let mut s = any_string_max_len(MAX_ALLOC - 4);
+        let len = s.len();
+        let ch: char = kani::any();
+        let idx: usize = kani::any_where(|i: &usize| *i <= len);
+        // Every index up to the length of an all-NUL string is a char boundary, so the
+        // documented panic is excluded by construction. Checked here, not assumed.
+        assert!(s.is_char_boundary(idx));
+        kani::cover(idx > 64 && len > idx + 64, "insert in the middle of a long string");
+        kani::cover(s.capacity() == len, "full buffer: insert reallocates");
+        s.insert(idx, ch);
+        assert!(s.len() == len + ch.len_utf8());
+    }
+
+    #[kani::proof]
+    fn check_insert_str() {
+        let mut s = any_string();
+        let len = s.len();
+        // `len + amt <= MAX_ALLOC`: the length of the result stays within `MAX_ALLOC`.
+        let t = any_string_max_len(MAX_ALLOC - len);
+        let amt = t.len();
+        let idx: usize = kani::any_where(|i: &usize| *i <= len);
+        // No panic by construction, as in `check_insert`.
+        assert!(s.is_char_boundary(idx));
+        kani::cover(idx > 64 && len > idx + 64 && amt > 64, "long insert in the middle");
+        kani::cover(s.capacity() == len && amt > 0, "full buffer: insert_str reallocates");
+        s.insert_str(idx, t.as_str());
+        assert!(s.len() == len + amt);
+    }
+
+    #[kani::proof]
+    fn check_split_off() {
+        let mut s = any_string();
+        let len = s.len();
+        let at: usize = kani::any_where(|a: &usize| *a <= len);
+        // No panic by construction, as in `check_insert`.
+        assert!(s.is_char_boundary(at));
+        kani::cover(at > 64 && len > at + 64, "split in the middle of a long string");
+        let other = s.split_off(at);
+        assert!(s.len() == at);
+        assert!(other.len() == len - at);
+    }
+
+    #[kani::proof]
+    fn check_drain_drop() {
+        // Arbitrary range, given in every `RangeBounds` shape; the `Drain` is dropped without
+        // being iterated.
+        let mut s = any_string();
+        let len = s.len();
+        let start: usize = kani::any_where(|x: &usize| *x <= len);
+        let end: usize = kani::any_where(|x: &usize| *x >= start && *x <= len);
+        // No panic by construction, as in `check_insert`.
+        assert!(s.is_char_boundary(start) && s.is_char_boundary(end));
+        kani::cover(start > 64 && end > start + 64 && len > end + 64, "drain in the middle");
+        drop(s.drain(any_bounds(start, end, len)));
+        assert!(s.len() == len - (end - start));
+    }
+
+    #[kani::proof]
+    fn check_drain_next() {
+        // The drained range starts with a well-formed char, which the iterator decodes.
+        let (mut s, start, c) = with_char_at();
+        let len = s.len();
+        let end: usize = kani::any_where(|x: &usize| *x >= start + c.len_utf8() && *x <= len);
+        // `start` is the start of `c`, and `end` is in the NUL suffix after `c` or at the end
+        // of the string: both are char boundaries by construction. Checked here, not assumed.
+        assert!(s.is_char_boundary(start) && s.is_char_boundary(end));
+        kani::cover(start > 64 && len > end + 64, "drain and iterate in the middle");
+        let mut d = s.drain(any_bounds(start, end, len));
+        assert!(d.next() == Some(c));
+        drop(d);
+        assert!(s.len() == len - (end - start));
+    }
+
+    #[kani::proof]
+    fn check_into_boxed_str() {
+        let s = any_string();
+        let len = s.len();
+        kani::cover(len > 64 && s.capacity() > len, "shrinking a long string");
+        let b = s.into_boxed_str();
+        assert!(b.len() == len);
+    }
+
+    #[kani::proof]
+    fn check_leak() {
+        let s = any_string();
+        let len = s.len();
+        kani::cover(len > 64, "long string");
+        let r: &'static mut str = s.leak();
+        assert!(r.len() == len);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // replace_range / remove_matches: arbitrary receiver length, bounded edit size.
+    //
+    // Every loop reachable from these two functions iterates once per *edited* byte or per
+    // *match* (Splice::drop's drain/fill/extend/collect loops; remove_matches' rejection-collect
+    // and compaction loops), never once per byte of the receiver: the receiver-sized work is the
+    // tail `ptr::copy`, which is loop-free. So the receiver has arbitrary length and capacity,
+    // and only the number of edited bytes / matches is bounded, with a matching
+    // `#[kani::unwind]` (an insufficient bound fails the unwinding assertion).
+    // ---------------------------------------------------------------------------------------
+
+    /// Every valid UTF-8 string of at most `E` bytes: up to `E` arbitrary chars encoded back to
+    /// back into the zeroed buffer `buf`, stopping at the first char that does not fit. A string
+    /// of `k` chars whose encodings fit in `E` bytes is produced when those chars come first and
+    /// `n = k`. The bytes are valid UTF-8 by construction; nothing is checked or assumed.
+    fn any_short_str<const E: usize>(buf: &mut [u8; E]) -> &str {
+        let chars: [char; E] = kani::any();
+        let n: usize = kani::any_where(|n: &usize| *n <= E);
+        let mut off = 0;
+        for i in 0..n {
+            let l = chars[i].len_utf8();
+            if l > E - off {
+                break;
+            }
+            chars[i].encode_utf8(&mut buf[off..off + l]);
+            off += l;
+        }
+        // SAFETY (harness): `buf[..off]` is the concatenation of the UTF-8 encodings of whole
+        // chars: valid UTF-8.
+        unsafe { core::str::from_utf8_unchecked(&buf[..off]) }
+    }
+
+    /// Arbitrary-length receiver, symbolic range `start..end` (any position,
+    /// `end - start <= E`) on char boundaries, given as an arbitrary `(Bound, Bound)` pair,
+    /// and an arbitrary valid UTF-8 replacement of `<= E` bytes.
+    fn replace_range_harness<const E: usize>() {
+        // `len + E <= MAX_ALLOC`: the length of the result stays within `MAX_ALLOC`.
+        let mut s = any_string_max_len(MAX_ALLOC - E);
+        let len = s.len();
+        let start: usize = kani::any_where(|a: &usize| *a <= len);
+        let removed: usize = kani::any_where(|n: &usize| *n <= E && *n <= len - start);
+        let end = start + removed;
+        // No panic by construction, as in `check_insert`.
+        assert!(s.is_char_boundary(start) && s.is_char_boundary(end));
+        let mut buf = [0u8; E];
+        let repl = any_short_str(&mut buf);
+        let rl = repl.len();
+        kani::cover(len > 64 && start > 0 && end < len && rl > removed, "grow in the middle");
+        kani::cover(len > 64 && start > 0 && end < len && rl < removed, "shrink in the middle");
+        kani::cover(len > 64 && end == len && rl > 0, "append at the end");
+        kani::cover(s.capacity() == len && rl > removed, "full buffer, growing: reallocates");
+        kani::cover(rl >= 4 && repl.as_bytes()[0] >= 0xF0, "replacement starts with a 4-byte char");
+        s.replace_range(any_bounds(start, end, len), repl);
+        assert!(s.len() == len - removed + rl);
+    }
+
+    // `unwind(5)`: the longest loops here run at most 4 times (the chars of `any_short_str`;
+    // the `Splice` loops, once per removed or inserted byte), plus the exit test.
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_replace_range() {
+        replace_range_harness::<4>();
+    }
+
+    /// A `Pattern` whose searcher returns an arbitrary sequence of matches allowed by the
+    /// `unsafe trait Searcher` contract that `remove_matches` relies on (its SAFETY comment).
+    /// The docs of `Searcher::next` say: "The stream of Match and Reject values up to a Done
+    /// will contain index ranges that are adjacent, non-overlapping, covering the whole
+    /// haystack, and laying on utf8 boundaries." and "Both ranges may have zero length."
+    /// `next_match` returns the `Match` ranges of that stream. So the successive `next_match`
+    /// results `(a, b)` are exactly the sequences with `front <= a <= b <= haystack.len()`,
+    /// where `front` is the end of the previous match (0 at first), and `a`, `b` on char
+    /// boundaries; the gap `front..a` is the implied `Reject`.
+    ///
+    /// This searcher generates every such sequence of at most `max_matches` matches (the only
+    /// bound) on a haystack where every index is a char boundary, which is the all-NUL receiver
+    /// of `check_remove_matches`: matches in increasing order, non-overlapping, possibly empty,
+    /// possibly an empty match repeated at one position (adjacent zero-length ranges, which the
+    /// contract allows; `remove_matches` then copies 0 bytes), within the haystack. The boundary
+    /// requirement is asserted, not assumed. On a haystack with multi-byte chars the contract
+    /// allows only a subset of these sequences, and `remove_matches` never reads the bytes
+    /// itself (it only moves them), so this covers every searcher that meets the contract at
+    /// once; the std searchers' own conformance is the subject of Challenges 20/21.
+    struct AnyPattern<'c> {
+        removed: &'c Cell<usize>,
+        matches: &'c Cell<usize>,
+        max_matches: usize,
+    }
+
+    struct AnySearcher<'a, 'c> {
+        haystack: &'a str,
+        front: usize,
+        left: usize,
+        removed: &'c Cell<usize>,
+        matches: &'c Cell<usize>,
+    }
+
+    // SAFETY: `next_match` returns the `Match` ranges of a stream that meets the contract of
+    // `Searcher::next` (see `AnyPattern`): in increasing order, non-overlapping (possibly empty,
+    // and possibly an empty match repeated at one position, as the contract allows), within the
+    // haystack, on char boundaries (asserted in `next_match`); the gaps between them are the
+    // implied `Reject`s. `next` reports the rest of the haystack (from the end of the last
+    // match) as one `Reject`, then `Done`.
+    unsafe impl<'a, 'c> Searcher<'a> for AnySearcher<'a, 'c> {
+        fn haystack(&self) -> &'a str {
+            self.haystack
+        }
+
+        fn next(&mut self) -> SearchStep {
+            let len = self.haystack.len();
+            if self.front == len {
+                return SearchStep::Done;
+            }
+            let a = self.front;
+            self.front = len;
+            SearchStep::Reject(a, len)
+        }
+
+        fn next_match(&mut self) -> Option<(usize, usize)> {
+            if self.left == 0 || kani::any() {
+                return None;
+            }
+            let len = self.haystack.len();
+            let front = self.front;
+            let a: usize = kani::any_where(|a: &usize| *a >= front && *a <= len);
+            let b: usize = kani::any_where(|b: &usize| *b >= a && *b <= len);
+            // The contract's boundary requirement. Every index of the all-NUL haystack is a
+            // char boundary, so this holds for every pair above; checked, not assumed.
+            assert!(self.haystack.is_char_boundary(a) && self.haystack.is_char_boundary(b));
+            self.front = b;
+            self.left -= 1;
+            self.removed.set(self.removed.get() + (b - a));
+            self.matches.set(self.matches.get() + 1);
+            Some((a, b))
+        }
+    }
+
+    impl<'c> Pattern for AnyPattern<'c> {
+        type Searcher<'a> = AnySearcher<'a, 'c>;
+
+        fn into_searcher(self, haystack: &str) -> AnySearcher<'_, 'c> {
+            AnySearcher {
+                haystack,
+                front: 0,
+                left: self.max_matches,
+                removed: self.removed,
+                matches: self.matches,
+            }
+        }
+    }
+
+    /// At most 5 matches. `remove_matches` collects the gaps between matches into a
+    /// `Vec<(usize, usize)>` that starts with capacity 4, so the 5th match exercises its
+    /// reallocation. `unwind(7)`: the loops run at most 6 times (5 gaps plus the tail), plus
+    /// the exit test.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_remove_matches() {
+        let mut s = any_string();
+        let len = s.len();
+        let removed = Cell::new(0usize);
+        let matches = Cell::new(0usize);
+        s.remove_matches(AnyPattern { removed: &removed, matches: &matches, max_matches: 5 });
+        let r = removed.get();
+        kani::cover(r > 0 && s.len() > 64, "real removal, long string left");
+        kani::cover(matches.get() == 5, "5 matches: the rejections Vec reallocates");
+        assert!(s.len() == len - r);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // BOUNDED harnesses for the remaining "(U)" functions: `retain`, `from_utf16le/be` and their
+    // `_lossy` variants. With the pinned Kani their loops cannot carry loop contracts:
+    // * `retain` (the `PanicGuard` version) reads the unread tail with `get_unchecked` and
+    //   `unwrap_unchecked`, so an invariant must state that the tail is still valid UTF-8 after
+    //   the earlier moves: a quantifier over a symbolic range, which CI's SAT backend does not
+    //   support (kani#4719). Its first loop runs over a `CharIndices`, whose state an invariant
+    //   can only reach through method calls, which loop invariants do not support (kani#4796).
+    // * `from_utf16le` and `from_utf16be` loop with `for` over `DecodeUtf16` in
+    //   `from_utf16_units`, which loop contracts do not support (kani#4907); the `_lossy`
+    //   variants loop inside `Iterator::fold` (via `collect`), where a loop contract has no
+    //   attach site (kani#4893). All of these loops push to a `String`, and a loop with a
+    //   contract may not allocate (kani#3587).
+    // These harnesses verify the real bodies up to the stated sizes (the unwinding assertions
+    // make an insufficient bound fail).
+    // ---------------------------------------------------------------------------------------
+
+    /// `check_retain_bounded` takes strings of at most this many chars.
+    const RETAIN_BOUND: usize = 5;
+    /// Length of the byte arrays in `check_retain_bounded`. A char is stored as 4 bytes (its
+    /// UTF-8 encoding, then zeros), so `4 * RETAIN_BOUND` = 20 bytes are needed; 24 is that
+    /// rounded up to three whole `u64` words.
+    const RETAIN_BYTES: usize = 24;
+
+    /// What `check_retain_bounded` expects `retain` to leave in the string: the UTF-8 encodings
+    /// of the chars that the predicate keeps, back to back, then zeros. The harness sets it
+    /// before it calls `retain`, and `from_utf8_kept` compares against it. A harness runs on a
+    /// single thread, so nothing else touches these statics.
+    static mut RETAIN_AFTER: [u8; RETAIN_BYTES] = [0; RETAIN_BYTES];
+    /// The number of bytes at the start of `RETAIN_AFTER` that form the expected string.
+    static mut RETAIN_AFTER_LEN: usize = 0;
+
+    /// The bytes of `v` (at most `RETAIN_BYTES` of them), then zeros up to `RETAIN_BYTES`.
+    fn zero_padded(v: &[u8]) -> [u8; RETAIN_BYTES] {
+        let mut out = [0u8; RETAIN_BYTES];
+        out[..v.len()].copy_from_slice(v);
+        out
+    }
+
+    /// Whether `a == b`, decided by comparing three `u64` words at fixed positions, so that
+    /// there is no loop to unwind.
+    fn equal_padded(a: [u8; RETAIN_BYTES], b: [u8; RETAIN_BYTES]) -> bool {
+        // SAFETY: `[u8; 24]` and `[u64; 3]` are the same size, and any 64 bits are a valid `u64`.
+        let x: [u64; 3] = unsafe { core::mem::transmute(a) };
+        // SAFETY: as for `x`.
+        let y: [u64; 3] = unsafe { core::mem::transmute(b) };
+        x[0] == y[0] && x[1] == y[1] && x[2] == y[2]
+    }
+
+    /// Replaces `core::str::from_utf8` in `check_retain_bounded`.
+    ///
+    /// Once `retain` has removed a char, it ends by dropping its `PanicGuard`, and that drop runs
+    /// `debug_assert!(str::from_utf8(..).is_ok())` on the new contents. CI passes
+    /// `-Z loop-contracts`, so the real validator (`run_utf8_validation` in
+    /// `core/src/str/validations.rs`) is checked with its loops replaced by their invariants.
+    /// Those invariants do not keep the index on a char boundary, so the validator can then
+    /// reject valid UTF-8 that contains a multi-byte char, and the `debug_assert!` fails on
+    /// correct bytes.
+    ///
+    /// This stand-in accepts one input only: the bytes in `RETAIN_AFTER`. On any other input
+    /// it panics, which fails the harness (`alloc` cannot construct a `Utf8Error`). The accepted
+    /// bytes are valid UTF-8, so the real `from_utf8` returns `Ok` whenever this one does. The
+    /// stand-in can therefore add failures but never hide one, and it checks the exact contents,
+    /// not only their validity.
+    fn from_utf8_kept(v: &[u8]) -> Result<&str, core::str::Utf8Error> {
+        // SAFETY (harness): plain reads of the statics; see `RETAIN_AFTER`.
+        let (want, want_len) = unsafe { (RETAIN_AFTER, RETAIN_AFTER_LEN) };
+        assert!(
+            v.len() == want_len && equal_padded(zero_padded(v), want),
+            "from_utf8 stand-in: bytes differ from RETAIN_AFTER"
+        );
+        // SAFETY: `v` equals the expected bytes, which are UTF-8 encodings of chars.
+        Ok(unsafe { core::str::from_utf8_unchecked(v) })
+    }
+
+    /// Inputs: up to `RETAIN_BOUND` chars, each of them any `char`, and for every call of the
+    /// predicate any answer: the answer to the `i`-th call is `answers[i]`. The predicate also
+    /// records the char it gets in each call. After `retain` returns, the harness checks that
+    /// there was one call per char, in the order of the chars, and that the string now holds
+    /// exactly the kept chars: first its length, then its bytes. When `retain` removes a char,
+    /// `from_utf8_kept` also compares the bytes inside `retain`.
+    /// `unwind(6)`: each loop runs at most once per char (at most 5 times), plus the exit test.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    #[kani::stub(core::str::from_utf8, from_utf8_kept)]
+    fn check_retain_bounded() {
+        let chars: [char; RETAIN_BOUND] = kani::any();
+        let n: usize = kani::any_where(|n: &usize| *n <= RETAIN_BOUND);
+        let answers: [bool; RETAIN_BOUND] = kani::any();
+
+        // One pass over `chars[..n]` builds `before`, the bytes of the string, and `after`, the
+        // bytes that `retain` has to leave. Each char is stored as 4 bytes, its encoding and
+        // then zeros, at the current end; the next char starts where the encoding ends and
+        // overwrites the zeros. Storing whole 4-byte groups keeps the formula small.
+        let mut before = [0u8; RETAIN_BYTES];
+        let mut before_len = 0;
+        let mut after = [0u8; RETAIN_BYTES];
+        let mut after_len = 0;
+        // Facts about the moves that `retain` has to make, for the covers at the end.
+        let mut multibyte_kept_in_place = false;
+        let mut overlapping_move = false;
+        for i in 0..n {
+            let ch = chars[i];
+            let mut utf8 = [0u8; 4];
+            ch.encode_utf8(&mut utf8);
+            let width = ch.len_utf8();
+            before[before_len] = utf8[0];
+            before[before_len + 1] = utf8[1];
+            before[before_len + 2] = utf8[2];
+            before[before_len + 3] = utf8[3];
+            if answers[i] {
+                // `retain` moves a kept char left by the number of bytes removed before it.
+                let shift = before_len - after_len;
+                multibyte_kept_in_place |= shift == 0 && width > 1;
+                overlapping_move |= shift > 0 && shift < width;
+                after[after_len] = utf8[0];
+                after[after_len + 1] = utf8[1];
+                after[after_len + 2] = utf8[2];
+                after[after_len + 3] = utf8[3];
+                after_len += width;
+            }
+            before_len += width;
+        }
+        // SAFETY (harness): plain writes of the statics, before `retain` runs.
+        unsafe {
+            RETAIN_AFTER = after;
+            RETAIN_AFTER_LEN = after_len;
+        }
+
+        // The string gets its bytes in one copy of the whole array (building it char by char
+        // with `Vec::extend_from_slice` made CBMC run out of memory).
+        let mut owned = before.to_vec();
+        owned.truncate(before_len);
+        // SAFETY (harness): `owned` holds the UTF-8 encodings of `chars[..n]`, back to back.
+        let mut s = unsafe { String::from_utf8_unchecked(owned) };
+
+        let mut calls = 0;
+        let mut visited = ['\0'; RETAIN_BOUND];
+        s.retain(|c| {
+            // More than `RETAIN_BOUND` calls index past the end of `visited` and fail the harness
+            // here; the count check below catches any other wrong number of calls. (Indexing
+            // without a check first also lets CBMC cut those paths early.)
+            visited[calls] = c;
+            let answer = answers[calls];
+            calls += 1;
+            answer
+        });
+
+        assert!(calls == n, "one predicate call per char");
+        for i in 0..n {
+            assert!(visited[i] == chars[i], "predicate calls follow the order of the chars");
+        }
+        assert!(s.len() == after_len, "new length = total UTF-8 length of the kept chars");
+        assert!(
+            equal_padded(zero_padded(s.as_bytes()), after),
+            "new bytes = encodings of the kept chars, back to back"
+        );
+
+        // Paths through `retain`: its first loop returns; its second loop starts at offset 0 or
+        // after a multi-byte char; it moves a char onto bytes that the char itself occupies
+        // (`ptr::copy` with overlapping ranges); it ends with length 0.
+        let removed_some = after_len < before_len;
+        kani::cover(n > 0 && !removed_some, "nothing rejected: the first loop returns");
+        kani::cover(n > 0 && !answers[0], "first char rejected: the second loop writes from 0");
+        kani::cover(
+            multibyte_kept_in_place && removed_some,
+            "rejection after a kept multi-byte char",
+        );
+        kani::cover(
+            overlapping_move,
+            "a char moves left by less than its length: overlapping copy",
+        );
+        kani::cover(n > 0 && after_len == 0, "every char rejected: the length drops to 0");
+    }
+
+    /// What `char::decode_utf16` makes of the bytes `v` read as code units (big-endian if `be`):
+    /// whether `v` is valid UTF-16 (an even number of bytes, every surrogate paired), and the
+    /// UTF-8 length of the decoded string, where each unpaired surrogate and a trailing odd
+    /// byte count as U+FFFD (3 bytes), as in the `_lossy` variants. `N`: the most bytes `v` can
+    /// have.
+    fn utf16_expected<const N: usize>(v: &[u8], be: bool) -> (bool, usize) {
+        let units = v.len() / 2;
+        let mut valid = v.len() % 2 == 0;
+        let mut out = if v.len() % 2 == 1 { 3 } else { 0 };
+        // Whether the previous code unit is a high surrogate that is still waiting for its pair.
+        let mut high = false;
+        for i in 0..N / 2 {
+            if i < units {
+                let b = [v[2 * i], v[2 * i + 1]];
+                let u = if be { u16::from_be_bytes(b) } else { u16::from_le_bytes(b) };
+                let is_high = (0xD800..=0xDBFF).contains(&u);
+                let is_low = (0xDC00..=0xDFFF).contains(&u);
+                if high && is_low {
+                    // A surrogate pair: one char outside the BMP, 4 bytes.
+                    out += 4;
+                    high = false;
+                } else {
+                    if high {
+                        // The previous high surrogate is unpaired.
+                        valid = false;
+                        out += 3;
+                    }
+                    high = is_high;
+                    if is_low {
+                        valid = false;
+                        out += 3;
+                    } else if !is_high {
+                        out += if u < 0x80 {
+                            1
+                        } else if u < 0x800 {
+                            2
+                        } else {
+                            3
+                        };
+                    }
+                }
+            }
+        }
+        if high {
+            valid = false;
+            out += 3;
+        }
+        (valid, out)
+    }
+
+    /// An arbitrary byte slice of length `<= N` at an arbitrary (odd or even) address, so both
+    /// the aligned (`align_to` succeeds) and the unaligned paths, and odd lengths, are
+    /// exercised. The strict variants must return `Ok` exactly for valid UTF-16, and every
+    /// returned string must have the length that `utf16_expected` computes. The covers read
+    /// only the input and the result's length: reading the bytes of the decoded string made
+    /// CBMC run out of memory at these sizes.
+    macro_rules! utf16_harness {
+        ($name:ident, $n:literal, $unwind:literal, $lossy:literal, $be:literal, $call:expr) => {
+            #[kani::proof]
+            #[kani::unwind($unwind)]
+            fn $name() {
+                let arr: [u8; $n] = kani::any();
+                let v = kani::slice::any_slice_of_array(&arr);
+                let (valid, out_len) = utf16_expected::<$n>(v, $be);
+                // Code unit `i` of `v`, in the byte order of the function under test.
+                let unit = |i: usize| {
+                    let b = [v[2 * i], v[2 * i + 1]];
+                    if $be { u16::from_be_bytes(b) } else { u16::from_le_bytes(b) }
+                };
+                kani::cover(v.len() >= 4 && (v.as_ptr() as usize) % 2 == 1, "unaligned");
+                kani::cover(v.len() >= 4 && (v.as_ptr() as usize) % 2 == 0, "aligned");
+                kani::cover(v.len() % 2 == 1, "odd length");
+                kani::cover(
+                    v.len() >= 4
+                        && (0xD800..=0xDBFF).contains(&unit(0))
+                        && (0xDC00..=0xDFFF).contains(&unit(1)),
+                    "starts with a surrogate pair",
+                );
+                kani::cover(!valid && v.len() % 2 == 0, "unpaired surrogate");
+                let f: fn(&[u8]) -> Option<String> = $call;
+                match f(v) {
+                    Some(s) => {
+                        assert!($lossy || valid, "Ok only for valid UTF-16");
+                        assert!(s.len() == out_len, "the decoded string has the expected length");
+                    }
+                    None => assert!(!$lossy && !valid, "Err only for invalid UTF-16"),
+                }
+            }
+        };
+    }
+    // `unwind(N / 2 + 1)`: an input of at most `N` bytes has at most `N / 2` code units, and
+    // every loop (the decode and push loops, and the one in `utf16_expected`) runs at most once
+    // per code unit, plus the exit test.
+    utf16_harness!(check_from_utf16le_bounded, 12, 7, false, false, |v| {
+        String::from_utf16le(v).ok()
+    });
+    utf16_harness!(check_from_utf16be_bounded, 16, 9, false, true, |v| {
+        String::from_utf16be(v).ok()
+    });
+    utf16_harness!(check_from_utf16le_lossy_bounded, 12, 7, true, false, |v| {
+        Some(String::from_utf16le_lossy(v))
+    });
+    utf16_harness!(check_from_utf16be_lossy_bounded, 16, 9, true, true, |v| {
+        Some(String::from_utf16be_lossy(v))
+    });
+
+    // ---------------------------------------------------------------------------------------
+    // Panic harnesses: the documented panic conditions that the harnesses above exclude do
+    // panic. Most take a string from `with_char_at` and an index at which it has no char
+    // boundary: strictly inside its char (so the char is multi-byte), or past the end. With
+    // `#[kani::should_panic]`, Kani checks that a panic-class failure is reachable and that
+    // every failing check is of that class (assertions, including arithmetic overflow and
+    // out-of-bounds indexing), so no UB is reachable before the panic (Kani uses
+    // `panic=abort`). That the failing checks are exactly the documented panics was checked in
+    // the verification logs. In each harness every input fails the same check (for a reversed
+    // range whose start is also past the length, `slice::range` reports that check with the
+    // message for a start out of range).
+    // `pop` has no panic condition. `drain` and `replace_range` also panic for a reversed range
+    // and for the two `RangeBounds` shapes whose conversion to `start..end` would overflow
+    // without the checks of `slice::range`; `remove` also panics at the end of the string.
+    // ---------------------------------------------------------------------------------------
+
+    /// An index strictly inside the encoding of `c`, which starts at byte `start`: in bounds,
+    /// but not a char boundary. There is none if `c` is ASCII; the covers show the other widths.
+    fn any_inside_char(len: usize, start: usize, c: char) -> usize {
+        let c_end = start + c.len_utf8();
+        let i: usize = kani::any_where(|i: &usize| start < *i && *i < c_end);
+        kani::cover(start > 64 && len > c_end + 64, "inside a char, long string");
+        kani::cover(c.len_utf8() == 2, "inside a 2-byte char");
+        kani::cover(c.len_utf8() == 4, "inside a 4-byte char");
+        i
+    }
+
+    /// An index past the end of a string of length `len`.
+    fn any_past_end(len: usize) -> usize {
+        let i: usize = kani::any_where(|i: &usize| *i > len);
+        kani::cover(len > 64, "past the end of a long string");
+        kani::cover(i == len + 1, "one past the end");
+        i
+    }
+
+    // For a range `a..b`, `drain` and `replace_range` check, in this order: `b <= len` and
+    // `a <= b` (both in `slice::range`), then that `a`, and then `b`, is a char boundary. The
+    // domains of `any_range_past_end`, `any_reversed_range` and the three helpers for ranges
+    // inside a char, together with the valid ranges of the main harnesses, split all pairs
+    // `(a, b)` along these checks.
+
+    // In `with_char_at`'s string, the only indices that are not char boundaries are strictly
+    // inside `c`. A range `a..b`, `a <= b <= len`, that fails a boundary check has its start
+    // inside `c` and its end at or after the end of `c`, or its start at or before the start of
+    // `c` and its end inside `c`, or both ends inside `c`: one helper and harness each, so that
+    // without the check that should fail no input of a harness panics.
+
+    /// A range whose start is strictly inside `c` and whose end is a char boundary.
+    fn any_range_start_inside_char(len: usize, start: usize, c: char) -> (usize, usize) {
+        let a = any_inside_char(len, start, c);
+        let b: usize = kani::any_where(|b: &usize| *b >= start + c.len_utf8() && *b <= len);
+        kani::cover(b > start + c.len_utf8(), "the end is after the char");
+        (a, b)
+    }
+
+    /// A range whose start is a char boundary and whose end is strictly inside `c`.
+    fn any_range_end_inside_char(len: usize, start: usize, c: char) -> (usize, usize) {
+        let b = any_inside_char(len, start, c);
+        let a: usize = kani::any_where(|a: &usize| *a <= start);
+        kani::cover(a < start, "the start is before the char");
+        (a, b)
+    }
+
+    /// A range whose two ends are strictly inside `c` (`a <= b`).
+    fn any_range_both_inside_char(len: usize, start: usize, c: char) -> (usize, usize) {
+        let a = any_inside_char(len, start, c);
+        let b: usize = kani::any_where(|b: &usize| *b >= a && *b < start + c.len_utf8());
+        kani::cover(a < b, "two different indices inside the char");
+        (a, b)
+    }
+
+    /// A range `a..b` whose end is past the end of a string of length `len`, with any start.
+    fn any_range_past_end(len: usize) -> (usize, usize) {
+        let b = any_past_end(len);
+        let a: usize = kani::any();
+        kani::cover(a <= len, "only the end is past the end");
+        kani::cover(a > b, "also reversed");
+        (a, b)
+    }
+
+    // Each panic condition has its own harness. A `should_panic` harness passes as soon as some
+    // input panics, so with both kinds of index in one harness the past-the-end inputs alone
+    // would make it pass even without the char-boundary checks.
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_insert_panics_inside_char() {
+        let (mut s, start, c) = with_char_at();
+        let idx = any_inside_char(s.len(), start, c);
+        s.insert(idx, kani::any());
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_insert_panics_past_end() {
+        let (mut s, _, _) = with_char_at();
+        let idx = any_past_end(s.len());
+        s.insert(idx, kani::any());
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_insert_str_panics_inside_char() {
+        let (mut s, start, c) = with_char_at();
+        let len = s.len();
+        let idx = any_inside_char(len, start, c);
+        let t = any_string_max_len(MAX_ALLOC - len);
+        s.insert_str(idx, t.as_str());
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_insert_str_panics_past_end() {
+        let (mut s, _, _) = with_char_at();
+        let len = s.len();
+        let idx = any_past_end(len);
+        let t = any_string_max_len(MAX_ALLOC - len);
+        s.insert_str(idx, t.as_str());
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_split_off_panics_inside_char() {
+        let (mut s, start, c) = with_char_at();
+        let at = any_inside_char(s.len(), start, c);
+        let _ = s.split_off(at);
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_split_off_panics_past_end() {
+        let (mut s, _, _) = with_char_at();
+        let at = any_past_end(s.len());
+        let _ = s.split_off(at);
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_drain_panics_start_inside_char() {
+        let (mut s, start, c) = with_char_at();
+        let (a, b) = any_range_start_inside_char(s.len(), start, c);
+        drop(s.drain(a..b));
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_drain_panics_end_inside_char() {
+        let (mut s, start, c) = with_char_at();
+        let (a, b) = any_range_end_inside_char(s.len(), start, c);
+        drop(s.drain(a..b));
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_drain_panics_both_inside_char() {
+        let (mut s, start, c) = with_char_at();
+        let (a, b) = any_range_both_inside_char(s.len(), start, c);
+        drop(s.drain(a..b));
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_drain_panics_past_end() {
+        let (mut s, _, _) = with_char_at();
+        let (a, b) = any_range_past_end(s.len());
+        drop(s.drain(a..b));
+    }
+
+    // `unwind(1)` on the two `replace_range` harnesses: the `Splice` loops are reachable only
+    // after both boundary checks pass, which no input here does. Unwinding assertions stay on,
+    // so a reachable loop would fail.
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(1)]
+    fn check_replace_range_panics_start_inside_char() {
+        let (mut s, start, c) = with_char_at();
+        let (a, b) = any_range_start_inside_char(s.len(), start, c);
+        s.replace_range(a..b, "");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(1)]
+    fn check_replace_range_panics_end_inside_char() {
+        let (mut s, start, c) = with_char_at();
+        let (a, b) = any_range_end_inside_char(s.len(), start, c);
+        s.replace_range(a..b, "");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(1)]
+    fn check_replace_range_panics_both_inside_char() {
+        let (mut s, start, c) = with_char_at();
+        let (a, b) = any_range_both_inside_char(s.len(), start, c);
+        s.replace_range(a..b, "");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(1)]
+    fn check_replace_range_panics_past_end() {
+        let (mut s, _, _) = with_char_at();
+        let (a, b) = any_range_past_end(s.len());
+        s.replace_range(a..b, "");
+    }
+
+    // `unwind(4)`: on this path `str::slice_error_fail_rt` finds the char around the index with
+    // `ceil_char_boundary`, whose loop runs at most 3 times (the next char boundary is at most
+    // 3 bytes away); no other loop is reachable. Unwinding assertions stay on.
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(4)]
+    fn check_remove_panics_inside_char() {
+        let (mut s, start, c) = with_char_at();
+        let idx = any_inside_char(s.len(), start, c);
+        let _ = s.remove(idx);
+    }
+
+    /// `remove(len)`: in bounds and a char boundary, but there is no char to remove.
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_remove_panics_at_end() {
+        let mut s = any_string();
+        let len = s.len();
+        kani::cover(len > 64, "at the end of a long string");
+        let _ = s.remove(len);
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_remove_panics_past_end() {
+        let (mut s, _, _) = with_char_at();
+        let idx = any_past_end(s.len());
+        let _ = s.remove(idx);
+    }
+
+    /// A reversed range `a..b`, `b < a`, whose end is in bounds (`b <= len`) of the all-NUL
+    /// string `any_string`, with any start: the reversal is the only cause of a panic.
+    fn any_reversed_range(len: usize) -> (usize, usize) {
+        let b: usize = kani::any_where(|b: &usize| *b <= len);
+        let a: usize = kani::any_where(|a: &usize| *a > b);
+        kani::cover(len > 64 && a < len && b > 0, "reversed range inside a long string");
+        kani::cover(a > len, "the start is also past the end");
+        (a, b)
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_drain_panics_reversed() {
+        let mut s = any_string();
+        let (a, b) = any_reversed_range(s.len());
+        drop(s.drain(a..b));
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(1)]
+    fn check_replace_range_panics_reversed() {
+        let mut s = any_string();
+        let (a, b) = any_reversed_range(s.len());
+        s.replace_range(a..b, "");
+    }
+
+    // `..=usize::MAX` (`end + 1` would overflow) and `(Excluded(usize::MAX), Unbounded)`
+    // (`start + 1` would overflow), one harness each.
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_drain_panics_end_included_max() {
+        let mut s = any_string();
+        kani::cover(s.len() > 64, "long string");
+        drop(s.drain(..=usize::MAX));
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_drain_panics_start_excluded_max() {
+        let mut s = any_string();
+        kani::cover(s.len() > 64, "long string");
+        drop(s.drain((Bound::Excluded(usize::MAX), Bound::Unbounded)));
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(1)]
+    fn check_replace_range_panics_end_included_max() {
+        let mut s = any_string();
+        kani::cover(s.len() > 64, "long string");
+        s.replace_range(..=usize::MAX, "");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(1)]
+    fn check_replace_range_panics_start_excluded_max() {
+        let mut s = any_string();
+        kani::cover(s.len() > 64, "long string");
+        s.replace_range((Bound::Excluded(usize::MAX), Bound::Unbounded), "");
+    }
+
+    // Why these three exist: `should_panic` accepts any panic. Without the range checks of
+    // `slice::range`, the four `*_max` harnesses above still pass, through an arithmetic
+    // overflow, and so does `check_replace_range_panics_reversed`, through later checks. These
+    // ordinary harnesses check the range checks themselves: `drain` and `replace_range` convert
+    // their range with `slice::range`, which panics exactly when `slice::try_range` returns
+    // `None` (both go through `try_into_slice_range`), and here an overflow is a failure.
+    #[kani::proof]
+    fn check_range_rejects_end_included_max() {
+        let len: usize = kani::any_where(|l: &usize| *l <= MAX_ALLOC);
+        kani::cover(len > 64, "long string");
+        assert!(core::slice::try_range(..=usize::MAX, ..len).is_none());
+    }
+
+    #[kani::proof]
+    fn check_range_rejects_start_excluded_max() {
+        let len: usize = kani::any_where(|l: &usize| *l <= MAX_ALLOC);
+        kani::cover(len > 64, "long string");
+        let r = (Bound::Excluded(usize::MAX), Bound::Unbounded);
+        assert!(core::slice::try_range(r, ..len).is_none());
+    }
+
+    #[kani::proof]
+    fn check_range_rejects_reversed() {
+        let len: usize = kani::any_where(|l: &usize| *l <= MAX_ALLOC);
+        let (a, b) = any_reversed_range(len);
+        assert!(core::slice::try_range(a..b, ..len).is_none());
+    }
+}
