@@ -30,6 +30,18 @@ class Flt2decHarnessesTests(unittest.TestCase):
             with self.subTest(selection=selection), self.assertRaises(ValueError):
                 proof_matrix(selection)
 
+    def test_platform_selection_requires_explicit_manual_groups(self):
+        names = ["dragon-exact-loop-frame"]
+        for platform in OPERATING_SYSTEMS:
+            with self.subTest(platform=platform):
+                matrix = proof_matrix(names, platform=platform)
+                self.assertEqual(matrix["os"], [platform])
+                self.assertEqual(matrix["group"], proof_matrix(names)["group"])
+                with self.assertRaises(ValueError):
+                    proof_matrix(platform=platform)
+        with self.assertRaises(ValueError):
+            proof_matrix(names, platform="windows-latest")
+
     def setUp(self):
         self.groups = proof_groups()
         self.dedicated = [harness for group in self.groups for harness in group["harnesses"]]

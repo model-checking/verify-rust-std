@@ -149,8 +149,12 @@ def remaining_harnesses(inventory):
     return [harness for harness in listed if harness not in dedicated]
 
 
-def proof_matrix(selected_groups=None, pointer_width=None):
+def proof_matrix(selected_groups=None, pointer_width=None, platform="both"):
     groups = proof_groups(pointer_width)
+    if platform != "both" and platform not in OPERATING_SYSTEMS:
+        raise ValueError("Unknown proof platform: " + str(platform))
+    if platform != "both" and selected_groups is None:
+        raise ValueError("Platform filtering requires explicitly selected manual proof groups")
     if selected_groups is not None:
         if not isinstance(selected_groups, list) or not selected_groups:
             raise ValueError("Select a nonempty JSON array of proof group names")
@@ -165,7 +169,7 @@ def proof_matrix(selected_groups=None, pointer_width=None):
             raise ValueError("Unknown proof groups: " + ", ".join(sorted(unknown)))
         groups = [dict(group, name="manual-" + group["name"], catalog_name=group["name"])
                   for group in groups if group["name"] in selected]
-    return {"os": OPERATING_SYSTEMS, "group": groups}
+    return {"os": OPERATING_SYSTEMS if platform == "both" else [platform], "group": groups}
 
 
 def main():
@@ -176,13 +180,17 @@ def main():
     mode.add_argument("--remaining", metavar="KANI_LIST_JSON")
     parser.add_argument("--matrix-groups", metavar="JSON",
                         help="Select manual proof groups with distinct check names")
+    parser.add_argument("--matrix-platform", choices=["both", *OPERATING_SYSTEMS], default="both",
+                        help="Select a platform only for explicitly selected manual groups")
     args = parser.parse_args()
     if args.matrix_groups is not None and not args.matrix:
         parser.error("--matrix-groups requires --matrix")
+    if args.matrix_platform != "both" and not args.matrix:
+        parser.error("--matrix-platform requires --matrix")
     if args.matrix:
         try:
             selected = json.loads(args.matrix_groups) if args.matrix_groups is not None else None
-            matrix = proof_matrix(selected)
+            matrix = proof_matrix(selected, platform=args.matrix_platform)
         except (ValueError, TypeError) as error:
             parser.error(str(error))
         print(json.dumps(matrix, separators=(",", ":")))

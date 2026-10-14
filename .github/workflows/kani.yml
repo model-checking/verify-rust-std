@@ -7,6 +7,11 @@ on:
         description: Optional JSON array of flt2dec groups (empty runs the full matrix)
         type: string
         default: ''
+      proof_platform:
+        description: Platform for explicitly selected manual proof groups
+        type: choice
+        options: [both, ubuntu-latest, macos-latest]
+        default: both
   merge_group:
   pull_request:
     branches: [ main ]
@@ -42,12 +47,13 @@ defaults:
 jobs:
   flt2dec_runtime:
     name: Test flt2dec runtime (${{ matrix.os }})
+    needs: flt2dec_matrix
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix).os }}
     steps:
       - uses: actions/checkout@v4
       - run: rustup toolchain install nightly-2026-09-25 --profile minimal
@@ -55,11 +61,12 @@ jobs:
 
   build-flat-smt-cbmc:
     name: Build patched CBMC (${{ matrix.os }})
+    needs: flt2dec_matrix
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix).os }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -156,10 +163,11 @@ jobs:
         id: groups
         env:
           SELECTED_PROOF_GROUPS: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups || '' }}
+          SELECTED_PROOF_PLATFORM: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && inputs.proof_platform || 'both' }}
         run: |
           matrix_args=(--matrix)
           if [[ -n "$SELECTED_PROOF_GROUPS" ]]; then
-            matrix_args+=(--matrix-groups "$SELECTED_PROOF_GROUPS")
+            matrix_args+=(--matrix-groups "$SELECTED_PROOF_GROUPS" --matrix-platform "$SELECTED_PROOF_PLATFORM")
           fi
           flt2dec_matrix=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py "${matrix_args[@]}")
           printf 'matrix=%s\n' "$flt2dec_matrix" >> "$GITHUB_OUTPUT"
