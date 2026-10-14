@@ -19,8 +19,8 @@ class Flt2decHarnessesTests(unittest.TestCase):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
         self.assertEqual(len(self.groups), 104)
         self.assertEqual(len({group["name"] for group in self.groups}), 104)
-        self.assertEqual(len(self.dedicated), 651)
-        self.assertEqual(len(set(self.dedicated)), 651)
+        self.assertEqual(len(self.dedicated), 652)
+        self.assertEqual(len(set(self.dedicated)), 652)
         self.assertLessEqual(len(self.groups) * len(OPERATING_SYSTEMS), 256)
         for group in self.groups:
             minutes = group["timeout_minutes"]
@@ -87,6 +87,7 @@ class Flt2decHarnessesTests(unittest.TestCase):
         self.assertEqual(set(arithmetic), expected)
         self.assertEqual(len(arithmetic), len(expected))
         self.assertIn(f"{prefix}check_rounded_multiply", self.dedicated)
+        self.assertIn(f"{prefix}check_normalized_multiply", self.dedicated)
 
     def test_cached_power_catalog_matches_rust_declarations(self):
         root = Path(__file__).resolve().parents[2]

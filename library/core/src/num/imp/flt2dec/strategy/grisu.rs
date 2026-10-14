@@ -1235,6 +1235,42 @@ pub mod grisu_verify {
         kani::cover(f == u64::MAX && coefficient == u64::MAX, "maximum product is covered");
     }
 
+    #[kani::requires(f >= 1 << 63 && coefficient >= 1 << 63)]
+    #[kani::ensures(|result| *result >= 1 << 62 && *result < u64::MAX)]
+    fn normalized_multiply_contract(f: u64, coefficient: u64) -> u64 {
+        Fp { f, e: 0 }.mul(Fp { f: coefficient, e: 0 }).f
+    }
+
+    fn stub_normalized_multiply(value: Fp, coefficient: Fp) -> Fp {
+        Fp {
+            f: normalized_multiply_contract(value.f, coefficient.f),
+            e: value.e + coefficient.e + 64,
+        }
+    }
+
+    #[kani::proof_for_contract(normalized_multiply_contract)]
+    #[kani::solver(kissat)]
+    #[cfg_attr(
+        target_pointer_width = "64",
+        kani::stub(
+            u64::carrying_mul,
+            crate::num::imp::flt2dec::strategy::dragon::dragon_verify::carrying_mul_model
+        )
+    )]
+    fn check_normalized_multiply() {
+        let f = kani::any::<u64>() | (1 << 63);
+        let coefficient = kani::any::<u64>() | (1 << 63);
+        let result = normalized_multiply_contract(f, coefficient);
+        kani::cover(
+            f == 1 << 63 && coefficient == 1 << 63 && result == 1 << 62,
+            "minimum normalized product is covered",
+        );
+        kani::cover(
+            f == u64::MAX && coefficient == u64::MAX && result == u64::MAX - 1,
+            "maximum normalized product is covered",
+        );
+    }
+
     fn arbitrary_normalized_interval() -> (u64, u64, u64, bool) {
         let asymmetric = kani::any::<bool>();
         let v = if asymmetric { 1 << 63 } else { kani::any::<u64>() };
@@ -1994,6 +2030,8 @@ pub mod grisu_verify {
                 )]
                 #[kani::stub(possibly_round, stub_possibly_round)]
                 #[kani::stub_verified(round_exact_contract)]
+                #[kani::stub_verified(normalized_multiply_contract)]
+                #[kani::stub(Fp::mul, stub_normalized_multiply)]
                 #[kani::solver(kissat)]
                 fn check_format_exact_opt() {
                     let d = $decoded;

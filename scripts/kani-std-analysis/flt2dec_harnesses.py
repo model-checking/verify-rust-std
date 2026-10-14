@@ -55,6 +55,7 @@ def proof_groups(pointer_width=None):
         ("grisu-shortest-rounding-contract", GRISU, "check_round_shortest_contract", "contract"),
         ("grisu-shortest-normalization-contract", GRISU, "check_normalize_shortest", "contract"),
         ("grisu-rounded-multiplication-contract", GRISU, "check_rounded_multiply", "contract"),
+        ("grisu-normalized-multiplication-contract", GRISU, "check_normalized_multiply", "contract"),
         ("grisu-shortest-scaling-partitioning", GRISU, "check_scale_shortest_partitioning", "equivalence"),
         ("comparison-equivalence", DRAGON, "check_comparison_models_agree", "equivalence"),
         ("zero-fill-equivalence", DRAGON, "check_fill_zeroes_model_agrees", "equivalence"),
