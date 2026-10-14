@@ -1805,6 +1805,27 @@ pub mod grisu_verify {
         assert!(len > 0 && len <= PROOF_BUFLEN);
         // Read and check every actual byte before invoking the numeric summary.
         assert!(crate::num::imp::flt2dec::rounding_verify::bytes_below_max(buf));
+        assert!(buf[len - 1] >= b'0' && buf[len - 1] <= b'9', "shortest final digit is decimal");
+        assert!(remainder < threshold, "shortest remainder is inside the rounding interval");
+        assert!(ten_kappa > 0, "shortest decimal unit is positive");
+        assert!(ulp <= threshold / 4, "shortest interval includes four error units");
+        assert!(
+            ulp <= plus1v && plus1v <= u64::MAX - ulp,
+            "shortest target leaves error-unit room"
+        );
+        assert!(
+            ulp > plus1v
+                || weed_stops_before_zero(
+                    buf[len - 1],
+                    remainder,
+                    threshold,
+                    plus1v,
+                    ten_kappa,
+                    ulp
+                ),
+            "shortest weeding stops before zero"
+        );
+
         let result = round_shortest_contract(
             buf[len - 1],
             len,
