@@ -18,6 +18,8 @@ pub mod actual_estimator;
 pub mod actual_grisu;
 #[path = "../../library/core/src/num/imp/traits.rs"]
 pub mod actual_traits;
+#[path = "runtime-baseline-dragon.rs"]
+pub mod baseline_dragon;
 #[path = "runtime-baseline-grisu.rs"]
 pub mod baseline_grisu;
 #[path = "runtime-common.rs"]
@@ -66,6 +68,48 @@ fn sample_bits(index: u64) -> u64 {
     let value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     let value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
     value ^ (value >> 31)
+}
+
+fn check_exact(decoded: actual_decoder::FullDecoded) {
+    match decoded {
+        actual_decoder::FullDecoded::Finite(decoded) => {
+            [0, 1, 2, 17, 32].into_iter().for_each(|len| {
+                [i16::MIN, -309, -1, 0, 1, 309, i16::MAX].into_iter().for_each(|limit| {
+                    let mut expected_buf = [std::mem::MaybeUninit::uninit(); 32];
+                    let mut actual_buf = [std::mem::MaybeUninit::uninit(); 32];
+                    let (expected, expected_exp) =
+                        baseline_dragon::format_exact(&decoded, &mut expected_buf[..len], limit);
+                    let (actual, actual_exp) =
+                        actual_dragon::format_exact(&decoded, &mut actual_buf[..len], limit);
+                    assert_eq!(
+                        (actual, actual_exp),
+                        (expected, expected_exp),
+                        "decoded input: {decoded:?}, buffer: {len}, limit: {limit}",
+                    );
+                    assert!(actual.iter().all(u8::is_ascii_digit));
+                });
+            });
+        }
+        actual_decoder::FullDecoded::Nan
+        | actual_decoder::FullDecoded::Infinite
+        | actual_decoder::FullDecoded::Zero => (),
+    }
+}
+
+#[test]
+fn dragon_exact_f64_matches_base() {
+    (0..2047u64)
+        .flat_map(|exponent| [0, (1 << 52) - 1].map(move |mantissa| (exponent << 52) | mantissa))
+        .chain((0..2000).map(sample_bits))
+        .for_each(|bits| check_exact(actual_decoder::decode(f64::from_bits(bits)).1));
+}
+
+#[test]
+fn dragon_exact_f32_matches_base() {
+    (0..255u32)
+        .flat_map(|exponent| [0, (1 << 23) - 1].map(move |mantissa| (exponent << 23) | mantissa))
+        .chain((0..2000).map(sample_bits).map(|bits| bits as u32))
+        .for_each(|bits| check_exact(actual_decoder::decode(f32::from_bits(bits)).1));
 }
 
 #[test]

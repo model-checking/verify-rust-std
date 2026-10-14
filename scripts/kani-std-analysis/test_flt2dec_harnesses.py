@@ -17,10 +17,10 @@ class Flt2decHarnessesTests(unittest.TestCase):
 
     def test_complete_disjoint_batches_on_both_platforms(self):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
-        self.assertEqual(len(self.groups), 104)
-        self.assertEqual(len({group["name"] for group in self.groups}), 104)
-        self.assertEqual(len(self.dedicated), 652)
-        self.assertEqual(len(set(self.dedicated)), 652)
+        self.assertEqual(len(self.groups), 105)
+        self.assertEqual(len({group["name"] for group in self.groups}), 105)
+        self.assertEqual(len(self.dedicated), 653)
+        self.assertEqual(len(set(self.dedicated)), 653)
         self.assertLessEqual(len(self.groups) * len(OPERATING_SYSTEMS), 256)
         for group in self.groups:
             minutes = group["timeout_minutes"]
@@ -46,6 +46,10 @@ class Flt2decHarnessesTests(unittest.TestCase):
                 self.assertLessEqual(len(groups) * len(OPERATING_SYSTEMS), 256)
 
     def test_all_float_partitions_and_equivalence_cases_remain(self):
+        self.assertIn(
+            "num::imp::flt2dec::strategy::dragon::dragon_verify::check_exact_digit_loop_frame",
+            self.dedicated,
+        )
         generators = [group for group in self.groups if group["kind"].startswith("generator-")]
         self.assertEqual(sum(len(group["harnesses"]) for group in generators), 144)
         for family in ("dragon-exact", "dragon-shortest", "grisu-exact", "grisu-shortest"):

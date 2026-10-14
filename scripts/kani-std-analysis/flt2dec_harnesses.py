@@ -44,6 +44,10 @@ def proof_groups(pointer_width=None):
             f"{GRISU}::f64_cached_power_39::check_format_{mode}_opt"
         ], 120 if mode == "shortest" else 60)
 
+    add("dragon-exact-loop-frame", "equivalence", [
+        f"{DRAGON}::check_exact_digit_loop_frame"
+    ], 30)
+
     foundations = {"contract": [], "equivalence": []}
     for name, module, proof, kind in [
         ("division-contract", DRAGON, "check_div_2pow10_contract", "contract"),
