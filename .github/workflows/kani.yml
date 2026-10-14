@@ -79,7 +79,8 @@ jobs:
         run: bash head/scripts/kani-std-analysis/test_cbmc_loop_assigns.sh head/cbmc_build/bin
 
   check-kani-on-std:
-    name: Verify std library (partition ${{ matrix.partition }})
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Verify std library (partition ${{ matrix.partition }})
+    if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -247,7 +248,8 @@ jobs:
             **/kani_verify_std/**/out/*dragon*.out
 
   kani_autoharness:
-    name: Verify std library using autoharness
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Verify std library using autoharness
+    if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -430,7 +432,8 @@ jobs:
           retention-days: 3
 
   run_kani_metrics:
-    name: Kani Metrics
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Kani Metrics
+    if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -500,7 +503,8 @@ jobs:
           retention-days: 3
 
   run-log-analysis:
-    name: Build JSON from logs
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Build JSON from logs
+    if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
     needs: [run_kani_metrics, kani_autoharness]
     runs-on: ${{ matrix.os }}
     strategy:
@@ -552,7 +556,8 @@ jobs:
           if-no-files-found: error
 
   run-kani-list:
-    name: Kani List
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Kani List
+    if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
     runs-on: ubuntu-latest
     steps:
       - name: Remove unnecessary software to free up disk space
@@ -597,7 +602,8 @@ jobs:
               .write();
 
   run-autoharness-analyzer:
-    name: Kani Autoharness Analyzer
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Kani Autoharness Analyzer
+    if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
     runs-on: ubuntu-latest
     steps:
       # Step 1: Check out the repository
