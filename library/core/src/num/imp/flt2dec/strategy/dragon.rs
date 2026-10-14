@@ -1772,11 +1772,9 @@ pub mod dragon_verify {
         (size_40, guide_size_40, 40, 0, 41),
     );
 
-    fn check_cached_mul_digits_model_agrees(digits: &[Digit]) {
-        let size = usize::from(kani::any::<u8>());
-        // This is the model's checked capacity requirement, for every accepted size.
-        kani::assume(size + digits.len() <= KANI_LIMBS);
-        let mut source = Big::kani_with_arbitrary_limbs(size);
+    fn check_cached_mul_digits_model_agrees<const SIZE: usize>(digits: &[Digit]) {
+        assert!(SIZE + digits.len() <= KANI_LIMBS);
+        let mut source = Big::kani_with_arbitrary_limbs(SIZE);
         *source.kani_limbs_mut() = kani::any();
         let mut actual = source.clone();
         let mut modeled = source;
@@ -1785,35 +1783,64 @@ pub mod dragon_verify {
         assert!(actual.mul_digits(digits) as *mut Big == actual_start);
         assert!(modeled.kani_mul_digits_model(digits) as *mut Big == modeled_start);
         assert!(actual.kani_same_storage(&modeled));
-        kani::cover(size == 0, "cached multiplication accepts empty storage");
-        kani::cover(
-            size + digits.len() == KANI_LIMBS,
-            "cached multiplication accepts the largest model input",
-        );
-        kani::cover(
-            size + digits.len() == KANI_LIMBS && actual.kani_size() == KANI_LIMBS,
-            "cached multiplication appends a carry",
-        );
+        if SIZE == 0 {
+            kani::cover(true, "cached multiplication accepts empty storage");
+        }
+        if SIZE + digits.len() == KANI_LIMBS {
+            kani::cover(true, "cached multiplication accepts the largest model input");
+            kani::cover(actual.kani_size() == KANI_LIMBS, "cached multiplication appends a carry");
+        }
     }
 
-    macro_rules! check_cached_mul_digits {
-        ($($name:ident => $digits:ident),+ $(,)?) => {$(
+    macro_rules! check_cached_mul_sizes {
+        ($digits:ident; $($name:ident => $size:literal),+ $(,)?) => {$(
             #[kani::proof]
             #[kani::unwind(41)]
             #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
             #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul_add, carrying_mul_add_model))]
             fn $name() {
-                check_cached_mul_digits_model_agrees(&$digits);
+                check_cached_mul_digits_model_agrees::<$size>(&$digits);
+            }
+        )+};
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    macro_rules! check_cached_mul_extra_sizes {
+        (POW5TO16) => { check_cached_mul_sizes!(POW5TO16; size_11 => 11, size_12 => 12, size_13 => 13, size_14 => 14, size_15 => 15, size_16 => 16, size_17 => 17, size_18 => 18, size_19 => 19); };
+        (POW5TO32) => { check_cached_mul_sizes!(POW5TO32; size_11 => 11, size_12 => 12, size_13 => 13, size_14 => 14, size_15 => 15, size_16 => 16, size_17 => 17, size_18 => 18); };
+        (POW5TO64) => { check_cached_mul_sizes!(POW5TO64; size_11 => 11, size_12 => 12, size_13 => 13, size_14 => 14, size_15 => 15, size_16 => 16, size_17 => 17); };
+        (POW5TO128) => { check_cached_mul_sizes!(POW5TO128; size_11 => 11, size_12 => 12, size_13 => 13, size_14 => 14, size_15 => 15); };
+        (POW5TO256) => {  };
+    }
+
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    macro_rules! check_cached_mul_extra_sizes {
+        (POW5TO16) => { check_cached_mul_sizes!(POW5TO16; size_22 => 22, size_23 => 23, size_24 => 24, size_25 => 25, size_26 => 26, size_27 => 27, size_28 => 28, size_29 => 29, size_30 => 30, size_31 => 31, size_32 => 32, size_33 => 33, size_34 => 34, size_35 => 35, size_36 => 36, size_37 => 37, size_38 => 38); };
+        (POW5TO32) => { check_cached_mul_sizes!(POW5TO32; size_22 => 22, size_23 => 23, size_24 => 24, size_25 => 25, size_26 => 26, size_27 => 27, size_28 => 28, size_29 => 29, size_30 => 30, size_31 => 31, size_32 => 32, size_33 => 33, size_34 => 34, size_35 => 35, size_36 => 36, size_37 => 37); };
+        (POW5TO64) => { check_cached_mul_sizes!(POW5TO64; size_22 => 22, size_23 => 23, size_24 => 24, size_25 => 25, size_26 => 26, size_27 => 27, size_28 => 28, size_29 => 29, size_30 => 30, size_31 => 31, size_32 => 32, size_33 => 33, size_34 => 34, size_35 => 35); };
+        (POW5TO128) => { check_cached_mul_sizes!(POW5TO128; size_22 => 22, size_23 => 23, size_24 => 24, size_25 => 25, size_26 => 26, size_27 => 27, size_28 => 28, size_29 => 29, size_30 => 30); };
+        (POW5TO256) => {  };
+    }
+
+    macro_rules! check_cached_mul_digits {
+        ($($group:ident => $digits:ident),+ $(,)?) => {$(
+            mod $group {
+                use super::*;
+
+                check_cached_mul_sizes!($digits; size_00 => 0, size_01 => 1, size_02 => 2, size_03 => 3, size_04 => 4, size_05 => 5, size_06 => 6, size_07 => 7, size_08 => 8, size_09 => 9, size_10 => 10);
+                #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+                check_cached_mul_sizes!($digits; size_11 => 11, size_12 => 12, size_13 => 13, size_14 => 14, size_15 => 15, size_16 => 16, size_17 => 17, size_18 => 18, size_19 => 19, size_20 => 20, size_21 => 21);
+                check_cached_mul_extra_sizes!($digits);
             }
         )+};
     }
 
     check_cached_mul_digits!(
-        check_mul_digits_pow5_16 => POW5TO16,
-        check_mul_digits_pow5_32 => POW5TO32,
-        check_mul_digits_pow5_64 => POW5TO64,
-        check_mul_digits_pow5_128 => POW5TO128,
-        check_mul_digits_pow5_256 => POW5TO256,
+        cached_mul_pow5_16 => POW5TO16,
+        cached_mul_pow5_32 => POW5TO32,
+        cached_mul_pow5_64 => POW5TO64,
+        cached_mul_pow5_128 => POW5TO128,
+        cached_mul_pow5_256 => POW5TO256,
     );
 
     fn check_mul_small_model_agrees<const SIZE: usize>() {

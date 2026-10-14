@@ -53,10 +53,10 @@ class Flt2decHarnessesTests(unittest.TestCase):
 
     def test_complete_disjoint_batches_on_both_platforms(self):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
-        self.assertEqual(len(self.groups), 107)
-        self.assertEqual(len({group["name"] for group in self.groups}), 107)
-        self.assertEqual(len(self.dedicated), 675)
-        self.assertEqual(len(set(self.dedicated)), 675)
+        self.assertEqual(len(self.groups), 106)
+        self.assertEqual(len({group["name"] for group in self.groups}), 106)
+        self.assertEqual(len(self.dedicated), 754)
+        self.assertEqual(len(set(self.dedicated)), 754)
         self.assertLessEqual(len(self.groups) * len(OPERATING_SYSTEMS), 256)
         for group in self.groups:
             minutes = group["timeout_minutes"]
@@ -127,8 +127,9 @@ class Flt2decHarnessesTests(unittest.TestCase):
         expected.add(f"{prefix}check_advance_fraction_threshold")
         expected.update(f"{prefix}check_fractional_encoding_{power:02d}" for power in range(16))
         expected.update(
-            f"num::imp::flt2dec::strategy::dragon::dragon_verify::check_mul_digits_pow5_{power}"
+            f"num::imp::flt2dec::strategy::dragon::dragon_verify::cached_mul_pow5_{power}::size_{size:02d}"
             for power in (16, 32, 64, 128, 256)
+            for size in range(21 - ((5 ** power).bit_length() + 63) // 64)
         )
         self.assertEqual(set(arithmetic), expected)
         self.assertEqual(len(arithmetic), len(expected))
@@ -142,15 +143,30 @@ class Flt2decHarnessesTests(unittest.TestCase):
         body = source[start:source.index("\n}\n", start)]
         called = re.findall(r"\.mul_digits\(&POW5TO(\d+)\)", body)
         self.assertEqual(len(called), len(re.findall(r"\.mul_digits\(", body)))
-        declared = re.findall(r"check_mul_digits_pow5_(\d+)\s*=>\s*POW5TO(\d+)", source)
+        declared = re.findall(r"cached_mul_pow5_(\d+)\s*=>\s*POW5TO(\d+)", source)
         self.assertTrue(all(case == coefficient for case, coefficient in declared))
         self.assertEqual({case for case, _ in declared}, set(called))
-        group = next(group for group in self.groups
-                     if group["name"] == "cached-multiplication-equivalence")
-        self.assertEqual(set(group["harnesses"]), {
-            f"num::imp::flt2dec::strategy::dragon::dragon_verify::check_mul_digits_pow5_{power}"
-            for power in called
-        })
+        routed = {re.search(r"::cached_mul_pow5_(\d+)::", harness).group(1)
+                  for harness in self.dedicated if "::cached_mul_pow5_" in harness}
+        self.assertEqual(routed, set(called))
+
+    def test_cached_big_multiplication_covers_every_accepted_size(self):
+        for width in (16, 32, 64):
+            digit_bits = 64 if width == 64 else 32
+            capacity = 1280 // digit_bits
+            groups = proof_groups(pointer_width=width)
+            cases = [harness for group in groups for harness in group["harnesses"]
+                     if "::cached_mul_pow5_" in harness]
+            routed = {tuple(map(int, re.search(r"::cached_mul_pow5_(\d+)::size_(\d+)$",
+                                               harness).groups())) for harness in cases}
+            expected = {(power, size) for power in (16, 32, 64, 128, 256)
+                        for size in range(capacity + 1 -
+                                          ((5 ** power).bit_length() + digit_bits - 1) // digit_bits)}
+            with self.subTest(pointer_width=width):
+                self.assertEqual(routed, expected)
+                self.assertEqual(len(cases), len(expected))
+                for group in groups:
+                    self.assertLessEqual(group["timeout_minutes"] * len(group["harnesses"]), 240)
 
     def test_cached_power_catalog_matches_rust_declarations(self):
         root = Path(__file__).resolve().parents[2]
