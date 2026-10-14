@@ -247,9 +247,17 @@ prepare_cbmc_tap() {
     return 1
 }
 
+kani_patch_hash() {
+    shasum -a 256 "$WORK_DIR/scripts/kani-explicit-for-counter.patch" | awk '{print $1}'
+}
+
 build_kani() {
     local directory="$1"
     pushd "$directory"
+    local proof_patch="$WORK_DIR/scripts/kani-explicit-for-counter.patch"
+    if ! git apply --reverse --check "$proof_patch" >/dev/null 2>&1; then
+        git apply "$proof_patch"
+    fi
     source "kani-dependencies"
     # Check if installed versions are correct.
     if ./scripts/check-cbmc-version.py \
@@ -276,6 +284,7 @@ build_kani() {
     fi
 
     CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}" cargo build-dev --release
+    kani_patch_hash > target/kani/std-proof-patch.sha256
     popd
 }
 
@@ -355,7 +364,9 @@ check_binary_exists() {
             if [[ -x "$build_dir/scripts/kani" &&
                   -x "$build_dir/target/kani/bin/kani-driver" &&
                   -x "$build_dir/target/kani/bin/kani-compiler" &&
-                  -f "$build_dir/target/kani/lib/libkani.rlib" ]]; then
+                  -f "$build_dir/target/kani/lib/libkani.rlib" &&
+                  -f "$build_dir/target/kani/std-proof-patch.sha256" ]] &&
+                [[ $(cat "$build_dir/target/kani/std-proof-patch.sha256") == $(kani_patch_hash) ]]; then
                 return 0
             fi
             echo "Kani runtime is missing or incomplete. Rebuilding..."

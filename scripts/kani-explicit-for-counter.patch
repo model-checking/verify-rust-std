@@ -1,0 +1,107 @@
+diff --git a/kani-compiler/src/codegen_cprover_gotoc/codegen/statement.rs b/kani-compiler/src/codegen_cprover_gotoc/codegen/statement.rs
+--- a/kani-compiler/src/codegen_cprover_gotoc/codegen/statement.rs
++++ b/kani-compiler/src/codegen_cprover_gotoc/codegen/statement.rs
+@@ -163,8 +163,26 @@
+                 if localname.contains("kani_loop_modifies") {
+                     let assigns = self.rvalue_to_assign_targets(rhs, location);
+                     self.current_loop_modifies = assigns.clone();
++                    self.current_for_pattern_initialized = false;
+                     return Stmt::skip(location);
+                 }
++                // A for-loop's synthetic counter is created after its explicit
++                // frame. Include it so both havoc and assignment checks cover
++                // iterator advancement, just as inferred frames already do.
++                if !self.current_loop_modifies.is_empty()
++                    && localname
++                        .rsplit("::")
++                        .next()
++                        .is_some_and(|name| name.starts_with("kani_index_"))
++                {
++                    let counter = unwrap_or_return_codegen_unimplemented_stmt!(
++                        self,
++                        self.codegen_place_stable(lhs, location)
++                    )
++                    .goto_expr;
++                    self.current_loop_modifies.push(counter);
++                }
++
+                 if localname.contains("kani_loop_decreases") {
+                     if !self
+                         .queries
+@@ -768,6 +786,34 @@
+     ) -> Stmt {
+         debug!(?func, ?args, ?destination, ?span, "codegen_funcall");
+         let instance_opt = self.get_instance(func);
++        // A generated for-loop initializes its pattern before entering the
++        // loop. Add that local once, while its counter identifies the frame.
++        let synthetic_for_frame = self.current_loop_modifies.iter().any(|target| {
++            matches!(
++                target.value(),
++                ExprValue::Symbol { identifier }
++                    if identifier.to_string().rsplit("::").next()
++                        .is_some_and(|name| name.starts_with("kani_index_"))
++            )
++        });
++        if !self.current_for_pattern_initialized
++            && synthetic_for_frame
++            && let TyKind::RigidTy(RigidTy::FnDef(def, _)) = self.operand_ty_stable(func).kind()
++        {
++            let callee = def.name();
++            if callee == "kani::KaniIter::first"
++                || callee.ends_with("::kani::KaniIter::first")
++            {
++                let location = self.codegen_span_stable(span);
++                let pattern = unwrap_or_return_codegen_unimplemented_stmt!(
++                    self,
++                    self.codegen_place_stable(destination, location)
++                )
++                .goto_expr;
++                self.current_loop_modifies.push(pattern);
++                self.current_for_pattern_initialized = true;
++            }
++        }
+         if let Some(instance) = instance_opt
+             && matches!(instance.kind, InstanceKind::LlvmIntrinsic)
+         {
+diff --git a/kani-compiler/src/codegen_cprover_gotoc/context/goto_ctx.rs b/kani-compiler/src/codegen_cprover_gotoc/context/goto_ctx.rs
+--- a/kani-compiler/src/codegen_cprover_gotoc/context/goto_ctx.rs
++++ b/kani-compiler/src/codegen_cprover_gotoc/context/goto_ctx.rs
+@@ -96,6 +96,7 @@
+     pub has_loop_contracts: bool,
+     /// Track loop assign clause
+     pub current_loop_modifies: Vec<Expr>,
++    pub current_for_pattern_initialized: bool,
+     /// Track loop decreases clause
+     pub current_loop_decreases: Option<Expr>,
+ }
+@@ -129,6 +130,7 @@
+             transformer,
+             has_loop_contracts: false,
+             current_loop_modifies: Vec::new(),
++            current_for_pattern_initialized: false,
+             current_loop_decreases: None,
+         }
+     }
+diff --git a/kani-compiler/src/kani_middle/transform/loop_contracts.rs b/kani-compiler/src/kani_middle/transform/loop_contracts.rs
+--- a/kani-compiler/src/kani_middle/transform/loop_contracts.rs
++++ b/kani-compiler/src/kani_middle/transform/loop_contracts.rs
+@@ -209,11 +209,17 @@
+                 else {
+                     continue;
+                 };
+-                if fn_def.name() == "kani::KaniIter::first" {
++                let function_name = fn_def.name();
++                if function_name == "kani::KaniIter::first"
++                    || function_name.ends_with("::kani::KaniIter::first")
++                {
+                     current_firstpat = dest.local;
+                     current_firstpat_pos = blockid;
+                 }
+-                if fn_def.name() == "kani::KaniIter::nth" && current_firstpat != 0 {
++                if current_firstpat != 0
++                    && (function_name == "kani::KaniIter::nth"
++                        || function_name.ends_with("::kani::KaniIter::nth"))
++                {
+                     first_pats_and_nth_pats.push((
+                         current_firstpat,
+                         dest.local,

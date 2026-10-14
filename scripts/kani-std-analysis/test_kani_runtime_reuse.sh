@@ -24,7 +24,13 @@ touch "$build_dir/scripts/kani" "$build_dir/target/kani/bin/kani-driver" \
     "$build_dir/target/kani/bin/kani-compiler" "$build_dir/target/kani/lib/libkani.rlib"
 chmod +x "$build_dir/scripts/kani" "$build_dir/target/kani/bin/kani-driver" \
     "$build_dir/target/kani/bin/kani-compiler"
+reject_reuse
+kani_patch_hash > "$build_dir/target/kani/std-proof-patch.sha256"
 check_binary_exists "$build_dir" expected
+
+printf '%s\n' stale-patch > "$build_dir/target/kani/std-proof-patch.sha256"
+reject_reuse
+kani_patch_hash > "$build_dir/target/kani/std-proof-patch.sha256"
 
 stub_commit=stale
 reject_reuse

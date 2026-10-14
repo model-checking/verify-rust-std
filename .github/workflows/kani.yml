@@ -10,6 +10,7 @@ on:
       - 'library/**'
       - '.github/workflows/kani.yml'
       - 'scripts/run-kani.sh'
+      - 'scripts/kani-explicit-for-counter.patch'
       - 'scripts/setup-flat-smt-cbmc.sh'
       - 'scripts/cbmc-skip-unused-loop-assigns.patch'
       - 'scripts/kani-std-analysis/test_cbmc_loop_assigns.cpp'
