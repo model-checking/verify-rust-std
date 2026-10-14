@@ -424,6 +424,15 @@ pub type Digit = Digit64;
 #[cfg(kani)]
 pub(crate) const KANI_LIMBS: usize = 1280 / Digit::BITS as usize;
 
+#[cfg(kani)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum KaniInvariantOrdering {
+    Less,
+    Equal,
+    Greater,
+    Unrepresentable,
+}
+
 #[cfg(all(kani, target_pointer_width = "64"))]
 macro_rules! kani_for_each_limb {
     ($model:ident) => {
@@ -513,6 +522,66 @@ impl Big {
             }};
         }
         self.size <= KANI_LIMBS && other.size <= KANI_LIMBS && kani_for_each_limb!(compare_limbs)
+    }
+
+    // Invariant-only arithmetic avoids shared callees and their DFCC parameters.
+    pub(crate) fn kani_invariant_cmp_scaled_sum(
+        &self,
+        left: &Self,
+        right: &Self,
+        decimal_digits: usize,
+    ) -> KaniInvariantOrdering {
+        if self.size <= KANI_LIMBS
+            && left.size <= KANI_LIMBS
+            && right.size <= KANI_LIMBS
+            && decimal_digits <= 16
+        {
+            let factor: u128 = match decimal_digits {
+                0 => 1,
+                1 => 10,
+                2 => 100,
+                3 => 1_000,
+                4 => 10_000,
+                5 => 100_000,
+                6 => 1_000_000,
+                7 => 10_000_000,
+                8 => 100_000_000,
+                9 => 1_000_000_000,
+                10 => 10_000_000_000,
+                11 => 100_000_000_000,
+                12 => 1_000_000_000_000,
+                13 => 10_000_000_000_000,
+                14 => 100_000_000_000_000,
+                15 => 1_000_000_000_000_000,
+                16 => 10_000_000_000_000_000,
+                _ => 0,
+            };
+            macro_rules! compare_scaled_sum {
+                ($($index:literal),+ $(,)?) => {{
+                    let carry = 0u128;
+                    let ordering = KaniInvariantOrdering::Equal;
+                    $(
+                        let a = if left.size > $index { left.base[$index] as u128 } else { 0 };
+                        let b = if right.size > $index { right.base[$index] as u128 } else { 0 };
+                        let product = (a + b) * factor + carry;
+                        let digit = product as Digit;
+                        let own = if self.size > $index { self.base[$index] } else { 0 };
+                        let ordering = if own < digit {
+                            KaniInvariantOrdering::Less
+                        } else if own > digit {
+                            KaniInvariantOrdering::Greater
+                        } else {
+                            ordering
+                        };
+                        let carry = product >> Digit::BITS;
+                    )+
+                    if carry == 0 { ordering } else { KaniInvariantOrdering::Unrepresentable }
+                }};
+            }
+            kani_for_each_limb!(compare_scaled_sum)
+        } else {
+            KaniInvariantOrdering::Unrepresentable
+        }
     }
 
     pub(crate) fn kani_limbs_mut(&mut self) -> &mut [Digit; KANI_LIMBS] {

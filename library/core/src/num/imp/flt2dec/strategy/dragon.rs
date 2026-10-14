@@ -11,6 +11,8 @@ use crate::cmp::Ordering;
 #[cfg(kani)]
 use crate::kani;
 use crate::mem::MaybeUninit;
+#[cfg(kani)]
+use crate::num::imp::bignum::KaniInvariantOrdering;
 use crate::num::imp::bignum::{Big, Digit};
 use crate::num::imp::flt2dec;
 
@@ -215,9 +217,57 @@ pub fn format_shortest<'a>(
     let mut scale8 = scale.clone();
     scale8.mul_pow2(3);
 
+    #[cfg(kani)]
+    let mut down = false;
+    #[cfg(not(kani))]
     let mut down;
+    #[cfg(kani)]
+    let mut up = false;
+    #[cfg(not(kani))]
     let mut up;
+    #[cfg(kani)]
+    let mut d = 0;
+    #[cfg(not(kani))]
+    let mut d;
+    #[cfg(kani)]
+    let mut up_candidate = Big::from_small(0);
+    #[cfg(not(kani))]
+    let mut up_candidate;
     let mut i = 0;
+    #[cfg(kani)]
+    let proof_zero = Big::from_small(0);
+    #[cfg(kani)]
+    let proof_scale10 = scale.clone().mul_small(10).clone();
+    #[cfg(kani)]
+    let proof_max_limbs = crate::cmp::max(mant.kani_size(), proof_scale10.kani_size());
+    #[cfg_attr(kani, kani::loop_modifies(&i, &d, &mant, &minus, &plus, &up_candidate, &down, &up, &buf[..]))]
+    #[cfg_attr(kani, kani::loop_invariant(
+        i < MAX_SIG_DIGITS
+            && mant.kani_invariant_size() > 0
+            && minus.kani_invariant_size() > 0 && plus.kani_invariant_size() > 0
+            && mant.kani_invariant_valid_storage()
+            && minus.kani_invariant_valid_storage() && plus.kani_invariant_valid_storage()
+            && mant.kani_invariant_size() <= proof_max_limbs
+            && minus.kani_invariant_size() <= proof_max_limbs
+            && plus.kani_invariant_size() <= proof_max_limbs
+            && mant.kani_invariant_less_than(&proof_scale10)
+            && minus.kani_invariant_less_than(&proof_scale10)
+            && plus.kani_invariant_less_than(&proof_scale10)
+            && proof_zero.kani_invariant_less_than(&minus)
+            && proof_zero.kani_invariant_less_than(&plus)
+            && (i == 0 || match proof_scale10.kani_invariant_cmp_scaled_sum(&mant, &plus, 0) {
+                KaniInvariantOrdering::Less => (Ordering::Less as i8) >= rounding as i8,
+                KaniInvariantOrdering::Equal => (Ordering::Equal as i8) >= rounding as i8,
+                KaniInvariantOrdering::Greater => true,
+                KaniInvariantOrdering::Unrepresentable => false,
+            })
+            && match scale.kani_invariant_cmp_scaled_sum(&minus, &plus, MAX_SIG_DIGITS - 1 - i) {
+                KaniInvariantOrdering::Less => true,
+                KaniInvariantOrdering::Equal | KaniInvariantOrdering::Greater
+                    | KaniInvariantOrdering::Unrepresentable => false,
+            }
+            && initialized_digit_prefix(buf, i)
+    ))]
     loop {
         // invariants, where `d[0..n-1]` are digits generated so far:
         // - `v = mant / scale * 10^(k-n-1) + d[0..n-1] * 10^(k-n)`
@@ -227,7 +277,7 @@ pub fn format_shortest<'a>(
         // where `d[i..j]` is a shorthand for `d[i] * 10^(j-i) + ... + d[j-1] * 10 + d[j]`.
 
         // generate one digit: `d[n] = floor(mant / scale) < 10`.
-        let (d, _) = div_rem_upto_16(&mut mant, &scale, &scale2, &scale4, &scale8);
+        (d, _) = div_rem_upto_16(&mut mant, &scale, &scale2, &scale4, &scale8);
         debug_assert!(d < 10);
         buf[i] = MaybeUninit::new(b'0' + d);
         i += 1;
@@ -264,7 +314,8 @@ pub fn format_shortest<'a>(
         // - stop and round `up` (increase the last digit) when `scale < mant + plus` (or `<=`).
         // - keep generating otherwise.
         down = mant.cmp(&minus) < rounding;
-        up = scale.cmp(mant.clone().add(&plus)) < rounding;
+        up_candidate = mant.clone();
+        up = scale.cmp(up_candidate.add(&plus)) < rounding;
         if down || up {
             break;
         } // we have the shortest representation, proceed to the rounding
