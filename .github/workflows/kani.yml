@@ -246,28 +246,34 @@ jobs:
           fi
           # Keep every group within four hours of proof budgets per job:
           # two 120-minute or four 60-minute generators, or eight 30-minute cases.
-          harness_names=$(python3 -I head/scripts/kani-std-analysis/flt2dec_harnesses.py --group "$HARNESS_GROUP")
-          harness_args=()
-          while IFS= read -r harness; do
-            [[ -n "$harness" ]] || exit 1
-            harness_args+=(--harness "$harness")
-          done <<< "$harness_names"
           output_format=terse
           if [[ "$HARNESS_KIND" == contract || "$HARNESS_KIND" == equivalence || "$HARNESS_KIND" == probe ]]; then
             output_format=regular
-          fi
-          printf 'Selected %s harnesses\n' "$(( ${#harness_args[@]} / 2 ))"
-          solver_args=()
-          if [[ "$KANI_FLAT_SMT_CVC5" == true ]]; then
-            solver_args=(--solver minisat)
           fi
           temporary_args=()
           if [[ "$RETAIN_PROOF_MODELS" == true ]]; then
             temporary_args=(--keep-temps)
           fi
-          head/scripts/run-kani.sh --path "${GITHUB_WORKSPACE}/head" \
-            --kani-args --jobs 1 --harness-timeout "$KANI_HARNESS_TIMEOUT" --fail-fast --output-format="$output_format" \
-            "${solver_args[@]}" "${temporary_args[@]}" --exact "${harness_args[@]}"
+          for proof_backend in cvc5 native; do
+            harness_names=$(python3 -I head/scripts/kani-std-analysis/flt2dec_harnesses.py \
+              --group "$HARNESS_GROUP" --backend "$proof_backend")
+            [[ -n "$harness_names" ]] || continue
+            harness_args=()
+            while IFS= read -r harness; do
+              [[ -n "$harness" ]] || exit 1
+              harness_args+=(--harness "$harness")
+            done <<< "$harness_names"
+            printf 'Selected %s harnesses for %s\n' "$(( ${#harness_args[@]} / 2 ))" "$proof_backend"
+            export KANI_FLAT_SMT_CVC5=false
+            solver_args=()
+            if [[ "$proof_backend" == cvc5 ]]; then
+              export KANI_FLAT_SMT_CVC5=true
+              solver_args=(--solver minisat)
+            fi
+            head/scripts/run-kani.sh --path "${GITHUB_WORKSPACE}/head" \
+              --kani-args --jobs 1 --harness-timeout "$KANI_HARNESS_TIMEOUT" --fail-fast --output-format="$output_format" \
+              "${solver_args[@]}" "${temporary_args[@]}" --exact "${harness_args[@]}"
+          done
       - name: Retain selected proof models
         if: always() && github.event_name == 'workflow_dispatch' && inputs.proof_groups != ''
         uses: actions/upload-artifact@v4

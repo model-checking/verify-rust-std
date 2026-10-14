@@ -2,7 +2,9 @@ from pathlib import Path
 import re
 import unittest
 
-from flt2dec_harnesses import OPERATING_SYSTEMS, proof_groups, proof_matrix, remaining_harnesses
+from flt2dec_harnesses import (
+    OPERATING_SYSTEMS, group_harnesses, proof_groups, proof_matrix, remaining_harnesses,
+)
 
 
 class Flt2decHarnessesTests(unittest.TestCase):
@@ -14,15 +16,16 @@ class Flt2decHarnessesTests(unittest.TestCase):
                 self.assertEqual(matrix["group"], proof_groups(width))
 
     def test_manual_matrix_keeps_group_contents_and_distinct_check_names(self):
-        names = ["grisu-shortest-f32-00-01", "dragon-exact-loop-frame"]
+        names = ["grisu-shortest-f32-00-01", "dragon-exact-loop-frame",
+                 "grisu-multiplication-contract-20-29"]
         matrix = proof_matrix(names)
         self.assertEqual(matrix["os"], OPERATING_SYSTEMS)
         self.assertEqual({group["catalog_name"] for group in matrix["group"]}, set(names))
         original = {group["name"]: group for group in proof_groups()}
         for group in matrix["group"]:
             self.assertEqual(group["name"], "manual-" + group["catalog_name"])
-            for field in ("harnesses", "kind", "backend", "timeout_minutes"):
-                self.assertEqual(group[field], original[group["catalog_name"]][field])
+            for field in ("harnesses", "kind", "backend", "timeout_minutes", "harness_backends"):
+                self.assertEqual(group.get(field), original[group["catalog_name"]].get(field))
 
     def test_invalid_manual_matrix_selection_fails(self):
         for selection in ([], {}, "dragon-exact-loop-frame", [0], ["unknown"],
@@ -119,8 +122,8 @@ class Flt2decHarnessesTests(unittest.TestCase):
         self.assertEqual({int(harness.rsplit("_", 1)[1]) for harness in scaling}, set(range(80)))
 
     def test_arithmetic_backend_covers_every_cached_power(self):
-        arithmetic = [harness for group in self.groups if group["backend"] == "cvc5"
-                      for harness in group["harnesses"]]
+        arithmetic = [harness for group in self.groups
+                      for harness in group_harnesses(group, "cvc5")]
         prefix = "num::imp::flt2dec::strategy::grisu::grisu_verify::"
         expected = {f"{prefix}check_multiply_shortest_{index:02d}" for index in range(80)}
         expected.add(f"{prefix}check_decimal_termination")
@@ -128,15 +131,25 @@ class Flt2decHarnessesTests(unittest.TestCase):
         expected.update(f"{prefix}check_fractional_encoding_{power:02d}" for power in range(16))
         expected.update(f"{prefix}f{width}_{index:02d}::check_format_shortest_opt"
                         for width, count in ((32, 4), (64, 2)) for index in range(count))
-        expected.update(
-            f"num::imp::flt2dec::strategy::dragon::dragon_verify::cached_mul_pow5_{power}::size_{size:02d}"
-            for power in (16, 32, 64, 128, 256)
-            for size in range(21 - ((5 ** power).bit_length() + 63) // 64)
-        )
         self.assertEqual(set(arithmetic), expected)
         self.assertEqual(len(arithmetic), len(expected))
         self.assertIn(f"{prefix}check_rounded_multiply", self.dedicated)
         self.assertIn(f"{prefix}check_normalized_multiply", self.dedicated)
+
+    def test_backend_split_keeps_every_harness_exactly_once(self):
+        for width in (16, 32, 64):
+            for group in proof_groups(width):
+                with self.subTest(pointer_width=width, group=group["name"]):
+                    native = group_harnesses(group, "native")
+                    arithmetic = group_harnesses(group, "cvc5")
+                    self.assertEqual(group_harnesses(group), group["harnesses"])
+                    self.assertCountEqual(native + arithmetic, group["harnesses"])
+                    self.assertTrue(set(native).isdisjoint(arithmetic))
+                    self.assertTrue(set(group.get("harness_backends", {})) <= set(group["harnesses"]))
+                    self.assertTrue(all(harness in native for harness in group["harnesses"]
+                                        if "::cached_mul_pow5_" in harness))
+        with self.assertRaises(ValueError):
+            group_harnesses(self.groups[0], "unknown")
 
     def test_cached_big_multiplication_covers_every_native_coefficient(self):
         root = Path(__file__).resolve().parents[2]

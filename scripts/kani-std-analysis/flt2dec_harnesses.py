@@ -98,6 +98,9 @@ def proof_groups(pointer_width=None):
             target[1].append(f"{DRAGON}::cached_mul_pow5_{power}::size_{size:02d}")
     for name, harnesses in multiplication_groups:
         add(name, "contract", harnesses, 7, "cvc5")
+        groups[-1]["harness_backends"] = {
+            harness: "native" for harness in harnesses if "::cached_mul_pow5_" in harness
+        }
 
     for first in range(0, 80, 4):
         last = min(first + 3, 79)
@@ -180,6 +183,14 @@ def proof_matrix(selected_groups=None, pointer_width=None, platform="both"):
     return {"os": OPERATING_SYSTEMS if platform == "both" else [platform], "group": groups}
 
 
+def group_harnesses(group, backend=None):
+    if backend not in (None, "native", "cvc5"):
+        raise ValueError("Expected the native or cvc5 proof backend")
+    overrides = group.get("harness_backends", {})
+    return [harness for harness in group["harnesses"]
+            if backend is None or overrides.get(harness, group["backend"]) == backend]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -190,11 +201,15 @@ def main():
                         help="Select manual proof groups with distinct check names")
     parser.add_argument("--matrix-platform", choices=["both", *OPERATING_SYSTEMS], default="both",
                         help="Select a platform only for explicitly selected manual groups")
+    parser.add_argument("--backend", choices=["native", "cvc5"],
+                        help="Select one backend's harnesses within a proof group")
     args = parser.parse_args()
     if args.matrix_groups is not None and not args.matrix:
         parser.error("--matrix-groups requires --matrix")
     if args.matrix_platform != "both" and not args.matrix:
         parser.error("--matrix-platform requires --matrix")
+    if args.backend is not None and not args.group:
+        parser.error("--backend requires --group")
     if args.matrix:
         try:
             selected = json.loads(args.matrix_groups) if args.matrix_groups is not None else None
@@ -204,7 +219,7 @@ def main():
         print(json.dumps(matrix, separators=(",", ":")))
     elif args.group:
         group = next(group for group in proof_groups() if group["name"] == args.group)
-        print("\n".join(group["harnesses"]))
+        print("\n".join(group_harnesses(group, args.backend)))
     else:
         try:
             with open(args.remaining, encoding="utf-8") as source:
