@@ -406,12 +406,18 @@ fn generate_shortest<'a>(d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> Shortes
     let mut remainder = plus1frac;
     let mut threshold = delta1frac;
     let mut ulp = 1;
+    // The scaling contract preserves a nonzero suffix in the lower e - 16
+    // bits for an asymmetric interval. Each decimal step adds only one factor
+    // of two, so the suffix stays nonzero below bit e through 16 more digits.
     #[cfg_attr(kani, kani::loop_invariant(
         i >= max_kappa as usize + 1 && i <= 16
             && remainder < 1u64 << e
             && threshold <= remainder
             && threshold as u128 == delta1frac as u128 * ulp as u128
             && ulp == grisu_verify::proof_power10(i - max_kappa as usize - 1)
+            && (2 * ((plus.f - v.f) as u128) < delta1 as u128
+                || remainder.wrapping_sub(threshold)
+                    << (64 - (e - 16 + (i - max_kappa as usize - 1))) != 0)
             && grisu_verify::initialized_digits(buf, i)
     ))]
     #[cfg_attr(kani, kani::loop_modifies(
