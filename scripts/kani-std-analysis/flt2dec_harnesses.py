@@ -32,9 +32,10 @@ def proof_groups(pointer_width=None):
             for first in range(0, count, batch_size):
                 last = first + batch_size - 1
                 partition = f"f{width}" if count == batch_size else f"f{width}-{first:02d}-{last:02d}"
+                backend = "cvc5" if name == "grisu-shortest" and (width == 32 or first == 0) else "native"
                 add(f"{name}-{partition}", f"generator-f{width}", [
                     f"{module}::f{width}_{group:02d}::{proof}" for group in range(first, last + 1)
-                ], timeout_minutes)
+                ], timeout_minutes, backend)
         add(f"{name}-fixed-exponent", "probe", [
             f"{module}::f64_exp_1023::{proof}"
         ], timeout_minutes)

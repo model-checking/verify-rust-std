@@ -126,6 +126,8 @@ class Flt2decHarnessesTests(unittest.TestCase):
         expected.add(f"{prefix}check_decimal_termination")
         expected.add(f"{prefix}check_advance_fraction_threshold")
         expected.update(f"{prefix}check_fractional_encoding_{power:02d}" for power in range(16))
+        expected.update(f"{prefix}f{width}_{index:02d}::check_format_shortest_opt"
+                        for width, count in ((32, 4), (64, 2)) for index in range(count))
         expected.update(
             f"num::imp::flt2dec::strategy::dragon::dragon_verify::cached_mul_pow5_{power}::size_{size:02d}"
             for power in (16, 32, 64, 128, 256)
