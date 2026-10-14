@@ -11,6 +11,9 @@ on:
       - '.github/workflows/kani.yml'
       - 'scripts/run-kani.sh'
       - 'scripts/setup-flat-smt-cbmc.sh'
+      - 'scripts/cbmc-skip-unused-loop-assigns.patch'
+      - 'scripts/kani-std-analysis/test_cbmc_loop_assigns.cpp'
+      - 'scripts/kani-std-analysis/test_cbmc_loop_assigns.sh'
       - 'scripts/setup-cvc5.sh'
       - 'scripts/kani-std-analysis/cvc5-flat-smt.sh'
       - 'scripts/kani-std-analysis/test_cvc5_flat_smt.sh'
@@ -60,12 +63,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: head/cbmc_build/bin
-          key: cbmc-flat-smt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('head/scripts/setup-flat-smt-cbmc.sh') }}
+          key: cbmc-flat-smt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('head/scripts/setup-flat-smt-cbmc.sh', 'head/scripts/cbmc-skip-unused-loop-assigns.patch') }}
       - name: Install build dependencies
         if: runner.os == 'Linux' && steps.cbmc.outputs.cache-hit != 'true'
         run: sudo apt-get update && sudo apt-get install -y cmake flex bison
-      - name: Build pinned verifier with upstream fix
+      - name: Build pinned verifier with proof fixes
         run: bash head/scripts/setup-flat-smt-cbmc.sh
+      - name: Check loop write-set enforcement
+        run: bash head/scripts/kani-std-analysis/test_cbmc_loop_assigns.sh head/cbmc_build/bin
 
   check-kani-on-std:
     name: Verify std library (partition ${{ matrix.partition }})
@@ -187,7 +192,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: head/cbmc_build/bin
-          key: cbmc-flat-smt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('head/scripts/setup-flat-smt-cbmc.sh') }}
+          key: cbmc-flat-smt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('head/scripts/setup-flat-smt-cbmc.sh', 'head/scripts/cbmc-skip-unused-loop-assigns.patch') }}
           fail-on-cache-miss: true
 
       - name: Verify selected proof groups
