@@ -51,9 +51,9 @@ def proof_groups(pointer_width=None):
     add("grisu-fractional-threshold-contract", "contract", [
         f"{GRISU}::check_advance_fraction_threshold"
     ], 30, "cvc5")
-    add("grisu-fractional-invariant-equivalence", "equivalence", [
-        f"{GRISU}::check_fractional_encoding_{power:02d}" for power in range(16)
-    ], 7, "cvc5")
+    add("cached-multiplication-equivalence", "equivalence", [
+        f"{DRAGON}::check_mul_digits_pow5_{power}" for power in (16, 32, 64, 128, 256)
+    ], 30, "cvc5")
 
     foundations = {"contract": [], "equivalence": []}
     for name, module, proof, kind in [
@@ -86,6 +86,8 @@ def proof_groups(pointer_width=None):
                      for group in range(first, last + 1)]
         if first == 0:
             harnesses.append(f"{GRISU}::check_decimal_termination")
+            harnesses.extend(f"{GRISU}::check_fractional_encoding_{power:02d}"
+                            for power in range(16))
         add(f"grisu-multiplication-contract-{first:02d}-{last:02d}", "contract",
             harnesses, 7, "cvc5")
 

@@ -43,8 +43,8 @@ class Flt2decHarnessesTests(unittest.TestCase):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
         self.assertEqual(len(self.groups), 107)
         self.assertEqual(len({group["name"] for group in self.groups}), 107)
-        self.assertEqual(len(self.dedicated), 670)
-        self.assertEqual(len(set(self.dedicated)), 670)
+        self.assertEqual(len(self.dedicated), 675)
+        self.assertEqual(len(set(self.dedicated)), 675)
         self.assertLessEqual(len(self.groups) * len(OPERATING_SYSTEMS), 256)
         for group in self.groups:
             minutes = group["timeout_minutes"]
@@ -114,10 +114,31 @@ class Flt2decHarnessesTests(unittest.TestCase):
         expected.add(f"{prefix}check_decimal_termination")
         expected.add(f"{prefix}check_advance_fraction_threshold")
         expected.update(f"{prefix}check_fractional_encoding_{power:02d}" for power in range(16))
+        expected.update(
+            f"num::imp::flt2dec::strategy::dragon::dragon_verify::check_mul_digits_pow5_{power}"
+            for power in (16, 32, 64, 128, 256)
+        )
         self.assertEqual(set(arithmetic), expected)
         self.assertEqual(len(arithmetic), len(expected))
         self.assertIn(f"{prefix}check_rounded_multiply", self.dedicated)
         self.assertIn(f"{prefix}check_normalized_multiply", self.dedicated)
+
+    def test_cached_big_multiplication_covers_every_native_coefficient(self):
+        root = Path(__file__).resolve().parents[2]
+        source = (root / "library/core/src/num/imp/flt2dec/strategy/dragon.rs").read_text()
+        start = source.index("pub fn mul_pow10(")
+        body = source[start:source.index("\n}\n", start)]
+        called = re.findall(r"\.mul_digits\(&POW5TO(\d+)\)", body)
+        self.assertEqual(len(called), len(re.findall(r"\.mul_digits\(", body)))
+        declared = re.findall(r"check_mul_digits_pow5_(\d+)\s*=>\s*POW5TO(\d+)", source)
+        self.assertTrue(all(case == coefficient for case, coefficient in declared))
+        self.assertEqual({case for case, _ in declared}, set(called))
+        group = next(group for group in self.groups
+                     if group["name"] == "cached-multiplication-equivalence")
+        self.assertEqual(set(group["harnesses"]), {
+            f"num::imp::flt2dec::strategy::dragon::dragon_verify::check_mul_digits_pow5_{power}"
+            for power in called
+        })
 
     def test_cached_power_catalog_matches_rust_declarations(self):
         root = Path(__file__).resolve().parents[2]

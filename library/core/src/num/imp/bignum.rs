@@ -715,6 +715,70 @@ impl Big {
         self
     }
 
+    pub(crate) fn kani_mul_digits_model<'a>(&'a mut self, other: &[Digit]) -> &'a mut Self {
+        let size = kani_loop_size(self.size);
+        assert!(size <= KANI_LIMBS && other.len() <= KANI_LIMBS);
+        assert!(size + other.len() <= KANI_LIMBS);
+        let mut ret = [0; KANI_LIMBS];
+        let retsz = if size < other.len() {
+            Self::kani_mul_digits_product(&mut ret, &self.base[..size], other)
+        } else {
+            Self::kani_mul_digits_product(&mut ret, other, &self.base[..size])
+        };
+        self.base = ret;
+        self.size = retsz;
+        self
+    }
+
+    #[rustc_force_inline]
+    fn kani_mul_digits_product(ret: &mut [Digit; KANI_LIMBS], aa: &[Digit], bb: &[Digit]) -> usize {
+        let mut retsz = 0;
+        macro_rules! multiply_rows {
+            ($($index:literal),+ $(,)?) => {$(
+                if $index < aa.len() {
+                    let a = aa[$index];
+                    if a != 0 {
+                        let sz = Self::kani_mul_digits_row(ret, a, bb, $index);
+                        if retsz < $index + sz {
+                            retsz = $index + sz;
+                        }
+                    }
+                }
+            )+};
+        }
+        kani_for_each_limb!(multiply_rows);
+        retsz
+    }
+
+    #[rustc_force_inline]
+    fn kani_mul_digits_row(
+        ret: &mut [Digit; KANI_LIMBS],
+        a: Digit,
+        bb: &[Digit],
+        index: usize,
+    ) -> usize {
+        let mut carry = 0;
+        macro_rules! multiply_columns {
+            ($($column:literal),+ $(,)?) => {$(
+                if $column < bb.len() {
+                    let output = index + $column;
+                    assert!(output < KANI_LIMBS);
+                    let output = output % KANI_LIMBS;
+                    let (c, v) = a.full_mul_add(bb[$column], ret[output], carry);
+                    ret[output] = v;
+                    carry = c;
+                }
+            )+};
+        }
+        kani_for_each_limb!(multiply_columns);
+        if carry > 0 {
+            ret[index + bb.len()] = carry;
+            bb.len() + 1
+        } else {
+            bb.len()
+        }
+    }
+
     pub(crate) fn kani_mul_small_model(&mut self, other: Digit) -> &mut Self {
         assert!(self.size < self.base.len());
         let mut sz = kani_loop_size(self.size);

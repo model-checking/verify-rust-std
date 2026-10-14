@@ -1772,6 +1772,50 @@ pub mod dragon_verify {
         (size_40, guide_size_40, 40, 0, 41),
     );
 
+    fn check_cached_mul_digits_model_agrees(digits: &[Digit]) {
+        let size = usize::from(kani::any::<u8>());
+        // This is the model's checked capacity requirement, for every accepted size.
+        kani::assume(size + digits.len() <= KANI_LIMBS);
+        let mut source = Big::kani_with_arbitrary_limbs(size);
+        *source.kani_limbs_mut() = kani::any();
+        let mut actual = source.clone();
+        let mut modeled = source;
+        let actual_start = &mut actual as *mut Big;
+        let modeled_start = &mut modeled as *mut Big;
+        assert!(actual.mul_digits(digits) as *mut Big == actual_start);
+        assert!(modeled.kani_mul_digits_model(digits) as *mut Big == modeled_start);
+        assert!(actual.kani_same_storage(&modeled));
+        kani::cover(size == 0, "cached multiplication accepts empty storage");
+        kani::cover(
+            size + digits.len() == KANI_LIMBS,
+            "cached multiplication accepts the largest model input",
+        );
+        kani::cover(
+            size + digits.len() == KANI_LIMBS && actual.kani_size() == KANI_LIMBS,
+            "cached multiplication appends a carry",
+        );
+    }
+
+    macro_rules! check_cached_mul_digits {
+        ($($name:ident => $digits:ident),+ $(,)?) => {$(
+            #[kani::proof]
+            #[kani::unwind(41)]
+            #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
+            #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul_add, carrying_mul_add_model))]
+            fn $name() {
+                check_cached_mul_digits_model_agrees(&$digits);
+            }
+        )+};
+    }
+
+    check_cached_mul_digits!(
+        check_mul_digits_pow5_16 => POW5TO16,
+        check_mul_digits_pow5_32 => POW5TO32,
+        check_mul_digits_pow5_64 => POW5TO64,
+        check_mul_digits_pow5_128 => POW5TO128,
+        check_mul_digits_pow5_256 => POW5TO256,
+    );
+
     fn check_mul_small_model_agrees<const SIZE: usize>() {
         assert!(SIZE < KANI_LIMBS);
         let source = Big::kani_with_arbitrary_limbs(SIZE);
