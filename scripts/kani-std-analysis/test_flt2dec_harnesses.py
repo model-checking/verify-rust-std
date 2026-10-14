@@ -1,3 +1,5 @@
+from pathlib import Path
+import re
 import unittest
 
 from flt2dec_harnesses import OPERATING_SYSTEMS, proof_groups, remaining_harnesses
@@ -85,6 +87,24 @@ class Flt2decHarnessesTests(unittest.TestCase):
         self.assertEqual(set(arithmetic), expected)
         self.assertEqual(len(arithmetic), len(expected))
         self.assertIn(f"{prefix}check_rounded_multiply", self.dedicated)
+
+    def test_cached_power_catalog_matches_rust_declarations(self):
+        root = Path(__file__).resolve().parents[2]
+        source = (root / "library/core/src/num/imp/flt2dec/strategy/grisu.rs").read_text()
+        for macro, prefix, expected_index in (
+            ("check_scale_shortest_partition", "check_scale_shortest", lambda group: group),
+            ("verify_multiply_shortest", "check_multiply_shortest", lambda group: 80 - group),
+        ):
+            pattern = rf"{macro}!\(\s*({prefix}_(\d+))\s*,(?:\s*scaling_cache_index_\d+\s*,)?\s*(\d+)\s*\)"
+            declarations = re.findall(pattern, source)
+            with self.subTest(macro=macro):
+                self.assertEqual(len(declarations), 80)
+                self.assertEqual({(int(group), int(index)) for _, group, index in declarations},
+                                 {(group, expected_index(group)) for group in range(80)})
+                declared = {name for name, _, _ in declarations}
+                routed = {name.rsplit("::", 1)[1] for name in self.dedicated
+                          if re.fullmatch(prefix + r"_\d+", name.rsplit("::", 1)[1])}
+                self.assertEqual(declared, routed)
 
     def test_only_exact_catalog_names_are_removed(self):
         retained = ["num::imp::flt2dec::check_wrapper", "num::imp::flt2dec::check_future_proof",

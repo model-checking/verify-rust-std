@@ -1569,6 +1569,17 @@ pub mod grisu_verify {
     check_scale_shortest_partition!(check_scale_shortest_71, scaling_cache_index_71, 71);
     check_scale_shortest_partition!(check_scale_shortest_72, scaling_cache_index_72, 72);
     check_scale_shortest_partition!(check_scale_shortest_73, scaling_cache_index_73, 73);
+    check_scale_shortest_partition!(check_scale_shortest_74, scaling_cache_index_74, 74);
+    check_scale_shortest_partition!(check_scale_shortest_75, scaling_cache_index_75, 75);
+    check_scale_shortest_partition!(check_scale_shortest_76, scaling_cache_index_76, 76);
+    check_scale_shortest_partition!(check_scale_shortest_77, scaling_cache_index_77, 77);
+    check_scale_shortest_partition!(check_scale_shortest_78, scaling_cache_index_78, 78);
+    check_scale_shortest_partition!(check_scale_shortest_79, scaling_cache_index_79, 79);
+
+    // At digit one the loop must stop. If its remainder would already exceed
+    // threshold, the loop's threshold check forces an earlier stop. With digit
+    // zero this checks the initial state, which must not decrement at all.
+    // Callers establish this numeric condition before using the helper model.
     fn weed_stops_before_zero(
         digit: u8,
         remainder: u64,

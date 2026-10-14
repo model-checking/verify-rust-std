@@ -31,7 +31,9 @@ if [[ "${KANI_FLAT_SMT_CVC5:-false}" == true ]]; then
         exit 2
     fi
     kani_cvc5_wrapper="$(dirname "$(realpath "${BASH_SOURCE[0]}")")/kani-std-analysis/cvc5-flat-smt.sh"
-    kani_cbmc_args+=(--yices --external-smt2-solver "$kani_cvc5_wrapper")
+    # This flat encoding uses native constant arrays without datatype wrappers
+    # or quantified array initializers.
+    kani_cbmc_args+=(--bitwuzla --external-smt2-solver "$kani_cvc5_wrapper")
 elif [[ "${KANI_FLAT_SMT_Z3:-false}" == true ]]; then
     if [[ "${KANI_ARITHMETIC_REFINEMENT:-false}" == true ]]; then
         echo "Flat SMT encoding cannot be combined with SAT arithmetic refinement." >&2
