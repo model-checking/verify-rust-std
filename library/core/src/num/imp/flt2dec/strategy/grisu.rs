@@ -406,22 +406,27 @@ fn generate_shortest<'a>(d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> Shortes
     let mut remainder = plus1frac;
     let mut threshold = delta1frac;
     let mut ulp = 1;
+    #[cfg(kani)]
+    let mut fractional_digits = 0usize;
     // The scaling contract preserves a nonzero suffix in the lower e - 16
     // bits for an asymmetric interval. Each decimal step adds only one factor
     // of two, so the suffix stays nonzero below bit e through 16 more digits.
     #[cfg_attr(kani, kani::loop_invariant(
         i >= max_kappa as usize + 1 && i <= 16
+            && fractional_digits <= 15
+            && i == max_kappa as usize + 1 + fractional_digits
             && remainder < 1u64 << e
             && threshold <= remainder
-            && threshold as u128 == delta1frac as u128 * ulp as u128
-            && ulp == grisu_verify::proof_power10(i - max_kappa as usize - 1)
+            && ulp < 1u64 << 50
+            && threshold as u128 == grisu_verify::proof_threshold(delta1frac, fractional_digits)
+            && ulp == grisu_verify::proof_power10(fractional_digits)
             && (2 * ((plus.f - v.f) as u128) < delta1 as u128
                 || remainder.wrapping_sub(threshold)
-                    << (64 - (e - 16 + (i - max_kappa as usize - 1))) != 0)
+                    << ((64 - (e - 16 + fractional_digits)) as u8) != 0)
             && grisu_verify::initialized_digits(buf, i)
     ))]
     #[cfg_attr(kani, kani::loop_modifies(
-        &i, &remainder, &threshold, &ulp,
+        &i, &remainder, &threshold, &ulp, &fractional_digits,
         crate::ptr::slice_from_raw_parts(buf.as_ptr(), MAX_SIG_DIGITS)
     ))]
     loop {
@@ -431,7 +436,15 @@ fn generate_shortest<'a>(d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> Shortes
         // - `plus1frac * 10^(n-m) = d[m..n-1] * 2^e + remainder`
 
         remainder *= 10; // won't overflow, `2^e * 10 < 2^64`
-        threshold *= 10;
+        #[cfg(kani)]
+        {
+            (threshold, fractional_digits) =
+                grisu_verify::advance_fraction_threshold(delta1frac, fractional_digits, threshold);
+        }
+        #[cfg(not(kani))]
+        {
+            threshold *= 10;
+        }
         ulp *= 10;
 
         // divide `remainder` by `10^kappa`.
@@ -952,11 +965,15 @@ pub mod grisu_verify {
     const _: () = assert!(PROOF_BUFLEN <= u8::MAX as usize);
 
     pub(super) fn initialized_digits(buf: &[MaybeUninit<u8>], len: usize) -> bool {
+        // Keep each guarded byte check independent to avoid deep conditionals.
         macro_rules! check_digit {
             ($($index:literal),+ $(,)?) => {
-                true $(&& (len <= $index || (
-                    kani::mem::can_dereference(unsafe { buf.as_ptr().add($index).cast::<u8>() })
-                        && unsafe { buf[$index].assume_init() >= b'0' && buf[$index].assume_init() <= b'9' }
+                true $(& (buf.len() <= $index || len <= $index || (
+                    kani::mem::can_dereference(crate::ptr::addr_of!(buf[$index]) as *const u8)
+                        && unsafe {
+                            let digit = *(crate::ptr::addr_of!(buf[$index]) as *const u8);
+                            digit >= b'0' && digit <= b'9'
+                        }
                 )))+
             };
         }
@@ -986,6 +1003,112 @@ pub mod grisu_verify {
             16 => 10000000000000000,
             _ => 0,
         }
+    }
+
+    #[kani::requires(exponent <= 15)]
+    #[kani::requires(threshold <= u64::MAX / 10)]
+    #[kani::requires(threshold as u128 == proof_threshold(delta, exponent))]
+    #[kani::ensures(|result| result.0 as u128 == proof_threshold(delta, result.1))]
+    #[kani::ensures(|result| result.0 == threshold * 10 && result.1 == exponent + 1)]
+    pub(super) fn advance_fraction_threshold(
+        delta: u64,
+        exponent: usize,
+        threshold: u64,
+    ) -> (u64, usize) {
+        let _ = delta;
+        (threshold * 10, exponent + 1)
+    }
+
+    #[kani::proof_for_contract(advance_fraction_threshold)]
+    fn check_advance_fraction_threshold() {
+        let delta: u64 = kani::any();
+        let exponent = usize::from(kani::any::<u8>() & 15);
+        let threshold: u64 = kani::any();
+        let result = advance_fraction_threshold(delta, exponent, threshold);
+        kani::cover(exponent == 15, "threshold advancement checks the last fractional step");
+        kani::cover(delta == 0 && result.0 == 0, "threshold advancement includes zero");
+        kani::cover(
+            exponent == 0 && threshold == u64::MAX / 10,
+            "threshold advancement checks the maximum safe product",
+        );
+    }
+
+    #[rustc_force_inline]
+    pub(super) fn proof_threshold(delta: u64, exponent: usize) -> u128 {
+        // Keep multiplication inside each arm so every factor is constant.
+        match exponent {
+            0 => delta as u128,
+            1 => delta as u128 * 10,
+            2 => delta as u128 * 100,
+            3 => delta as u128 * 1_000,
+            4 => delta as u128 * 10_000,
+            5 => delta as u128 * 100_000,
+            6 => delta as u128 * 1_000_000,
+            7 => delta as u128 * 10_000_000,
+            8 => delta as u128 * 100_000_000,
+            9 => delta as u128 * 1_000_000_000,
+            10 => delta as u128 * 10_000_000_000,
+            11 => delta as u128 * 100_000_000_000,
+            12 => delta as u128 * 1_000_000_000_000,
+            13 => delta as u128 * 10_000_000_000_000,
+            14 => delta as u128 * 100_000_000_000_000,
+            15 => delta as u128 * 1_000_000_000_000_000,
+            16 => delta as u128 * 10_000_000_000_000_000,
+            _ => 0,
+        }
+    }
+
+    macro_rules! check_fractional_encoding_power {
+        ($($name:ident => $exponent:literal),+ $(,)?) => {$(
+            #[kani::proof]
+            fn $name() {
+                check_fractional_encoding_for_exponent($exponent);
+            }
+        )+};
+    }
+
+    check_fractional_encoding_power!(
+        check_fractional_encoding_00 => 0,
+        check_fractional_encoding_01 => 1,
+        check_fractional_encoding_02 => 2,
+        check_fractional_encoding_03 => 3,
+        check_fractional_encoding_04 => 4,
+        check_fractional_encoding_05 => 5,
+        check_fractional_encoding_06 => 6,
+        check_fractional_encoding_07 => 7,
+        check_fractional_encoding_08 => 8,
+        check_fractional_encoding_09 => 9,
+        check_fractional_encoding_10 => 10,
+        check_fractional_encoding_11 => 11,
+        check_fractional_encoding_12 => 12,
+        check_fractional_encoding_13 => 13,
+        check_fractional_encoding_14 => 14,
+        check_fractional_encoding_15 => 15,
+    );
+
+    fn check_fractional_encoding_for_exponent(exponent: usize) {
+        assert!(exponent <= 15);
+        let power = proof_power10(exponent);
+        assert!(power < 1u64 << 50);
+        let ulp: u64 = kani::any();
+        let delta: u64 = kani::any();
+        let threshold: u64 = kani::any();
+        assert_eq!(proof_threshold(delta, exponent), delta as u128 * power as u128);
+        let original = threshold as u128 == delta as u128 * ulp as u128 && ulp == power;
+        if ulp == power {
+            assert_eq!(ulp, ulp & ((1u64 << 50) - 1));
+        }
+        let narrowed = ulp < 1u64 << 50
+            && threshold as u128 == proof_threshold(delta, exponent)
+            && ulp == power;
+        assert_eq!(original, narrowed);
+
+        let shift: usize = kani::any();
+        let value: u64 = kani::any();
+        kani::assume(shift < 64);
+        assert_eq!(value << shift, value << (shift as u8));
+        kani::cover(ulp == power, "the selected fractional decimal power is checked");
+        kani::cover(shift == 63, "the maximum defined shift is checked");
     }
 
     // Decode gives minus = 1. Only normal powers of two have plus = 2,
@@ -2093,6 +2216,7 @@ pub mod grisu_verify {
                 #[kani::stub(round_and_weed, stub_round_and_weed)]
                 #[kani::stub(div_rem_pow10, div_rem_pow10_model)]
                 #[kani::stub_verified(round_shortest_contract)]
+                #[kani::stub_verified(advance_fraction_threshold)]
                 $(
                     #[kani::stub(scale_shortest, stub_scale_shortest)]
                     #[kani::stub_verified($scaling_contract)]

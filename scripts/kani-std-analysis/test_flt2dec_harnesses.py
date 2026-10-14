@@ -2,10 +2,34 @@ from pathlib import Path
 import re
 import unittest
 
-from flt2dec_harnesses import OPERATING_SYSTEMS, proof_groups, remaining_harnesses
+from flt2dec_harnesses import OPERATING_SYSTEMS, proof_groups, proof_matrix, remaining_harnesses
 
 
 class Flt2decHarnessesTests(unittest.TestCase):
+    def test_default_matrix_keeps_every_group_on_both_platforms(self):
+        for width in (16, 32, 64):
+            with self.subTest(pointer_width=width):
+                matrix = proof_matrix(pointer_width=width)
+                self.assertEqual(matrix["os"], OPERATING_SYSTEMS)
+                self.assertEqual(matrix["group"], proof_groups(width))
+
+    def test_manual_matrix_keeps_group_contents_and_distinct_check_names(self):
+        names = ["grisu-shortest-f32-00-01", "dragon-exact-loop-frame"]
+        matrix = proof_matrix(names)
+        self.assertEqual(matrix["os"], OPERATING_SYSTEMS)
+        self.assertEqual({group["catalog_name"] for group in matrix["group"]}, set(names))
+        original = {group["name"]: group for group in proof_groups()}
+        for group in matrix["group"]:
+            self.assertEqual(group["name"], "manual-" + group["catalog_name"])
+            for field in ("harnesses", "kind", "backend", "timeout_minutes"):
+                self.assertEqual(group[field], original[group["catalog_name"]][field])
+
+    def test_invalid_manual_matrix_selection_fails(self):
+        for selection in ([], {}, "dragon-exact-loop-frame", [0], ["unknown"],
+                          ["dragon-exact-loop-frame", "dragon-exact-loop-frame"]):
+            with self.subTest(selection=selection), self.assertRaises(ValueError):
+                proof_matrix(selection)
+
     def setUp(self):
         self.groups = proof_groups()
         self.dedicated = [harness for group in self.groups for harness in group["harnesses"]]
@@ -17,10 +41,10 @@ class Flt2decHarnessesTests(unittest.TestCase):
 
     def test_complete_disjoint_batches_on_both_platforms(self):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
-        self.assertEqual(len(self.groups), 105)
-        self.assertEqual(len({group["name"] for group in self.groups}), 105)
-        self.assertEqual(len(self.dedicated), 653)
-        self.assertEqual(len(set(self.dedicated)), 653)
+        self.assertEqual(len(self.groups), 107)
+        self.assertEqual(len({group["name"] for group in self.groups}), 107)
+        self.assertEqual(len(self.dedicated), 670)
+        self.assertEqual(len(set(self.dedicated)), 670)
         self.assertLessEqual(len(self.groups) * len(OPERATING_SYSTEMS), 256)
         for group in self.groups:
             minutes = group["timeout_minutes"]
@@ -88,6 +112,8 @@ class Flt2decHarnessesTests(unittest.TestCase):
         prefix = "num::imp::flt2dec::strategy::grisu::grisu_verify::"
         expected = {f"{prefix}check_multiply_shortest_{index:02d}" for index in range(80)}
         expected.add(f"{prefix}check_decimal_termination")
+        expected.add(f"{prefix}check_advance_fraction_threshold")
+        expected.update(f"{prefix}check_fractional_encoding_{power:02d}" for power in range(16))
         self.assertEqual(set(arithmetic), expected)
         self.assertEqual(len(arithmetic), len(expected))
         self.assertIn(f"{prefix}check_rounded_multiply", self.dedicated)

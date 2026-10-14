@@ -48,6 +48,13 @@ def proof_groups(pointer_width=None):
         f"{DRAGON}::check_exact_digit_loop_frame"
     ], 30)
 
+    add("grisu-fractional-threshold-contract", "contract", [
+        f"{GRISU}::check_advance_fraction_threshold"
+    ], 30, "cvc5")
+    add("grisu-fractional-invariant-equivalence", "equivalence", [
+        f"{GRISU}::check_fractional_encoding_{power:02d}" for power in range(16)
+    ], 7, "cvc5")
+
     foundations = {"contract": [], "equivalence": []}
     for name, module, proof, kind in [
         ("division-contract", DRAGON, "check_div_2pow10_contract", "contract"),
@@ -140,15 +147,43 @@ def remaining_harnesses(inventory):
     return [harness for harness in listed if harness not in dedicated]
 
 
+def proof_matrix(selected_groups=None, pointer_width=None):
+    groups = proof_groups(pointer_width)
+    if selected_groups is not None:
+        if not isinstance(selected_groups, list) or not selected_groups:
+            raise ValueError("Select a nonempty JSON array of proof group names")
+        if not all(isinstance(name, str) for name in selected_groups):
+            raise ValueError("Every selected proof group name must be a string")
+        selected = set(selected_groups)
+        if len(selected) != len(selected_groups):
+            raise ValueError("Selected proof group names must be distinct")
+        known = {group["name"] for group in groups}
+        unknown = selected - known
+        if unknown:
+            raise ValueError("Unknown proof groups: " + ", ".join(sorted(unknown)))
+        groups = [dict(group, name="manual-" + group["name"], catalog_name=group["name"])
+                  for group in groups if group["name"] in selected]
+    return {"os": OPERATING_SYSTEMS, "group": groups}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--matrix", action="store_true")
     mode.add_argument("--group", choices=[group["name"] for group in proof_groups()])
     mode.add_argument("--remaining", metavar="KANI_LIST_JSON")
+    parser.add_argument("--matrix-groups", metavar="JSON",
+                        help="Select manual proof groups with distinct check names")
     args = parser.parse_args()
+    if args.matrix_groups is not None and not args.matrix:
+        parser.error("--matrix-groups requires --matrix")
     if args.matrix:
-        print(json.dumps({"os": OPERATING_SYSTEMS, "group": proof_groups()}, separators=(",", ":")))
+        try:
+            selected = json.loads(args.matrix_groups) if args.matrix_groups is not None else None
+            matrix = proof_matrix(selected)
+        except (ValueError, TypeError) as error:
+            parser.error(str(error))
+        print(json.dumps(matrix, separators=(",", ":")))
     elif args.group:
         group = next(group for group in proof_groups() if group["name"] == args.group)
         print("\n".join(group["harnesses"]))
