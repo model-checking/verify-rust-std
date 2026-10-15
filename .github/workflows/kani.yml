@@ -254,7 +254,7 @@ jobs:
           if [[ "$RETAIN_PROOF_MODELS" == true ]]; then
             temporary_args=(--keep-temps)
           fi
-          for proof_backend in cvc5 native; do
+          for proof_backend in native cvc5; do
             harness_names=$(python3 -I head/scripts/kani-std-analysis/flt2dec_harnesses.py \
               --group "$HARNESS_GROUP" --backend "$proof_backend")
             [[ -n "$harness_names" ]] || continue

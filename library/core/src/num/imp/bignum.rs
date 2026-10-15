@@ -761,7 +761,6 @@ impl Big {
                 if $column < bb.len() {
                     let output = index + $column;
                     assert!(output < KANI_LIMBS);
-                    let output = output % KANI_LIMBS;
                     let (c, v) = a.full_mul_add(bb[$column], ret[output], carry);
                     ret[output] = v;
                     carry = c;
