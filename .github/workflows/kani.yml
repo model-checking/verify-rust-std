@@ -22,6 +22,15 @@ on:
         type: choice
         options: [default, kissat]
         default: default
+      harness_timeout:
+        description: Optional per-harness timeout in minutes for explicitly selected proof groups (empty keeps the catalog value)
+        type: string
+        default: ''
+      proof_backend:
+        description: Optional backend for every harness of explicitly selected proof groups
+        type: choice
+        options: [catalog, native, cvc5]
+        default: catalog
   merge_group:
   pull_request:
     branches: [ main ]
@@ -197,7 +206,9 @@ jobs:
       # CBMC otherwise builds for every satisfied Kani reachability check.
       KANI_PATCHED_CBMC: 'true'
       KANI_FLAT_SMT_CVC5: ${{ matrix.group.backend == 'cvc5' && 'true' || 'false' }}
-      KANI_HARNESS_TIMEOUT: ${{ matrix.group.timeout_minutes }}m
+      # Manual runs can raise the per-harness timeout and move every selected harness to one backend.
+      KANI_HARNESS_TIMEOUT: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && inputs.harness_timeout != '' && inputs.harness_timeout || matrix.group.timeout_minutes }}m
+      KANI_PROOF_BACKEND: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && inputs.proof_backend || 'catalog' }}
       KANI_CACHED_MULTIPLICATION: ${{ contains(join(matrix.group.harnesses, ' '), '::cached_mul_pow5_') }}
       # Record memory use where proofs stop without a verdict.
       KANI_MEMORY_DIAGNOSTICS: ${{ contains(join(matrix.group.harnesses, ' '), '::cached_mul_pow5_') || startsWith(matrix.group.catalog_name || matrix.group.name, 'dragon-') }}
@@ -255,17 +266,21 @@ jobs:
             (
               while sleep 30; do
                 date -u +%FT%TZ
-                ps -A -o pid=,rss=,comm= | awk '$3 ~ /(^|\/)(cbmc|cvc5|goto-instrument|goto-cc|kani-driver|kani-compiler|rustc)$/ { print "verifier RSS KiB:", $0 }'
+                ps -A -o pid=,rss=,comm= | awk '$3 ~ /(^|\/)(cbmc|cvc5|kissat|goto-instrument|goto-cc|kani-driver|kani-compiler|rustc)$/ { print "verifier RSS KiB:", $0 }'
               done
             ) &
             proof_sampler_pid=$!
             trap 'kill "$proof_sampler_pid" 2>/dev/null || true' EXIT
           fi
+          if [[ ! "$KANI_HARNESS_TIMEOUT" =~ ^[1-9][0-9]*m$ ]]; then
+            echo "Expected a positive whole number of minutes, got $KANI_HARNESS_TIMEOUT" >&2
+            exit 1
+          fi
           # Keep every group within four hours of proof budgets per job:
           # two 120-minute or four 60-minute generators, or eight 30-minute cases.
           output_format=terse
-          # Dragon generators show their CBMC phases until they converge.
-          if [[ "$HARNESS_KIND" == contract || "$HARNESS_KIND" == equivalence || "$HARNESS_KIND" == probe || "$HARNESS_GROUP" == dragon-* ]]; then
+          # Dragon generators and manual probes show their CBMC phases until they converge.
+          if [[ "$HARNESS_KIND" == contract || "$HARNESS_KIND" == equivalence || "$HARNESS_KIND" == probe || "$HARNESS_GROUP" == dragon-* || "$KANI_MANUAL_PROBE" == true ]]; then
             output_format=regular
           fi
           temporary_args=()
@@ -273,8 +288,13 @@ jobs:
             temporary_args=(--keep-temps)
           fi
           for proof_backend in native cvc5; do
+            backend_args=(--backend "$proof_backend")
+            if [[ "$KANI_PROOF_BACKEND" != catalog ]]; then
+              [[ "$KANI_PROOF_BACKEND" == "$proof_backend" ]] || continue
+              backend_args=()
+            fi
             harness_names=$(python3 -I head/scripts/kani-std-analysis/flt2dec_harnesses.py \
-              --group "$HARNESS_GROUP" --backend "$proof_backend")
+              --group "$HARNESS_GROUP" "${backend_args[@]}")
             [[ -n "$harness_names" ]] || continue
             harness_args=()
             while IFS= read -r harness; do

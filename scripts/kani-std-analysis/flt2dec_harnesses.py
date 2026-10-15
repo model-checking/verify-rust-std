@@ -18,9 +18,12 @@ def proof_groups(pointer_width=None):
     limb_count = 20 if pointer_width == 64 else 40
     groups = []
 
-    def add(name, kind, harnesses, timeout_minutes, backend="native"):
-        groups.append({"name": name, "kind": kind, "harnesses": harnesses,
-                       "timeout_minutes": timeout_minutes, "backend": backend})
+    def add(name, kind, harnesses, timeout_minutes, backend="native", harness_backends=None):
+        group = {"name": name, "kind": kind, "harnesses": harnesses,
+                 "timeout_minutes": timeout_minutes, "backend": backend}
+        if harness_backends:
+            group["harness_backends"] = harness_backends
+        groups.append(group)
 
     for name, module, proof, batch_size, timeout_minutes in [
         ("dragon-exact", DRAGON, "check_format_exact", 4, 60),
@@ -33,9 +36,12 @@ def proof_groups(pointer_width=None):
                 last = first + batch_size - 1
                 partition = f"f{width}" if count == batch_size else f"f{width}-{first:02d}-{last:02d}"
                 backend = "cvc5" if name == "grisu-shortest" and (width == 32 or first == 0) else "native"
-                add(f"{name}-{partition}", f"generator-f{width}", [
-                    f"{module}::f{width}_{group:02d}::{proof}" for group in range(first, last + 1)
-                ], timeout_minutes, backend)
+                harnesses = [f"{module}::f{width}_{group:02d}::{proof}" for group in range(first, last + 1)]
+                # The native backend proved f64_01 in an earlier run;  only f64_00 keeps cvc5.
+                native_harnesses = {harness: "native" for harness in harnesses
+                                    if backend == "cvc5" and harness == f"{module}::f64_01::{proof}"}
+                add(f"{name}-{partition}", f"generator-f{width}", harnesses, timeout_minutes, backend,
+                    native_harnesses)
         add(f"{name}-fixed-exponent", "probe", [
             f"{module}::f64_exp_1023::{proof}"
         ], timeout_minutes)

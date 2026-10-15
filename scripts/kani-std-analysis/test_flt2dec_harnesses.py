@@ -212,6 +212,15 @@ class Flt2decHarnessesTests(unittest.TestCase):
                 for group in groups:
                     self.assertLessEqual(group["timeout_minutes"] * len(group["harnesses"]), 240)
 
+    def test_native_grisu_shortest_partition_leaves_its_cvc5_group(self):
+        group = next(group for group in proof_groups(pointer_width=64)
+                     if group["name"] == "grisu-shortest-f64-00-01")
+        self.assertEqual(group["backend"], "cvc5")
+        self.assertEqual([harness.rsplit("::", 2)[1] for harness in group_harnesses(group, "native")],
+                         ["f64_01"])
+        self.assertEqual([harness.rsplit("::", 2)[1] for harness in group_harnesses(group, "cvc5")],
+                         ["f64_00"])
+
     def test_cached_big_multiplication_uses_dedicated_native_groups(self):
         for width in (16, 32, 64):
             for group in proof_groups(pointer_width=width):
@@ -219,8 +228,8 @@ class Flt2decHarnessesTests(unittest.TestCase):
                 dedicated = group["name"].startswith("cached-multiplication-equivalence-")
                 with self.subTest(pointer_width=width, group=group["name"]):
                     self.assertEqual(cached, group["harnesses"] if dedicated else [])
-                    self.assertNotIn("harness_backends", group)
                     if dedicated:
+                        self.assertNotIn("harness_backends", group)
                         self.assertEqual(
                             (group["kind"], group["backend"], group["timeout_minutes"]),
                             ("equivalence", "native", 60))

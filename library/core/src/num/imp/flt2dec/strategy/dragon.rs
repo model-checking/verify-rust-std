@@ -1796,6 +1796,8 @@ pub mod dragon_verify {
         ($digits:ident; $($name:ident => $size:literal),+ $(,)?) => {$(
             #[kani::proof]
             #[kani::unwind(41)]
+            // The patched CBMC does not link CaDiCaL, and MiniSAT times out on these products.
+            #[kani::solver(kissat)]
             #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
             #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul_add, carrying_mul_add_model))]
             fn $name() {
