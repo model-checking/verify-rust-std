@@ -78,7 +78,6 @@ def proof_groups(pointer_width=None):
         for first in range(0, len(harnesses), 8):
             add(f"foundations-{kind}-{first:02d}", kind, harnesses[first:first + 8], 30)
 
-    multiplication_groups = []
     for first in range(0, 80, 10):
         last = first + 9
         harnesses = [f"{GRISU}::check_multiply_shortest_{group:02d}"
@@ -87,20 +86,21 @@ def proof_groups(pointer_width=None):
             harnesses.append(f"{GRISU}::check_decimal_termination")
             harnesses.extend(f"{GRISU}::check_fractional_encoding_{power:02d}"
                             for power in range(16))
-        multiplication_groups.append((f"grisu-multiplication-contract-{first:02d}-{last:02d}",
-                                      harnesses))
+        add(f"grisu-multiplication-contract-{first:02d}-{last:02d}", "contract", harnesses, 7, "cvc5")
 
+    # Each cached multiplication proof needs more than the 7-minute arithmetic budget,
+    # so these native SAT proofs get their own 60-minute groups of four.
     cached_lengths = ((16, 1), (32, 2), (64, 3), (128, 5), (256, 10)) if pointer_width == 64 else (
         (16, 2), (32, 3), (64, 5), (128, 10), (256, 19))
-    for power, digits in cached_lengths:
-        for size in range(limb_count - digits + 1):
-            target = min(multiplication_groups, key=lambda group: len(group[1]))
-            target[1].append(f"{DRAGON}::cached_mul_pow5_{power}::size_{size:02d}")
-    for name, harnesses in multiplication_groups:
-        add(name, "contract", harnesses, 7, "cvc5")
-        groups[-1]["harness_backends"] = {
-            harness: "native" for harness in harnesses if "::cached_mul_pow5_" in harness
-        }
+    cached_cases = [
+        f"{DRAGON}::cached_mul_pow5_{power}::size_{size:02d}"
+        for power, digits in cached_lengths
+        for size in range(limb_count - digits + 1)
+    ]
+    for first in range(0, len(cached_cases), 4):
+        last = min(first + 3, len(cached_cases) - 1)
+        add(f"cached-multiplication-equivalence-{first:03d}-{last:03d}", "equivalence",
+            cached_cases[first:last + 1], 60)
 
     for first in range(0, 80, 4):
         last = min(first + 3, 79)

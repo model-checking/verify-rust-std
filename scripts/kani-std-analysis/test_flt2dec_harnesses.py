@@ -17,7 +17,7 @@ class Flt2decHarnessesTests(unittest.TestCase):
 
     def test_manual_matrix_keeps_group_contents_and_distinct_check_names(self):
         names = ["grisu-shortest-f32-00-01", "dragon-exact-loop-frame",
-                 "grisu-multiplication-contract-20-29"]
+                 "grisu-multiplication-contract-20-29", "cached-multiplication-equivalence-000-003"]
         matrix = proof_matrix(names)
         self.assertEqual(matrix["os"], OPERATING_SYSTEMS)
         self.assertEqual({group["catalog_name"] for group in matrix["group"]}, set(names))
@@ -81,8 +81,8 @@ class Flt2decHarnessesTests(unittest.TestCase):
 
     def test_complete_disjoint_batches_on_both_platforms(self):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
-        self.assertEqual(len(self.groups), 106)
-        self.assertEqual(len({group["name"] for group in self.groups}), 106)
+        self.assertEqual(len(self.groups), 127)
+        self.assertEqual(len({group["name"] for group in self.groups}), 127)
         self.assertEqual(len(self.dedicated), 754)
         self.assertEqual(len(set(self.dedicated)), 754)
         self.assertLessEqual(len(self.groups) * len(OPERATING_SYSTEMS), 256)
@@ -107,7 +107,11 @@ class Flt2decHarnessesTests(unittest.TestCase):
             with self.subTest(pointer_width=width):
                 self.assertEqual(routed, expected)
                 self.assertEqual(len(cases), len(expected))
-                self.assertLessEqual(len(groups) * len(OPERATING_SYSTEMS), 256)
+
+    def test_ci_matrix_fits_the_job_limit(self):
+        # The matrix job runs on a 64-bit host, so only that catalog is expanded.
+        # Narrower catalogs keep their routing tests but exceed one matrix.
+        self.assertLessEqual(len(proof_groups(pointer_width=64)) * len(OPERATING_SYSTEMS), 256)
 
     def test_all_float_partitions_and_equivalence_cases_remain(self):
         self.assertIn(
@@ -207,6 +211,25 @@ class Flt2decHarnessesTests(unittest.TestCase):
                 self.assertEqual(len(cases), len(expected))
                 for group in groups:
                     self.assertLessEqual(group["timeout_minutes"] * len(group["harnesses"]), 240)
+
+    def test_cached_big_multiplication_uses_dedicated_native_groups(self):
+        for width in (16, 32, 64):
+            for group in proof_groups(pointer_width=width):
+                cached = [harness for harness in group["harnesses"] if "::cached_mul_pow5_" in harness]
+                dedicated = group["name"].startswith("cached-multiplication-equivalence-")
+                with self.subTest(pointer_width=width, group=group["name"]):
+                    self.assertEqual(cached, group["harnesses"] if dedicated else [])
+                    self.assertNotIn("harness_backends", group)
+                    if dedicated:
+                        self.assertEqual(
+                            (group["kind"], group["backend"], group["timeout_minutes"]),
+                            ("equivalence", "native", 60))
+                        self.assertLessEqual(len(group["harnesses"]), 4)
+        names = [group["name"] for group in proof_groups(pointer_width=64)
+                 if group["name"].startswith("cached-multiplication-equivalence-")]
+        self.assertEqual(len(names), 21)
+        self.assertEqual(names[0], "cached-multiplication-equivalence-000-003")
+        self.assertEqual(names[-1], "cached-multiplication-equivalence-080-083")
 
     def test_cached_power_catalog_matches_rust_declarations(self):
         root = Path(__file__).resolve().parents[2]
