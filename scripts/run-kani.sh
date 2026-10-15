@@ -19,6 +19,17 @@ declare -a command_args
 kani_object_bits="${KANI_OBJECT_BITS:-14}"
 # Optional encoding experiments preserve the verification checks and bounds.
 kani_cbmc_args=(--object-bits "$kani_object_bits")
+if [[ -n "${KANI_PROBE_PROPERTY:-}" ]]; then
+    if [[ "${GITHUB_EVENT_NAME:-}" != workflow_dispatch || "${KANI_MANUAL_PROBE:-false}" != true ]]; then
+        echo "Property probes require an explicitly selected manual diagnostic run." >&2
+        exit 2
+    fi
+    case "$KANI_PROBE_PROPERTY" in
+        num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_base.1|num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_step.1)
+            kani_cbmc_args+=(--property "$KANI_PROBE_PROPERTY") ;;
+        *) echo "Unknown diagnostic loop property." >&2; exit 2 ;;
+    esac
+fi
 if [[ "${KANI_SYMEX_CACHE_DEREFERENCES:-false}" == true ]]; then
     kani_cbmc_args+=(--symex-cache-dereferences)
 fi

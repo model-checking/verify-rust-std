@@ -12,6 +12,11 @@ on:
         type: choice
         options: [both, ubuntu-latest, macos-latest]
         default: both
+      grisu_probe:
+        description: Optional diagnostic property for explicitly selected Grisu shortest groups
+        type: choice
+        options: [none, entry, step]
+        default: none
   merge_group:
   pull_request:
     branches: [ main ]
@@ -164,8 +169,9 @@ jobs:
         env:
           SELECTED_PROOF_GROUPS: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups || '' }}
           SELECTED_PROOF_PLATFORM: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && inputs.proof_platform || 'both' }}
+          SELECTED_GRISU_PROBE: ${{ github.event_name == 'workflow_dispatch' && inputs.grisu_probe || 'none' }}
         run: |
-          matrix_args=(--matrix)
+          matrix_args=(--matrix --matrix-grisu-probe "$SELECTED_GRISU_PROBE")
           if [[ -n "$SELECTED_PROOF_GROUPS" ]]; then
             matrix_args+=(--matrix-groups "$SELECTED_PROOF_GROUPS" --matrix-platform "$SELECTED_PROOF_PLATFORM")
           fi
@@ -188,6 +194,8 @@ jobs:
       KANI_FLAT_SMT_CVC5: ${{ matrix.group.backend == 'cvc5' && 'true' || 'false' }}
       KANI_HARNESS_TIMEOUT: ${{ matrix.group.timeout_minutes }}m
       KANI_CACHED_MULTIPLICATION: ${{ contains(join(matrix.group.harnesses, ' '), '::cached_mul_pow5_') }}
+      KANI_MANUAL_PROBE: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && matrix.group.probe_property != '' }}
+      KANI_PROBE_PROPERTY: ${{ matrix.group.probe_property || '' }}
       KANI_OBJECT_BITS: ${{ contains(join(matrix.group.harnesses, ' '), '::cached_mul_pow5_') && '16' || ((matrix.group.catalog_name || matrix.group.name) == 'dragon-exact-loop-frame' || startsWith(matrix.group.catalog_name || matrix.group.name, 'grisu-shortest-')) && '10' || (matrix.group.kind == 'contract' || matrix.group.kind == 'equivalence') && '12' || '14' }}
       KANI_SYMEX_CACHE_DEREFERENCES: ${{ (matrix.group.backend == 'cvc5' || matrix.group.kind == 'probe' || startsWith(matrix.group.catalog_name || matrix.group.name, 'bigint-shift-equivalence-') || startsWith(matrix.group.catalog_name || matrix.group.name, 'grisu-')) && 'true' || 'false' }}
       # Dragon's fixed limb indices can use the default array field splitting.

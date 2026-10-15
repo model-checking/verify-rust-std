@@ -160,8 +160,12 @@ def remaining_harnesses(inventory):
     return [harness for harness in listed if harness not in dedicated]
 
 
-def proof_matrix(selected_groups=None, pointer_width=None, platform="both"):
+def proof_matrix(selected_groups=None, pointer_width=None, platform="both", grisu_probe="none"):
     groups = proof_groups(pointer_width)
+    if grisu_probe not in ("none", "entry", "step"):
+        raise ValueError("Unknown Grisu probe: " + str(grisu_probe))
+    if grisu_probe != "none" and selected_groups is None:
+        raise ValueError("Grisu probes require explicitly selected manual proof groups")
     if platform != "both" and platform not in OPERATING_SYSTEMS:
         raise ValueError("Unknown proof platform: " + str(platform))
     if platform != "both" and selected_groups is None:
@@ -180,6 +184,15 @@ def proof_matrix(selected_groups=None, pointer_width=None, platform="both"):
             raise ValueError("Unknown proof groups: " + ", ".join(sorted(unknown)))
         groups = [dict(group, name="manual-" + group["name"], catalog_name=group["name"])
                   for group in groups if group["name"] in selected]
+        if grisu_probe != "none":
+            for group in groups:
+                if not (group["catalog_name"].startswith("grisu-shortest-")
+                        and group["kind"].startswith("generator-")):
+                    raise ValueError("Grisu probes require shortest generator groups")
+                phase = "base" if grisu_probe == "entry" else "step"
+                group.update(name=f"probe-{grisu_probe}-" + group["catalog_name"],
+                             probe_property=f"num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_{phase}.1",
+                             timeout_minutes=3)
     return {"os": OPERATING_SYSTEMS if platform == "both" else [platform], "group": groups}
 
 
@@ -203,6 +216,8 @@ def main():
                         help="Select a platform only for explicitly selected manual groups")
     parser.add_argument("--backend", choices=["native", "cvc5"],
                         help="Select one backend's harnesses within a proof group")
+    parser.add_argument("--matrix-grisu-probe", choices=["none", "entry", "step"], default="none",
+                        help="Diagnose one loop property in selected manual Grisu groups")
     args = parser.parse_args()
     if args.matrix_groups is not None and not args.matrix:
         parser.error("--matrix-groups requires --matrix")
@@ -210,10 +225,13 @@ def main():
         parser.error("--matrix-platform requires --matrix")
     if args.backend is not None and not args.group:
         parser.error("--backend requires --group")
+    if args.matrix_grisu_probe != "none" and not args.matrix:
+        parser.error("--matrix-grisu-probe requires --matrix")
     if args.matrix:
         try:
             selected = json.loads(args.matrix_groups) if args.matrix_groups is not None else None
-            matrix = proof_matrix(selected, platform=args.matrix_platform)
+            matrix = proof_matrix(selected, platform=args.matrix_platform,
+                                  grisu_probe=args.matrix_grisu_probe)
         except (ValueError, TypeError) as error:
             parser.error(str(error))
         print(json.dumps(matrix, separators=(",", ":")))

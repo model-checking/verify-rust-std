@@ -44,3 +44,21 @@ touch "$build_dir/target/kani/lib/libkani.rlib"
 rm -rf -- "$build_dir/target"
 reject_reuse
 echo "Kani runtime reuse tests passed."
+
+probe_property=num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_step.1
+if (export GITHUB_EVENT_NAME=pull_request KANI_MANUAL_PROBE=false KANI_PROBE_PROPERTY="$probe_property";
+    source scripts/run-kani.sh --run list) >/dev/null 2>&1; then
+    echo "Automatic property filtering was accepted" >&2
+    exit 1
+fi
+(
+    export GITHUB_EVENT_NAME=workflow_dispatch KANI_MANUAL_PROBE=true KANI_PROBE_PROPERTY="$probe_property"
+    source scripts/run-kani.sh --run list
+    [[ " ${kani_cbmc_args[*]} " == *" --property $probe_property "* ]]
+)
+if (export GITHUB_EVENT_NAME=workflow_dispatch KANI_MANUAL_PROBE=true KANI_PROBE_PROPERTY=unknown;
+    source scripts/run-kani.sh --run list) >/dev/null 2>&1; then
+    echo "Unknown diagnostic property was accepted" >&2
+    exit 1
+fi
+echo "Manual property probe guards passed."

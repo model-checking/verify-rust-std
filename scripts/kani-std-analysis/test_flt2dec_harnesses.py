@@ -45,6 +45,31 @@ class Flt2decHarnessesTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             proof_matrix(names, platform="windows-latest")
 
+    def test_loop_probes_have_distinct_names_and_keep_the_selected_harnesses(self):
+        name = "grisu-shortest-f32-00-01"
+        original = next(group for group in self.groups if group["name"] == name)
+        for probe, phase in (("entry", "base"), ("step", "step")):
+            matrix = proof_matrix([name], grisu_probe=probe)
+            group, = matrix["group"]
+            with self.subTest(probe=probe):
+                self.assertEqual(group["name"], f"probe-{probe}-{name}")
+                self.assertEqual(group["catalog_name"], name)
+                self.assertEqual(group["harnesses"], original["harnesses"])
+                self.assertEqual(group["timeout_minutes"], 3)
+                self.assertEqual(group["probe_property"],
+                                 "num::imp::flt2dec::strategy::grisu::generate_shortest."
+                                 f"loop_invariant_{phase}.1")
+                self.assertEqual(matrix["os"], OPERATING_SYSTEMS)
+        self.assertTrue(all("probe_property" not in group for group in proof_matrix()["group"]))
+
+    def test_loop_probes_reject_automatic_and_unrelated_groups(self):
+        for probe in ("entry", "step", "unknown"):
+            with self.subTest(probe=probe), self.assertRaises(ValueError):
+                proof_matrix(grisu_probe=probe)
+        for name in ("dragon-exact-loop-frame", "grisu-shortest-scaling-contract-00-03"):
+            with self.subTest(group=name), self.assertRaises(ValueError):
+                proof_matrix([name], grisu_probe="entry")
+
     def setUp(self):
         self.groups = proof_groups()
         self.dedicated = [harness for group in self.groups for harness in group["harnesses"]]
