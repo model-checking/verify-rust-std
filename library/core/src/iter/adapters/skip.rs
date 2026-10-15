@@ -162,7 +162,8 @@ where
     }
 
     #[doc(hidden)]
-    #[requires(idx + self.n < self.iter.size_hint().0)]
+    // Express the translated index bound without overflowing in the contract.
+    #[requires(idx < self.iter.size_hint().0.saturating_sub(self.n))]
     #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item
     where
@@ -180,6 +181,18 @@ where
         //   before something is written into the storage used by the prefix
         unsafe {
             if Self::MAY_HAVE_SIDE_EFFECT && idx == 0 {
+                #[cfg(kani)]
+                let inner_size_hint = self.iter.size_hint();
+                // The outer precondition and `idx == 0` imply `self.n < inner_size_hint.0`.
+                // Random access may mutate the inner iterator, but it must preserve its size.
+                #[cfg_attr(
+                    kani,
+                    kani::loop_invariant(
+                        kani::index <= self.n
+                            && self.n < inner_size_hint.0
+                            && self.iter.size_hint() == inner_size_hint
+                    )
+                )]
                 for skipped_idx in 0..self.n {
                     drop(try_get_unchecked(&mut self.iter, skipped_idx));
                 }
@@ -293,3 +306,95 @@ where
 // I: TrustedLen would not.
 #[unstable(feature = "trusted_len", issue = "37572")]
 unsafe impl<I> TrustedLen for Skip<I> where I: Iterator + TrustedRandomAccess {}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Harnesses for `__iterator_get_unchecked` for Skip.
+    #[kani::proof_for_contract(
+        <Skip<crate::ops::Range<usize>> as crate::iter::Iterator>::__iterator_get_unchecked
+    )]
+    pub fn harness_skip_get_unchecked_unbounded() {
+        let len: usize = kani::any();
+        let n: usize = kani::any();
+        let idx: usize = kani::any();
+        let mut iter = Skip::new(0..len, n);
+        let _ = unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
+        let remaining = len - n;
+        kani::cover(n == 0 && idx == 0, "first element without a skipped prefix");
+        kani::cover(n > 0 && idx == 0, "first element after a skipped prefix");
+        kani::cover(idx > 0 && idx < remaining - 1, "interior element");
+        kani::cover(idx == remaining - 1, "last element");
+        kani::cover(
+            len == usize::MAX && n == 0 && idx == len - 1,
+            "last element at the maximum logical length",
+        );
+    }
+
+    macro_rules! generate_skip_get_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(
+                            <Skip<
+                                crate::iter::Map<crate::ops::Range<usize>, fn(usize) -> $ty>,
+                            > as crate::iter::Iterator>::__iterator_get_unchecked
+                        )]
+            pub fn $name() {
+                let len: usize = kani::any();
+                let n: usize = kani::any();
+                let idx: usize = kani::any();
+                let value: $ty = kani::any();
+                let source = (0..len).map(move |_| value);
+                let mut iter = Skip::new(source, n);
+                let _ = unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
+                let remaining = len - n;
+                kani::cover(n == 0 && idx == 0, "empty skipped prefix");
+                kani::cover(n > 0 && idx == 0, "nonempty skipped prefix");
+                kani::cover(n > 0 && idx > 0, "access without evaluating the prefix");
+                kani::cover(idx == remaining - 1, "last element");
+                kani::cover(
+                    len == usize::MAX && n == usize::MAX - 1 && idx == 0,
+                    "maximum skipped prefix",
+                );
+            }
+        };
+    }
+
+    // Use a regular proof because proof_for_contract cannot name the
+    // anonymous closure type used by Map. Mirror the target's precondition.
+    #[kani::proof]
+    pub fn harness_skip_get_unchecked_side_effect() {
+        let len: usize = kani::any();
+        let n: usize = kani::any();
+        let idx: usize = kani::any();
+        let mut calls: usize = kani::any();
+        let source = (0..usize::MAX).map(|position| position);
+        let mut iter = Skip::new(source, n);
+        // Mirror the target's #[requires] contract.
+        kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "the mirrored precondition is satisfiable");
+        let _ = unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
+        kani::cover(n == 0 && idx == 0, "empty skipped prefix");
+        kani::cover(n > 0 && idx == 0, "stateful nonempty skipped prefix");
+        kani::cover(n > 0 && idx > 0, "stateful access without evaluating the prefix");
+        kani::cover(
+            len == usize::MAX && n == usize::MAX - 1 && idx == 0,
+            "stateful maximum skipped prefix",
+        );
+    }
+
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_i8, i8);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_i16, i16);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_i32, i32);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_i64, i64);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_i128, i128);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_u8, u8);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_u16, u16);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_u32, u32);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_u64, u64);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_u128, u128);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_array, [u8; 4]);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_bool, bool);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_unit, ());
+}

@@ -511,3 +511,49 @@ fn and_then_or_clear<T, U>(opt: &mut Option<T>, f: impl FnOnce(&mut T) -> Option
     }
     x
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Harnesses for `__iterator_get_unchecked` for Fuse.
+    macro_rules! generate_fuse_get_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(
+                            <Fuse<
+                                crate::iter::Map<crate::ops::Range<usize>, fn(usize) -> $ty>,
+                            > as crate::iter::Iterator>::__iterator_get_unchecked
+                        )]
+            pub fn $name() {
+                let len: usize = kani::any();
+                let idx: usize = kani::any();
+                let value: $ty = kani::any();
+                let source = (0..len).map(move |_| value);
+                let mut iter = Fuse { iter: if kani::any() { Some(source) } else { None } };
+                let _ = unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
+                kani::cover(idx == 0, "first element");
+                kani::cover(idx > 0 && idx < len - 1, "interior element");
+                kani::cover(idx == len - 1, "last element");
+                kani::cover(
+                    len == usize::MAX && idx == len - 1,
+                    "last element at the maximum logical length",
+                );
+            }
+        };
+    }
+
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_i8, i8);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_i16, i16);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_i32, i32);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_i64, i64);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_i128, i128);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_u8, u8);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_u16, u16);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_u32, u32);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_u64, u64);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_u128, u128);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_array, [u8; 4]);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_bool, bool);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_unit, ());
+}
