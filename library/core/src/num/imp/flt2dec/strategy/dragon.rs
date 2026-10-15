@@ -1772,6 +1772,64 @@ pub mod dragon_verify {
         (size_40, guide_size_40, 40, 0, 41),
     );
 
+    // The cached products run the real multiplication and the model in
+    // lockstep at each `carrying_mul_add` step. The real product runs first:
+    // its call k records the arguments and returns arbitrary outputs. The
+    // model runs second: its call k must pass the arguments of real call k,
+    // and it returns the outputs of real call k. Thus the proof holds for
+    // every function in place of `carrying_mul_add`, and the real one is one
+    // of them. The model makes the same calls in the same order, so the log
+    // replaces a comparison of two multiplier circuits. One product makes at
+    // most `aa.len() * bb.len()` calls, with `aa.len() + bb.len() <= KANI_LIMBS`.
+    const LOCKSTEP_CALLS: usize = KANI_LIMBS * KANI_LIMBS / 4;
+
+    struct Lockstep {
+        replay: bool,
+        recorded: usize,
+        replayed: usize,
+        arguments: [(Digit, Digit, Digit, Digit); LOCKSTEP_CALLS],
+        outputs: [(Digit, Digit); LOCKSTEP_CALLS],
+    }
+
+    static mut LOCKSTEP: Lockstep = Lockstep {
+        replay: false,
+        recorded: 0,
+        replayed: 0,
+        arguments: [(0, 0, 0, 0); LOCKSTEP_CALLS],
+        outputs: [(0, 0); LOCKSTEP_CALLS],
+    };
+
+    fn lockstep() -> &'static mut Lockstep {
+        // SAFETY: a harness runs on one thread, and each caller stops using
+        // the reference before the next call to this function.
+        unsafe { &mut *(&raw mut LOCKSTEP) }
+    }
+
+    fn carrying_mul_add_lockstep(
+        digit: Digit,
+        multiplier: Digit,
+        carry: Digit,
+        addend: Digit,
+    ) -> (Digit, Digit) {
+        let state = lockstep();
+        let arguments = (digit, multiplier, carry, addend);
+        if state.replay {
+            let call = state.replayed;
+            assert!(call < state.recorded);
+            assert!(state.arguments[call] == arguments);
+            state.replayed = call + 1;
+            state.outputs[call]
+        } else {
+            let call = state.recorded;
+            assert!(call < LOCKSTEP_CALLS);
+            let outputs: (Digit, Digit) = (kani::any(), kani::any());
+            state.arguments[call] = arguments;
+            state.outputs[call] = outputs;
+            state.recorded = call + 1;
+            outputs
+        }
+    }
+
     fn check_cached_mul_digits_model_agrees<const SIZE: usize>(digits: &[Digit]) {
         assert!(SIZE + digits.len() <= KANI_LIMBS);
         let mut source = Big::kani_with_arbitrary_limbs(SIZE);
@@ -1781,7 +1839,10 @@ pub mod dragon_verify {
         let actual_start = &mut actual as *mut Big;
         let modeled_start = &mut modeled as *mut Big;
         assert!(actual.mul_digits(digits) as *mut Big == actual_start);
+        lockstep().replay = true;
         assert!(modeled.kani_mul_digits_model(digits) as *mut Big == modeled_start);
+        let state = lockstep();
+        assert!(state.replayed == state.recorded);
         assert!(actual.kani_same_storage(&modeled));
         if SIZE == 0 {
             kani::cover(true, "cached multiplication accepts empty storage");
@@ -1798,8 +1859,8 @@ pub mod dragon_verify {
             #[kani::unwind(41)]
             // The patched CBMC does not link CaDiCaL, and MiniSAT times out on these products.
             #[kani::solver(kissat)]
-            #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
-            #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul_add, carrying_mul_add_model))]
+            #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_lockstep))]
+            #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul_add, carrying_mul_add_lockstep))]
             fn $name() {
                 check_cached_mul_digits_model_agrees::<$size>(&$digits);
             }
