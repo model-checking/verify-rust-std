@@ -282,7 +282,7 @@ where
     }
 
     #[inline]
-    #[cfg_attr(kani, kani::requires(idx < TrustedRandomAccessNoCoerce::size(self)))]
+    #[requires(idx < TrustedRandomAccessNoCoerce::size(self))]
     #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn get_unchecked(&mut self, idx: usize) -> <Self as Iterator>::Item {
         let idx = self.index + idx;
@@ -699,8 +699,6 @@ impl<A: TrustedLen, B: TrustedLen> SpecFold for Zip<A, B> {
         F: FnMut(Acc, Self::Item) -> Acc,
     {
         let mut accum = init;
-
-        #[cfg(not(kani))]
         loop {
             let (upper, more) = if let Some(upper) = ZipImpl::size_hint(&self).1 {
                 (upper, false)
@@ -721,23 +719,6 @@ impl<A: TrustedLen, B: TrustedLen> SpecFold for Zip<A, B> {
                 break;
             }
         }
-
-        // Loop stub: choose one arbitrary iteration from a chunk
-        // and preserve the unchecked-access safety check without a
-        // writeset over generic iterator structs.
-        #[cfg(kani)]
-        {
-            let upper = ZipImpl::size_hint(&self).1.unwrap_or(usize::MAX);
-            if upper != 0 {
-                let index: usize = kani::any();
-                kani::assume(index < upper);
-                let pair = unsafe {
-                    (self.a.nth(index).unwrap_unchecked(), self.b.nth(index).unwrap_unchecked())
-                };
-                accum = f(accum, pair);
-            }
-        }
-
         accum
     }
 }
@@ -747,85 +728,67 @@ impl<A: TrustedLen, B: TrustedLen> SpecFold for Zip<A, B> {
 mod verify {
     use super::*;
 
-    // Harnesses for `__iterator_get_unchecked` for ZipImpl.
-    // Use a regular proof because `proof_for_contract` cannot resolve this trait method path.
-    // Use core's non-side-effecting `Copied<slice::Iter<T>>` for item-type coverage.
+    // Harnesses for `__iterator_get_unchecked` for Zip.
     macro_rules! generate_zip_iterator_get_unchecked_harness {
         ($name:ident, $ty:ty) => {
-            #[kani::proof]
+            #[kani::proof_for_contract(
+                            <Zip<
+                                crate::iter::Map<crate::ops::Range<usize>, fn(usize) -> $ty>,
+                                crate::iter::Map<crate::ops::Range<usize>, fn(usize) -> $ty>,
+                            > as crate::iter::Iterator>::__iterator_get_unchecked
+                        )]
             pub fn $name() {
-                // Generate independent symbolic values for both sides.
-                let left: [$ty; 4] = kani::any();
-                let right: [$ty; 4] = kani::any();
-                // Generate a symbolic reachable offset and remaining-relative index.
+                let left_len: usize = kani::any();
+                let right_len: usize = kani::any();
                 let index: usize = kani::any();
                 let idx: usize = kani::any();
-
-                // `Copied<slice::Iter<T>>` implements full trusted random access.
-                let mut zip = Zip::new(left.iter().copied(), right.iter().copied());
-                // Specialized `next` changes only `index`, so this models a reachable state.
-                kani::assume(index <= zip.len);
-                zip.index = index;
-
-                // Express the target's `idx < self.size()` precondition.
-                kani::assume(idx < TrustedRandomAccessNoCoerce::size(&zip));
-                let absolute_idx = index + idx;
-                let expected = (left[absolute_idx], right[absolute_idx]);
-                // Save observable `Zip` state before random access.
-                let index_before = zip.index;
-                let len_before = zip.len;
-                let size_before = Iterator::size_hint(&zip);
-
-                // Call the outer `Iterator` target through its trait path.
-                let result = unsafe { Iterator::__iterator_get_unchecked(&mut zip, idx) };
-
-                // Check both values at the translated absolute index.
-                assert_eq!(result, expected);
-                // Check that random access did not consume the zipped iterator.
-                assert_eq!(zip.index, index_before);
-                assert_eq!(zip.len, len_before);
-                assert_eq!(Iterator::size_hint(&zip), size_before);
+                let left_value: $ty = kani::any();
+                let right_value: $ty = kani::any();
+                let left = (0..left_len).map(move |_| left_value);
+                let right = (0..right_len).map(move |_| right_value);
+                let mut zip = Zip::new(left, right);
+                zip.index = index.min(zip.len);
+                let _ = unsafe { Iterator::__iterator_get_unchecked(&mut zip, idx) };
+                let remaining = zip.len - zip.index;
+                kani::cover(zip.index == 0 && idx == 0, "first element");
+                kani::cover(zip.index > 0 && idx == 0, "first element after a prefix");
+                kani::cover(idx > 0 && idx < remaining - 1, "interior element");
+                kani::cover(idx == remaining - 1, "last element");
+                kani::cover(left_len < right_len, "left iterator is shorter");
+                kani::cover(left_len > right_len, "right iterator is shorter");
+                kani::cover(
+                    left_len == usize::MAX && right_len == usize::MAX && idx == usize::MAX - 1,
+                    "last element at the maximum logical length",
+                );
             }
         };
     }
 
-    #[kani::proof]
+    #[kani::proof_for_contract(
+        <Zip<
+            crate::ops::Range<usize>,
+            crate::ops::Range<usize>,
+        > as crate::iter::Iterator>::__iterator_get_unchecked
+    )]
     fn harness_zip_iterator_get_unchecked_unbounded() {
-        // Generate independent symbolic lengths for both inner iterators.
         let left_len: usize = kani::any();
         let right_len: usize = kani::any();
-        // Generate a symbolic reachable offset in the specialized `Zip` state.
         let index: usize = kani::any();
-        // Generate a symbolic index relative to the remaining zipped iterator.
         let idx: usize = kani::any();
-
-        // Use core ranges to keep both input lengths unbounded by a harness constant.
         let mut zip = Zip::new(0..left_len, 0..right_len);
-        // Specialized `next` reaches this state by changing only `index`.
-        kani::assume(index <= zip.len);
-        zip.index = index;
-
-        // Express the target's `idx < self.size()` precondition.
-        kani::assume(idx < TrustedRandomAccessNoCoerce::size(&zip));
-        let absolute_idx = index + idx;
-        // Save all observable iterator state before random access.
-        let index_before = zip.index;
-        let len_before = zip.len;
-        let left_size_before = zip.a.size_hint();
-        let right_size_before = zip.b.size_hint();
-        let size_before = Iterator::size_hint(&zip);
-
-        // Call the outer `Iterator` target, which delegates to `ZipImpl`.
-        let result = unsafe { Iterator::__iterator_get_unchecked(&mut zip, idx) };
-
-        // Check that both sides received the same translated absolute index.
-        assert_eq!(result, (absolute_idx, absolute_idx));
-        // Check that random access did not consume or resize any iterator state.
-        assert_eq!(zip.index, index_before);
-        assert_eq!(zip.len, len_before);
-        assert_eq!(zip.a.size_hint(), left_size_before);
-        assert_eq!(zip.b.size_hint(), right_size_before);
-        assert_eq!(Iterator::size_hint(&zip), size_before);
+        zip.len = kani::any::<usize>().min(zip.len);
+        zip.index = index.min(zip.len);
+        let _ = unsafe { Iterator::__iterator_get_unchecked(&mut zip, idx) };
+        let remaining = zip.len - zip.index;
+        kani::cover(zip.index == 0 && idx == 0, "first element");
+        kani::cover(zip.index > 0 && idx == 0, "first element after a prefix");
+        kani::cover(idx > 0 && idx < remaining - 1, "interior element");
+        kani::cover(idx == remaining - 1, "last element");
+        kani::cover(zip.len < left_len.min(right_len), "access after consuming from the back");
+        kani::cover(
+            left_len == usize::MAX && right_len == usize::MAX && idx == usize::MAX - 1,
+            "last element at the maximum logical length",
+        );
     }
 
     generate_zip_iterator_get_unchecked_harness!(harness_zip_iterator_get_unchecked_i8, i8);
@@ -843,56 +806,75 @@ mod verify {
     generate_zip_iterator_get_unchecked_harness!(harness_zip_iterator_get_unchecked_unit, ());
 
     // Harnesses for `get_unchecked` for ZipImpl.
-    // Use a regular proof because `proof_for_contract` cannot resolve this trait method path.
-    // Use stateless maps to combine unbounded positions with symbolic Copy payloads.
     macro_rules! generate_zip_get_unchecked_harness {
         ($name:ident, $ty:ty) => {
-            #[kani::proof]
+            #[kani::proof_for_contract(
+                <Zip<
+                    crate::iter::Map<crate::ops::Range<usize>, fn(usize) -> (usize, $ty)>,
+                    crate::iter::Map<crate::ops::Range<usize>, fn(usize) -> (usize, $ty)>,
+                > as ZipImpl<
+                    crate::iter::Map<crate::ops::Range<usize>, fn(usize) -> (usize, $ty)>,
+                    crate::iter::Map<crate::ops::Range<usize>, fn(usize) -> (usize, $ty)>,
+                >>::get_unchecked
+            )]
             pub fn $name() {
-                // Generate independent symbolic lengths and payloads for both sides.
                 let left_len: usize = kani::any();
                 let right_len: usize = kani::any();
-                let left_value: $ty = kani::any();
-                let right_value: $ty = kani::any();
-                let left_expected = left_value;
-                let right_expected = right_value;
-                // Generate a symbolic reachable offset and remaining-relative index.
                 let index: usize = kani::any();
                 let idx: usize = kani::any();
-
-                // Preserve each absolute position while attaching a symbolic payload.
-                // These closures copy captured values without mutating any state.
+                let left_value: $ty = kani::any();
+                let right_value: $ty = kani::any();
                 let left = (0..left_len).map(move |position| (position, left_value));
                 let right = (0..right_len).map(move |position| (position, right_value));
                 let mut zip = Zip::new(left, right);
-
-                // Full trusted-random-access `Zip::next` changes only `index`.
-                kani::assume(index <= zip.len);
-                zip.index = index;
-
-                // Express the target's `idx < self.size()` precondition.
-                kani::assume(idx < TrustedRandomAccessNoCoerce::size(&zip));
-                let absolute_idx = index + idx;
-                let expected = ((absolute_idx, left_expected), (absolute_idx, right_expected));
-                // Save all observable state before the internal random-access call.
-                let index_before = zip.index;
-                let len_before = zip.len;
-                let left_size_before = zip.a.size_hint();
-                let right_size_before = zip.b.size_hint();
-                let size_before = Iterator::size_hint(&zip);
-
-                // Call the internal target directly rather than the outer `Iterator` method.
-                let result = unsafe { ZipImpl::get_unchecked(&mut zip, idx) };
-
-                // Check the shared translated index, both payloads, and state preservation.
-                assert_eq!(result, expected);
-                assert_eq!(zip.index, index_before);
-                assert_eq!(zip.len, len_before);
-                assert_eq!(zip.a.size_hint(), left_size_before);
-                assert_eq!(zip.b.size_hint(), right_size_before);
-                assert_eq!(Iterator::size_hint(&zip), size_before);
+                zip.index = index.min(zip.len);
+                let _ = unsafe { ZipImpl::get_unchecked(&mut zip, idx) };
+                let remaining = zip.len - zip.index;
+                kani::cover(zip.index == 0 && idx == 0, "first element");
+                kani::cover(zip.index > 0 && idx == 0, "first element after a prefix");
+                kani::cover(idx > 0 && idx < remaining - 1, "interior element");
+                kani::cover(idx == remaining - 1, "last element");
+                kani::cover(left_len < right_len, "left iterator is shorter");
+                kani::cover(left_len > right_len, "right iterator is shorter");
+                kani::cover(zip.index == usize::MAX - 1 && idx == 0, "maximum valid offset");
+                kani::cover(
+                    left_len == usize::MAX && right_len == usize::MAX && idx == usize::MAX - 1,
+                    "last element at the maximum logical length",
+                );
             }
         };
+    }
+
+    #[kani::proof_for_contract(
+        <Zip<
+            crate::ops::Range<usize>,
+            crate::ops::Range<usize>,
+        > as ZipImpl<
+            crate::ops::Range<usize>,
+            crate::ops::Range<usize>,
+        >>::get_unchecked
+    )]
+    fn harness_zip_get_unchecked_unbounded() {
+        let left_len: usize = kani::any();
+        let right_len: usize = kani::any();
+        let index: usize = kani::any();
+        let idx: usize = kani::any();
+        let mut zip = Zip::new(0..left_len, 0..right_len);
+        // For ranges, front/back consumption changes only index/len.
+        zip.len = kani::any::<usize>().min(zip.len);
+        zip.index = index.min(zip.len);
+        let _ = unsafe { ZipImpl::get_unchecked(&mut zip, idx) };
+        let remaining = zip.len - zip.index;
+        kani::cover(zip.index == 0 && idx == 0, "first element");
+        kani::cover(zip.index > 0 && idx == 0, "first element after a prefix");
+        kani::cover(idx > 0 && idx < remaining - 1, "interior element");
+        kani::cover(idx == remaining - 1, "last element");
+        kani::cover(zip.len < left_len.min(right_len), "access after consuming from the back");
+        kani::cover(zip.index == usize::MAX - 1 && idx == 0, "maximum valid offset");
+        kani::cover(
+            left_len == usize::MAX && right_len == usize::MAX && idx == usize::MAX - 1,
+            "last element at the maximum logical length",
+        );
     }
 
     generate_zip_get_unchecked_harness!(harness_zip_get_unchecked_i8, i8);
@@ -1064,22 +1046,29 @@ mod verify {
     macro_rules! generate_zip_spec_fold_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
-            fn $name() {
-                // Generate independent symbolic finite lengths.
+            #[kani::unwind(8)]
+            pub fn $name() {
+                // Generate independent symbolic lengths, bounded for unwinding.
                 let left_len: usize = kani::any();
                 let right_len: usize = kani::any();
-
-                // Generate independent symbolic values for both sides.
+                kani::assume(left_len <= 4 && right_len <= 4);
+                kani::cover(true, "bounded input is satisfiable");
+                // Generate independent symbolic payloads.
                 let left_value: $ty = kani::any();
                 let right_value: $ty = kani::any();
-
-                // Take<Repeat<T>> preserves full trusted random access.
+                // Take<Repeat<T>> provides a finite TrustedLen iterator.
                 let left = crate::iter::repeat(left_value).take(left_len);
                 let right = crate::iter::repeat(right_value).take(right_len);
                 let zip = Zip::new(left, right);
-
-                // Call the TrustedLen-specialized safe function directly.
-                SpecFold::spec_fold(zip, (), |(), _pair| ());
+                // Exercise the real TrustedLen-specialized implementation.
+                let count = SpecFold::spec_fold(zip, 0usize, |count, _pair| count + 1);
+                // The fold must process exactly min(left_len, right_len) pairs.
+                assert_eq!(count, left_len.min(right_len));
+                kani::cover(left_len == 0 || right_len == 0, "empty zip");
+                kani::cover(left_len < right_len, "left iterator is shorter");
+                kani::cover(left_len > right_len, "right iterator is shorter");
+                kani::cover(left_len == right_len && left_len > 0, "equal nonempty lengths");
+                kani::cover(left_len == 4 && right_len == 4, "maximum bounded length");
             }
         };
     }

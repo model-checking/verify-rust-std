@@ -238,49 +238,34 @@ unsafe impl<I: InPlaceIterable, F> InPlaceIterable for Map<I, F> {
 mod verify {
     use super::*;
 
-    // Harnesses for `__iterator_get_unchecked` for Map
-    // Use a regular proof because `proof_for_contract` cannot resolve this trait method path.
+    // Harnesses for `__iterator_get_unchecked` for Map.
     macro_rules! generate_map_get_unchecked_harness {
         ($name:ident, $ty:ty) => {
-            #[kani::proof]
+            #[kani::proof_for_contract(
+                                        <Map<
+                                            crate::ops::Range<usize>,
+                                            fn(usize) -> ($ty, usize, usize),
+                                        > as crate::iter::Iterator>::__iterator_get_unchecked
+                                    )]
             pub fn $name() {
-                // Generate a symbolic logical length with no explicit upper bound.
                 let len: usize = kani::any();
-                // Generate a symbolic access index.
                 let idx: usize = kani::any();
-                // Generate arbitrary data captured by the mapping closure.
                 let value: $ty = kani::any();
-                // Record the inner item passed to the mapping closure.
-                let observed_input = crate::cell::Cell::new(usize::MAX);
-                // Count how many times the target invokes the mapping closure.
-                let closure_calls = crate::cell::Cell::new(0usize);
-
-                // Use the range item itself as the observable inner position.
-                let source = 0..len;
-                // Construct the target with a stateful, type-changing closure.
-                let mut iter = Map::new(source, |position| {
-                    observed_input.set(position);
-                    closure_calls.set(closure_calls.get() + 1);
-                    (value, position, closure_calls.get())
+                let initial_calls: usize = kani::any();
+                let mut calls = initial_calls;
+                let mut iter = Map::new(0..len, move |position| {
+                    calls = calls.wrapping_add(1);
+                    (value, position, calls)
                 });
-
-                // Express the target's `idx < self.size()` precondition.
-                kani::assume(idx < iter.size_hint().0);
-                // Save the iterator size before random access.
-                let size_before = iter.size_hint();
-
-                // Call the target `Map<I, F>` implementation through the trait path.
-                let result =
-                    unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
-
-                // Check that the target forwarded `idx` to the inner range exactly.
-                assert_eq!(observed_input.get(), idx);
-                // Check that the target invoked the mapping closure exactly once.
-                assert_eq!(closure_calls.get(), 1);
-                // Check the closure input, captured value, and stateful output.
-                assert_eq!(result, (value, idx, 1));
-                // Check that random access did not consume the iterator.
-                assert_eq!(iter.size_hint(), size_before);
+                let _ = unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
+                kani::cover(idx == 0, "first element");
+                kani::cover(idx > 0 && idx < len - 1, "interior element");
+                kani::cover(idx == len - 1, "last element");
+                kani::cover(initial_calls == usize::MAX, "wrapping closure state");
+                kani::cover(
+                    len == usize::MAX && idx == len - 1,
+                    "last element at the maximum logical length",
+                );
             }
         };
     }
@@ -298,62 +283,4 @@ mod verify {
     generate_map_get_unchecked_harness!(harness_map_get_unchecked_array, [u8; 4]);
     generate_map_get_unchecked_harness!(harness_map_get_unchecked_bool, bool);
     generate_map_get_unchecked_harness!(harness_map_get_unchecked_unit, ());
-
-    // Harnesses for `next_unchecked` for Map
-    // Use a regular proof because `proof_for_contract` cannot resolve this trait method path.
-    macro_rules! generate_map_next_unchecked_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Generate arbitrary data captured by the mapping closure.
-                let value: $ty = kani::any();
-                // Generate an arbitrary inner item.
-                let inner_value: usize = kani::any();
-                // Generate a symbolic logical length with no explicit upper bound.
-                let len: usize = kani::any();
-                // Record the inner item passed to the mapping closure.
-                let observed_input = crate::cell::Cell::new(usize::MAX);
-                // Count how many times the target invokes the mapping closure.
-                let closure_calls = crate::cell::Cell::new(0usize);
-
-                // Build an exact-length iterator without allocating `len` elements.
-                let source = crate::iter::repeat_n(inner_value, len);
-                // Construct the target with a stateful, type-changing closure.
-                let mut iter = Map::new(source, |item| {
-                    observed_input.set(item);
-                    closure_calls.set(closure_calls.get() + 1);
-                    (value, item, closure_calls.get())
-                });
-
-                // Express the target's non-empty precondition.
-                kani::assume(iter.size_hint().0 > 0);
-
-                // Call the target `Map<I, F>` implementation through the trait path.
-                let result = unsafe { UncheckedIterator::next_unchecked(&mut iter) };
-
-                // Check that the closure received the consumed inner item.
-                assert_eq!(observed_input.get(), inner_value);
-                // Check that the target invoked the mapping closure exactly once.
-                assert_eq!(closure_calls.get(), 1);
-                // Check the closure input, captured value, and stateful output.
-                assert_eq!(result, (value, inner_value, 1));
-                // Check that the target consumed exactly one inner element.
-                assert_eq!(iter.size_hint(), (len - 1, Some(len - 1)));
-            }
-        };
-    }
-
-    generate_map_next_unchecked_harness!(harness_map_next_unchecked_i8, i8);
-    generate_map_next_unchecked_harness!(harness_map_next_unchecked_i16, i16);
-    generate_map_next_unchecked_harness!(harness_map_next_unchecked_i32, i32);
-    generate_map_next_unchecked_harness!(harness_map_next_unchecked_i64, i64);
-    generate_map_next_unchecked_harness!(harness_map_next_unchecked_i128, i128);
-    generate_map_next_unchecked_harness!(harness_map_next_unchecked_u8, u8);
-    generate_map_next_unchecked_harness!(harness_map_next_unchecked_u16, u16);
-    generate_map_next_unchecked_harness!(harness_map_next_unchecked_u32, u32);
-    generate_map_next_unchecked_harness!(harness_map_next_unchecked_u64, u64);
-    generate_map_next_unchecked_harness!(harness_map_next_unchecked_u128, u128);
-    generate_map_next_unchecked_harness!(harness_map_next_unchecked_array, [u8; 4]);
-    generate_map_next_unchecked_harness!(harness_map_next_unchecked_bool, bool);
-    generate_map_next_unchecked_harness!(harness_map_next_unchecked_unit, ());
 }

@@ -289,20 +289,20 @@ mod verify {
     macro_rules! generate_next_back_remainder_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
+            #[kani::unwind(5)]
+            // The input length remains unbounded. Kani cannot automatically infer that
+            // `array::write` iterates at most `end % 4 <= 3` times, so `unwind(5)`
+            // bounds loop expansion, not input length; unwinding assertions ensure completeness.
             pub fn $name() {
                 // Generate an unbounded symbolic length and payload.
                 let end: usize = kani::any();
                 let value: $ty = kani::any();
-
                 // Construct a valid unbounded exact-size, double-ended iterator.
                 let source = (0..end).map(move |position| (position, value));
-
                 // The safe constructor establishes N != 0.
                 let mut chunks = ArrayChunks::<_, 4>::new(source);
-
                 // Exercise the main path, including unwrap_err_unchecked.
                 chunks.next_back_remainder();
-
                 // Exercise the existing-remainder early-return path.
                 chunks.next_back_remainder();
             }
@@ -332,13 +332,10 @@ mod verify {
                 let end: usize = kani::any();
                 let value: $ty = kani::any();
                 let init: $ty = kani::any();
-
                 // Map preserves random access while attaching the symbolic payload.
                 let source = (0..end).map(move |position| (position, value));
-
                 // The safe constructor establishes the N != 0 invariant.
                 let chunks = ArrayChunks::<_, 4>::new(source);
-
                 // Directly call the specialized safe function under test.
                 let _ = SpecFold::fold(chunks, init, |accum, _chunk| accum);
             }

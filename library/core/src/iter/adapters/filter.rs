@@ -291,4 +291,3 @@ mod verify {
     generate_next_chunk_dropless_harness!(harness_next_chunk_dropless_bool, bool);
     generate_next_chunk_dropless_harness!(harness_next_chunk_dropless_unit, ());
 }
-  

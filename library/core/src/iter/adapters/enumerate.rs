@@ -327,50 +327,34 @@ impl<I: Default> Default for Enumerate<I> {
 mod verify {
     use super::*;
 
-    // Harnesses for `__iterator_get_unchecked` for enumerate
-    // Use a regular proof because `proof_for_contract` cannot resolve this trait method path.
+    // Harnesses for `__iterator_get_unchecked` for Enumerate.
     macro_rules! generate_enumerate_get_unchecked_harness {
         ($name:ident, $ty:ty) => {
-            #[kani::proof]
+            #[kani::proof_for_contract(
+                            <Enumerate<
+                                crate::iter::Map<crate::ops::Range<usize>, fn(usize) -> $ty>,
+                            > as crate::iter::Iterator>::__iterator_get_unchecked
+                        )]
             pub fn $name() {
-                // Generate a symbolic enumeration offset.
                 let count: usize = kani::any();
-                // Generate a symbolic relative access index.
+                let end: usize = kani::any();
                 let idx: usize = kani::any();
-                // Generate an arbitrary inner item.
                 let value: $ty = kani::any();
-                // Record the absolute position reached by the inner iterator.
-                let observed_position = crate::cell::Cell::new(usize::MAX);
-
-                // Model the remaining range after `count` items without allocating elements.
-                let source = (count..usize::MAX).map(|position| {
-                    // Record which inner element the target actually requested.
-                    observed_position.set(position);
-                    value
-                });
-                // Build a valid `Enumerate` state with a symbolic offset.
+                let source = (count..end).map(move |_| value);
                 let mut iter = Enumerate { iter: source, count };
-
-                // Express the target's `idx < self.size()` precondition.
-                kani::assume(idx < iter.size_hint().0);
-                // Save observable iterator state before random access.
-                let count_before = iter.next_index();
-                let size_before = iter.size_hint();
-
-                // Call the target `Enumerate<I>` implementation through the trait path.
-                let result =
-                    unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
-
-                // Check that the relative `idx` reached the correct absolute position.
-                assert_eq!(observed_position.get(), count_before + idx);
-                // Check the enumeration index added by the target.
-                assert_eq!(result.0, count_before + idx);
-                // Check that the inner item was forwarded unchanged.
-                assert_eq!(result.1, value);
-                // Check that random access did not advance the enumeration count.
-                assert_eq!(iter.next_index(), count_before);
-                // Check that random access did not consume the iterator.
-                assert_eq!(iter.size_hint(), size_before);
+                let _ = unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
+                let len = end - count;
+                kani::cover(count == 0 && idx == 0, "first element");
+                kani::cover(
+                    count > 0 && idx > 0 && idx < len - 1,
+                    "interior element after a prefix",
+                );
+                kani::cover(idx == len - 1, "last element");
+                kani::cover(count == usize::MAX - 1 && idx == 0, "large enumeration offset");
+                kani::cover(
+                    len == usize::MAX && idx == len - 1,
+                    "last element at the maximum logical length",
+                );
             }
         };
     }

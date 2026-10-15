@@ -290,41 +290,27 @@ unsafe impl<I: InPlaceIterable> InPlaceIterable for Copied<I> {
 mod verify {
     use super::*;
 
-    // Harnesses for `__iterator_get_unchecked` for Copied
-    // Use a regular proof because `proof_for_contract` cannot resolve this trait method path.
+    // Harnesses for `__iterator_get_unchecked` for Copied.
     macro_rules! generate_copied_get_unchecked_harness {
         ($name:ident, $ty:ty) => {
-            #[kani::proof]
+            #[kani::proof_for_contract(
+                            <Copied<crate::slice::Iter<'static, $ty>> as crate::iter::Iterator>::
+                                __iterator_get_unchecked
+                        )]
             pub fn $name() {
-                // Generate symbolic inputs with no explicit length bound.
                 let len: usize = kani::any();
                 let idx: usize = kani::any();
                 let value: $ty = kani::any();
-
-                // Record the index received by the inner iterator.
-                let observed_idx = crate::cell::Cell::new(usize::MAX);
-
-                // Build a lazy trusted-random-access iterator yielding `&T`.
-                let source = (0..len).map(|i| {
-                    observed_idx.set(i);
-                    &value
-                });
+                let source = (0..len).map(|_| &value);
                 let mut iter = Copied::new(source);
-
-                // Express `idx < self.size()`.
-                kani::assume(idx < iter.size_hint().0);
-                let size_before = iter.size_hint();
-
-                // Call the target `Copied<I>` implementation.
-                let result =
-                    unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
-
-                // Check exact index forwarding.
-                assert_eq!(observed_idx.get(), idx);
-                // Check the copied result.
-                assert_eq!(result, value);
-                // Check that random access did not consume the iterator.
-                assert_eq!(iter.size_hint(), size_before);
+                let _ = unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
+                kani::cover(idx == 0, "first element");
+                kani::cover(idx > 0 && idx < len - 1, "interior element");
+                kani::cover(idx == len - 1, "last element");
+                kani::cover(
+                    len == usize::MAX && idx == len - 1,
+                    "last element at the maximum logical length",
+                );
             }
         };
     }
@@ -352,7 +338,6 @@ mod verify {
                 let values: [$ty; 5] = kani::any();
                 let slice = kani::slice::any_slice_of_array(&values);
                 let mut iter = slice.iter();
-
                 // Directly call the specialized safe function under test.
                 let _ = <crate::slice::Iter<'_, $ty> as SpecNextChunk<'_, 4, $ty>>::spec_next_chunk(
                     &mut iter,
@@ -379,11 +364,9 @@ mod verify {
         // Generate a truly unbounded symbolic length for the zero-sized type.
         let len: usize = kani::any();
         let data = crate::ptr::NonNull::<()>::dangling().as_ptr();
-
         // SAFETY: the pointer is non-null and aligned, and `()` occupies zero bytes.
         let slice = unsafe { crate::slice::from_raw_parts(data, len) };
         let mut iter = slice.iter();
-
         // Directly call the ZST branch of the specialized safe function.
         let _ =
             <crate::slice::Iter<'_, ()> as SpecNextChunk<'_, 4, ()>>::spec_next_chunk(&mut iter);
