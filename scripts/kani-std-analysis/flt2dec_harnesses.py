@@ -18,9 +18,11 @@ def proof_groups(pointer_width=None):
     limb_count = 20 if pointer_width == 64 else 40
     groups = []
 
-    def add(name, kind, harnesses, timeout_minutes, backend="native", harness_backends=None):
+    # One CI matrix holds at most 256 jobs, so generator and cached proofs form a second ("long") job.
+    def add(name, kind, harnesses, timeout_minutes, backend="native", harness_backends=None,
+            matrix_job="core"):
         group = {"name": name, "kind": kind, "harnesses": harnesses,
-                 "timeout_minutes": timeout_minutes, "backend": backend}
+                 "timeout_minutes": timeout_minutes, "backend": backend, "matrix_job": matrix_job}
         if harness_backends:
             group["harness_backends"] = harness_backends
         groups.append(group)
@@ -41,7 +43,7 @@ def proof_groups(pointer_width=None):
                 native_harnesses = {harness: "native" for harness in harnesses
                                     if backend == "cvc5" and harness == f"{module}::f64_01::{proof}"}
                 add(f"{name}-{partition}", f"generator-f{width}", harnesses, timeout_minutes, backend,
-                    native_harnesses)
+                    native_harnesses, matrix_job="long")
         add(f"{name}-fixed-exponent", "probe", [
             f"{module}::f64_exp_1023::{proof}"
         ], timeout_minutes)
@@ -106,7 +108,7 @@ def proof_groups(pointer_width=None):
     for first in range(0, len(cached_cases), 4):
         last = min(first + 3, len(cached_cases) - 1)
         add(f"cached-multiplication-equivalence-{first:03d}-{last:03d}", "equivalence",
-            cached_cases[first:last + 1], 60)
+            cached_cases[first:last + 1], 60, matrix_job="long")
 
     for first in range(0, 80, 4):
         last = min(first + 3, 79)
@@ -166,10 +168,13 @@ def remaining_harnesses(inventory):
     return [harness for harness in listed if harness not in dedicated]
 
 
-def proof_matrix(selected_groups=None, pointer_width=None, platform="both", grisu_probe="none"):
+def proof_matrix(selected_groups=None, pointer_width=None, platform="both", grisu_probe="none",
+                 matrix_job=None):
     groups = proof_groups(pointer_width)
     if grisu_probe not in ("none", "entry", "step"):
         raise ValueError("Unknown Grisu probe: " + str(grisu_probe))
+    if matrix_job not in (None, "core", "long"):
+        raise ValueError("Unknown matrix job: " + str(matrix_job))
     if grisu_probe != "none" and selected_groups is None:
         raise ValueError("Grisu probes require explicitly selected manual proof groups")
     if platform != "both" and platform not in OPERATING_SYSTEMS:
@@ -199,6 +204,9 @@ def proof_matrix(selected_groups=None, pointer_width=None, platform="both", gris
                 group.update(name=f"probe-{grisu_probe}-" + group["catalog_name"],
                              probe_property=f"num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_{phase}.1",
                              timeout_minutes=3)
+    # A manual selection splits between the two matrix jobs;  either part can be empty.
+    if matrix_job is not None:
+        groups = [group for group in groups if group["matrix_job"] == matrix_job]
     return {"os": OPERATING_SYSTEMS if platform == "both" else [platform], "group": groups}
 
 
@@ -224,6 +232,8 @@ def main():
                         help="Select one backend's harnesses within a proof group")
     parser.add_argument("--matrix-grisu-probe", choices=["none", "entry", "step"], default="none",
                         help="Diagnose one loop property in selected manual Grisu groups")
+    parser.add_argument("--matrix-job", choices=["core", "long"],
+                        help="Keep only the groups of one CI matrix job")
     args = parser.parse_args()
     if args.matrix_groups is not None and not args.matrix:
         parser.error("--matrix-groups requires --matrix")
@@ -233,11 +243,13 @@ def main():
         parser.error("--backend requires --group")
     if args.matrix_grisu_probe != "none" and not args.matrix:
         parser.error("--matrix-grisu-probe requires --matrix")
+    if args.matrix_job is not None and not args.matrix:
+        parser.error("--matrix-job requires --matrix")
     if args.matrix:
         try:
             selected = json.loads(args.matrix_groups) if args.matrix_groups is not None else None
             matrix = proof_matrix(selected, platform=args.matrix_platform,
-                                  grisu_probe=args.matrix_grisu_probe)
+                                  grisu_probe=args.matrix_grisu_probe, matrix_job=args.matrix_job)
         except (ValueError, TypeError) as error:
             parser.error(str(error))
         print(json.dumps(matrix, separators=(",", ":")))

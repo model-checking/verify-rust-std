@@ -24,7 +24,7 @@ class Flt2decHarnessesTests(unittest.TestCase):
         original = {group["name"]: group for group in proof_groups()}
         for group in matrix["group"]:
             self.assertEqual(group["name"], "manual-" + group["catalog_name"])
-            for field in ("harnesses", "kind", "backend", "timeout_minutes", "harness_backends"):
+            for field in ("harnesses", "kind", "backend", "timeout_minutes", "harness_backends", "matrix_job"):
                 self.assertEqual(group.get(field), original[group["catalog_name"]].get(field))
 
     def test_invalid_manual_matrix_selection_fails(self):
@@ -85,7 +85,8 @@ class Flt2decHarnessesTests(unittest.TestCase):
         self.assertEqual(len({group["name"] for group in self.groups}), 127)
         self.assertEqual(len(self.dedicated), 754)
         self.assertEqual(len(set(self.dedicated)), 754)
-        self.assertLessEqual(len(self.groups) * len(OPERATING_SYSTEMS), 256)
+        for part in ("core", "long"):
+            self.assertLessEqual(len(proof_matrix(matrix_job=part)["group"]) * len(OPERATING_SYSTEMS), 256)
         for group in self.groups:
             minutes = group["timeout_minutes"]
             with self.subTest(group=group["name"]):
@@ -110,8 +111,42 @@ class Flt2decHarnessesTests(unittest.TestCase):
 
     def test_ci_matrix_fits_the_job_limit(self):
         # The matrix job runs on a 64-bit host, so only that catalog is expanded.
-        # Narrower catalogs keep their routing tests but exceed one matrix.
-        self.assertLessEqual(len(proof_groups(pointer_width=64)) * len(OPERATING_SYSTEMS), 256)
+        # Each of the two flt2dec matrix jobs holds at most 256 jobs.
+        for part in ("core", "long"):
+            with self.subTest(matrix_job=part):
+                matrix = proof_matrix(pointer_width=64, matrix_job=part)
+                self.assertTrue(matrix["group"])
+                self.assertLessEqual(len(matrix["group"]) * len(matrix["os"]), 256)
+
+    def test_matrix_jobs_split_every_catalog(self):
+        for width in (16, 32, 64):
+            groups = proof_groups(width)
+            parts = {part: proof_matrix(pointer_width=width, matrix_job=part)["group"]
+                     for part in ("core", "long")}
+            with self.subTest(pointer_width=width):
+                self.assertTrue(all(group["matrix_job"] in parts for group in groups))
+                self.assertTrue(all(group["matrix_job"] == part
+                                    for part, selected in parts.items() for group in selected))
+                self.assertEqual(sorted(group["name"] for selected in parts.values() for group in selected),
+                                 sorted(group["name"] for group in groups))
+
+    def test_generator_and_cached_groups_run_in_the_long_job(self):
+        for group in self.groups:
+            in_long_job = (group["kind"].startswith("generator-")
+                           or group["name"].startswith("cached-multiplication-equivalence-"))
+            with self.subTest(group=group["name"]):
+                self.assertEqual(group["matrix_job"], "long" if in_long_job else "core")
+
+    def test_manual_selection_splits_between_matrix_jobs(self):
+        names = ["dragon-exact-loop-frame", "grisu-exact-f32"]
+        for part, name in (("core", "dragon-exact-loop-frame"), ("long", "grisu-exact-f32")):
+            with self.subTest(matrix_job=part):
+                matrix = proof_matrix(names, matrix_job=part)
+                self.assertEqual([group["catalog_name"] for group in matrix["group"]], [name])
+        self.assertEqual(proof_matrix(["dragon-exact-loop-frame"], matrix_job="long")["group"], [])
+        for part in ("all", ""):
+            with self.subTest(matrix_job=part), self.assertRaises(ValueError):
+                proof_matrix(matrix_job=part)
 
     def test_all_float_partitions_and_equivalence_cases_remain(self):
         self.assertIn(
