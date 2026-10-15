@@ -714,6 +714,22 @@ pub mod flt2dec_verify {
         finite_decoded(decode(f64::from_bits(bits)).1)
     }
 
+    // One eighth of a group: SLICE fixes the next three exponent bits, so a
+    // slice holds eight exponents. The eight slices of a group form the group.
+    pub(crate) fn arbitrary_finite_f32_slice<const GROUP: u32, const SLICE: u32>() -> Decoded {
+        assert!(GROUP < 4 && SLICE < 8);
+        let bits = (GROUP << 29) | (SLICE << 26) | (kani::any::<u32>() & 0x03ff_ffff);
+        kani::assume(bits > 0 && bits < 0x7f80_0000);
+        finite_decoded(decode(f32::from_bits(bits)).1)
+    }
+
+    pub(crate) fn arbitrary_finite_f64_slice<const GROUP: u64, const SLICE: u64>() -> Decoded {
+        assert!(GROUP < 32 && SLICE < 8);
+        let bits = (GROUP << 58) | (SLICE << 55) | (kani::any::<u64>() & 0x007f_ffff_ffff_ffff);
+        kani::assume(bits > 0 && bits < 0x7ff0_0000_0000_0000);
+        finite_decoded(decode(f64::from_bits(bits)).1)
+    }
+
     // Additional CI probes test whether fixing the exponent makes the real
     // arithmetic tractable. Every significand bit remains symbolic, and the
     // exhaustive groups below remain part of the required verification.

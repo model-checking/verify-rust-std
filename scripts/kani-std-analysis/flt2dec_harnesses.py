@@ -8,6 +8,8 @@ import sys
 DRAGON = "num::imp::flt2dec::strategy::dragon::dragon_verify"
 GRISU = "num::imp::flt2dec::strategy::grisu::grisu_verify"
 OPERATING_SYSTEMS = ["ubuntu-latest", "macos-latest"]
+# Grisu shortest partitions that the Rust macro proves in eight exponent slices.
+SLICED_SHORTEST = {"f32_00", "f32_01", "f32_02", "f32_03", "f64_00"}
 
 
 def proof_groups(pointer_width=None):
@@ -37,21 +39,27 @@ def proof_groups(pointer_width=None):
             for first in range(0, count, batch_size):
                 last = first + batch_size - 1
                 partition = f"f{width}" if count == batch_size else f"f{width}-{first:02d}-{last:02d}"
-                backend = "cvc5" if name == "grisu-shortest" and (width == 32 or first == 0) else "native"
-                harnesses = [f"{module}::f{width}_{group:02d}::{proof}" for group in range(first, last + 1)]
-                # The native backend proved f64_01 in an earlier run;  only f64_00 keeps cvc5.
-                native_harnesses = {harness: "native" for harness in harnesses
-                                    if backend == "cvc5" and harness == f"{module}::f64_01::{proof}"}
-                add(f"{name}-{partition}", f"generator-f{width}", harnesses, timeout_minutes, backend,
-                    native_harnesses, matrix_job="long")
+                # Neither cvc5 nor kissat proves a sliced Grisu shortest partition whole;
+                # the slice groups below hold it instead.  f64-00-01 keeps only f64_01.
+                harnesses = [f"{module}::f{width}_{group:02d}::{proof}" for group in range(first, last + 1)
+                             if name != "grisu-shortest" or f"f{width}_{group:02d}" not in SLICED_SHORTEST]
+                if harnesses:
+                    add(f"{name}-{partition}", f"generator-f{width}", harnesses, timeout_minutes,
+                        matrix_job="long")
+        # Each slice holds eight exponents;  the eight slices of a partition form the partition.
+        for partition in sorted(SLICED_SHORTEST) if name == "grisu-shortest" else []:
+            for index in range(8):
+                add(f"{name}-{partition.replace('_', '-')}-slice-{index}", f"generator-{partition[:3]}",
+                    [f"{module}::{partition}::s{index}::{proof}"], timeout_minutes, matrix_job="long")
         add(f"{name}-fixed-exponent", "probe", [
             f"{module}::f64_exp_1023::{proof}"
         ], timeout_minutes)
 
+    # Ubuntu proved the shortest probe in 65 minutes;  macOS is about twice as slow.
     for mode in ("exact", "shortest"):
         add(f"grisu-{mode}-cached-power-39", "probe", [
             f"{GRISU}::f64_cached_power_39::check_format_{mode}_opt"
-        ], 120 if mode == "shortest" else 60)
+        ], 180 if mode == "shortest" else 60)
 
     add("dragon-exact-loop-frame", "equivalence", [
         f"{DRAGON}::check_exact_digit_loop_frame"

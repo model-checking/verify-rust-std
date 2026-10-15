@@ -16,7 +16,7 @@ class Flt2decHarnessesTests(unittest.TestCase):
                 self.assertEqual(matrix["group"], proof_groups(width))
 
     def test_manual_matrix_keeps_group_contents_and_distinct_check_names(self):
-        names = ["grisu-shortest-f32-00-01", "dragon-exact-loop-frame",
+        names = ["grisu-shortest-f64-02-03", "dragon-exact-loop-frame",
                  "grisu-multiplication-contract-20-29", "cached-multiplication-equivalence-000-003"]
         matrix = proof_matrix(names)
         self.assertEqual(matrix["os"], OPERATING_SYSTEMS)
@@ -46,7 +46,7 @@ class Flt2decHarnessesTests(unittest.TestCase):
             proof_matrix(names, platform="windows-latest")
 
     def test_loop_probes_have_distinct_names_and_keep_the_selected_harnesses(self):
-        name = "grisu-shortest-f32-00-01"
+        name = "grisu-shortest-f64-02-03"
         original = next(group for group in self.groups if group["name"] == name)
         for probe, phase in (("entry", "base"), ("step", "step")):
             matrix = proof_matrix([name], grisu_probe=probe)
@@ -81,17 +81,17 @@ class Flt2decHarnessesTests(unittest.TestCase):
 
     def test_complete_disjoint_batches_on_both_platforms(self):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
-        self.assertEqual(len(self.groups), 127)
-        self.assertEqual(len({group["name"] for group in self.groups}), 127)
-        self.assertEqual(len(self.dedicated), 754)
-        self.assertEqual(len(set(self.dedicated)), 754)
+        self.assertEqual(len(self.groups), 165)
+        self.assertEqual(len({group["name"] for group in self.groups}), 165)
+        self.assertEqual(len(self.dedicated), 789)
+        self.assertEqual(len(set(self.dedicated)), 789)
         for part in ("core", "long"):
             self.assertLessEqual(len(proof_matrix(matrix_job=part)["group"]) * len(OPERATING_SYSTEMS), 256)
         for group in self.groups:
             minutes = group["timeout_minutes"]
             with self.subTest(group=group["name"]):
                 self.assertTrue(group["harnesses"])
-                self.assertIn(minutes, (7, 30, 60, 120))
+                self.assertIn(minutes, (7, 30, 60, 120, 180))
                 self.assertLessEqual(minutes * len(group["harnesses"]), 240)
 
     def test_shift_models_cover_all_safe_whole_limb_offsets(self):
@@ -154,11 +154,13 @@ class Flt2decHarnessesTests(unittest.TestCase):
             self.dedicated,
         )
         generators = [group for group in self.groups if group["kind"].startswith("generator-")]
-        self.assertEqual(sum(len(group["harnesses"]) for group in generators), 144)
+        self.assertEqual(sum(len(group["harnesses"]) for group in generators), 179)
         for family in ("dragon-exact", "dragon-shortest", "grisu-exact", "grisu-shortest"):
             targets = [harness for group in generators if group["name"].startswith(family + "-")
                        for harness in group["harnesses"]]
-            partitions = {harness.split("::")[-2] for harness in targets}
+            # A slice harness adds an `sN` module below its partition module.
+            partitions = {next(part for part in harness.split("::") if part.startswith(("f32_", "f64_")))
+                          for harness in targets}
             self.assertEqual(partitions, {f"f32_{i:02d}" for i in range(4)} |
                              {f"f64_{i:02d}" for i in range(32)})
         cases = [harness for group in self.groups if group["name"].startswith("estimator-")
@@ -193,9 +195,6 @@ class Flt2decHarnessesTests(unittest.TestCase):
         expected.add(f"{prefix}check_decimal_termination")
         expected.add(f"{prefix}check_advance_fraction_threshold")
         expected.update(f"{prefix}check_fractional_encoding_{power:02d}" for power in range(16))
-        # f64_01 goes to the native backend;  see the grisu-shortest-f64-00-01 test below.
-        expected.update(f"{prefix}f{width}_{index:02d}::check_format_shortest_opt"
-                        for width, count in ((32, 4), (64, 1)) for index in range(count))
         self.assertEqual(set(arithmetic), expected)
         self.assertEqual(len(arithmetic), len(expected))
         self.assertIn(f"{prefix}check_rounded_multiply", self.dedicated)
@@ -248,14 +247,29 @@ class Flt2decHarnessesTests(unittest.TestCase):
                 for group in groups:
                     self.assertLessEqual(group["timeout_minutes"] * len(group["harnesses"]), 240)
 
-    def test_native_grisu_shortest_partition_leaves_its_cvc5_group(self):
-        group = next(group for group in proof_groups(pointer_width=64)
-                     if group["name"] == "grisu-shortest-f64-00-01")
-        self.assertEqual(group["backend"], "cvc5")
-        self.assertEqual([harness.rsplit("::", 2)[1] for harness in group_harnesses(group, "native")],
-                         ["f64_01"])
-        self.assertEqual([harness.rsplit("::", 2)[1] for harness in group_harnesses(group, "cvc5")],
-                         ["f64_00"])
+    def test_sliced_grisu_shortest_partitions_cover_every_exponent(self):
+        prefix = "num::imp::flt2dec::strategy::grisu::grisu_verify::"
+        partitions = ("f32_00", "f32_01", "f32_02", "f32_03", "f64_00")
+        slices = [group for group in self.groups
+                  if group["name"].startswith("grisu-shortest-") and "-slice-" in group["name"]]
+        self.assertEqual(sorted(harness for group in slices for harness in group["harnesses"]),
+                         sorted(f"{prefix}{partition}::s{index}::check_format_shortest_opt"
+                                for partition in partitions for index in range(8)))
+        for group in slices:
+            with self.subTest(group=group["name"]):
+                self.assertEqual(len(group["harnesses"]), 1)
+                self.assertEqual((group["backend"], group["matrix_job"], group["timeout_minutes"]),
+                                 ("native", "long", 120))
+                self.assertNotIn("harness_backends", group)
+        # The slices replace the whole shortest harness;  the exact harness stays whole.
+        for partition in partitions:
+            with self.subTest(partition=partition):
+                self.assertNotIn(f"{prefix}{partition}::check_format_shortest_opt", self.dedicated)
+                self.assertIn(f"{prefix}{partition}::check_format_exact_opt", self.dedicated)
+        group = next(group for group in self.groups if group["name"] == "grisu-shortest-f64-00-01")
+        self.assertEqual(group["harnesses"], [f"{prefix}f64_01::check_format_shortest_opt"])
+        self.assertEqual(group["backend"], "native")
+        self.assertNotIn("harness_backends", group)
 
     def test_cached_big_multiplication_uses_dedicated_native_groups(self):
         for width in (16, 32, 64):

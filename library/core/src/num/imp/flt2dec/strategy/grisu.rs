@@ -2195,6 +2195,33 @@ pub mod grisu_verify {
     // Call the real generator loops and compose the final-rounding proof. The
     // wrapper harness below checks a separate obligation.
     macro_rules! check_partition {
+        // No solver proves the shortest harness of these partitions whole, so
+        // eight slices of eight exponents each replace it. The union of the
+        // slices is the partition, and every slice checks the same property.
+        ($name:ident, arbitrary_finite_f32, $group:literal, $cover_fallback:literal) => {
+            check_partition!(@sliced $name, arbitrary_finite_f32, arbitrary_finite_f32_slice, $group, $cover_fallback);
+        };
+        (f64_00, arbitrary_finite_f64, $group:literal, $cover_fallback:literal) => {
+            check_partition!(@sliced f64_00, arbitrary_finite_f64, arbitrary_finite_f64_slice, $group, $cover_fallback);
+        };
+        (@sliced $name:ident, $decode:ident, $slice:ident, $group:literal, $cover_fallback:literal) => {
+            mod $name {
+                use super::*;
+
+                check_partition!(@exact $decode::<$group>(), $cover_fallback);
+                check_partition!(@slices $slice, $group, $cover_fallback, s0 0, s1 1, s2 2, s3 3, s4 4, s5 5, s6 6, s7 7);
+            }
+        };
+        (@slices $slice:ident, $group:literal, $cover_fallback:literal, $($index_name:ident $index:literal),+) => {
+            $(
+                mod $index_name {
+                    use super::*;
+                    use crate::num::imp::flt2dec::flt2dec_verify::$slice;
+
+                    check_partition!(@shortest $slice::<$group, $index>(), $cover_fallback => scale_shortest_contract);
+                }
+            )+
+        };
         ($name:ident, $decode:ident, $group:literal, $cover_fallback:literal) => {
             check_partition!($name, $decode::<$group>(), $cover_fallback => scale_shortest_contract);
         };
@@ -2202,6 +2229,11 @@ pub mod grisu_verify {
             mod $name {
                 use super::*;
 
+                check_partition!(@shortest $decoded, $cover_fallback $(, $cached_index)? $(=> $scaling_contract)?);
+                check_partition!(@exact $decoded, $cover_fallback $(, $cached_index)?);
+            }
+        };
+        (@shortest $decoded:expr, $cover_fallback:literal $(, $cached_index:path)? $(=> $scaling_contract:path)?) => {
                 #[kani::proof]
                 #[kani::unwind(19)]
                 $(#[kani::stub(proof_cached_power_index, $cached_index)])?
@@ -2241,7 +2273,8 @@ pub mod grisu_verify {
                         assert_eq!(digits.as_ptr(), start);
                     });
                 }
-
+        };
+        (@exact $decoded:expr, $cover_fallback:literal $(, $cached_index:path)?) => {
                 // Integral extraction takes at most ten iterations. Fractional
                 // extraction stops once err = 10^18 >= 2^59: the cached power
                 // gives e <= 60, hence maxerr = 2^(e - 1) <= 2^59. The separate
@@ -2282,7 +2315,6 @@ pub mod grisu_verify {
                         assert_eq!(digits.as_ptr(), start);
                     });
                 }
-            }
         };
     }
 
