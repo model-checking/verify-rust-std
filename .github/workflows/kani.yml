@@ -17,6 +17,11 @@ on:
         type: choice
         options: [none, entry, step]
         default: none
+      native_solver:
+        description: Optional SAT solver for the native pass of explicitly selected proof groups
+        type: choice
+        options: [default, kissat]
+        default: default
   merge_group:
   pull_request:
     branches: [ main ]
@@ -194,6 +199,10 @@ jobs:
       KANI_FLAT_SMT_CVC5: ${{ matrix.group.backend == 'cvc5' && 'true' || 'false' }}
       KANI_HARNESS_TIMEOUT: ${{ matrix.group.timeout_minutes }}m
       KANI_CACHED_MULTIPLICATION: ${{ contains(join(matrix.group.harnesses, ' '), '::cached_mul_pow5_') }}
+      # Record memory use where proofs stop without a verdict.
+      KANI_MEMORY_DIAGNOSTICS: ${{ contains(join(matrix.group.harnesses, ' '), '::cached_mul_pow5_') || startsWith(matrix.group.catalog_name || matrix.group.name, 'dragon-') }}
+      # Manual runs can compare SAT solvers.  Other runs keep the default solver.
+      KANI_NATIVE_SOLVER: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && inputs.native_solver || 'default' }}
       KANI_MANUAL_PROBE: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && matrix.group.probe_property != '' }}
       KANI_PROBE_PROPERTY: ${{ matrix.group.probe_property || '' }}
       KANI_OBJECT_BITS: ${{ contains(join(matrix.group.harnesses, ' '), '::cached_mul_pow5_') && '16' || ((matrix.group.catalog_name || matrix.group.name) == 'dragon-exact-loop-frame' || startsWith(matrix.group.catalog_name || matrix.group.name, 'grisu-shortest-')) && '10' || (matrix.group.kind == 'contract' || matrix.group.kind == 'equivalence') && '12' || '14' }}
@@ -225,8 +234,8 @@ jobs:
           key: cbmc-flat-smt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('head/scripts/setup-flat-smt-cbmc.sh', 'head/scripts/cbmc-skip-unused-loop-assigns.patch') }}
           fail-on-cache-miss: true
 
-      - name: Add memory for cached multiplication equivalence
-        if: runner.os == 'Linux' && contains(join(matrix.group.harnesses, ' '), '::cached_mul_pow5_')
+      - name: Add memory for cached multiplication and Dragon proofs
+        if: runner.os == 'Linux' && env.KANI_MEMORY_DIAGNOSTICS == 'true'
         run: |
           sudo fallocate -l 24G /mnt/pr601-proof-swap
           sudo chmod 600 /mnt/pr601-proof-swap
@@ -239,7 +248,7 @@ jobs:
         env:
           RETAIN_PROOF_MODELS: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' }}
         run: |
-          if [[ "$KANI_CACHED_MULTIPLICATION" == true ]]; then
+          if [[ "$KANI_MEMORY_DIAGNOSTICS" == true ]]; then
             if [[ "$RUNNER_OS" == Linux ]]; then
               ulimit -v 33554432
             fi
@@ -255,7 +264,8 @@ jobs:
           # Keep every group within four hours of proof budgets per job:
           # two 120-minute or four 60-minute generators, or eight 30-minute cases.
           output_format=terse
-          if [[ "$HARNESS_KIND" == contract || "$HARNESS_KIND" == equivalence || "$HARNESS_KIND" == probe ]]; then
+          # Dragon generators show their CBMC phases until they converge.
+          if [[ "$HARNESS_KIND" == contract || "$HARNESS_KIND" == equivalence || "$HARNESS_KIND" == probe || "$HARNESS_GROUP" == dragon-* ]]; then
             output_format=regular
           fi
           temporary_args=()
@@ -274,6 +284,9 @@ jobs:
             printf 'Selected %s harnesses for %s\n' "$(( ${#harness_args[@]} / 2 ))" "$proof_backend"
             export KANI_FLAT_SMT_CVC5=false
             solver_args=()
+            if [[ "$KANI_NATIVE_SOLVER" != default ]]; then
+              solver_args=(--solver "$KANI_NATIVE_SOLVER")
+            fi
             if [[ "$proof_backend" == cvc5 ]]; then
               export KANI_FLAT_SMT_CVC5=true
               solver_args=(--solver minisat)
