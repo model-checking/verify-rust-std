@@ -158,8 +158,9 @@ class Flt2decHarnessesTests(unittest.TestCase):
         expected.add(f"{prefix}check_decimal_termination")
         expected.add(f"{prefix}check_advance_fraction_threshold")
         expected.update(f"{prefix}check_fractional_encoding_{power:02d}" for power in range(16))
+        # f64_01 goes to the native backend;  see the grisu-shortest-f64-00-01 test below.
         expected.update(f"{prefix}f{width}_{index:02d}::check_format_shortest_opt"
-                        for width, count in ((32, 4), (64, 2)) for index in range(count))
+                        for width, count in ((32, 4), (64, 1)) for index in range(count))
         self.assertEqual(set(arithmetic), expected)
         self.assertEqual(len(arithmetic), len(expected))
         self.assertIn(f"{prefix}check_rounded_multiply", self.dedicated)
