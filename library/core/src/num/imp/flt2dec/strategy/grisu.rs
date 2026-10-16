@@ -1332,6 +1332,27 @@ pub mod grisu_verify {
                 kani::cover(exp == 1000, "multiplication includes its largest exponent");
             }
         };
+        // The same proof on the inputs with `$low <= v < $high`. Index 51 does not finish in
+        // two hours on the whole domain, so it is proved in two pieces that split on the top
+        // bit of `v`. The asymmetric intervals all have `v == 1 << 63`, so only the upper
+        // piece passes the asymmetric cover message.
+        ($name:ident, $index:literal, $low:expr, $high:expr $(, $asymmetric:literal)?) => {
+            #[kani::proof_for_contract(multiply_shortest_contract)]
+            #[kani::stub_verified(rounded_multiply_contract)]
+            #[kani::stub(Fp::mul, stub_rounded_multiply)]
+            #[kani::solver(kissat)]
+            fn $name() {
+                let (plus, minus, v, asymmetric) = arbitrary_normalized_interval();
+                kani::assume(($low..$high).contains(&u128::from(v)));
+                let exp = kani::any::<i16>();
+                kani::assume((-1200..=1000).contains(&exp));
+                multiply_shortest_contract(plus, minus, v, exp, $index);
+                $(kani::cover(asymmetric, $asymmetric);)?
+                kani::cover(!asymmetric, "multiplication includes symmetric intervals");
+                kani::cover(exp == -1200, "multiplication includes its smallest exponent");
+                kani::cover(exp == 1000, "multiplication includes its largest exponent");
+            }
+        };
     }
 
     verify_multiply_shortest!(check_multiply_shortest_00, 80);
@@ -1363,7 +1384,14 @@ pub mod grisu_verify {
     verify_multiply_shortest!(check_multiply_shortest_26, 54);
     verify_multiply_shortest!(check_multiply_shortest_27, 53);
     verify_multiply_shortest!(check_multiply_shortest_28, 52);
-    verify_multiply_shortest!(check_multiply_shortest_29, 51);
+    verify_multiply_shortest!(check_multiply_shortest_29_v0, 51, 0, 1 << 63);
+    verify_multiply_shortest!(
+        check_multiply_shortest_29_v1,
+        51,
+        1 << 63,
+        1 << 64,
+        "multiplication includes asymmetric intervals"
+    );
     verify_multiply_shortest!(check_multiply_shortest_30, 50);
     verify_multiply_shortest!(check_multiply_shortest_31, 49);
     verify_multiply_shortest!(check_multiply_shortest_32, 48);

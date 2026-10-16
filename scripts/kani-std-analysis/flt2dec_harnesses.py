@@ -100,10 +100,13 @@ def proof_groups(pointer_width=None):
         for first in range(0, len(harnesses), 8):
             add(f"foundations-{kind}-{first:02d}", kind, harnesses[first:first + 8], 30)
 
+    # The index 51 proof (group 29) does not finish on the whole domain, so grisu.rs proves
+    # it in two pieces that split on the top bit of v and together cover every input.
     for first in range(0, 80, 10):
         last = first + 9
-        harnesses = [f"{GRISU}::check_multiply_shortest_{group:02d}"
-                     for group in range(first, last + 1)]
+        harnesses = [f"{GRISU}::check_multiply_shortest_{group:02d}{piece}"
+                     for group in range(first, last + 1)
+                     for piece in (("_v0", "_v1") if group == 29 else ("",))]
         if first == 0:
             harnesses.append(f"{GRISU}::check_decimal_termination")
             harnesses.extend(f"{GRISU}::check_fractional_encoding_{power:02d}"
