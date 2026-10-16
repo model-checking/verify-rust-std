@@ -2,6 +2,35 @@ name: Kani
 
 on:
   workflow_dispatch:
+    inputs:
+      proof_groups:
+        description: Optional JSON array of flt2dec groups (empty runs the full matrix)
+        type: string
+        default: ''
+      proof_platform:
+        description: Platform for explicitly selected manual proof groups
+        type: choice
+        options: [both, ubuntu-latest, macos-latest]
+        default: both
+      grisu_probe:
+        description: Optional diagnostic property for explicitly selected Grisu shortest groups
+        type: choice
+        options: [none, entry, step, integral-step]
+        default: none
+      native_solver:
+        description: Optional SAT solver for the native pass of explicitly selected proof groups
+        type: choice
+        options: [default, kissat]
+        default: default
+      harness_timeout:
+        description: Optional per-harness timeout in minutes for explicitly selected proof groups (empty keeps the catalog value)
+        type: string
+        default: ''
+      proof_backend:
+        description: Optional backend for every harness of explicitly selected proof groups
+        type: choice
+        options: [catalog, native, cvc5]
+        default: catalog
   merge_group:
   pull_request:
     branches: [ main ]
@@ -10,14 +39,74 @@ on:
       - 'library/**'
       - '.github/workflows/kani.yml'
       - 'scripts/run-kani.sh'
+      - 'scripts/kani-explicit-for-counter.patch'
+      - 'scripts/setup-flat-smt-cbmc.sh'
+      - 'scripts/cbmc-skip-unused-loop-assigns.patch'
+      - 'scripts/kani-std-analysis/test_cbmc_loop_assigns.cpp'
+      - 'scripts/kani-std-analysis/test_cbmc_loop_assigns.sh'
+      - 'scripts/setup-cvc5.sh'
+      - 'scripts/kani-std-analysis/cvc5-flat-smt.sh'
+      - 'scripts/kani-std-analysis/test_cvc5_flat_smt.sh'
+      - 'scripts/kani-std-analysis/overflow-result.rs'
+      - 'scripts/kani-std-analysis/flt2dec_harnesses.py'
+      - 'scripts/kani-std-analysis/test_flt2dec_harnesses.py'
+      - 'scripts/kani-std-analysis/test_flt2dec_runtime.rs'
+      - 'scripts/kani-std-analysis/test_flt2dec_runtime.sh'
+      - 'scripts/kani-std-analysis/test_run_kani_list.sh'
+      - 'scripts/kani-std-analysis/test_cbmc_tap_retry.sh'
+      - 'scripts/kani-std-analysis/test_kani_runtime_reuse.sh'
+      - 'scripts/kani-std-analysis/test_kani_bootstrap.sh'
+      - 'scripts/kani-std-analysis/z3-flat-smt.sh'
+      - 'scripts/kani-std-analysis/test_z3_flat_smt.sh'
 
 defaults:
   run:
     shell: bash
 
 jobs:
+  flt2dec_runtime:
+    name: Test flt2dec runtime (${{ matrix.os }})
+    needs: flt2dec_matrix
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix).os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install nightly-2026-09-25 --profile minimal
+      - run: bash scripts/kani-std-analysis/test_flt2dec_runtime.sh
+
+  build-flat-smt-cbmc:
+    name: Build patched CBMC (${{ matrix.os }})
+    needs: flt2dec_matrix
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix).os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: head
+      - name: Cache patched verifier
+        id: cbmc
+        uses: actions/cache@v4
+        with:
+          path: head/cbmc_build/bin
+          key: cbmc-flat-smt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('head/scripts/setup-flat-smt-cbmc.sh', 'head/scripts/cbmc-skip-unused-loop-assigns.patch') }}
+      - name: Install build dependencies
+        if: runner.os == 'Linux' && steps.cbmc.outputs.cache-hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y cmake flex bison
+      - name: Build pinned verifier with proof fixes
+        run: bash head/scripts/setup-flat-smt-cbmc.sh
+      - name: Check loop write-set enforcement
+        run: bash head/scripts/kani-std-analysis/test_cbmc_loop_assigns.sh head/cbmc_build/bin
+
   check-kani-on-std:
-    name: Verify std library (partition ${{ matrix.partition }})
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Verify std library (partition ${{ matrix.partition }})
+    if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -35,10 +124,10 @@ jobs:
       WORKER_INDEX: ${{ matrix.partition }}
       # Total number of workers running this step
       WORKER_TOTAL: 4
-      # Cap parallel harness verification on ubuntu-latest: its 4-core/16 GB
-      # runners get OOM-killed when 4 memory-hungry harnesses (up to ~10 GB
-      # each, e.g. the ffi::c_str ones) run concurrently.
-      KANI_JOBS: ${{ matrix.os == 'ubuntu-latest' && 2 || '' }}
+      # The same catalog assigns every excluded proof to a dedicated job on each OS.
+      KANI_SEPARATE_FLT2DEC: "true"
+      # Run one verifier per runner to bound proof concurrency.
+      KANI_JOBS: 1
     
     steps:
       - name: Remove unnecessary software to free up disk space
@@ -61,12 +150,213 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get install -y jq
       
-      # Step 3: Run Kani on the std library (default configuration)
+      - name: Trust CBMC Homebrew tap
+        if: runner.os == 'macOS'
+        run: brew trust diffblue/cbmc
+
+      # Step 3: Run Kani on the std library
       - name: Run Kani Verification
-        run: head/scripts/run-kani.sh --path ${{github.workspace}}/head
+        run: |
+          # Run one proof at a time on each runner.
+          export KANI_JOBS=1
+          export RAYON_NUM_THREADS=1
+          head/scripts/run-kani.sh --path ${{github.workspace}}/head \
+            --kani-args --harness-timeout 30m --fail-fast
    
+  flt2dec_matrix:
+    name: Prepare flt2dec proof groups
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.groups.outputs.matrix }}
+      matrix_long: ${{ steps.groups.outputs.matrix_long }}
+      core_groups: ${{ steps.groups.outputs.core_groups }}
+      long_groups: ${{ steps.groups.outputs.long_groups }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check proof routing
+        run: |
+          bash scripts/kani-std-analysis/test_run_kani_list.sh
+          bash scripts/kani-std-analysis/test_cbmc_tap_retry.sh
+          bash scripts/kani-std-analysis/test_kani_runtime_reuse.sh
+          bash scripts/kani-std-analysis/test_kani_bootstrap.sh
+          bash scripts/kani-std-analysis/test_cvc5_flat_smt.sh
+          python3 -I -m unittest discover -s scripts/kani-std-analysis -p test_flt2dec_harnesses.py
+      - name: Build proof matrix
+        id: groups
+        env:
+          SELECTED_PROOF_GROUPS: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups || '' }}
+          SELECTED_PROOF_PLATFORM: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && inputs.proof_platform || 'both' }}
+          SELECTED_GRISU_PROBE: ${{ github.event_name == 'workflow_dispatch' && inputs.grisu_probe || 'none' }}
+        run: |
+          matrix_args=(--matrix --matrix-grisu-probe "$SELECTED_GRISU_PROBE")
+          if [[ -n "$SELECTED_PROOF_GROUPS" ]]; then
+            matrix_args+=(--matrix-groups "$SELECTED_PROOF_GROUPS" --matrix-platform "$SELECTED_PROOF_PLATFORM")
+          fi
+          # One matrix holds at most 256 jobs, so generator and cached proofs run in a second job.
+          core_matrix=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py "${matrix_args[@]}" --matrix-job core)
+          long_matrix=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py "${matrix_args[@]}" --matrix-job long)
+          core_groups=$(jq '.group | length' <<< "$core_matrix")
+          long_groups=$(jq '.group | length' <<< "$long_matrix")
+          printf 'Core groups: %s, long groups: %s\n' "$core_groups" "$long_groups"
+          {
+            printf 'matrix=%s\n' "$core_matrix"
+            printf 'matrix_long=%s\n' "$long_matrix"
+            printf 'core_groups=%s\n' "$core_groups"
+            printf 'long_groups=%s\n' "$long_groups"
+          } >> "$GITHUB_OUTPUT"
+
+  check-flt2dec:
+    name: Verify flt2dec (${{ matrix.group.name }}, ${{ matrix.os }})
+    needs: [flt2dec_matrix, build-flat-smt-cbmc]
+    if: needs.flt2dec_matrix.outputs.core_groups != '0'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix) }}
+    env: &flt2dec_env
+      KANI_JOBS: 1
+      RAYON_NUM_THREADS: 1
+      # Reachability verdicts do not need the large diagnostic traces that
+      # CBMC otherwise builds for every satisfied Kani reachability check.
+      KANI_PATCHED_CBMC: 'true'
+      KANI_FLAT_SMT_CVC5: ${{ matrix.group.backend == 'cvc5' && 'true' || 'false' }}
+      # Manual runs can raise the per-harness timeout and move every selected harness to one backend.
+      KANI_HARNESS_TIMEOUT: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && inputs.harness_timeout != '' && inputs.harness_timeout || matrix.group.timeout_minutes }}m
+      KANI_PROOF_BACKEND: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && inputs.proof_backend || 'catalog' }}
+      KANI_CACHED_MULTIPLICATION: ${{ contains(join(matrix.group.harnesses, ' '), '::cached_mul_pow5_') }}
+      # Record memory use where proofs stop without a verdict.
+      KANI_MEMORY_DIAGNOSTICS: ${{ contains(join(matrix.group.harnesses, ' '), '::cached_mul_pow5_') || startsWith(matrix.group.catalog_name || matrix.group.name, 'dragon-') }}
+      # Manual runs can compare SAT solvers.  Other runs keep the default solver.
+      KANI_NATIVE_SOLVER: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && inputs.native_solver || 'default' }}
+      KANI_MANUAL_PROBE: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && matrix.group.probe_property != '' }}
+      KANI_PROBE_PROPERTY: ${{ matrix.group.probe_property || '' }}
+      KANI_OBJECT_BITS: ${{ contains(join(matrix.group.harnesses, ' '), '::cached_mul_pow5_') && '16' || ((matrix.group.catalog_name || matrix.group.name) == 'dragon-exact-loop-frame' || startsWith(matrix.group.catalog_name || matrix.group.name, 'grisu-shortest-')) && '10' || (matrix.group.kind == 'contract' || matrix.group.kind == 'equivalence') && '12' || '14' }}
+      KANI_SYMEX_CACHE_DEREFERENCES: ${{ (matrix.group.backend == 'cvc5' || matrix.group.kind == 'probe' || startsWith(matrix.group.catalog_name || matrix.group.name, 'bigint-shift-equivalence-') || startsWith(matrix.group.catalog_name || matrix.group.name, 'cached-multiplication-equivalence-') || startsWith(matrix.group.catalog_name || matrix.group.name, 'grisu-')) && 'true' || 'false' }}
+      # Dragon's fixed limb indices can use the default array field splitting.
+      KANI_ARRAY_FIELD_SENSITIVITY: 'true'
+      HARNESS_GROUP: ${{ matrix.group.catalog_name || matrix.group.name }}
+      HARNESS_KIND: ${{ matrix.group.kind }}
+    steps: &flt2dec_steps
+      - name: Remove unnecessary software to free up disk space
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /usr/local/.ghcup
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          path: head
+          submodules: true
+
+      - name: Trust CBMC Homebrew tap
+        if: runner.os == 'macOS'
+        run: brew trust diffblue/cbmc
+
+      - name: Restore patched verifier
+        uses: actions/cache/restore@v4
+        with:
+          path: head/cbmc_build/bin
+          key: cbmc-flat-smt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('head/scripts/setup-flat-smt-cbmc.sh', 'head/scripts/cbmc-skip-unused-loop-assigns.patch') }}
+          fail-on-cache-miss: true
+
+      - name: Add memory for cached multiplication and Dragon proofs
+        if: runner.os == 'Linux' && env.KANI_MEMORY_DIAGNOSTICS == 'true'
+        run: |
+          sudo fallocate -l 24G /mnt/pr601-proof-swap
+          sudo chmod 600 /mnt/pr601-proof-swap
+          sudo mkswap /mnt/pr601-proof-swap
+          sudo swapon /mnt/pr601-proof-swap
+          free -h
+          df -h /mnt
+
+      - name: Verify selected proof groups
+        env:
+          RETAIN_PROOF_MODELS: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' }}
+        run: |
+          if [[ "$KANI_MEMORY_DIAGNOSTICS" == true ]]; then
+            if [[ "$RUNNER_OS" == Linux ]]; then
+              ulimit -v 33554432
+            fi
+            (
+              while sleep 30; do
+                date -u +%FT%TZ
+                ps -A -o pid=,rss=,comm= | awk '$3 ~ /(^|\/)(cbmc|cvc5|kissat|goto-instrument|goto-cc|kani-driver|kani-compiler|rustc)$/ { print "verifier RSS KiB:", $0 }'
+              done
+            ) &
+            proof_sampler_pid=$!
+            trap 'kill "$proof_sampler_pid" 2>/dev/null || true' EXIT
+          fi
+          if [[ ! "$KANI_HARNESS_TIMEOUT" =~ ^[1-9][0-9]*m$ ]]; then
+            echo "Expected a positive whole number of minutes, got $KANI_HARNESS_TIMEOUT" >&2
+            exit 1
+          fi
+          # Keep every group within four hours of proof budgets per job:
+          # two 120-minute or four 60-minute generators, or eight 30-minute cases.
+          output_format=terse
+          # Dragon generators and manual probes show their CBMC phases until they converge.
+          if [[ "$HARNESS_KIND" == contract || "$HARNESS_KIND" == equivalence || "$HARNESS_KIND" == probe || "$HARNESS_GROUP" == dragon-* || "$KANI_MANUAL_PROBE" == true ]]; then
+            output_format=regular
+          fi
+          temporary_args=()
+          if [[ "$RETAIN_PROOF_MODELS" == true ]]; then
+            temporary_args=(--keep-temps)
+          fi
+          for proof_backend in native cvc5; do
+            backend_args=(--backend "$proof_backend")
+            if [[ "$KANI_PROOF_BACKEND" != catalog ]]; then
+              [[ "$KANI_PROOF_BACKEND" == "$proof_backend" ]] || continue
+              backend_args=()
+            fi
+            harness_names=$(python3 -I head/scripts/kani-std-analysis/flt2dec_harnesses.py \
+              --group "$HARNESS_GROUP" "${backend_args[@]}")
+            [[ -n "$harness_names" ]] || continue
+            harness_args=()
+            while IFS= read -r harness; do
+              [[ -n "$harness" ]] || exit 1
+              harness_args+=(--harness "$harness")
+            done <<< "$harness_names"
+            printf 'Selected %s harnesses for %s\n' "$(( ${#harness_args[@]} / 2 ))" "$proof_backend"
+            export KANI_FLAT_SMT_CVC5=false
+            solver_args=()
+            if [[ "$KANI_NATIVE_SOLVER" != default ]]; then
+              solver_args=(--solver "$KANI_NATIVE_SOLVER")
+            fi
+            if [[ "$proof_backend" == cvc5 ]]; then
+              export KANI_FLAT_SMT_CVC5=true
+              solver_args=(--solver minisat)
+            fi
+            head/scripts/run-kani.sh --path "${GITHUB_WORKSPACE}/head" \
+              --kani-args --jobs 1 --harness-timeout "$KANI_HARNESS_TIMEOUT" --fail-fast --output-format="$output_format" \
+              "${solver_args[@]}" "${temporary_args[@]}" --exact "${harness_args[@]}"
+          done
+      - name: Retain selected proof models
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.proof_groups != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: flt2dec-models-${{ matrix.group.name }}-${{ runner.os }}-${{ runner.arch }}
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            **/kani_verify_std/**/out/*grisu*.out
+            **/kani_verify_std/**/out/*dragon*.out
+            !**/*.symtab.out
+
+  # One matrix holds at most 256 jobs, so generator and cached proofs run in this second job.
+  check-flt2dec-long:
+    name: Verify flt2dec long (${{ matrix.group.name }}, ${{ matrix.os }})
+    needs: [flt2dec_matrix, build-flat-smt-cbmc]
+    if: needs.flt2dec_matrix.outputs.long_groups != '0'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_long) }}
+    # The aliases reuse the environment and steps of check-flt2dec.
+    env: *flt2dec_env
+    steps: *flt2dec_steps
+
   kani_autoharness:
-    name: Verify std library using autoharness
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Verify std library using autoharness
+    if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -93,6 +383,10 @@ jobs:
         with:
           submodules: true
 
+      - name: Trust CBMC Homebrew tap
+        if: runner.os == 'macOS'
+        run: brew trust diffblue/cbmc
+
       # Step 2: Run Kani autoharness on the std library for selected functions.
       # Uses "--include-pattern" to make sure we do not try to run across all
       # possible functions as that may take a lot longer than expected. Instead,
@@ -108,7 +402,24 @@ jobs:
       #   timeout on macOS and the ubuntu runner died while verifying them.
       - name: Run Kani Verification
         run: |
+          python3 -I -B -m unittest discover \
+            -s scripts/kani-std-analysis -p test_log_parser.py
+          scripts/run-kani.sh --run list --kani-args --format json
+          remaining_manual_harnesses=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py \
+            --remaining kani-list.json)
+          manual_harness_args=()
+          while IFS= read -r harness; do
+            [[ -n "$harness" ]] || continue
+            manual_harness_args+=(--harness "$harness")
+          done <<< "$remaining_manual_harnesses"
+          if (( ${#manual_harness_args[@]} == 0 )); then
+            echo "No remaining manual harnesses were found" >&2
+            exit 1
+          fi
+          # Manual filters leave Kani's automatic harness selection intact.
+          # Dedicated flt2dec proofs run in the check-flt2dec and check-flt2dec-long matrices.
           scripts/run-kani.sh --run autoharness --kani-args \
+            --exact "${manual_harness_args[@]}" \
             --include-pattern "<(.+)[[:space:]]as[[:space:]](.+)>::disjoint_bitor" \
             --include-pattern "<(.+)[[:space:]]as[[:space:]](.+)>::unchecked_disjoint_bitor" \
             --include-pattern "<(.+)[[:space:]]as[[:space:]]iter::range::Step>::backward_unchecked" \
@@ -213,9 +524,9 @@ jobs:
             --include-pattern time::Duration::from_secs \
             --exclude-pattern time::Duration::from_secs_f \
             --exclude-pattern ::precondition_check \
-            --harness-timeout 10m \
+            --harness-timeout 30m --fail-fast \
             --default-unwind 1000 \
-            --jobs=3 --output-format=terse | tee autoharness-verification.log
+            --jobs=1 --output-format=terse | tee autoharness-verification.log
           gzip autoharness-verification.log
 
       - name: Upload Autoharness Verification Log
@@ -228,7 +539,8 @@ jobs:
           retention-days: 3
 
   run_kani_metrics:
-    name: Kani Metrics
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Kani Metrics
+    if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -257,7 +569,7 @@ jobs:
 
       # The Kani metrics collection uses a Python script (kani_std_analysis.py), so make sure Python is installed
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
@@ -298,7 +610,8 @@ jobs:
           retention-days: 3
 
   run-log-analysis:
-    name: Build JSON from logs
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Build JSON from logs
+    if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
     needs: [run_kani_metrics, kani_autoharness]
     runs-on: ${{ matrix.os }}
     strategy:
@@ -350,7 +663,8 @@ jobs:
           if-no-files-found: error
 
   run-kani-list:
-    name: Kani List
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Kani List
+    if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
     runs-on: ubuntu-latest
     steps:
       - name: Remove unnecessary software to free up disk space
@@ -384,7 +698,7 @@ jobs:
 
       # Step 3: Add output to job summary
       - name: Add Kani List output to job summary
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
@@ -395,7 +709,8 @@ jobs:
               .write();
 
   run-autoharness-analyzer:
-    name: Kani Autoharness Analyzer
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Kani Autoharness Analyzer
+    if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
     runs-on: ubuntu-latest
     steps:
       # Step 1: Check out the repository
@@ -412,13 +727,15 @@ jobs:
       - name: Add Autoharness Analyzer output to job summary
         run: |
           pushd scripts/autoharness_analyzer
-          echo "# Autoharness Failure Summary" >> "$GITHUB_STEP_SUMMARY"
-          echo "## Crate core, all functions" >> "$GITHUB_STEP_SUMMARY"
-          cat core_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
-          echo "## Crate core, unsafe functions" >> "$GITHUB_STEP_SUMMARY"
-          cat core_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
-          echo "## Crate std, all functions" >> "$GITHUB_STEP_SUMMARY"
-          cat std_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
-          echo "## Crate std, unsafe functions" >> "$GITHUB_STEP_SUMMARY"
-          cat std_unsafe_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "# Autoharness Failure Summary"
+            echo "## Crate core, all functions"
+            cat core_autoharness_data.md
+            echo "## Crate core, unsafe functions"
+            cat core_autoharness_data.md
+            echo "## Crate std, all functions"
+            cat std_autoharness_data.md
+            echo "## Crate std, unsafe functions"
+            cat std_unsafe_autoharness_data.md
+          } >> "$GITHUB_STEP_SUMMARY"
           popd
