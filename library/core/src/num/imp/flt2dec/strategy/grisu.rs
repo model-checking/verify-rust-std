@@ -1207,7 +1207,7 @@ pub mod grisu_verify {
     #[kani::ensures(|result| {
         shortest_scaling_valid(*result)
             && shortest_scaling_exponent_matches(mant, plus, exp, result.3, result.4)
-            && shortest_scaling_width_valid(mant, minus, plus, result.0, result.1)
+            && shortest_scaling_width_valid(mant, minus, plus, exp, result.0, result.1)
     })]
     fn scale_shortest_contract(
         mant: u64,
@@ -1285,7 +1285,12 @@ pub mod grisu_verify {
             (result.0, result.1, result.2), plus.wrapping_sub(v) == v.wrapping_sub(minus))
         && result.0.wrapping_sub(result.1) <= plus.wrapping_sub(minus)
         && index < CACHED_POW10.len()
-        && i32::from(result.3) == i32::from(exp) + i32::from(CACHED_POW10[index].1) + 64)]
+        && i32::from(result.3) == i32::from(exp) + i32::from(CACHED_POW10[index].1) + 64
+        && scaled_width_window_valid(
+            plus.wrapping_sub(minus) as u128,
+            CACHED_POW10[index].0,
+            result.0.wrapping_sub(result.1) as u128,
+        ))]
     fn multiply_shortest_contract(
         plus: u64,
         minus: u64,
@@ -1506,12 +1511,39 @@ pub mod grisu_verify {
         mant: u64,
         minus: u64,
         plus: u64,
+        exp: i16,
         scaled_plus: u64,
         scaled_minus: u64,
     ) -> bool {
         let shift = mant.wrapping_add(plus).leading_zeros();
+        let gap = (minus as u128 + plus as u128) << shift;
+        let (_, index) = shortest_cached_power_index(mant, plus, exp);
         scaled_minus <= scaled_plus
-            && scaled_plus as u128 - scaled_minus as u128 <= (minus as u128 + plus as u128) << shift
+            && scaled_plus as u128 - scaled_minus as u128 <= gap
+            && index >= 0
+            && (index as usize) < CACHED_POW10.len()
+            && scaled_width_window_valid(
+                gap,
+                CACHED_POW10[index as usize].0,
+                scaled_plus as u128 - scaled_minus as u128,
+            )
+    }
+
+    // `width` is the difference of two products that `Fp::mul` rounded to nearest, so it is
+    // less than one away from the exact `gap * cached / 2^64` on either side.
+    fn scaled_width_window_valid(gap: u128, cached: u64, width: u128) -> bool {
+        let product = gap * cached as u128;
+        (width + 1) << 64 > product && width << 64 < product + (1u128 << 64)
+    }
+
+    // The normalized exponent and the `CACHED_POW10` index that `scale_shortest` selects.
+    fn shortest_cached_power_index(mant: u64, input_plus: u64, input_exp: i16) -> (i32, i32) {
+        let normalized_exp =
+            i32::from(input_exp) - mant.wrapping_add(input_plus).leading_zeros() as i32;
+        let index = (i32::from(GAMMA) - normalized_exp - 64 - i32::from(CACHED_POW10_FIRST_E))
+            * (CACHED_POW10.len() as i32 - 1)
+            / i32::from(CACHED_POW10_LAST_E - CACHED_POW10_FIRST_E);
+        (normalized_exp, index)
     }
 
     fn shortest_scaling_exponent_matches(
@@ -1521,11 +1553,7 @@ pub mod grisu_verify {
         exp: i16,
         minusk: i16,
     ) -> bool {
-        let normalized_exp =
-            i32::from(input_exp) - mant.wrapping_add(input_plus).leading_zeros() as i32;
-        let index = (i32::from(GAMMA) - normalized_exp - 64 - i32::from(CACHED_POW10_FIRST_E))
-            * (CACHED_POW10.len() as i32 - 1)
-            / i32::from(CACHED_POW10_LAST_E - CACHED_POW10_FIRST_E);
+        let (normalized_exp, index) = shortest_cached_power_index(mant, input_plus, input_exp);
         index >= 0 && (index as usize) < CACHED_POW10.len() && {
             let (_, cached_exp, cached_k) = CACHED_POW10[index as usize];
             i32::from(exp) == normalized_exp + i32::from(cached_exp) + 64 && minusk == cached_k
