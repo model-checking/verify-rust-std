@@ -25,7 +25,7 @@ if [[ -n "${KANI_PROBE_PROPERTY:-}" ]]; then
         exit 2
     fi
     case "$KANI_PROBE_PROPERTY" in
-        num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_base.1|num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_step.1)
+        num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_base.1|num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_step.1|num::imp::flt2dec::strategy::grisu::generate_integral_digits.loop_invariant_step.1)
             kani_cbmc_args+=(--property "$KANI_PROBE_PROPERTY") ;;
         *) echo "Unknown diagnostic loop property." >&2; exit 2 ;;
     esac

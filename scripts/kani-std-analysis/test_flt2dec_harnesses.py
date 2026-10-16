@@ -48,7 +48,9 @@ class Flt2decHarnessesTests(unittest.TestCase):
     def test_loop_probes_have_distinct_names_and_keep_the_selected_harnesses(self):
         name = "grisu-shortest-f64-02-03"
         original = next(group for group in self.groups if group["name"] == name)
-        for probe, phase in (("entry", "base"), ("step", "step")):
+        for probe, function, phase in (("entry", "generate_shortest", "base"),
+                                       ("step", "generate_shortest", "step"),
+                                       ("integral-step", "generate_integral_digits", "step")):
             matrix = proof_matrix([name], grisu_probe=probe)
             group, = matrix["group"]
             with self.subTest(probe=probe):
@@ -57,13 +59,13 @@ class Flt2decHarnessesTests(unittest.TestCase):
                 self.assertEqual(group["harnesses"], original["harnesses"])
                 self.assertEqual(group["timeout_minutes"], 3)
                 self.assertEqual(group["probe_property"],
-                                 "num::imp::flt2dec::strategy::grisu::generate_shortest."
+                                 f"num::imp::flt2dec::strategy::grisu::{function}."
                                  f"loop_invariant_{phase}.1")
                 self.assertEqual(matrix["os"], OPERATING_SYSTEMS)
         self.assertTrue(all("probe_property" not in group for group in proof_matrix()["group"]))
 
     def test_loop_probes_reject_automatic_and_unrelated_groups(self):
-        for probe in ("entry", "step", "unknown"):
+        for probe in ("entry", "step", "integral-step", "unknown"):
             with self.subTest(probe=probe), self.assertRaises(ValueError):
                 proof_matrix(grisu_probe=probe)
         for name in ("dragon-exact-loop-frame", "grisu-shortest-scaling-contract-00-03"):
@@ -153,7 +155,9 @@ class Flt2decHarnessesTests(unittest.TestCase):
             "num::imp::flt2dec::strategy::dragon::dragon_verify::check_exact_digit_loop_frame",
             self.dedicated,
         )
-        generators = [group for group in self.groups if group["kind"].startswith("generator-")]
+        # The diagnostic probes (branch g4-diag-s19 only) repeat slices, so they stay out.
+        generators = [group for group in self.groups if group["kind"].startswith("generator-")
+                      and "::probe_" not in group["harnesses"][0]]
         self.assertEqual(sum(len(group["harnesses"]) for group in generators), 179)
         for family in ("dragon-exact", "dragon-shortest", "grisu-exact", "grisu-shortest"):
             targets = [harness for group in generators if group["name"].startswith(family + "-")
@@ -251,7 +255,8 @@ class Flt2decHarnessesTests(unittest.TestCase):
         prefix = "num::imp::flt2dec::strategy::grisu::grisu_verify::"
         partitions = ("f32_00", "f32_01", "f32_02", "f32_03", "f64_00")
         slices = [group for group in self.groups
-                  if group["name"].startswith("grisu-shortest-") and "-slice-" in group["name"]]
+                  if group["name"].startswith("grisu-shortest-") and "-slice-" in group["name"]
+                  and "::probe_" not in group["harnesses"][0]]
         self.assertEqual(sorted(harness for group in slices for harness in group["harnesses"]),
                          sorted(f"{prefix}{partition}::s{index}::check_format_shortest_opt"
                                 for partition in partitions for index in range(8)))

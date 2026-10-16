@@ -10,6 +10,12 @@ GRISU = "num::imp::flt2dec::strategy::grisu::grisu_verify"
 OPERATING_SYSTEMS = ["ubuntu-latest", "macos-latest"]
 # Grisu shortest partitions that the Rust macro proves in eight exponent slices.
 SLICED_SHORTEST = {"f32_00", "f32_01", "f32_02", "f32_03", "f64_00"}
+# A manual Grisu probe checks one loop-contract property in place of the whole harness.
+GRISU_PROBES = {
+    "entry": "num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_base.1",
+    "step": "num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_step.1",
+    "integral-step": "num::imp::flt2dec::strategy::grisu::generate_integral_digits.loop_invariant_step.1",
+}
 
 
 def proof_groups(pointer_width=None):
@@ -54,6 +60,18 @@ def proof_groups(pointer_width=None):
         add(f"{name}-fixed-exponent", "probe", [
             f"{module}::f64_exp_1023::{proof}"
         ], timeout_minutes)
+
+    # Diagnostic value-range probes (branch g4-diag-s19 only):  each adds one assumption on the
+    # scaled width to a hard shortest slice.  The covers show that each assumption admits an input.
+    for probe, partition, index in [("p0", "f32_03", 4), ("p1", "f32_03", 4), ("p2", "f32_03", 4),
+                                    ("p3", "f32_03", 4), ("p5", "f32_00", 0), ("p5", "f64_00", 0)]:
+        add(f"grisu-shortest-{partition.replace('_', '-')}-slice-{index}-{probe}", f"generator-{partition[:3]}",
+            [f"{GRISU}::probe_{probe}::{partition}_s{index}::check_format_shortest_opt"], 120,
+            matrix_job="long")
+    add("grisu-shortest-probe-covers", "probe", [
+        f"{GRISU}::probe_covers::{name}"
+        for name in ("p0_f32_03_s4", "p1_f32_03_s4", "p2_f32_03_s4", "p1_f32_00_s0", "p1_f64_00_s0")
+    ], 30)
 
     # Ubuntu proved the shortest probe in 65 minutes;  macOS is about twice as slow.
     for mode in ("exact", "shortest"):
@@ -179,7 +197,7 @@ def remaining_harnesses(inventory):
 def proof_matrix(selected_groups=None, pointer_width=None, platform="both", grisu_probe="none",
                  matrix_job=None):
     groups = proof_groups(pointer_width)
-    if grisu_probe not in ("none", "entry", "step"):
+    if grisu_probe != "none" and grisu_probe not in GRISU_PROBES:
         raise ValueError("Unknown Grisu probe: " + str(grisu_probe))
     if matrix_job not in (None, "core", "long"):
         raise ValueError("Unknown matrix job: " + str(matrix_job))
@@ -208,10 +226,8 @@ def proof_matrix(selected_groups=None, pointer_width=None, platform="both", gris
                 if not (group["catalog_name"].startswith("grisu-shortest-")
                         and group["kind"].startswith("generator-")):
                     raise ValueError("Grisu probes require shortest generator groups")
-                phase = "base" if grisu_probe == "entry" else "step"
                 group.update(name=f"probe-{grisu_probe}-" + group["catalog_name"],
-                             probe_property=f"num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_{phase}.1",
-                             timeout_minutes=3)
+                             probe_property=GRISU_PROBES[grisu_probe], timeout_minutes=3)
     # A manual selection splits between the two matrix jobs;  either part can be empty.
     if matrix_job is not None:
         groups = [group for group in groups if group["matrix_job"] == matrix_job]
@@ -238,7 +254,7 @@ def main():
                         help="Select a platform only for explicitly selected manual groups")
     parser.add_argument("--backend", choices=["native", "cvc5"],
                         help="Select one backend's harnesses within a proof group")
-    parser.add_argument("--matrix-grisu-probe", choices=["none", "entry", "step"], default="none",
+    parser.add_argument("--matrix-grisu-probe", choices=["none", *GRISU_PROBES], default="none",
                         help="Diagnose one loop property in selected manual Grisu groups")
     parser.add_argument("--matrix-job", choices=["core", "long"],
                         help="Keep only the groups of one CI matrix job")
