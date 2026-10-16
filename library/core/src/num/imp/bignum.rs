@@ -292,14 +292,30 @@ macro_rules! define_bignum {
                 self
             }
 
+            /// One step of `mul_digits`: returns `(carry', v)` such that
+            /// `carry' * 2^W + v = a * b + c + carry`, where `a` is digit `i` of the
+            /// first factor and `b` is digit `j` of the second factor. The positions do
+            /// not change the result. The Kani proofs of the cached products use them.
+            #[inline]
+            pub(crate) fn mul_digits_step(
+                _i: usize,
+                _j: usize,
+                a: $ty,
+                b: $ty,
+                c: $ty,
+                carry: $ty,
+            ) -> ($ty, $ty) {
+                use crate::num::imp::bignum::FullOps;
+
+                a.full_mul_add(b, c, carry)
+            }
+
             /// Multiplies itself by a number described by `other[0] + other[1] * 2^W +
             /// other[2] * 2^(2W) + ...` (where `W` is the number of bits in the digit type)
             /// and returns its own mutable reference.
             pub fn mul_digits<'a>(&'a mut self, other: &[$ty]) -> &'a mut $name {
                 // the internal routine. works best when aa.len() <= bb.len().
                 fn mul_inner(ret: &mut [$ty; $n], aa: &[$ty], bb: &[$ty]) -> usize {
-                    use crate::num::imp::bignum::FullOps;
-
                     let mut retsz = 0;
                     for (i, &a) in aa.iter().enumerate() {
                         if a == 0 {
@@ -308,7 +324,7 @@ macro_rules! define_bignum {
                         let mut sz = bb.len();
                         let mut carry = 0;
                         for (j, &b) in bb.iter().enumerate() {
-                            let (c, v) = a.full_mul_add(b, ret[i + j], carry);
+                            let (c, v) = $name::mul_digits_step(i, j, a, b, ret[i + j], carry);
                             ret[i + j] = v;
                             carry = c;
                         }
@@ -761,7 +777,8 @@ impl Big {
                 if $column < bb.len() {
                     let output = index + $column;
                     assert!(output < KANI_LIMBS);
-                    let (c, v) = a.full_mul_add(bb[$column], ret[output], carry);
+                    let (c, v) =
+                        Self::mul_digits_step(index, $column, a, bb[$column], ret[output], carry);
                     ret[output] = v;
                     carry = c;
                 }
