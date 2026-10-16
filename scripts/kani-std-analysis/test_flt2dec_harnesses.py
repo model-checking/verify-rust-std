@@ -87,7 +87,7 @@ class Flt2decHarnessesTests(unittest.TestCase):
         real = [group for group in self.groups if "::probe_" not in group["harnesses"][0]]
         self.assertEqual(len(real), 165)
         self.assertEqual(len({group["name"] for group in self.groups}), len(self.groups))
-        self.assertEqual(sum(len(group["harnesses"]) for group in real), 789)
+        self.assertEqual(sum(len(group["harnesses"]) for group in real), 790)
         self.assertEqual(len(set(self.dedicated)), len(self.dedicated))
         for part in ("core", "long"):
             parts = [group for group in proof_matrix(matrix_job=part)["group"]
@@ -199,7 +199,9 @@ class Flt2decHarnessesTests(unittest.TestCase):
         arithmetic = [harness for group in self.groups
                       for harness in group_harnesses(group, "cvc5")]
         prefix = "num::imp::flt2dec::strategy::grisu::grisu_verify::"
-        expected = {f"{prefix}check_multiply_shortest_{index:02d}" for index in range(80)}
+        expected = {f"{prefix}check_multiply_shortest_{index:02d}"
+                    for index in range(80) if index != 29}
+        expected.update(f"{prefix}check_multiply_shortest_29_{piece}" for piece in ("v0", "v1"))
         expected.add(f"{prefix}check_decimal_termination")
         expected.add(f"{prefix}check_advance_fraction_threshold")
         expected.update(f"{prefix}check_fractional_encoding_{power:02d}" for power in range(16))
@@ -302,20 +304,28 @@ class Flt2decHarnessesTests(unittest.TestCase):
     def test_cached_power_catalog_matches_rust_declarations(self):
         root = Path(__file__).resolve().parents[2]
         source = (root / "library/core/src/num/imp/flt2dec/strategy/grisu.rs").read_text()
-        for macro, prefix, expected_index in (
-            ("check_scale_shortest_partition", "check_scale_shortest", lambda group: group),
-            ("verify_multiply_shortest", "check_multiply_shortest", lambda group: 80 - group),
+        for macro, prefix, expected_index, pieces in (
+            ("check_scale_shortest_partition", "check_scale_shortest", lambda group: group, {}),
+            ("verify_multiply_shortest", "check_multiply_shortest", lambda group: 80 - group,
+             {29: ("v0", "v1")}),
         ):
-            pattern = rf"{macro}!\(\s*({prefix}_(\d+))\s*,(?:\s*scaling_cache_index_\d+\s*,)?\s*(\d+)\s*\)"
+            pattern = (rf"{macro}!\(\s*({prefix}_(\d+)(?:_(v\d))?)\s*,"
+                       rf"(?:\s*scaling_cache_index_\d+\s*,)?\s*(\d+)\s*[,)]")
             declarations = re.findall(pattern, source)
+            expected = {(group, piece, expected_index(group)) for group in range(80)
+                        for piece in pieces.get(group, ("",))}
             with self.subTest(macro=macro):
-                self.assertEqual(len(declarations), 80)
-                self.assertEqual({(int(group), int(index)) for _, group, index in declarations},
-                                 {(group, expected_index(group)) for group in range(80)})
-                declared = {name for name, _, _ in declarations}
+                self.assertEqual(len(declarations), len(expected))
+                self.assertEqual({(int(group), piece, int(index))
+                                  for _, group, piece, index in declarations}, expected)
+                declared = {name for name, _, _, _ in declarations}
                 routed = {name.rsplit("::", 1)[1] for name in self.dedicated
-                          if re.fullmatch(prefix + r"_\d+", name.rsplit("::", 1)[1])}
+                          if re.fullmatch(prefix + r"_\d+(?:_v\d)?", name.rsplit("::", 1)[1])}
                 self.assertEqual(declared, routed)
+        # The two pieces of the index 51 proof must cover every u64 value of v.
+        split = re.findall(r"verify_multiply_shortest!\(\s*check_multiply_shortest_29_(v\d)\s*,"
+                           r"\s*51\s*,\s*([^,]+?)\s*,\s*([^,)]+?)\s*[,)]", source)
+        self.assertEqual(split, [("v0", "0", "1 << 63"), ("v1", "1 << 63", "1 << 64")])
 
     def test_only_exact_catalog_names_are_removed(self):
         retained = ["num::imp::flt2dec::check_wrapper", "num::imp::flt2dec::check_future_proof",
