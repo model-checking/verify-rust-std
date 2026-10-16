@@ -48,7 +48,9 @@ class Flt2decHarnessesTests(unittest.TestCase):
     def test_loop_probes_have_distinct_names_and_keep_the_selected_harnesses(self):
         name = "grisu-shortest-f64-02-03"
         original = next(group for group in self.groups if group["name"] == name)
-        for probe, phase in (("entry", "base"), ("step", "step")):
+        for probe, function, phase in (("entry", "generate_shortest", "base"),
+                                       ("step", "generate_shortest", "step"),
+                                       ("integral-step", "generate_integral_digits", "step")):
             matrix = proof_matrix([name], grisu_probe=probe)
             group, = matrix["group"]
             with self.subTest(probe=probe):
@@ -57,13 +59,13 @@ class Flt2decHarnessesTests(unittest.TestCase):
                 self.assertEqual(group["harnesses"], original["harnesses"])
                 self.assertEqual(group["timeout_minutes"], 3)
                 self.assertEqual(group["probe_property"],
-                                 "num::imp::flt2dec::strategy::grisu::generate_shortest."
+                                 f"num::imp::flt2dec::strategy::grisu::{function}."
                                  f"loop_invariant_{phase}.1")
                 self.assertEqual(matrix["os"], OPERATING_SYSTEMS)
         self.assertTrue(all("probe_property" not in group for group in proof_matrix()["group"]))
 
     def test_loop_probes_reject_automatic_and_unrelated_groups(self):
-        for probe in ("entry", "step", "unknown"):
+        for probe in ("entry", "step", "integral-step", "unknown"):
             with self.subTest(probe=probe), self.assertRaises(ValueError):
                 proof_matrix(grisu_probe=probe)
         for name in ("dragon-exact-loop-frame", "grisu-shortest-scaling-contract-00-03"):

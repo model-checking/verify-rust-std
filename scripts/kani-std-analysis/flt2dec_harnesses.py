@@ -10,6 +10,12 @@ GRISU = "num::imp::flt2dec::strategy::grisu::grisu_verify"
 OPERATING_SYSTEMS = ["ubuntu-latest", "macos-latest"]
 # Grisu shortest partitions that the Rust macro proves in eight exponent slices.
 SLICED_SHORTEST = {"f32_00", "f32_01", "f32_02", "f32_03", "f64_00"}
+# A manual Grisu probe checks one loop-contract property in place of the whole harness.
+GRISU_PROBES = {
+    "entry": "num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_base.1",
+    "step": "num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_step.1",
+    "integral-step": "num::imp::flt2dec::strategy::grisu::generate_integral_digits.loop_invariant_step.1",
+}
 
 
 def proof_groups(pointer_width=None):
@@ -179,7 +185,7 @@ def remaining_harnesses(inventory):
 def proof_matrix(selected_groups=None, pointer_width=None, platform="both", grisu_probe="none",
                  matrix_job=None):
     groups = proof_groups(pointer_width)
-    if grisu_probe not in ("none", "entry", "step"):
+    if grisu_probe != "none" and grisu_probe not in GRISU_PROBES:
         raise ValueError("Unknown Grisu probe: " + str(grisu_probe))
     if matrix_job not in (None, "core", "long"):
         raise ValueError("Unknown matrix job: " + str(matrix_job))
@@ -208,10 +214,8 @@ def proof_matrix(selected_groups=None, pointer_width=None, platform="both", gris
                 if not (group["catalog_name"].startswith("grisu-shortest-")
                         and group["kind"].startswith("generator-")):
                     raise ValueError("Grisu probes require shortest generator groups")
-                phase = "base" if grisu_probe == "entry" else "step"
                 group.update(name=f"probe-{grisu_probe}-" + group["catalog_name"],
-                             probe_property=f"num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_{phase}.1",
-                             timeout_minutes=3)
+                             probe_property=GRISU_PROBES[grisu_probe], timeout_minutes=3)
     # A manual selection splits between the two matrix jobs;  either part can be empty.
     if matrix_job is not None:
         groups = [group for group in groups if group["matrix_job"] == matrix_job]
@@ -238,7 +242,7 @@ def main():
                         help="Select a platform only for explicitly selected manual groups")
     parser.add_argument("--backend", choices=["native", "cvc5"],
                         help="Select one backend's harnesses within a proof group")
-    parser.add_argument("--matrix-grisu-probe", choices=["none", "entry", "step"], default="none",
+    parser.add_argument("--matrix-grisu-probe", choices=["none", *GRISU_PROBES], default="none",
                         help="Diagnose one loop property in selected manual Grisu groups")
     parser.add_argument("--matrix-job", choices=["core", "long"],
                         help="Keep only the groups of one CI matrix job")

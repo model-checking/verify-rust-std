@@ -15,7 +15,7 @@ on:
       grisu_probe:
         description: Optional diagnostic property for explicitly selected Grisu shortest groups
         type: choice
-        options: [none, entry, step]
+        options: [none, entry, step, integral-step]
         default: none
       native_solver:
         description: Optional SAT solver for the native pass of explicitly selected proof groups
