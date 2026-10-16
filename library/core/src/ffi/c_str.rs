@@ -459,11 +459,10 @@ impl CStr {
     #[stable(feature = "cstr_from_bytes", since = "1.10.0")]
     #[rustc_const_stable(feature = "const_cstr_unchecked", since = "1.59.0")]
     #[rustc_allow_const_fn_unstable(const_eval_select)]
-    // Safety contract: the documented requirement is the `CStr` safety
-    // invariant restated on the input slice (non-empty, nul-terminated, no
-    // interior nul) — the obligation every caller must discharge. The result
-    // then upholds the invariant.
+    // Preconditions: non-empty, nul-terminated, no interior nul (the `CStr`
+    // safety invariant restated on the input — the caller's obligation).
     #[requires(!bytes.is_empty() && bytes[bytes.len() - 1] == 0 && !bytes[..bytes.len()-1].contains(&0))]
+    // Postcondition: the resulting `CStr` upholds the safety invariant.
     #[ensures(|result: &&CStr| result.is_safe())]
     pub const unsafe fn from_bytes_with_nul_unchecked(bytes: &[u8]) -> &CStr {
         const_eval_select!(
@@ -826,7 +825,12 @@ impl const AsRef<CStr> for CStr {
 #[unstable(feature = "cstr_internals", issue = "none")]
 #[rustc_allow_const_fn_unstable(const_eval_select)]
 #[requires(is_null_terminated(ptr))]
-#[ensures(|&result| result < isize::MAX as usize && unsafe { *ptr.add(result) } == 0)]
+// `result` is the offset of the *first* nul: a legal offset (`< isize::MAX`)
+// pointing at a nul, with no interior nul at any earlier offset. The first-nul
+// clause is what `from_ptr` relies on to establish the `CStr` safety invariant.
+#[ensures(|&result| result < isize::MAX as usize
+    && unsafe { *ptr.add(result) } == 0
+    && !(0..result).any(|i| unsafe { *ptr.add(i) } == 0))]
 const unsafe fn strlen(ptr: *const c_char) -> usize {
     const_eval_select!(
         @capture { s: *const c_char = ptr } -> usize:
@@ -930,7 +934,13 @@ impl FusedIterator for Bytes<'_> {}
 mod verify {
     use super::*;
 
-    // Helper function
+    // Helper: returns an arbitrary *valid* `&CStr` built from `slice`.
+    //
+    // `slice` is assumed to be non-empty and nul-terminated; `from_bytes_until_nul`
+    // then yields the `CStr` whose nul-terminated view is the prefix of `slice`
+    // up to and including its first nul. Harnesses use this to quantify over all
+    // valid C strings up to the array bound. To relate a method's output back to
+    // the raw input, pair it with `first_nul` below.
     fn arbitrary_cstr(slice: &[u8]) -> &CStr {
         // At a minimum, the slice has a null terminator to form a valid CStr.
         kani::assume(slice.len() > 0 && slice[slice.len() - 1] == 0);
@@ -940,6 +950,19 @@ mod verify {
         let c_str = result.unwrap();
         assert!(c_str.is_safe());
         c_str
+    }
+
+    // Helper: index of the first nul in `slice`. For a slice accepted by
+    // `arbitrary_cstr`, this is where the valid `CStr`'s content ends, so the
+    // nul-terminated view is `slice[..=first_nul(slice)]` and the content is
+    // `slice[..first_nul(slice)]`. Lets a harness check a method's output
+    // against the raw input bytes, not merely against `is_safe()`.
+    fn first_nul(slice: &[u8]) -> usize {
+        let mut i = 0;
+        while slice[i] != 0 {
+            i += 1;
+        }
+        i
     }
 
     // impl Invariant for &CStr  (criterion 1)
@@ -966,7 +989,7 @@ mod verify {
         let len = slice.len();
         // Oracle #1 (structural): valid iff the FIRST nul sits at the final
         // index. Phrased with `position` — not the invariant's own form — so
-        // the equivalence is a theorem, not a restatement.
+        // this is an independent cross-check, not a restatement.
         let first_nul_at_end = match slice.iter().position(|&b| b == 0) {
             Some(pos) => pos == len - 1,
             None => false,
@@ -1239,6 +1262,12 @@ mod verify {
         // Criterion 2: the invariant is preserved by the (immutable) call.
         assert!(c_str.is_safe());
 
+        // Explicit end-to-end check against the raw input: `to_bytes()` is
+        // exactly the content before the first nul of the generating slice
+        // (not merely some `is_safe()` byte sequence).
+        let end = first_nul(slice);
+        assert_eq!(bytes, &slice[..end]);
+
         // Non-vacuity: neither contract clause is vacuously satisfied.
         kani::cover(bytes.is_empty(), "non-vacuity: an empty CStr (to_bytes() empty) is reachable");
         kani::cover(
@@ -1265,6 +1294,11 @@ mod verify {
         // Criterion 2: the invariant is preserved by the (immutable) call.
         assert!(c_str.is_safe());
 
+        // Explicit end-to-end check against the raw input: the nul-terminated
+        // view is exactly the input prefix up to and including the first nul.
+        let end = first_nul(slice);
+        assert_eq!(bytes, &slice[..=end]);
+
         // Non-vacuity: no contract clause is vacuously satisfied.
         kani::cover(
             bytes.len() == 1,
@@ -1278,11 +1312,12 @@ mod verify {
 
     // const unsafe fn strlen(ptr: *const c_char) -> usize  (criterion 3)
     //
-    // The contract pins "legal offset, points at a nul"; the harness
-    // additionally asserts the FIRST-nul property — kept out of the shared
-    // contract so callers that stub `strlen` are unaffected. A mutant
-    // returning a later nul index would satisfy the contract but break the
-    // first-nul semantics `from_ptr` relies on for `is_safe`.
+    // The contract pins the FIRST-nul property directly: a legal offset
+    // (`< isize::MAX`) pointing at a nul, with no interior nul before it.
+    // The in-harness assertions below restate that postcondition; a mutant
+    // returning a later nul index now fails the contract itself (not just
+    // this harness), which protects the first-nul semantics `from_ptr`
+    // relies on for `is_safe`.
     #[kani::proof_for_contract(super::strlen)]
     #[kani::unwind(33)]
     fn check_strlen_contract() {
@@ -1292,12 +1327,10 @@ mod verify {
 
         let len = unsafe { super::strlen(ptr) };
 
-        // The `#[ensures]` clause, restated: a legal offset that points at
-        // the nul terminator.
+        // The `#[ensures]` clause, restated: the first nul is a legal offset
+        // that points at the nul terminator, with no interior nul before it.
         assert!(len < isize::MAX as usize);
         assert!(unsafe { *ptr.add(len) } == 0);
-
-        // First-nul semantics: no interior nul precedes the terminator.
         for i in 0..len {
             assert!(unsafe { *ptr.add(i) } != 0);
         }
@@ -1353,6 +1386,10 @@ mod verify {
 
         // Criterion 2: the invariant is preserved by the (immutable) call.
         assert!(c_str.is_safe());
+
+        // Explicit end-to-end check against the raw input: the string is
+        // empty iff the first nul of the generating slice is at index 0.
+        assert_eq!(empty, first_nul(slice) == 0);
 
         // Non-vacuity: neither contract clause is vacuously satisfied.
         kani::cover(empty, "non-vacuity: an empty CStr (is_empty == true) is reachable");
