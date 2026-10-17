@@ -138,30 +138,19 @@ fn div_rem_upto_16<'a>(
     (d, x)
 }
 
-/// The shortest mode implementation for Dragon.
-pub fn format_shortest<'a>(
-    d: &Decoded,
-    buf: &'a mut [MaybeUninit<u8>],
-) -> (/*digits*/ &'a [u8], /*exp*/ i16) {
-    // the number `v` to format is known to be:
-    // - equal to `mant * 2^exp`;
-    // - preceded by `(mant - 2 * minus) * 2^exp` in the original type; and
-    // - followed by `(mant + 2 * plus) * 2^exp` in the original type.
-    //
-    // obviously, `minus` and `plus` cannot be zero. (for infinities, we use out-of-range values.)
-    // also we assume that at least one digit is generated, i.e., `mant` cannot be zero too.
-    //
-    // this also means that any number between `low = (mant - minus) * 2^exp` and
-    // `high = (mant + plus) * 2^exp` will map to this exact floating point number,
-    // with bounds included when the original mantissa was even (i.e., `!mant_was_odd`).
+/// The scaled state of `format_shortest` before digit generation.
+struct ShortestScaled {
+    k: i16,
+    mant: Big,
+    minus: Big,
+    plus: Big,
+    scale: Big,
+}
 
-    assert!(d.mant > 0);
-    assert!(d.minus > 0);
-    assert!(d.plus > 0);
-    assert!(d.mant.checked_add(d.plus).is_some());
-    assert!(d.mant.checked_sub(d.minus).is_some());
-    assert!(buf.len() >= MAX_SIG_DIGITS);
-
+/// Converts `{mant, minus, plus} * 2^exp` into the fractional form `{mant, minus, plus} / scale`
+/// and finds `k` such that `scale < mant + plus <= scale * 10` (`<=` on the left when inclusive).
+#[inline]
+fn scale_shortest(d: &Decoded) -> ShortestScaled {
     // `a.cmp(&b) < rounding` is `if d.inclusive {a <= b} else {a < b}`
     let rounding = if d.inclusive { Ordering::Greater } else { Ordering::Equal };
 
@@ -208,6 +197,39 @@ pub fn format_shortest<'a>(
         minus.mul_small(10);
         plus.mul_small(10);
     }
+
+    ShortestScaled { k, mant, minus, plus, scale }
+}
+
+/// The shortest mode implementation for Dragon.
+pub fn format_shortest<'a>(
+    d: &Decoded,
+    buf: &'a mut [MaybeUninit<u8>],
+) -> (/*digits*/ &'a [u8], /*exp*/ i16) {
+    // the number `v` to format is known to be:
+    // - equal to `mant * 2^exp`;
+    // - preceded by `(mant - 2 * minus) * 2^exp` in the original type; and
+    // - followed by `(mant + 2 * plus) * 2^exp` in the original type.
+    //
+    // obviously, `minus` and `plus` cannot be zero. (for infinities, we use out-of-range values.)
+    // also we assume that at least one digit is generated, i.e., `mant` cannot be zero too.
+    //
+    // this also means that any number between `low = (mant - minus) * 2^exp` and
+    // `high = (mant + plus) * 2^exp` will map to this exact floating point number,
+    // with bounds included when the original mantissa was even (i.e., `!mant_was_odd`).
+
+    assert!(d.mant > 0);
+    assert!(d.minus > 0);
+    assert!(d.plus > 0);
+    assert!(d.mant.checked_add(d.plus).is_some());
+    assert!(d.mant.checked_sub(d.minus).is_some());
+    assert!(buf.len() >= MAX_SIG_DIGITS);
+
+    // `a.cmp(&b) < rounding` is `if d.inclusive {a <= b} else {a < b}`
+    let rounding = if d.inclusive { Ordering::Greater } else { Ordering::Equal };
+
+    // scale the inputs so that `scale < mant + plus <= scale * 10` (see `scale_shortest`).
+    let ShortestScaled { mut k, mut mant, mut minus, mut plus, scale } = scale_shortest(d);
 
     // cache `(2, 4, 8) * scale` for digit generation.
     let mut scale2 = scale.clone();
