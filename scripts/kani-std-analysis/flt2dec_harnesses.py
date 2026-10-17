@@ -118,6 +118,13 @@ def proof_groups(pointer_width=None):
         f"{DRAGON}::dragon_scale_shortest_{window:03d}::check_scale_shortest" for window in (0, 127)
     ], 60)
 
+    # Diagnostic (s37):  fixed-K proofs of windows 000 and 127, and the estimate range they need.
+    add("dragon-shortest-scaling-k-range", "equivalence", [f"{DRAGON}::check_dragon_scale_k_range"], 30)
+    for window in (0, 127):
+        add(f"dragon-shortest-scaling-fixed-k-{window:03d}", "contract", [
+            f"{DRAGON}::dragon_scale_fixed_k_{window:03d}::check_scale_shortest"
+        ], 60)
+
     # The index 51 proof (group 29) does not finish on the whole domain, so grisu.rs proves
     # it in two pieces that split on the top bit of v and together cover every input.
     for first in range(0, 80, 10):

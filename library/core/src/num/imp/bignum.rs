@@ -826,10 +826,13 @@ impl Big {
     }
 
     fn kani_mul_digits_product(ret: &mut [Digit; KANI_LIMBS], aa: &[Digit], bb: &[Digit]) -> usize {
+        // The caller gives the shorter operand as `aa`, so the bound `bb.len()` removes no
+        // row, but a constant `bb` (a power table) bounds the rows before the solver starts.
+        assert!(aa.len() <= bb.len());
         let mut retsz = 0;
         macro_rules! multiply_rows {
             ($($index:literal),+ $(,)?) => {$(
-                if $index < aa.len() {
+                if $index < aa.len() && $index < bb.len() {
                     let a = aa[$index];
                     if a != 0 {
                         let sz = Self::kani_mul_digits_row(ret, a, bb, $index);

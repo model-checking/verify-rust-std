@@ -2407,6 +2407,115 @@ pub mod dragon_verify {
     check_dragon_scale_partition!(dragon_scale_shortest_000, 0, 303, 324);
     check_dragon_scale_partition!(dragon_scale_shortest_127, 127, 288, 308);
 
+    // Diagnostic: one window with the estimate fixed to K. The proof assumes that the
+    // estimate is K, and the estimator stub checks the same value, so the fixed-K proofs
+    // of a window and check_dragon_scale_k_range together cover the window.
+    macro_rules! check_dragon_scale_fixed_k {
+        ($name:ident, $window:literal, $k:expr) => {
+            mod $name {
+                use super::*;
+
+                const FIRST: i16 = -1076 + 16 * $window;
+                const LAST: i16 = if FIRST + 15 < 970 { FIRST + 15 } else { 970 };
+                const K: i16 = $k;
+
+                fn window_limb_count(size: usize) -> usize {
+                    let limb_bound = dragon_limb_bound(FIRST).max(dragon_limb_bound(LAST));
+                    LimbCountMask((limb_bound + 1).next_power_of_two() - 1).check(size)
+                }
+
+                fn stub_pow10_exponent(n: usize) -> usize {
+                    let magnitude = usize::from(K.unsigned_abs());
+                    Pow10Prefix::for_range(magnitude..=magnitude).check(n)
+                }
+
+                fn stub_pow2_bits(bits: usize) -> usize {
+                    let encoded = bits & 2047;
+                    assert_eq!(encoded, bits);
+                    encoded
+                }
+
+                fn stub_estimate(mant: u64, exp: i16) -> i16 {
+                    assert_eq!(
+                        crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor(mant, exp),
+                        K
+                    );
+                    K
+                }
+
+                #[kani::proof_for_contract(scale_shortest_contract)]
+                #[kani::unwind(41)]
+                #[kani::stub(crate::num::imp::bignum::kani_loop_size, window_limb_count)]
+                #[kani::stub(Big::add, Big::kani_add_model)]
+                #[kani::stub(Big::sub, Big::kani_sub_model)]
+                #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
+                #[kani::stub(Big::mul_pow2, Big::kani_mul_pow2_model)]
+                #[kani::stub(Big::mul_digits, Big::kani_mul_digits_model)]
+                #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
+                #[kani::stub(crate::num::imp::bignum::kani_pow2_bits, stub_pow2_bits)]
+                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul, carrying_mul_model))]
+                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
+                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul, carrying_mul_model))]
+                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul_add, carrying_mul_add_model))]
+                #[kani::stub(crate::num::imp::flt2dec::estimator::estimate_scaling_factor, stub_estimate)]
+                #[kani::stub(
+                    u64::leading_zeros,
+                    crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u64
+                )]
+                #[kani::stub(
+                    u32::leading_zeros,
+                    crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u32
+                )]
+                #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
+                #[kani::stub(Big::is_zero, stub_is_zero)]
+                #[kani::solver(kissat)]
+                fn check_scale_shortest() {
+                    let mant = kani::any::<u64>() & ((1u64 << 55) - 1);
+                    let minus = 1;
+                    let plus = if kani::any::<bool>() { 1 } else { 2 };
+                    kani::assume(mant >= 2);
+                    kani::assume(plus == 1 || mant == 1 << 25 || mant == 1 << 54);
+                    kani::assume(mant as u128 + plus as u128 <= ((minus as u128 + plus as u128) << 53));
+                    let exp = FIRST + i16::from(kani::any::<u8>() & 15);
+                    kani::assume(exp <= LAST);
+                    kani::assume(
+                        crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor(mant + plus, exp)
+                            == K
+                    );
+                    let inclusive = kani::any::<bool>();
+                    scale_shortest_contract(mant, minus, plus, exp, inclusive);
+                    kani::cover(inclusive, "fixed-K scaling includes inclusive intervals");
+                    kani::cover(!inclusive, "fixed-K scaling includes exclusive intervals");
+                }
+            }
+        };
+    }
+
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000, 0, -319);
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_127, 127, 308);
+
+    // Every contract input of windows 000 and 127 has its estimate in the window range,
+    // so the fixed-K proofs of each K in that range cover the window.
+    #[kani::proof]
+    fn check_dragon_scale_k_range() {
+        let mant = kani::any::<u64>() & ((1u64 << 55) - 1);
+        let plus: u64 = if kani::any::<bool>() { 1 } else { 2 };
+        kani::assume(mant >= 2);
+        kani::assume(plus == 1 || mant == 1 << 25 || mant == 1 << 54);
+        kani::assume(mant as u128 + plus as u128 <= ((1 + plus as u128) << 53));
+        let high = kani::any::<bool>();
+        let first: i16 = if high { -1076 + 16 * 127 } else { -1076 };
+        let exp = first + i16::from(kani::any::<u8>() & 15);
+        kani::assume(exp <= 970);
+        let k =
+            crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor(mant + plus, exp);
+        if high {
+            assert!((288..=308).contains(&k));
+        } else {
+            assert!((-324..=-303).contains(&k));
+        }
+    }
+
     // Only the additional [1, 2) probes use this adapter. Check the scaling
     // value against the independently proved model for the actual arguments,
     // then expose the literal zero before expanding bigint multiplication.

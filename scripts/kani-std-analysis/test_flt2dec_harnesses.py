@@ -85,9 +85,9 @@ class Flt2decHarnessesTests(unittest.TestCase):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
         # The diagnostic probes (branch g4-diag-s19 only) add groups, so the counts skip them.
         real = [group for group in self.groups if "::probe_" not in group["harnesses"][0]]
-        self.assertEqual(len(real), 166)
+        self.assertEqual(len(real), 169)
         self.assertEqual(len({group["name"] for group in self.groups}), len(self.groups))
-        self.assertEqual(sum(len(group["harnesses"]) for group in real), 793)
+        self.assertEqual(sum(len(group["harnesses"]) for group in real), 796)
         self.assertEqual(len(set(self.dedicated)), len(self.dedicated))
         for part in ("core", "long"):
             parts = [group for group in proof_matrix(matrix_job=part)["group"]
