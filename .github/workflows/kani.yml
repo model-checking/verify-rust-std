@@ -20,7 +20,7 @@ on:
       native_solver:
         description: Optional SAT solver for the native pass of explicitly selected proof groups
         type: choice
-        options: [default, kissat]
+        options: [default, kissat, cadical, minisat]
         default: default
       harness_timeout:
         description: Optional per-harness timeout in minutes for explicitly selected proof groups (empty keeps the catalog value)
