@@ -100,6 +100,7 @@ def proof_groups(pointer_width=None):
         ("grisu-rounded-multiplication-contract", GRISU, "check_rounded_multiply", "contract"),
         ("grisu-normalized-multiplication-contract", GRISU, "check_normalized_multiply", "contract"),
         ("grisu-shortest-scaling-partitioning", GRISU, "check_scale_shortest_partitioning", "equivalence"),
+        ("dragon-shortest-scaling-partitioning", DRAGON, "check_dragon_scale_partitioning", "equivalence"),
         ("comparison-equivalence", DRAGON, "check_comparison_models_agree", "equivalence"),
         ("zero-fill-equivalence", DRAGON, "check_fill_zeroes_model_agrees", "equivalence"),
         ("addition-equivalence", DRAGON, "check_add_model_agrees", "equivalence"),
@@ -111,6 +112,11 @@ def proof_groups(pointer_width=None):
     for kind, harnesses in foundations.items():
         for first in range(0, len(harnesses), 8):
             add(f"foundations-{kind}-{first:02d}", kind, harnesses[first:first + 8], 30)
+
+    # Dragon shortest scaling:  one contract proof per window of 32 exponents (diagnostic subset).
+    add("dragon-shortest-scaling-contract-00-01", "contract", [
+        f"{DRAGON}::dragon_scale_shortest_{window:02d}::check_scale_shortest" for window in (0, 63)
+    ], 60)
 
     # The index 51 proof (group 29) does not finish on the whole domain, so grisu.rs proves
     # it in two pieces that split on the top bit of v and together cover every input.

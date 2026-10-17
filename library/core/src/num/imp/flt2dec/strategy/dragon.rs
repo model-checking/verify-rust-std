@@ -2220,6 +2220,193 @@ pub mod dragon_verify {
         kani::cover(value.kani_size() == KANI_LIMBS, "division accepts all bigint limbs");
     }
 
+    // Dragon decodes every finite value with `-1076 <= exp <= 970`. This is the
+    // bound of `checked_f64_limb_count` for one exponent: the value bits,
+    // sixteen bits for decimal scaling, and one carry limb.
+    fn dragon_limb_bound(exp: i16) -> usize {
+        let exp = i32::from(exp);
+        let value_bits = (-exp).max(exp + 55).max(64) as usize;
+        (value_bits + 16).div_ceil(Digit::BITS as usize) + 1
+    }
+
+    // The size checks come before any limb access, so the limb predicates
+    // never read a limb at a havocked size.
+    fn dragon_scaled_storage_valid(value: &Big, limb_bound: usize) -> bool {
+        value.kani_contract_size() > 0
+            && value.kani_contract_size() <= limb_bound
+            && value.kani_contract_valid_storage()
+    }
+
+    // `value < scale * 10`.
+    fn dragon_scaled_below_scale10(value: &Big, scale: &Big, zero: &Big) -> bool {
+        value.kani_contract_cmp_scaled_sum(scale, zero, 1) == KaniInvariantOrdering::Less
+    }
+
+    // `0 < value`.
+    fn dragon_scaled_nonzero(value: &Big, zero: &Big) -> bool {
+        zero.kani_contract_cmp_scaled_sum(value, zero, 0) == KaniInvariantOrdering::Less
+    }
+
+    // The facts that the digit loop of `format_shortest` needs at `i == 0`,
+    // with each limb count bounded by `exp`.
+    fn dragon_shortest_scaling_valid(exp: i16, result: &(i16, Big, Big, Big, Big)) -> bool {
+        let (k, mant, minus, plus, scale) = result;
+        let limb_bound = dragon_limb_bound(exp);
+        let zero = Big::kani_contract_zero();
+        -400 <= *k
+            && *k <= 400
+            && dragon_scaled_storage_valid(mant, limb_bound)
+            && dragon_scaled_storage_valid(minus, limb_bound)
+            && dragon_scaled_storage_valid(plus, limb_bound)
+            && dragon_scaled_storage_valid(scale, limb_bound)
+            && (minus.kani_contract_size() <= mant.kani_contract_size()
+                || minus.kani_contract_size() <= scale.kani_contract_size())
+            && (plus.kani_contract_size() <= mant.kani_contract_size()
+                || plus.kani_contract_size() <= scale.kani_contract_size())
+            && dragon_scaled_below_scale10(mant, scale, &zero)
+            && dragon_scaled_below_scale10(minus, scale, &zero)
+            && dragon_scaled_below_scale10(plus, scale, &zero)
+            && dragon_scaled_nonzero(minus, &zero)
+            && dragon_scaled_nonzero(plus, &zero)
+            && scale.kani_contract_cmp_scaled_sum(minus, plus, MAX_SIG_DIGITS - 1)
+                == KaniInvariantOrdering::Less
+    }
+
+    #[kani::requires(
+        mant >= 2 && minus == 1
+            && (plus == 1 || (plus == 2 && (mant == 1 << 25 || mant == 1 << 54)))
+            && exp >= -1076 && exp <= 970
+            && mant as u128 + plus as u128 <= ((minus as u128 + plus as u128) << 53)
+    )]
+    #[kani::ensures(|result| dragon_shortest_scaling_valid(exp, result))]
+    fn scale_shortest_contract(
+        mant: u64,
+        minus: u64,
+        plus: u64,
+        exp: i16,
+        inclusive: bool,
+    ) -> (i16, Big, Big, Big, Big) {
+        let d = Decoded { mant, minus, plus, exp, inclusive };
+        let ShortestScaled { k, mant, minus, plus, scale } = scale_shortest(&d);
+        // Establish the size bounds in separate checked steps, so the value
+        // properties of the postcondition can use the bounds already established.
+        let limb_bound = dragon_limb_bound(exp);
+        assert!(-400 <= k && k <= 400);
+        assert!(mant.kani_size() > 0 && mant.kani_size() <= limb_bound);
+        assert!(minus.kani_size() > 0 && minus.kani_size() <= limb_bound);
+        assert!(plus.kani_size() > 0 && plus.kani_size() <= limb_bound);
+        assert!(scale.kani_size() > 0 && scale.kani_size() <= limb_bound);
+        (k, mant, minus, plus, scale)
+    }
+
+    fn stub_scale_shortest(d: &Decoded) -> ShortestScaled {
+        let (k, mant, minus, plus, scale) =
+            scale_shortest_contract(d.mant, d.minus, d.plus, d.exp, d.inclusive);
+        ShortestScaled { k, mant, minus, plus, scale }
+    }
+
+    // Each window of 32 exponents has its own contract proof. Together the
+    // windows cover every Dragon exponent, and each limb bound fits the storage.
+    #[kani::proof]
+    fn check_dragon_scale_partitioning() {
+        let exp = kani::any::<i16>();
+        kani::assume((-1076..=970).contains(&exp));
+        let index = (i32::from(exp) + 1076) / 32;
+        assert!((0..64).contains(&index));
+        let first = -1076 + 32 * index;
+        let last = (first + 31).min(970);
+        assert!(first <= i32::from(exp) && i32::from(exp) <= last);
+        assert!(last - first < 32);
+        assert!(dragon_limb_bound(exp) < KANI_LIMBS);
+        kani::cover(exp == -1076, "partitions include the lowest Dragon exponent");
+        kani::cover(exp == 970, "partitions include the highest Dragon exponent");
+    }
+
+    // Each window of 32 exponents proves the scaling contract on its own.
+    // The guides only choose encodings: each one asserts that the actual
+    // value fits, so a value outside the encoding fails the proof.
+    macro_rules! check_dragon_scale_partition {
+        ($name:ident, $window:literal, $pow10_low:literal, $pow10_high:literal) => {
+            mod $name {
+                use super::*;
+
+                const FIRST: i16 = -1076 + 32 * $window;
+                const LAST: i16 = if FIRST + 31 < 970 { FIRST + 31 } else { 970 };
+
+                fn window_limb_count(size: usize) -> usize {
+                    let limb_bound = dragon_limb_bound(FIRST).max(dragon_limb_bound(LAST));
+                    LimbCountMask((limb_bound + 1).next_power_of_two() - 1).check(size)
+                }
+
+                fn stub_pow10_exponent(n: usize) -> usize {
+                    Pow10Prefix::for_range($pow10_low..=$pow10_high).check(n)
+                }
+
+                fn stub_pow2_bits(bits: usize) -> usize {
+                    let encoded = bits & 2047;
+                    assert_eq!(encoded, bits);
+                    encoded
+                }
+
+                #[kani::proof_for_contract(scale_shortest_contract)]
+                #[kani::unwind(41)]
+                #[kani::stub(crate::num::imp::bignum::kani_loop_size, window_limb_count)]
+                #[kani::stub(Big::add, Big::kani_add_model)]
+                #[kani::stub(Big::sub, Big::kani_sub_model)]
+                #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
+                #[kani::stub(Big::mul_pow2, Big::kani_mul_pow2_model)]
+                #[kani::stub(Big::mul_digits, Big::kani_mul_digits_model)]
+                #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
+                #[kani::stub(crate::num::imp::bignum::kani_pow2_bits, stub_pow2_bits)]
+                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul, carrying_mul_model))]
+                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
+                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul, carrying_mul_model))]
+                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul_add, carrying_mul_add_model))]
+                #[kani::stub(
+                    crate::num::imp::flt2dec::estimator::estimate_scaling_factor,
+                    crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor
+                )]
+                #[kani::stub(
+                    u64::leading_zeros,
+                    crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u64
+                )]
+                #[kani::stub(
+                    u32::leading_zeros,
+                    crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u32
+                )]
+                #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
+                #[kani::stub(Big::is_zero, stub_is_zero)]
+                #[kani::solver(kissat)]
+                fn check_scale_shortest() {
+                    // Every contract input has minus = 1, plus in {1, 2}, and
+                    // mant <= 2^54. Encode those bounds directly, so the verifier
+                    // need not build paths for impossible inputs.
+                    let mant = kani::any::<u64>() & ((1u64 << 55) - 1);
+                    let minus = 1;
+                    let plus = if kani::any::<bool>() { 1 } else { 2 };
+                    kani::assume(mant >= 2);
+                    kani::assume(plus == 1 || mant == 1 << 25 || mant == 1 << 54);
+                    kani::assume(mant as u128 + plus as u128 <= ((minus as u128 + plus as u128) << 53));
+                    let exp = FIRST + i16::from(kani::any::<u8>() & 31);
+                    kani::assume(exp <= LAST);
+                    let inclusive = kani::any::<bool>();
+                    scale_shortest_contract(mant, minus, plus, exp, inclusive);
+                    kani::cover(exp == FIRST, "scaling reaches the first exponent in its window");
+                    kani::cover(exp == LAST, "scaling reaches the last exponent in its window");
+                    kani::cover(plus == 2, "scaling includes unequal neighbor intervals");
+                    kani::cover(inclusive, "scaling includes inclusive intervals");
+                    kani::cover(!inclusive, "scaling includes exclusive intervals");
+                }
+            }
+        };
+    }
+
+    // Diagnostic subset: the lowest and the highest window. The two literals
+    // are the decimal scaling exponents |k| of the window, from the estimator
+    // formula on the window ends with mant + plus in [3, 2^54 + 2].
+    check_dragon_scale_partition!(dragon_scale_shortest_00, 0, 299, 324);
+    check_dragon_scale_partition!(dragon_scale_shortest_63, 63, 283, 308);
+
     // Only the additional [1, 2) probes use this adapter. Check the scaling
     // value against the independently proved model for the actual arguments,
     // then expose the literal zero before expanding bigint multiplication.

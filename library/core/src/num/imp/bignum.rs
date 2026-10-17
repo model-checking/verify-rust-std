@@ -600,6 +600,85 @@ impl Big {
         }
     }
 
+    // Contract-only twins of the invariant helpers above. A postcondition that
+    // shares the loop-invariant helpers can receive a mismatched DFCC parameter:
+    // model-checking/kani#4796. Each twin checks the sizes before any limb access.
+    pub(crate) fn kani_contract_zero() -> Self {
+        Self { size: 0, base: [0; KANI_LIMBS] }
+    }
+
+    pub(crate) fn kani_contract_size(&self) -> usize {
+        self.size
+    }
+
+    pub(crate) fn kani_contract_valid_storage(&self) -> bool {
+        macro_rules! inactive_limbs_are_zero {
+            ($($index:literal),+ $(,)?) => {
+                true $(& ((self.size > $index) | (self.base[$index] == 0)))+
+            };
+        }
+        self.size <= KANI_LIMBS && kani_for_each_limb!(inactive_limbs_are_zero)
+    }
+
+    pub(crate) fn kani_contract_cmp_scaled_sum(
+        &self,
+        left: &Self,
+        right: &Self,
+        decimal_digits: usize,
+    ) -> KaniInvariantOrdering {
+        if self.size <= KANI_LIMBS
+            && left.size <= KANI_LIMBS
+            && right.size <= KANI_LIMBS
+            && decimal_digits <= 16
+        {
+            let factor: u128 = match decimal_digits {
+                0 => 1,
+                1 => 10,
+                2 => 100,
+                3 => 1_000,
+                4 => 10_000,
+                5 => 100_000,
+                6 => 1_000_000,
+                7 => 10_000_000,
+                8 => 100_000_000,
+                9 => 1_000_000_000,
+                10 => 10_000_000_000,
+                11 => 100_000_000_000,
+                12 => 1_000_000_000_000,
+                13 => 10_000_000_000_000,
+                14 => 100_000_000_000_000,
+                15 => 1_000_000_000_000_000,
+                16 => 10_000_000_000_000_000,
+                _ => 0,
+            };
+            macro_rules! compare_scaled_sum {
+                ($($index:literal),+ $(,)?) => {{
+                    let carry = 0u128;
+                    let ordering = KaniInvariantOrdering::Equal;
+                    $(
+                        let a = if left.size > $index { left.base[$index] as u128 } else { 0 };
+                        let b = if right.size > $index { right.base[$index] as u128 } else { 0 };
+                        let product = (a + b) * factor + carry;
+                        let digit = product as Digit;
+                        let own = if self.size > $index { self.base[$index] } else { 0 };
+                        let ordering = if own < digit {
+                            KaniInvariantOrdering::Less
+                        } else if own > digit {
+                            KaniInvariantOrdering::Greater
+                        } else {
+                            ordering
+                        };
+                        let carry = product >> Digit::BITS;
+                    )+
+                    if carry == 0 { ordering } else { KaniInvariantOrdering::Unrepresentable }
+                }};
+            }
+            kani_for_each_limb!(compare_scaled_sum)
+        } else {
+            KaniInvariantOrdering::Unrepresentable
+        }
+    }
+
     pub(crate) fn kani_limbs_mut(&mut self) -> &mut [Digit; KANI_LIMBS] {
         &mut self.base
     }
