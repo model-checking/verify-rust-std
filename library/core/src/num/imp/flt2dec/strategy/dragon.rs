@@ -2305,24 +2305,24 @@ pub mod dragon_verify {
         ShortestScaled { k, mant, minus, plus, scale }
     }
 
-    // Each window of 32 exponents has its own contract proof. Together the
+    // Each window of 16 exponents has its own contract proof. Together the
     // windows cover every Dragon exponent, and each limb bound fits the storage.
     #[kani::proof]
     fn check_dragon_scale_partitioning() {
         let exp = kani::any::<i16>();
         kani::assume((-1076..=970).contains(&exp));
-        let index = (i32::from(exp) + 1076) / 32;
-        assert!((0..64).contains(&index));
-        let first = -1076 + 32 * index;
-        let last = (first + 31).min(970);
+        let index = (i32::from(exp) + 1076) / 16;
+        assert!((0..128).contains(&index));
+        let first = -1076 + 16 * index;
+        let last = (first + 15).min(970);
         assert!(first <= i32::from(exp) && i32::from(exp) <= last);
-        assert!(last - first < 32);
+        assert!(last - first < 16);
         assert!(dragon_limb_bound(exp) < KANI_LIMBS);
         kani::cover(exp == -1076, "partitions include the lowest Dragon exponent");
         kani::cover(exp == 970, "partitions include the highest Dragon exponent");
     }
 
-    // Each window of 32 exponents proves the scaling contract on its own.
+    // Each window of 16 exponents proves the scaling contract on its own.
     // The guides only choose encodings: each one asserts that the actual
     // value fits, so a value outside the encoding fails the proof.
     macro_rules! check_dragon_scale_partition {
@@ -2330,8 +2330,8 @@ pub mod dragon_verify {
             mod $name {
                 use super::*;
 
-                const FIRST: i16 = -1076 + 32 * $window;
-                const LAST: i16 = if FIRST + 31 < 970 { FIRST + 31 } else { 970 };
+                const FIRST: i16 = -1076 + 16 * $window;
+                const LAST: i16 = if FIRST + 15 < 970 { FIRST + 15 } else { 970 };
 
                 fn window_limb_count(size: usize) -> usize {
                     let limb_bound = dragon_limb_bound(FIRST).max(dragon_limb_bound(LAST));
@@ -2387,7 +2387,7 @@ pub mod dragon_verify {
                     kani::assume(mant >= 2);
                     kani::assume(plus == 1 || mant == 1 << 25 || mant == 1 << 54);
                     kani::assume(mant as u128 + plus as u128 <= ((minus as u128 + plus as u128) << 53));
-                    let exp = FIRST + i16::from(kani::any::<u8>() & 31);
+                    let exp = FIRST + i16::from(kani::any::<u8>() & 15);
                     kani::assume(exp <= LAST);
                     let inclusive = kani::any::<bool>();
                     scale_shortest_contract(mant, minus, plus, exp, inclusive);
@@ -2404,8 +2404,8 @@ pub mod dragon_verify {
     // Diagnostic subset: the lowest and the highest window. The two literals
     // are the decimal scaling exponents |k| of the window, from the estimator
     // formula on the window ends with mant + plus in [3, 2^54 + 2].
-    check_dragon_scale_partition!(dragon_scale_shortest_00, 0, 299, 324);
-    check_dragon_scale_partition!(dragon_scale_shortest_63, 63, 283, 308);
+    check_dragon_scale_partition!(dragon_scale_shortest_000, 0, 303, 324);
+    check_dragon_scale_partition!(dragon_scale_shortest_127, 127, 288, 308);
 
     // Only the additional [1, 2) probes use this adapter. Check the scaling
     // value against the independently proved model for the actual arguments,

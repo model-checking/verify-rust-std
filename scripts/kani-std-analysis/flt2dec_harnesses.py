@@ -113,9 +113,9 @@ def proof_groups(pointer_width=None):
         for first in range(0, len(harnesses), 8):
             add(f"foundations-{kind}-{first:02d}", kind, harnesses[first:first + 8], 30)
 
-    # Dragon shortest scaling:  one contract proof per window of 32 exponents (diagnostic subset).
+    # Dragon shortest scaling:  one contract proof per window of 16 exponents (diagnostic subset).
     add("dragon-shortest-scaling-contract-00-01", "contract", [
-        f"{DRAGON}::dragon_scale_shortest_{window:02d}::check_scale_shortest" for window in (0, 63)
+        f"{DRAGON}::dragon_scale_shortest_{window:03d}::check_scale_shortest" for window in (0, 127)
     ], 60)
 
     # The index 51 proof (group 29) does not finish on the whole domain, so grisu.rs proves
