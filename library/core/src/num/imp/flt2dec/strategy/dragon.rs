@@ -2564,6 +2564,28 @@ pub mod dragon_verify {
     #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
     check_dragon_scale_fixed_k!(dragon_scale_fixed_k_001_k319, 1, -319, []);
 
+    // Four more pairs test whether the cost follows the mantissa bit range.  At K = -314 and
+    // K = -312 (window 000, mantissa below 2^36 and 2^42) and at K = -312 (window 001,
+    // mantissa below 2^26), the operands have at most 1, 2 and 3 limbs before the 1-, 2- and
+    // 10-limb power tables.  At K = -262 (window 011, mantissa below 2^32) the operands have
+    // at most 1 limb before the 10-limb power table.
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k314, 0, -314, [1 => 1, 2 => 2, 10 => 3]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k314, 0, -314, []);
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k312, 0, -312, [1 => 1, 2 => 2, 10 => 3]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k312, 0, -312, []);
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_001_k312, 1, -312, [1 => 1, 2 => 2, 10 => 3]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_001_k312, 1, -312, []);
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_011_k262, 11, -262, [10 => 1]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_011_k262, 11, -262, []);
+
     // Every contract input of windows 000 and 127 has its estimate in the window range,
     // so the fixed-K proofs of each K in that range cover the window.
     #[kani::proof]
