@@ -2409,9 +2409,11 @@ pub mod dragon_verify {
 
     // Diagnostic: one window with the estimate fixed to K. The proof assumes that the
     // estimate is K, and the estimator stub checks the same value, so the fixed-K proofs
-    // of a window and check_dragon_scale_k_range together cover the window.
+    // of a window and check_dragon_scale_k_range together cover the window. Each
+    // `len => bound` pair bounds the limb count of the bigint operand of a cached product
+    // with a power table of `len` limbs, and the stub asserts the actual count.
     macro_rules! check_dragon_scale_fixed_k {
-        ($name:ident, $window:literal, $k:expr) => {
+        ($name:ident, $window:literal, $k:expr, [$($len:literal => $bound:expr),* $(,)?]) => {
             mod $name {
                 use super::*;
 
@@ -2443,6 +2445,15 @@ pub mod dragon_verify {
                     K
                 }
 
+                fn stub_mul_limb_bound(size: usize, other_len: usize) -> usize {
+                    let bound = match other_len {
+                        $($len => $bound,)*
+                        _ => KANI_LIMBS,
+                    };
+                    assert!(size <= bound);
+                    bound
+                }
+
                 #[kani::proof_for_contract(scale_shortest_contract)]
                 #[kani::unwind(41)]
                 #[kani::stub(crate::num::imp::bignum::kani_loop_size, window_limb_count)]
@@ -2453,6 +2464,7 @@ pub mod dragon_verify {
                 #[kani::stub(Big::mul_digits, Big::kani_mul_digits_model)]
                 #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
                 #[kani::stub(crate::num::imp::bignum::kani_pow2_bits, stub_pow2_bits)]
+                #[kani::stub(crate::num::imp::bignum::kani_mul_limb_bound, stub_mul_limb_bound)]
                 #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul, carrying_mul_model))]
                 #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
                 #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul, carrying_mul_model))]
@@ -2491,8 +2503,13 @@ pub mod dragon_verify {
         };
     }
 
-    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000, 0, -319);
-    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_127, 127, 308);
+    // At K = -319 each bigint operand of the cached products of mul_pow10 (mant, minus,
+    // plus) must have at most 1, 2 and 3 limbs before the 1-, 2- and 10-limb power tables.
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000, 0, -319, [1 => 1, 2 => 2, 10 => 3]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000, 0, -319, []);
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_127, 127, 308, []);
 
     // Every contract input of windows 000 and 127 has its estimate in the window range,
     // so the fixed-K proofs of each K in that range cover the window.

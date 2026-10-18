@@ -478,6 +478,13 @@ pub(crate) fn kani_pow2_bits(bits: usize) -> usize {
     bits
 }
 
+// Proofs can bound the limb count of the bigint operand of a cached product.
+// A replacement asserts the actual size against its constant bound.
+#[cfg(kani)]
+pub(crate) fn kani_mul_limb_bound(_size: usize, _other_len: usize) -> usize {
+    KANI_LIMBS
+}
+
 #[cfg(kani)]
 impl crate::kani::Arbitrary for Big {
     fn any() -> Self {
@@ -814,28 +821,37 @@ impl Big {
         let size = kani_loop_size(self.size);
         assert!(size <= KANI_LIMBS && other.len() <= KANI_LIMBS);
         assert!(size + other.len() <= KANI_LIMBS);
+        let bound = kani_mul_limb_bound(size, other.len());
         let mut ret = [0; KANI_LIMBS];
-        let retsz = if size < other.len() {
-            Self::kani_mul_digits_product(&mut ret, &self.base[..size], other)
+        let retsz = if bound < other.len() || size < other.len() {
+            Self::kani_mul_digits_product(&mut ret, &self.base[..size], other, bound, KANI_LIMBS)
         } else {
-            Self::kani_mul_digits_product(&mut ret, other, &self.base[..size])
+            Self::kani_mul_digits_product(&mut ret, other, &self.base[..size], KANI_LIMBS, bound)
         };
         self.base = ret;
         self.size = retsz;
         self
     }
 
-    fn kani_mul_digits_product(ret: &mut [Digit; KANI_LIMBS], aa: &[Digit], bb: &[Digit]) -> usize {
+    fn kani_mul_digits_product(
+        ret: &mut [Digit; KANI_LIMBS],
+        aa: &[Digit],
+        bb: &[Digit],
+        aa_bound: usize,
+        bb_bound: usize,
+    ) -> usize {
         // The caller gives the shorter operand as `aa`, so the bound `bb.len()` removes no
         // row, but a constant `bb` (a power table) bounds the rows before the solver starts.
+        // The caller checks that each operand length is at most its limb bound, so the
+        // limb bounds remove no row or column either.
         assert!(aa.len() <= bb.len());
         let mut retsz = 0;
         macro_rules! multiply_rows {
             ($($index:literal),+ $(,)?) => {$(
-                if $index < aa.len() && $index < bb.len() {
+                if $index < aa_bound && $index < aa.len() && $index < bb.len() {
                     let a = aa[$index];
                     if a != 0 {
-                        let sz = Self::kani_mul_digits_row(ret, a, bb, $index);
+                        let sz = Self::kani_mul_digits_row(ret, a, bb, $index, bb_bound);
                         if retsz < $index + sz {
                             retsz = $index + sz;
                         }
@@ -852,11 +868,12 @@ impl Big {
         a: Digit,
         bb: &[Digit],
         index: usize,
+        bb_bound: usize,
     ) -> usize {
         let mut carry = 0;
         macro_rules! multiply_columns {
             ($($column:literal),+ $(,)?) => {$(
-                if $column < bb.len() {
+                if $column < bb_bound && $column < bb.len() {
                     let output = index + $column;
                     assert!(output < KANI_LIMBS);
                     let (c, v) =
