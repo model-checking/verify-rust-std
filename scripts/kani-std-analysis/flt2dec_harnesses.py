@@ -124,6 +124,11 @@ def proof_groups(pointer_width=None):
         add(f"dragon-shortest-scaling-fixed-k-{window:03d}", "contract", [
             f"{DRAGON}::dragon_scale_fixed_k_{window:03d}::check_scale_shortest"
         ], 60)
+    # Diagnostic (s45):  window 000 at K = -323 and K = -310.
+    for window, k in ((0, 323), (0, 310)):
+        add(f"dragon-shortest-scaling-fixed-k-{window:03d}-k{k}", "contract", [
+            f"{DRAGON}::dragon_scale_fixed_k_{window:03d}_k{k}::check_scale_shortest"
+        ], 60)
 
     # The index 51 proof (group 29) does not finish on the whole domain, so grisu.rs proves
     # it in two pieces that split on the top bit of v and together cover every input.

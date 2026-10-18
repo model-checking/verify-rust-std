@@ -2530,6 +2530,18 @@ pub mod dragon_verify {
     check_dragon_scale_fixed_k!(dragon_scale_fixed_k_001, 1, -303, [2 => 2, 10 => 3]);
     #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
     check_dragon_scale_fixed_k!(dragon_scale_fixed_k_001, 1, -303, []);
+    // Window 000 at two more K values shows if the cost of the K = -319 proof comes from K or
+    // from the window.  At K = -323 the mantissa is below 2^6, so the operands have at most 1
+    // and 3 limbs before the 3- and 10-limb power tables.  At K = -310 the mantissa is below
+    // 2^49, so the operands have at most 1, 2 and 3 limbs before the 1-, 2- and 10-limb tables.
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k323, 0, -323, [3 => 1, 10 => 3]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k323, 0, -323, []);
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k310, 0, -310, [1 => 1, 2 => 2, 10 => 3]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k310, 0, -310, []);
 
     // Every contract input of windows 000 and 127 has its estimate in the window range,
     // so the fixed-K proofs of each K in that range cover the window.
