@@ -14,7 +14,50 @@ usage() {
 }
 
 # Initialize variables
+# Generator proofs need more objects; helper jobs can select a smaller capacity.
 declare -a command_args
+kani_object_bits="${KANI_OBJECT_BITS:-14}"
+# Optional encoding experiments preserve the verification checks and bounds.
+kani_cbmc_args=(--object-bits "$kani_object_bits")
+if [[ -n "${KANI_PROBE_PROPERTY:-}" ]]; then
+    if [[ "${GITHUB_EVENT_NAME:-}" != workflow_dispatch || "${KANI_MANUAL_PROBE:-false}" != true ]]; then
+        echo "Property probes require an explicitly selected manual diagnostic run." >&2
+        exit 2
+    fi
+    case "$KANI_PROBE_PROPERTY" in
+        num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_base.1|num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_step.1|num::imp::flt2dec::strategy::grisu::generate_integral_digits.loop_invariant_step.1)
+            kani_cbmc_args+=(--property "$KANI_PROBE_PROPERTY") ;;
+        *) echo "Unknown diagnostic loop property." >&2; exit 2 ;;
+    esac
+fi
+if [[ "${KANI_SYMEX_CACHE_DEREFERENCES:-false}" == true ]]; then
+    kani_cbmc_args+=(--symex-cache-dereferences)
+fi
+if [[ "${KANI_ARRAY_FIELD_SENSITIVITY:-true}" == false ]]; then
+    kani_cbmc_args+=(--no-array-field-sensitivity)
+fi
+if [[ "${KANI_FLAT_SMT_CVC5:-false}" == true ]]; then
+    if [[ "${KANI_FLAT_SMT_Z3:-false}" == true || "${KANI_ARITHMETIC_REFINEMENT:-false}" == true ]]; then
+        echo "CVC5 cannot be combined with another arithmetic backend." >&2
+        exit 2
+    fi
+    kani_cvc5_wrapper="$(dirname "$(realpath "${BASH_SOURCE[0]}")")/kani-std-analysis/cvc5-flat-smt.sh"
+    # This flat encoding uses native constant arrays without datatype wrappers
+    # or quantified array initializers.
+    kani_cbmc_args+=(--bitwuzla --external-smt2-solver "$kani_cvc5_wrapper")
+elif [[ "${KANI_FLAT_SMT_Z3:-false}" == true ]]; then
+    if [[ "${KANI_ARITHMETIC_REFINEMENT:-false}" == true ]]; then
+        echo "Flat SMT encoding cannot be combined with SAT arithmetic refinement." >&2
+        exit 2
+    fi
+    # The Yices-compatible encoding avoids CBMC's datatype construction failure.
+    # The adapter declares quantified logic without changing any assertions.
+    kani_flat_smt_wrapper="$(dirname "$(realpath "${BASH_SOURCE[0]}")")/kani-std-analysis/z3-flat-smt.sh"
+    echo "Using Z3 with CBMC's flat SMT encoding and quantified logic." >&2
+    kani_cbmc_args+=(--yices --external-smt2-solver "$kani_flat_smt_wrapper")
+elif [[ "${KANI_ARITHMETIC_REFINEMENT:-false}" == true ]]; then
+    kani_cbmc_args+=(--refine-arithmetic)
+fi
 path=""
 run_command="verify-std"
 with_autoharness="false"
@@ -114,13 +157,29 @@ read_commit_from_toml() {
     echo "$commit"
 }
 
-setup_kani_repo() {
+retry_kani_git() {
+    local attempt status
+    for attempt in 1 2 3; do
+        if git "$@"; then
+            return 0
+        else
+            status=$?
+        fi
+        if [[ "$attempt" -lt 3 ]]; then
+            echo "Kani Git download failed; retrying ($attempt/3)" >&2
+            sleep "$((attempt * 5))"
+        fi
+    done
+    return "$status"
+}
+
+setup_kani_repo() (
     local repo_url="$1"
     local directory="$2"
     local branch="$3"
     local commit="$4"
 
-    if [[ ! -d "${directory}" ]]; then
+    if [[ ! -d "${directory}/.git" ]]; then
         mkdir -p "${directory}"
         pushd "${directory}" > /dev/null
 
@@ -130,13 +189,13 @@ setup_kani_repo() {
         pushd "${directory}" > /dev/null
     fi
 
-    git fetch --depth 1 origin "$commit" --quiet
-    git checkout "$commit" --quiet
-    # Workaround for occasionally failing to copy a file in s2n-quic that we
-    # don't actually care about
-    GIT_LFS_SKIP_SMUDGE=1 git submodule update --init --recursive --depth 1 --quiet
+    retry_kani_git fetch --depth 1 origin "$commit" --quiet || return $?
+    git checkout "$commit" --quiet || return $?
+    # Cargo resolves the compiler's optional Charon dependency. Firecracker
+    # and s2n-quic are benchmark fixtures and are not needed to build Kani.
+    GIT_LFS_SKIP_SMUDGE=1 retry_kani_git submodule update --init --recursive --depth 1 --quiet -- charon || return $?
     popd > /dev/null
-}
+)
 
 get_current_commit() {
     local directory="$1"
@@ -147,9 +206,69 @@ get_current_commit() {
     fi
 }
 
+install_kani_dependencies() (
+    # Keep this download policy scoped to dependency installation in CI.
+    if [[ "${GITHUB_ACTIONS:-false}" != true ]]; then
+        exec "$@"
+    fi
+
+    local kani_download_config
+    kani_download_config=$(mktemp -d)
+    trap 'rm -f -- "$kani_download_config/.curlrc"
+          rmdir -- "$kani_download_config"' EXIT
+    # The pinned installers use curl -O for their archives. HTTP errors must
+    # fail before extraction, and retries must not run without time limits.
+    cat > "$kani_download_config/.curlrc" <<'EOF'
+fail
+retry = 5
+retry-all-errors
+retry-delay = 5
+retry-max-time = 300
+connect-timeout = 30
+max-time = 120
+EOF
+    # Homebrew's API refresh uses its own curl policy. Retry the installer too,
+    # so a transient brew update failure does not abort the proof job.
+    local attempt status=0
+    for attempt in 1 2 3; do
+        if CURL_HOME="$kani_download_config" "$@"; then
+            return 0
+        else
+            status=$?
+        fi
+        echo "Kani dependency installation failed (attempt $attempt of 3)" >&2
+        if [[ "$attempt" -lt 3 ]]; then
+            sleep 10
+        fi
+    done
+    return "$status"
+)
+
+prepare_cbmc_tap() {
+    local attempt
+    for attempt in 1 2 3; do
+        if brew tap diffblue/cbmc; then
+            return 0
+        fi
+        echo "CBMC tap fetch failed (attempt $attempt of 3)" >&2
+        if [[ "$attempt" -lt 3 ]]; then
+            sleep 10
+        fi
+    done
+    return 1
+}
+
+kani_patch_hash() {
+    shasum -a 256 "$WORK_DIR/scripts/kani-explicit-for-counter.patch" | awk '{print $1}'
+}
+
 build_kani() {
     local directory="$1"
     pushd "$directory"
+    local proof_patch="$WORK_DIR/scripts/kani-explicit-for-counter.patch"
+    if ! git apply --reverse --check "$proof_patch" >/dev/null 2>&1; then
+        git apply "$proof_patch"
+    fi
     source "kani-dependencies"
     # Check if installed versions are correct.
     if ./scripts/check-cbmc-version.py \
@@ -160,7 +279,7 @@ build_kani() {
         os_name=$(uname -s)
 
         if [[ "$os_name" == "Linux" ]]; then
-            ./scripts/setup/ubuntu/install_deps.sh
+            install_kani_dependencies ./scripts/setup/ubuntu/install_deps.sh
         elif [[ "$os_name" == "Darwin" ]]; then
             # Homebrew 6.0+ refuses to load formulae from third-party taps
             # unless they are explicitly trusted, which breaks the
@@ -168,13 +287,15 @@ build_kani() {
             # Trust the tap first (no-op on older Homebrew). Mirrors
             # model-checking/kani#4785.
             brew trust diffblue/cbmc 2>/dev/null || true
-            ./scripts/setup/macos/install_deps.sh
+            prepare_cbmc_tap || return 1
+            install_kani_dependencies ./scripts/setup/macos/install_deps.sh
         else
             echo "Unknown operating system"
         fi
     fi
 
-    cargo build-dev --release
+    CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}" cargo build-dev --release
+    kani_patch_hash > target/kani/std-proof-patch.sha256
     popd
 }
 
@@ -198,11 +319,20 @@ get_harnesses() {
     fi
     # Extract the harnesses inside "standard-harnesses" and "contract-harnesses" 
     # into an array called ALL_HARNESSES and the length of that array into HARNESS_COUNT
-    ALL_HARNESSES=($(jq -r '
-        ([.["standard-harnesses"] | to_entries | .[] | .value[]] + 
-            [.["contract-harnesses"] | to_entries | .[] | .value[]]) | 
-        .[]
-    ' $WORK_DIR/kani-list.json))
+    if [[ "${KANI_SEPARATE_FLT2DEC:-false}" == true ]]; then
+        # Dedicated jobs verify these exact names on both operating systems.
+        # Fail if any expected target is absent instead of silently dropping it.
+        local remaining_harnesses
+        remaining_harnesses=$(python3 -I "$WORK_DIR/scripts/kani-std-analysis/flt2dec_harnesses.py" \
+            --remaining "$WORK_DIR/kani-list.json")
+        ALL_HARNESSES=($remaining_harnesses)
+    else
+        ALL_HARNESSES=($(jq -r '
+            ([.["standard-harnesses"] | to_entries | .[] | .value[]] +
+                [.["contract-harnesses"] | to_entries | .[] | .value[]]) |
+            .[]
+        ' "$WORK_DIR/kani-list.json"))
+    fi
     HARNESS_COUNT=${#ALL_HARNESSES[@]}
 }
 
@@ -210,7 +340,12 @@ get_harnesses() {
 run_verification_subset() {
     local kani_path="$1"
     local harnesses=("${@:2}")  # All arguments after kani_path are harness names
-    
+
+    if (( ${#harnesses[@]} == 0 )); then
+        echo "No harnesses assigned to this partition."
+        return
+    fi
+
     # Build the --harness arguments
     local harness_args=""
     for harness in "${harnesses[@]}"; do
@@ -219,33 +354,33 @@ run_verification_subset() {
 
     echo "Running verification for harnesses:"
     printf '%s\n' "${harnesses[@]}"
-    # Use KANI_JOBS to cap the number of parallel harnesses; some harnesses peak
-    # at close to 10 GB of memory, so running one per core can exhaust the
-    # memory of smaller CI runners (e.g., 4-core/16 GB ubuntu-latest).
-    local jobs_arg="-j"
-    if [[ -n "${KANI_JOBS:-}" ]]; then
-        jobs_arg="--jobs=${KANI_JOBS}"
-    fi
+    # Honor KANI_JOBS and default to one verifier per runner.
     "$kani_path" verify-std -Z unstable-options ./library \
         $unstable_args \
         --no-assert-contracts \
         $harness_args --exact \
-        $jobs_arg \
+        --jobs "${KANI_JOBS:-1}" \
         --output-format=terse \
         "${command_args[@]}" \
-        --cbmc-args --object-bits 12
+        --cbmc-args "${kani_cbmc_args[@]}"
 }
 
 # Check if binary exists and is up to date
 check_binary_exists() {
     local build_dir="$1"
     local expected_commit="$2"
-    local kani_path=$(get_kani_path "$build_dir")
-
     if [[ -d "${build_dir}" ]]; then
         local current_commit=$(get_current_commit "$build_dir")
         if [[ "$current_commit" = "$expected_commit" ]]; then
-            return 0
+            if [[ -x "$build_dir/scripts/kani" &&
+                  -x "$build_dir/target/kani/bin/kani-driver" &&
+                  -x "$build_dir/target/kani/bin/kani-compiler" &&
+                  -f "$build_dir/target/kani/lib/libkani.rlib" &&
+                  -f "$build_dir/target/kani/std-proof-patch.sha256" ]] &&
+                [[ $(cat "$build_dir/target/kani/std-proof-patch.sha256") == $(kani_patch_hash) ]]; then
+                return 0
+            fi
+            echo "Kani runtime is missing or incomplete. Rebuilding..."
         else
             echo "Kani repository is out of date. Rebuilding..."
         fi
@@ -271,7 +406,7 @@ main() {
         echo "Building Kani from commit: $commit"
 
         # Clone repository and checkout specific commit
-        setup_kani_repo "$REPO_URL" "$build_dir" "$BRANCH_NAME" "$commit"
+        setup_kani_repo "$REPO_URL" "$build_dir" "$BRANCH_NAME" "$commit" || return $?
 
         # Build project
         build_kani "$build_dir"
@@ -285,6 +420,23 @@ main() {
 
     echo "Running Kani command..."
     "$kani_path" --version
+
+    if [[ "${KANI_PATCHED_CBMC:-false}" == true || "${KANI_FLAT_SMT_Z3:-false}" == true || "${KANI_FLAT_SMT_CVC5:-false}" == true ]]; then
+        bash "$WORK_DIR/scripts/setup-flat-smt-cbmc.sh" "$WORK_DIR/cbmc_build"
+        export PATH="$WORK_DIR/cbmc_build/bin:$PATH"
+    fi
+    if [[ "${KANI_FLAT_SMT_CVC5:-false}" == true ]]; then
+        bash "$WORK_DIR/scripts/setup-cvc5.sh" "$WORK_DIR/cvc5_build"
+        export KANI_CVC5_BINARY="$WORK_DIR/cvc5_build/bin/cvc5"
+        bash "$(dirname "$kani_cvc5_wrapper")/test_cvc5_flat_smt.sh"
+    fi
+    if [[ "${KANI_FLAT_SMT_Z3:-false}" == true ]]; then
+        bash "$(dirname "$kani_flat_smt_wrapper")/test_z3_flat_smt.sh"
+        "$kani_path" "$WORK_DIR/scripts/kani-std-analysis/overflow-result.rs" \
+            -Z unstable-options --jobs 1 --harness-timeout 60s \
+            --solver minisat --output-format=terse \
+            --cbmc-args --yices --external-smt2-solver "$kani_flat_smt_wrapper"
+    fi
 
     if [[ "$run_command" == "verify-std" ]]; then
         if [[ -n "$WORKER_INDEX" && -n "$WORKER_TOTAL" ]]; then
@@ -314,7 +466,7 @@ main() {
                 $unstable_args \
                 --no-assert-contracts \
                 "${command_args[@]}" \
-                --cbmc-args --object-bits 12
+                --cbmc-args "${kani_cbmc_args[@]}"
         fi
       elif [[ "$run_command" == "autoharness" ]]; then
           # Run verification for a subset of automatically generated harnesses
@@ -324,14 +476,27 @@ main() {
               $unstable_args \
               --no-assert-contracts \
               "${command_args[@]}" \
-              --cbmc-args --object-bits 12
+              --cbmc-args "${kani_cbmc_args[@]}"
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
+        local list_format_args=(--format markdown)
+        local argument
+        for argument in "${command_args[@]}"; do
+            case "$argument" in
+                --format|--format=*)
+                    list_format_args=()
+                    break
+                    ;;
+            esac
+        done
         if [[ "$with_autoharness" == "true" ]]; then
-            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format markdown \
+            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library \
+                "${list_format_args[@]}" \
                 "${command_args[@]}"
         else
-            "$kani_path" list $unstable_args ./library --std --format markdown
+            "$kani_path" list $unstable_args ./library --std \
+                "${list_format_args[@]}" \
+                "${command_args[@]}"
         fi
     elif [[ "$run_command" == "metrics" ]]; then
         local current_dir=$(pwd)
@@ -364,7 +529,7 @@ main() {
             $unstable_args \
             --no-assert-contracts \
             "${command_args[@]}" \
-            --cbmc-args --object-bits 12
+            --cbmc-args "${kani_cbmc_args[@]}"
         # remove metadata file for Kani-generated "dummy" crate that we won't
         # get scanner data for
         local target=$(find "target/kani_verify_std/target/" -mindepth 1 -maxdepth 1 \
@@ -393,4 +558,6 @@ main() {
     fi
 }
 
-main
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main
+fi

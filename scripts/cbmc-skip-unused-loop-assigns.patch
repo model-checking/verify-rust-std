@@ -1,0 +1,25 @@
+diff --git a/src/goto-instrument/contracts/dynamic-frames/dfcc_cfg_info.cpp b/src/goto-instrument/contracts/dynamic-frames/dfcc_cfg_info.cpp
+--- a/src/goto-instrument/contracts/dynamic-frames/dfcc_cfg_info.cpp
++++ b/src/goto-instrument/contracts/dynamic-frames/dfcc_cfg_info.cpp
+@@ -525,15 +525,19 @@
+ 
+     auto topsorted = loop_nesting_graph.topsort();
+ 
+     bool has_loops_with_contracts = false;
++    bool has_loops_without_assigns = false;
+     for(const auto idx : topsorted)
+     {
+       topsorted_loops.push_back(idx);
+       has_loops_with_contracts |= has_contract(
+         loop_nesting_graph[idx].latch, loop_contract_config.check_side_effect);
++      has_loops_without_assigns |=
++        get_loop_assigns(loop_nesting_graph[idx].latch).operands().empty();
+     }
+ 
+-    // We infer loop assigns for all loops in the function.
+-    if(has_loops_with_contracts)
++    // Explicit assigns clauses do not use inferred targets. Avoid inlining
++    // the function's callees when every loop already provides those targets.
++    if(has_loops_with_contracts && has_loops_without_assigns)
+     {
+       dfcc_infer_loop_assigns_for_function(

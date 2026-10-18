@@ -8,7 +8,11 @@ use flt2dec::estimator::estimate_scaling_factor;
 use flt2dec::{Decoded, MAX_SIG_DIGITS, round_up};
 
 use crate::cmp::Ordering;
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::MaybeUninit;
+#[cfg(kani)]
+use crate::num::imp::bignum::KaniInvariantOrdering;
 use crate::num::imp::bignum::{Big, Digit};
 use crate::num::imp::flt2dec;
 
@@ -62,6 +66,8 @@ static POW5TO256: [Digit; 10] = [
 
 #[doc(hidden)]
 pub fn mul_pow10(x: &mut Big, n: usize) -> &mut Big {
+    #[cfg(kani)]
+    let n = dragon_verify::proof_pow10_exponent(n);
     debug_assert!(n < 512);
     // Save ourself the left shift for the smallest cases.
     if n < 8 {
@@ -211,9 +217,57 @@ pub fn format_shortest<'a>(
     let mut scale8 = scale.clone();
     scale8.mul_pow2(3);
 
+    #[cfg(kani)]
+    let mut down = false;
+    #[cfg(not(kani))]
     let mut down;
+    #[cfg(kani)]
+    let mut up = false;
+    #[cfg(not(kani))]
     let mut up;
+    #[cfg(kani)]
+    let mut d = 0;
+    #[cfg(not(kani))]
+    let mut d;
+    #[cfg(kani)]
+    let mut up_candidate = Big::from_small(0);
+    #[cfg(not(kani))]
+    let mut up_candidate;
     let mut i = 0;
+    #[cfg(kani)]
+    let proof_zero = Big::from_small(0);
+    #[cfg(kani)]
+    let proof_scale10 = scale.clone().mul_small(10).clone();
+    #[cfg(kani)]
+    let proof_max_limbs = crate::cmp::max(mant.kani_size(), proof_scale10.kani_size());
+    #[cfg_attr(kani, kani::loop_modifies(&i, &d, &mant, &minus, &plus, &up_candidate, &down, &up, &buf[..]))]
+    #[cfg_attr(kani, kani::loop_invariant(
+        i < MAX_SIG_DIGITS
+            && mant.kani_invariant_size() > 0
+            && minus.kani_invariant_size() > 0 && plus.kani_invariant_size() > 0
+            && mant.kani_invariant_valid_storage()
+            && minus.kani_invariant_valid_storage() && plus.kani_invariant_valid_storage()
+            && mant.kani_invariant_size() <= proof_max_limbs
+            && minus.kani_invariant_size() <= proof_max_limbs
+            && plus.kani_invariant_size() <= proof_max_limbs
+            && mant.kani_invariant_less_than(&proof_scale10)
+            && minus.kani_invariant_less_than(&proof_scale10)
+            && plus.kani_invariant_less_than(&proof_scale10)
+            && proof_zero.kani_invariant_less_than(&minus)
+            && proof_zero.kani_invariant_less_than(&plus)
+            && (i == 0 || match proof_scale10.kani_invariant_cmp_scaled_sum(&mant, &plus, 0) {
+                KaniInvariantOrdering::Less => (Ordering::Less as i8) >= rounding as i8,
+                KaniInvariantOrdering::Equal => (Ordering::Equal as i8) >= rounding as i8,
+                KaniInvariantOrdering::Greater => true,
+                KaniInvariantOrdering::Unrepresentable => false,
+            })
+            && match scale.kani_invariant_cmp_scaled_sum(&minus, &plus, MAX_SIG_DIGITS - 1 - i) {
+                KaniInvariantOrdering::Less => true,
+                KaniInvariantOrdering::Equal | KaniInvariantOrdering::Greater
+                    | KaniInvariantOrdering::Unrepresentable => false,
+            }
+            && initialized_digit_prefix(buf, i)
+    ))]
     loop {
         // invariants, where `d[0..n-1]` are digits generated so far:
         // - `v = mant / scale * 10^(k-n-1) + d[0..n-1] * 10^(k-n)`
@@ -223,7 +277,7 @@ pub fn format_shortest<'a>(
         // where `d[i..j]` is a shorthand for `d[i] * 10^(j-i) + ... + d[j-1] * 10 + d[j]`.
 
         // generate one digit: `d[n] = floor(mant / scale) < 10`.
-        let (d, _) = div_rem_upto_16(&mut mant, &scale, &scale2, &scale4, &scale8);
+        (d, _) = div_rem_upto_16(&mut mant, &scale, &scale2, &scale4, &scale8);
         debug_assert!(d < 10);
         buf[i] = MaybeUninit::new(b'0' + d);
         i += 1;
@@ -260,7 +314,8 @@ pub fn format_shortest<'a>(
         // - stop and round `up` (increase the last digit) when `scale < mant + plus` (or `<=`).
         // - keep generating otherwise.
         down = mant.cmp(&minus) < rounding;
-        up = scale.cmp(mant.clone().add(&plus)) < rounding;
+        up_candidate = mant.clone();
+        up = scale.cmp(up_candidate.add(&plus)) < rounding;
         if down || up {
             break;
         } // we have the shortest representation, proceed to the rounding
@@ -290,6 +345,92 @@ pub fn format_shortest<'a>(
 
     // SAFETY: we initialized that memory above.
     (unsafe { buf[..i].assume_init_ref() }, k)
+}
+
+fn fill_zeroes(buf: &mut [MaybeUninit<u8>]) {
+    buf.fill(MaybeUninit::new(b'0'));
+}
+
+fn generate_exact_digits(
+    mant: &mut Big,
+    scale: &Big,
+    scale2: &Big,
+    scale4: &Big,
+    scale8: &Big,
+    buf: &mut [MaybeUninit<u8>],
+) -> bool {
+    let len = buf.len();
+    #[cfg(kani)]
+    let proof_scale10 = scale.clone().mul_small(10).clone();
+    #[cfg(kani)]
+    let proof_max_limbs = crate::cmp::max(mant.kani_size(), proof_scale10.kani_size());
+    #[cfg(kani)]
+    let mut d = 0;
+    #[cfg(not(kani))]
+    let mut d;
+    #[cfg_attr(kani, kani::loop_modifies(&*mant, &buf[..], &d))]
+    #[cfg_attr(kani, kani::loop_invariant(
+        kani::index <= len
+            && len <= dragon_verify::PROOF_BUFLEN
+            && mant.kani_invariant_size() <= proof_max_limbs
+            && mant.kani_invariant_valid_storage()
+            && mant.kani_invariant_less_than(&proof_scale10)
+            && initialized_digit_prefix(buf, kani::index)
+    ))]
+    for i in 0..len {
+        if mant.is_zero() {
+            // following digits are all zeroes, we stop here
+            // do *not* try to perform rounding! rather, fill remaining digits.
+            fill_zeroes(&mut buf[i..len]);
+            return true;
+        }
+
+        d = 0;
+        if *mant >= *scale8 {
+            mant.sub(scale8);
+            d += 8;
+        }
+        if *mant >= *scale4 {
+            mant.sub(scale4);
+            d += 4;
+        }
+        if *mant >= *scale2 {
+            mant.sub(scale2);
+            d += 2;
+        }
+        if *mant >= *scale {
+            mant.sub(scale);
+            d += 1;
+        }
+        debug_assert!(*mant < *scale);
+        debug_assert!(d < 10);
+        buf[i] = MaybeUninit::new(b'0' + d);
+        mant.mul_small(10);
+    }
+    false
+}
+
+#[cfg(kani)]
+fn initialized_digit_prefix(buf: &[MaybeUninit<u8>], len: usize) -> bool {
+    // Each byte keeps its own initialization guard. Combine the independent
+    // checks eagerly to avoid nested short-circuit paths during instrumentation.
+    macro_rules! check_digit {
+        ($($index:literal),+ $(,)?) => {
+            true $(& (buf.len() <= $index || len <= $index || (
+                kani::mem::can_dereference(crate::ptr::addr_of!(buf[$index]) as *const u8)
+                    && unsafe {
+                        let digit = *(crate::ptr::addr_of!(buf[$index]) as *const u8);
+                        digit >= b'0' && digit <= b'9'
+                    }
+            )))+
+        };
+    }
+    len <= buf.len()
+        && len <= dragon_verify::PROOF_BUFLEN
+        && check_digit!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31
+        )
 }
 
 /// The exact and fixed mode implementation for Dragon.
@@ -349,7 +490,7 @@ pub fn format_exact<'a>(
         buf.len()
     };
 
-    if len > 0 {
+    let exhausted = if len > 0 {
         // cache `(2, 4, 8) * scale` for digit generation.
         // (this can be expensive, so do not calculate them when the buffer is empty.)
         let mut scale2 = scale.clone();
@@ -359,65 +500,2022 @@ pub fn format_exact<'a>(
         let mut scale8 = scale.clone();
         scale8.mul_pow2(3);
 
-        for i in 0..len {
-            if mant.is_zero() {
-                // following digits are all zeroes, we stop here
-                // do *not* try to perform rounding! rather, fill remaining digits.
-                for c in &mut buf[i..len] {
-                    *c = MaybeUninit::new(b'0');
+        generate_exact_digits(&mut mant, &scale, &scale2, &scale4, &scale8, &mut buf[..len])
+    } else {
+        false
+    };
+
+    if exhausted {
+        // SAFETY: digit generation initialized the requested prefix.
+        (unsafe { buf[..len].assume_init_ref() }, k)
+    } else {
+        // rounding up if we stop in the middle of digits
+        // if the following digits are exactly 5000..., check the prior digit and try to
+        // round to even (i.e., avoid rounding up when the prior digit is even).
+        let order = mant.cmp(scale.mul_small(5));
+        if order == Ordering::Greater
+            || (order == Ordering::Equal
+                // SAFETY: `buf[len-1]` is initialized.
+                && len > 0 && unsafe { buf[len - 1].assume_init() } & 1 == 1)
+        {
+            // if rounding up changes the length, the exponent should also change.
+            // but we've been requested a fixed number of digits, so do not alter the buffer...
+            // SAFETY: we initialized that memory above.
+            if let Some(c) = round_up(unsafe { buf[..len].assume_init_mut() }) {
+                // ...unless we've been requested the fixed precision instead.
+                // we also need to check that, if the original buffer was empty,
+                // the additional digit can only be added when `k == limit` (edge case).
+                k += 1;
+                if k > limit && len < buf.len() {
+                    buf[len] = MaybeUninit::new(c);
+                    len += 1;
                 }
-                // SAFETY: we initialized that memory above.
-                return (unsafe { buf[..len].assume_init_ref() }, k);
             }
-
-            let mut d = 0;
-            if mant >= scale8 {
-                mant.sub(&scale8);
-                d += 8;
-            }
-            if mant >= scale4 {
-                mant.sub(&scale4);
-                d += 4;
-            }
-            if mant >= scale2 {
-                mant.sub(&scale2);
-                d += 2;
-            }
-            if mant >= scale {
-                mant.sub(&scale);
-                d += 1;
-            }
-            debug_assert!(mant < scale);
-            debug_assert!(d < 10);
-            buf[i] = MaybeUninit::new(b'0' + d);
-            mant.mul_small(10);
         }
-    }
 
-    // rounding up if we stop in the middle of digits
-    // if the following digits are exactly 5000..., check the prior digit and try to
-    // round to even (i.e., avoid rounding up when the prior digit is even).
-    let order = mant.cmp(scale.mul_small(5));
-    if order == Ordering::Greater
-        || (order == Ordering::Equal
-            // SAFETY: `buf[len-1]` is initialized.
-            && len > 0 && unsafe { buf[len - 1].assume_init() } & 1 == 1)
-    {
-        // if rounding up changes the length, the exponent should also change.
-        // but we've been requested a fixed number of digits, so do not alter the buffer...
         // SAFETY: we initialized that memory above.
-        if let Some(c) = round_up(unsafe { buf[..len].assume_init_mut() }) {
-            // ...unless we've been requested the fixed precision instead.
-            // we also need to check that, if the original buffer was empty,
-            // the additional digit can only be added when `k == limit` (edge case).
-            k += 1;
-            if k > limit && len < buf.len() {
-                buf[len] = MaybeUninit::new(c);
-                len += 1;
+        (unsafe { buf[..len].assume_init_ref() }, k)
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod dragon_verify {
+    use super::*;
+    use crate::kani;
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    use crate::num::imp::bignum::Big32x40 as Big;
+    #[cfg(target_pointer_width = "64")]
+    use crate::num::imp::bignum::Big64x20 as Big;
+    use crate::num::imp::bignum::KANI_LIMBS;
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    use crate::primitive::u32 as Digit;
+    #[cfg(target_pointer_width = "64")]
+    use crate::primitive::u64 as Digit;
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    type WideDigit = u64;
+    #[cfg(target_pointer_width = "64")]
+    type WideDigit = u128;
+    use crate::num::imp::flt2dec::flt2dec_verify::{
+        arbitrary_finite_f32, arbitrary_finite_f64, arbitrary_finite_f64_exponent,
+        for_each_finite_partition,
+    };
+
+    // Keep exact comparison semantics and the generator's digit writes. The
+    // comparison models have a separate equivalence proof; exact mode also
+    // uses the division contract below for initial fixup. Neither termination
+    // nor the buffer index is assumed. Bigint unwind assertions remain enabled.
+    // Lengths above 32 require a separate proof; these harnesses are bounded.
+    pub(super) const PROOF_BUFLEN: usize = 32;
+    const _: () = assert!(PROOF_BUFLEN <= u8::MAX as usize);
+
+    #[kani::proof]
+    #[kani::unwind(41)]
+    #[kani::stub(crate::num::imp::bignum::kani_loop_size, counter_frame_limb_count)]
+    #[kani::stub(Big::sub, Big::kani_sub_model)]
+    #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
+    #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
+    #[kani::stub(Big::is_zero, stub_is_zero)]
+    #[kani::solver(kissat)]
+    fn check_exact_digit_loop_frame() {
+        let mut mant = Big::from_u64(5);
+        let scale = Big::from_small(1);
+        let scale2 = Big::from_small(2);
+        let scale4 = Big::from_small(4);
+        let scale8 = Big::from_small(8);
+        let mut buf = [MaybeUninit::uninit(); 1];
+        let _ = generate_exact_digits(&mut mant, &scale, &scale2, &scale4, &scale8, &mut buf);
+        let digit = unsafe { buf[0].assume_init() };
+        assert!(digit >= b'0' && digit <= b'9');
+        kani::cover(digit == b'5', "the counter frame permits a generated digit");
+    }
+    fn counter_frame_limb_count(size: usize) -> usize {
+        LimbCountMask(1).check(size)
+    }
+
+    // The models assert the size bounds checked by the independent equivalence
+    // proof, then compute exact results with constant limb indices.
+    fn stub_cmp(left: &Big, right: &Big) -> Ordering {
+        left.kani_cmp_model(right)
+    }
+
+    fn stub_is_zero(value: &Big) -> bool {
+        value.kani_is_zero_model()
+    }
+
+    #[kani::proof]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_comparison_models_agree() {
+        // These methods only need size bounds. Inactive limbs may be arbitrary;
+        // unlike arithmetic contracts, this proof needs no zero-tail invariant.
+        // Six symbolic bits represent every permitted storage size, while
+        // keeping unused upper index bits concrete during symbolic execution.
+        let left = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        let right = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        // This is exactly the domain asserted by both models at their call sites.
+        kani::assume(left.kani_size() <= KANI_LIMBS && right.kani_size() <= KANI_LIMBS);
+        assert!(left.cmp(&right) == left.kani_cmp_model(&right));
+        assert!(left.is_zero() == left.kani_is_zero_model());
+        let ordering = left.kani_cmp_model(&right);
+        assert!(left.kani_invariant_size() == left.kani_size());
+        assert!(left.kani_invariant_valid_storage() == left.kani_valid_storage());
+        assert!(left.kani_invariant_less_than(&right) == (ordering == Ordering::Less));
+        kani::cover(ordering == Ordering::Less, "comparison can be less");
+        kani::cover(ordering == Ordering::Equal, "comparison can be equal");
+        kani::cover(ordering == Ordering::Greater, "comparison can be greater");
+        kani::cover(left.kani_is_zero_model(), "zero testing accepts zero");
+        kani::cover(!left.kani_is_zero_model(), "zero testing accepts nonzero limbs");
+        kani::cover(left.kani_size() == 0, "comparison accepts empty zero storage");
+        kani::cover(left.kani_size() == KANI_LIMBS, "comparison accepts all bigint limbs");
+        kani::cover(
+            left.kani_size() == 0 && !left.kani_valid_storage(),
+            "comparison models accept arbitrary inactive limbs",
+        );
+    }
+
+    #[kani::proof]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_add_model_agrees() {
+        let source = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        let other = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        kani::assume(source.kani_size() < KANI_LIMBS && other.kani_size() < KANI_LIMBS);
+        kani::cover(source.kani_size() == 0, "addition accepts empty storage");
+        kani::cover(
+            source.kani_size() == KANI_LIMBS - 1,
+            "addition accepts the largest model input",
+        );
+        let mut actual = source.clone();
+        let mut modeled = source;
+        let actual_start = &mut actual as *mut Big;
+        let modeled_start = &mut modeled as *mut Big;
+        assert!(actual.add(&other) as *mut Big == actual_start);
+        assert!(modeled.kani_add_model(&other) as *mut Big == modeled_start);
+        assert!(actual.kani_same_storage(&modeled));
+        kani::cover(actual.kani_size() == KANI_LIMBS, "addition can append a carry limb");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_sub_model_agrees() {
+        let source = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        let other = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        kani::assume(source.kani_size() <= KANI_LIMBS && other.kani_size() <= KANI_LIMBS);
+        kani::assume(source.kani_cmp_model(&other) != Ordering::Less);
+        kani::cover(source.kani_size() == 0, "subtraction accepts empty storage");
+        kani::cover(source.kani_size() == KANI_LIMBS, "subtraction accepts all limbs");
+        let mut actual = source.clone();
+        let mut modeled = source;
+        let actual_start = &mut actual as *mut Big;
+        let modeled_start = &mut modeled as *mut Big;
+        assert!(actual.sub(&other) as *mut Big == actual_start);
+        assert!(modeled.kani_sub_model(&other) as *mut Big == modeled_start);
+        assert!(actual.kani_same_storage(&modeled));
+    }
+
+    fn fill_zeroes_model(buf: &mut [MaybeUninit<u8>]) {
+        assert!(buf.len() <= PROOF_BUFLEN);
+        // SAFETY: MaybeUninit<u8> has byte size and alignment. The mutable
+        // slice covers exactly buf.len() writable bytes, including an empty slice.
+        unsafe { crate::ptr::write_bytes(buf.as_mut_ptr(), b'0', buf.len()) };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(33)]
+    #[kani::solver(kissat)]
+    fn check_fill_zeroes_model_agrees() {
+        let initial = kani::any::<[u8; PROOF_BUFLEN]>();
+        let mut actual = initial.map(MaybeUninit::new);
+        let mut modeled = initial.map(MaybeUninit::new);
+        let start = usize::from(kani::any::<u8>());
+        let end = usize::from(kani::any::<u8>());
+        kani::assume(start <= end && end <= PROOF_BUFLEN);
+        fill_zeroes(&mut actual[start..end]);
+        fill_zeroes_model(&mut modeled[start..end]);
+        macro_rules! compare_bytes {
+            ($($index:literal),+ $(,)?) => {
+                $(
+                    // SAFETY: Both arrays began initialized, and zero filling
+                    // preserves initialization of every byte.
+                    assert_eq!(unsafe { actual[$index].assume_init() }, unsafe {
+                        modeled[$index].assume_init()
+                    });
+                )+
+            };
+        }
+        compare_bytes!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31
+        );
+        kani::cover(start == end, "zero filling accepts an empty slice");
+        kani::cover(start == 0 && end == PROOF_BUFLEN, "zero filling reaches every byte");
+        kani::cover(
+            start > 0 && end < PROOF_BUFLEN && start < end,
+            "zero filling preserves both edges",
+        );
+    }
+
+    fn check_mul_pow2_model_agrees<const SIZE: usize, const DIGITS: usize>() {
+        let mut value = Big::kani_valid_with_size(SIZE);
+        let shift = usize::from(kani::any::<u8>()) & (Digit::BITS as usize - 1);
+        let bits = (DIGITS * Digit::BITS as usize) | shift;
+        let digits = DIGITS;
+        let size = value.kani_size();
+        // Use the real method's safe shift domain for valid bigint storage.
+        kani::assume(digits < KANI_LIMBS && size + digits <= KANI_LIMBS);
+        kani::assume(shift == 0 || size + digits > 0);
+        kani::assume(
+            shift == 0
+                || (value.kani_limbs_mut()[KANI_LIMBS - digits - 1]
+                    >> (Digit::BITS as usize - shift))
+                    == 0,
+        );
+        let mut expected = value.clone();
+        let mut actual = value;
+        expected.mul_pow2(bits);
+        actual.kani_mul_pow2_model(bits);
+        assert!(actual.kani_same_storage(&expected));
+        kani::cover(shift == 0, "shift preserves whole limbs");
+        kani::cover(shift == Digit::BITS as usize - 1, "shift uses the largest partial limb");
+        kani::cover(digits == KANI_LIMBS - 1, "shift reaches the last stored limb");
+    }
+
+    // A case fixes the active size and whole-limb shift, leaving every
+    // partial-limb shift symbolic. Each real loop visits at most max(SIZE,
+    // DIGITS) limbs. Unwinding assertions verify the bound for every case.
+    macro_rules! check_shift_width {
+        ($module:ident, $($(#[$cfg:meta])* ($name:ident, $guide:ident, $size:literal, $digits:literal, $unwind:literal)),+ $(,)?) => {
+            mod $module {
+                use crate::kani;
+
+                $(
+                    $(#[$cfg])*
+                    fn $guide(size: usize) -> usize {
+                        assert_eq!(size, $size);
+                        $size
+                    }
+
+                    $(#[$cfg])*
+                    #[kani::proof]
+                    #[kani::unwind($unwind)]
+                    #[kani::solver(kissat)]
+                    #[kani::stub(crate::num::imp::bignum::kani_loop_size, $guide)]
+                    fn $name() {
+                        super::check_mul_pow2_model_agrees::<$size, $digits>();
+                    }
+                )+
             }
+        };
+    }
+
+    check_shift_width!(shift_width_00, (size_00, guide_size_00, 0, 0, 1),);
+    check_shift_width!(
+        shift_width_01,
+        (size_00, guide_size_00, 0, 1, 2),
+        (size_01, guide_size_01, 1, 0, 2),
+    );
+    check_shift_width!(
+        shift_width_02,
+        (size_00, guide_size_00, 0, 2, 3),
+        (size_01, guide_size_01, 1, 1, 2),
+        (size_02, guide_size_02, 2, 0, 3),
+    );
+    check_shift_width!(
+        shift_width_03,
+        (size_00, guide_size_00, 0, 3, 4),
+        (size_01, guide_size_01, 1, 2, 3),
+        (size_02, guide_size_02, 2, 1, 3),
+        (size_03, guide_size_03, 3, 0, 4),
+    );
+    check_shift_width!(
+        shift_width_04,
+        (size_00, guide_size_00, 0, 4, 5),
+        (size_01, guide_size_01, 1, 3, 4),
+        (size_02, guide_size_02, 2, 2, 3),
+        (size_03, guide_size_03, 3, 1, 4),
+        (size_04, guide_size_04, 4, 0, 5),
+    );
+    check_shift_width!(
+        shift_width_05,
+        (size_00, guide_size_00, 0, 5, 6),
+        (size_01, guide_size_01, 1, 4, 5),
+        (size_02, guide_size_02, 2, 3, 4),
+        (size_03, guide_size_03, 3, 2, 4),
+        (size_04, guide_size_04, 4, 1, 5),
+        (size_05, guide_size_05, 5, 0, 6),
+    );
+    check_shift_width!(
+        shift_width_06,
+        (size_00, guide_size_00, 0, 6, 7),
+        (size_01, guide_size_01, 1, 5, 6),
+        (size_02, guide_size_02, 2, 4, 5),
+        (size_03, guide_size_03, 3, 3, 4),
+        (size_04, guide_size_04, 4, 2, 5),
+        (size_05, guide_size_05, 5, 1, 6),
+        (size_06, guide_size_06, 6, 0, 7),
+    );
+    check_shift_width!(
+        shift_width_07,
+        (size_00, guide_size_00, 0, 7, 8),
+        (size_01, guide_size_01, 1, 6, 7),
+        (size_02, guide_size_02, 2, 5, 6),
+        (size_03, guide_size_03, 3, 4, 5),
+        (size_04, guide_size_04, 4, 3, 5),
+        (size_05, guide_size_05, 5, 2, 6),
+        (size_06, guide_size_06, 6, 1, 7),
+        (size_07, guide_size_07, 7, 0, 8),
+    );
+    check_shift_width!(
+        shift_width_08,
+        (size_00, guide_size_00, 0, 8, 9),
+        (size_01, guide_size_01, 1, 7, 8),
+        (size_02, guide_size_02, 2, 6, 7),
+        (size_03, guide_size_03, 3, 5, 6),
+        (size_04, guide_size_04, 4, 4, 5),
+        (size_05, guide_size_05, 5, 3, 6),
+        (size_06, guide_size_06, 6, 2, 7),
+        (size_07, guide_size_07, 7, 1, 8),
+        (size_08, guide_size_08, 8, 0, 9),
+    );
+    check_shift_width!(
+        shift_width_09,
+        (size_00, guide_size_00, 0, 9, 10),
+        (size_01, guide_size_01, 1, 8, 9),
+        (size_02, guide_size_02, 2, 7, 8),
+        (size_03, guide_size_03, 3, 6, 7),
+        (size_04, guide_size_04, 4, 5, 6),
+        (size_05, guide_size_05, 5, 4, 6),
+        (size_06, guide_size_06, 6, 3, 7),
+        (size_07, guide_size_07, 7, 2, 8),
+        (size_08, guide_size_08, 8, 1, 9),
+        (size_09, guide_size_09, 9, 0, 10),
+    );
+    check_shift_width!(
+        shift_width_10,
+        (size_00, guide_size_00, 0, 10, 11),
+        (size_01, guide_size_01, 1, 9, 10),
+        (size_02, guide_size_02, 2, 8, 9),
+        (size_03, guide_size_03, 3, 7, 8),
+        (size_04, guide_size_04, 4, 6, 7),
+        (size_05, guide_size_05, 5, 5, 6),
+        (size_06, guide_size_06, 6, 4, 7),
+        (size_07, guide_size_07, 7, 3, 8),
+        (size_08, guide_size_08, 8, 2, 9),
+        (size_09, guide_size_09, 9, 1, 10),
+        (size_10, guide_size_10, 10, 0, 11),
+    );
+    check_shift_width!(
+        shift_width_11,
+        (size_00, guide_size_00, 0, 11, 12),
+        (size_01, guide_size_01, 1, 10, 11),
+        (size_02, guide_size_02, 2, 9, 10),
+        (size_03, guide_size_03, 3, 8, 9),
+        (size_04, guide_size_04, 4, 7, 8),
+        (size_05, guide_size_05, 5, 6, 7),
+        (size_06, guide_size_06, 6, 5, 7),
+        (size_07, guide_size_07, 7, 4, 8),
+        (size_08, guide_size_08, 8, 3, 9),
+        (size_09, guide_size_09, 9, 2, 10),
+        (size_10, guide_size_10, 10, 1, 11),
+        (size_11, guide_size_11, 11, 0, 12),
+    );
+    check_shift_width!(
+        shift_width_12,
+        (size_00, guide_size_00, 0, 12, 13),
+        (size_01, guide_size_01, 1, 11, 12),
+        (size_02, guide_size_02, 2, 10, 11),
+        (size_03, guide_size_03, 3, 9, 10),
+        (size_04, guide_size_04, 4, 8, 9),
+        (size_05, guide_size_05, 5, 7, 8),
+        (size_06, guide_size_06, 6, 6, 7),
+        (size_07, guide_size_07, 7, 5, 8),
+        (size_08, guide_size_08, 8, 4, 9),
+        (size_09, guide_size_09, 9, 3, 10),
+        (size_10, guide_size_10, 10, 2, 11),
+        (size_11, guide_size_11, 11, 1, 12),
+        (size_12, guide_size_12, 12, 0, 13),
+    );
+    check_shift_width!(
+        shift_width_13,
+        (size_00, guide_size_00, 0, 13, 14),
+        (size_01, guide_size_01, 1, 12, 13),
+        (size_02, guide_size_02, 2, 11, 12),
+        (size_03, guide_size_03, 3, 10, 11),
+        (size_04, guide_size_04, 4, 9, 10),
+        (size_05, guide_size_05, 5, 8, 9),
+        (size_06, guide_size_06, 6, 7, 8),
+        (size_07, guide_size_07, 7, 6, 8),
+        (size_08, guide_size_08, 8, 5, 9),
+        (size_09, guide_size_09, 9, 4, 10),
+        (size_10, guide_size_10, 10, 3, 11),
+        (size_11, guide_size_11, 11, 2, 12),
+        (size_12, guide_size_12, 12, 1, 13),
+        (size_13, guide_size_13, 13, 0, 14),
+    );
+    check_shift_width!(
+        shift_width_14,
+        (size_00, guide_size_00, 0, 14, 15),
+        (size_01, guide_size_01, 1, 13, 14),
+        (size_02, guide_size_02, 2, 12, 13),
+        (size_03, guide_size_03, 3, 11, 12),
+        (size_04, guide_size_04, 4, 10, 11),
+        (size_05, guide_size_05, 5, 9, 10),
+        (size_06, guide_size_06, 6, 8, 9),
+        (size_07, guide_size_07, 7, 7, 8),
+        (size_08, guide_size_08, 8, 6, 9),
+        (size_09, guide_size_09, 9, 5, 10),
+        (size_10, guide_size_10, 10, 4, 11),
+        (size_11, guide_size_11, 11, 3, 12),
+        (size_12, guide_size_12, 12, 2, 13),
+        (size_13, guide_size_13, 13, 1, 14),
+        (size_14, guide_size_14, 14, 0, 15),
+    );
+    check_shift_width!(
+        shift_width_15,
+        (size_00, guide_size_00, 0, 15, 16),
+        (size_01, guide_size_01, 1, 14, 15),
+        (size_02, guide_size_02, 2, 13, 14),
+        (size_03, guide_size_03, 3, 12, 13),
+        (size_04, guide_size_04, 4, 11, 12),
+        (size_05, guide_size_05, 5, 10, 11),
+        (size_06, guide_size_06, 6, 9, 10),
+        (size_07, guide_size_07, 7, 8, 9),
+        (size_08, guide_size_08, 8, 7, 9),
+        (size_09, guide_size_09, 9, 6, 10),
+        (size_10, guide_size_10, 10, 5, 11),
+        (size_11, guide_size_11, 11, 4, 12),
+        (size_12, guide_size_12, 12, 3, 13),
+        (size_13, guide_size_13, 13, 2, 14),
+        (size_14, guide_size_14, 14, 1, 15),
+        (size_15, guide_size_15, 15, 0, 16),
+    );
+    check_shift_width!(
+        shift_width_16,
+        (size_00, guide_size_00, 0, 16, 17),
+        (size_01, guide_size_01, 1, 15, 16),
+        (size_02, guide_size_02, 2, 14, 15),
+        (size_03, guide_size_03, 3, 13, 14),
+        (size_04, guide_size_04, 4, 12, 13),
+        (size_05, guide_size_05, 5, 11, 12),
+        (size_06, guide_size_06, 6, 10, 11),
+        (size_07, guide_size_07, 7, 9, 10),
+        (size_08, guide_size_08, 8, 8, 9),
+        (size_09, guide_size_09, 9, 7, 10),
+        (size_10, guide_size_10, 10, 6, 11),
+        (size_11, guide_size_11, 11, 5, 12),
+        (size_12, guide_size_12, 12, 4, 13),
+        (size_13, guide_size_13, 13, 3, 14),
+        (size_14, guide_size_14, 14, 2, 15),
+        (size_15, guide_size_15, 15, 1, 16),
+        (size_16, guide_size_16, 16, 0, 17),
+    );
+    check_shift_width!(
+        shift_width_17,
+        (size_00, guide_size_00, 0, 17, 18),
+        (size_01, guide_size_01, 1, 16, 17),
+        (size_02, guide_size_02, 2, 15, 16),
+        (size_03, guide_size_03, 3, 14, 15),
+        (size_04, guide_size_04, 4, 13, 14),
+        (size_05, guide_size_05, 5, 12, 13),
+        (size_06, guide_size_06, 6, 11, 12),
+        (size_07, guide_size_07, 7, 10, 11),
+        (size_08, guide_size_08, 8, 9, 10),
+        (size_09, guide_size_09, 9, 8, 10),
+        (size_10, guide_size_10, 10, 7, 11),
+        (size_11, guide_size_11, 11, 6, 12),
+        (size_12, guide_size_12, 12, 5, 13),
+        (size_13, guide_size_13, 13, 4, 14),
+        (size_14, guide_size_14, 14, 3, 15),
+        (size_15, guide_size_15, 15, 2, 16),
+        (size_16, guide_size_16, 16, 1, 17),
+        (size_17, guide_size_17, 17, 0, 18),
+    );
+    check_shift_width!(
+        shift_width_18,
+        (size_00, guide_size_00, 0, 18, 19),
+        (size_01, guide_size_01, 1, 17, 18),
+        (size_02, guide_size_02, 2, 16, 17),
+        (size_03, guide_size_03, 3, 15, 16),
+        (size_04, guide_size_04, 4, 14, 15),
+        (size_05, guide_size_05, 5, 13, 14),
+        (size_06, guide_size_06, 6, 12, 13),
+        (size_07, guide_size_07, 7, 11, 12),
+        (size_08, guide_size_08, 8, 10, 11),
+        (size_09, guide_size_09, 9, 9, 10),
+        (size_10, guide_size_10, 10, 8, 11),
+        (size_11, guide_size_11, 11, 7, 12),
+        (size_12, guide_size_12, 12, 6, 13),
+        (size_13, guide_size_13, 13, 5, 14),
+        (size_14, guide_size_14, 14, 4, 15),
+        (size_15, guide_size_15, 15, 3, 16),
+        (size_16, guide_size_16, 16, 2, 17),
+        (size_17, guide_size_17, 17, 1, 18),
+        (size_18, guide_size_18, 18, 0, 19),
+    );
+    check_shift_width!(
+        shift_width_19,
+        (size_00, guide_size_00, 0, 19, 20),
+        (size_01, guide_size_01, 1, 18, 19),
+        (size_02, guide_size_02, 2, 17, 18),
+        (size_03, guide_size_03, 3, 16, 17),
+        (size_04, guide_size_04, 4, 15, 16),
+        (size_05, guide_size_05, 5, 14, 15),
+        (size_06, guide_size_06, 6, 13, 14),
+        (size_07, guide_size_07, 7, 12, 13),
+        (size_08, guide_size_08, 8, 11, 12),
+        (size_09, guide_size_09, 9, 10, 11),
+        (size_10, guide_size_10, 10, 9, 11),
+        (size_11, guide_size_11, 11, 8, 12),
+        (size_12, guide_size_12, 12, 7, 13),
+        (size_13, guide_size_13, 13, 6, 14),
+        (size_14, guide_size_14, 14, 5, 15),
+        (size_15, guide_size_15, 15, 4, 16),
+        (size_16, guide_size_16, 16, 3, 17),
+        (size_17, guide_size_17, 17, 2, 18),
+        (size_18, guide_size_18, 18, 1, 19),
+        (size_19, guide_size_19, 19, 0, 20),
+    );
+    check_shift_width!(
+        shift_width_20,
+        #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+        (size_00, guide_size_00, 0, 20, 21),
+        (size_01, guide_size_01, 1, 19, 20),
+        (size_02, guide_size_02, 2, 18, 19),
+        (size_03, guide_size_03, 3, 17, 18),
+        (size_04, guide_size_04, 4, 16, 17),
+        (size_05, guide_size_05, 5, 15, 16),
+        (size_06, guide_size_06, 6, 14, 15),
+        (size_07, guide_size_07, 7, 13, 14),
+        (size_08, guide_size_08, 8, 12, 13),
+        (size_09, guide_size_09, 9, 11, 12),
+        (size_10, guide_size_10, 10, 10, 11),
+        (size_11, guide_size_11, 11, 9, 12),
+        (size_12, guide_size_12, 12, 8, 13),
+        (size_13, guide_size_13, 13, 7, 14),
+        (size_14, guide_size_14, 14, 6, 15),
+        (size_15, guide_size_15, 15, 5, 16),
+        (size_16, guide_size_16, 16, 4, 17),
+        (size_17, guide_size_17, 17, 3, 18),
+        (size_18, guide_size_18, 18, 2, 19),
+        (size_19, guide_size_19, 19, 1, 20),
+        (size_20, guide_size_20, 20, 0, 21),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_21,
+        (size_00, guide_size_00, 0, 21, 22),
+        (size_01, guide_size_01, 1, 20, 21),
+        (size_02, guide_size_02, 2, 19, 20),
+        (size_03, guide_size_03, 3, 18, 19),
+        (size_04, guide_size_04, 4, 17, 18),
+        (size_05, guide_size_05, 5, 16, 17),
+        (size_06, guide_size_06, 6, 15, 16),
+        (size_07, guide_size_07, 7, 14, 15),
+        (size_08, guide_size_08, 8, 13, 14),
+        (size_09, guide_size_09, 9, 12, 13),
+        (size_10, guide_size_10, 10, 11, 12),
+        (size_11, guide_size_11, 11, 10, 12),
+        (size_12, guide_size_12, 12, 9, 13),
+        (size_13, guide_size_13, 13, 8, 14),
+        (size_14, guide_size_14, 14, 7, 15),
+        (size_15, guide_size_15, 15, 6, 16),
+        (size_16, guide_size_16, 16, 5, 17),
+        (size_17, guide_size_17, 17, 4, 18),
+        (size_18, guide_size_18, 18, 3, 19),
+        (size_19, guide_size_19, 19, 2, 20),
+        (size_20, guide_size_20, 20, 1, 21),
+        (size_21, guide_size_21, 21, 0, 22),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_22,
+        (size_00, guide_size_00, 0, 22, 23),
+        (size_01, guide_size_01, 1, 21, 22),
+        (size_02, guide_size_02, 2, 20, 21),
+        (size_03, guide_size_03, 3, 19, 20),
+        (size_04, guide_size_04, 4, 18, 19),
+        (size_05, guide_size_05, 5, 17, 18),
+        (size_06, guide_size_06, 6, 16, 17),
+        (size_07, guide_size_07, 7, 15, 16),
+        (size_08, guide_size_08, 8, 14, 15),
+        (size_09, guide_size_09, 9, 13, 14),
+        (size_10, guide_size_10, 10, 12, 13),
+        (size_11, guide_size_11, 11, 11, 12),
+        (size_12, guide_size_12, 12, 10, 13),
+        (size_13, guide_size_13, 13, 9, 14),
+        (size_14, guide_size_14, 14, 8, 15),
+        (size_15, guide_size_15, 15, 7, 16),
+        (size_16, guide_size_16, 16, 6, 17),
+        (size_17, guide_size_17, 17, 5, 18),
+        (size_18, guide_size_18, 18, 4, 19),
+        (size_19, guide_size_19, 19, 3, 20),
+        (size_20, guide_size_20, 20, 2, 21),
+        (size_21, guide_size_21, 21, 1, 22),
+        (size_22, guide_size_22, 22, 0, 23),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_23,
+        (size_00, guide_size_00, 0, 23, 24),
+        (size_01, guide_size_01, 1, 22, 23),
+        (size_02, guide_size_02, 2, 21, 22),
+        (size_03, guide_size_03, 3, 20, 21),
+        (size_04, guide_size_04, 4, 19, 20),
+        (size_05, guide_size_05, 5, 18, 19),
+        (size_06, guide_size_06, 6, 17, 18),
+        (size_07, guide_size_07, 7, 16, 17),
+        (size_08, guide_size_08, 8, 15, 16),
+        (size_09, guide_size_09, 9, 14, 15),
+        (size_10, guide_size_10, 10, 13, 14),
+        (size_11, guide_size_11, 11, 12, 13),
+        (size_12, guide_size_12, 12, 11, 13),
+        (size_13, guide_size_13, 13, 10, 14),
+        (size_14, guide_size_14, 14, 9, 15),
+        (size_15, guide_size_15, 15, 8, 16),
+        (size_16, guide_size_16, 16, 7, 17),
+        (size_17, guide_size_17, 17, 6, 18),
+        (size_18, guide_size_18, 18, 5, 19),
+        (size_19, guide_size_19, 19, 4, 20),
+        (size_20, guide_size_20, 20, 3, 21),
+        (size_21, guide_size_21, 21, 2, 22),
+        (size_22, guide_size_22, 22, 1, 23),
+        (size_23, guide_size_23, 23, 0, 24),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_24,
+        (size_00, guide_size_00, 0, 24, 25),
+        (size_01, guide_size_01, 1, 23, 24),
+        (size_02, guide_size_02, 2, 22, 23),
+        (size_03, guide_size_03, 3, 21, 22),
+        (size_04, guide_size_04, 4, 20, 21),
+        (size_05, guide_size_05, 5, 19, 20),
+        (size_06, guide_size_06, 6, 18, 19),
+        (size_07, guide_size_07, 7, 17, 18),
+        (size_08, guide_size_08, 8, 16, 17),
+        (size_09, guide_size_09, 9, 15, 16),
+        (size_10, guide_size_10, 10, 14, 15),
+        (size_11, guide_size_11, 11, 13, 14),
+        (size_12, guide_size_12, 12, 12, 13),
+        (size_13, guide_size_13, 13, 11, 14),
+        (size_14, guide_size_14, 14, 10, 15),
+        (size_15, guide_size_15, 15, 9, 16),
+        (size_16, guide_size_16, 16, 8, 17),
+        (size_17, guide_size_17, 17, 7, 18),
+        (size_18, guide_size_18, 18, 6, 19),
+        (size_19, guide_size_19, 19, 5, 20),
+        (size_20, guide_size_20, 20, 4, 21),
+        (size_21, guide_size_21, 21, 3, 22),
+        (size_22, guide_size_22, 22, 2, 23),
+        (size_23, guide_size_23, 23, 1, 24),
+        (size_24, guide_size_24, 24, 0, 25),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_25,
+        (size_00, guide_size_00, 0, 25, 26),
+        (size_01, guide_size_01, 1, 24, 25),
+        (size_02, guide_size_02, 2, 23, 24),
+        (size_03, guide_size_03, 3, 22, 23),
+        (size_04, guide_size_04, 4, 21, 22),
+        (size_05, guide_size_05, 5, 20, 21),
+        (size_06, guide_size_06, 6, 19, 20),
+        (size_07, guide_size_07, 7, 18, 19),
+        (size_08, guide_size_08, 8, 17, 18),
+        (size_09, guide_size_09, 9, 16, 17),
+        (size_10, guide_size_10, 10, 15, 16),
+        (size_11, guide_size_11, 11, 14, 15),
+        (size_12, guide_size_12, 12, 13, 14),
+        (size_13, guide_size_13, 13, 12, 14),
+        (size_14, guide_size_14, 14, 11, 15),
+        (size_15, guide_size_15, 15, 10, 16),
+        (size_16, guide_size_16, 16, 9, 17),
+        (size_17, guide_size_17, 17, 8, 18),
+        (size_18, guide_size_18, 18, 7, 19),
+        (size_19, guide_size_19, 19, 6, 20),
+        (size_20, guide_size_20, 20, 5, 21),
+        (size_21, guide_size_21, 21, 4, 22),
+        (size_22, guide_size_22, 22, 3, 23),
+        (size_23, guide_size_23, 23, 2, 24),
+        (size_24, guide_size_24, 24, 1, 25),
+        (size_25, guide_size_25, 25, 0, 26),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_26,
+        (size_00, guide_size_00, 0, 26, 27),
+        (size_01, guide_size_01, 1, 25, 26),
+        (size_02, guide_size_02, 2, 24, 25),
+        (size_03, guide_size_03, 3, 23, 24),
+        (size_04, guide_size_04, 4, 22, 23),
+        (size_05, guide_size_05, 5, 21, 22),
+        (size_06, guide_size_06, 6, 20, 21),
+        (size_07, guide_size_07, 7, 19, 20),
+        (size_08, guide_size_08, 8, 18, 19),
+        (size_09, guide_size_09, 9, 17, 18),
+        (size_10, guide_size_10, 10, 16, 17),
+        (size_11, guide_size_11, 11, 15, 16),
+        (size_12, guide_size_12, 12, 14, 15),
+        (size_13, guide_size_13, 13, 13, 14),
+        (size_14, guide_size_14, 14, 12, 15),
+        (size_15, guide_size_15, 15, 11, 16),
+        (size_16, guide_size_16, 16, 10, 17),
+        (size_17, guide_size_17, 17, 9, 18),
+        (size_18, guide_size_18, 18, 8, 19),
+        (size_19, guide_size_19, 19, 7, 20),
+        (size_20, guide_size_20, 20, 6, 21),
+        (size_21, guide_size_21, 21, 5, 22),
+        (size_22, guide_size_22, 22, 4, 23),
+        (size_23, guide_size_23, 23, 3, 24),
+        (size_24, guide_size_24, 24, 2, 25),
+        (size_25, guide_size_25, 25, 1, 26),
+        (size_26, guide_size_26, 26, 0, 27),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_27,
+        (size_00, guide_size_00, 0, 27, 28),
+        (size_01, guide_size_01, 1, 26, 27),
+        (size_02, guide_size_02, 2, 25, 26),
+        (size_03, guide_size_03, 3, 24, 25),
+        (size_04, guide_size_04, 4, 23, 24),
+        (size_05, guide_size_05, 5, 22, 23),
+        (size_06, guide_size_06, 6, 21, 22),
+        (size_07, guide_size_07, 7, 20, 21),
+        (size_08, guide_size_08, 8, 19, 20),
+        (size_09, guide_size_09, 9, 18, 19),
+        (size_10, guide_size_10, 10, 17, 18),
+        (size_11, guide_size_11, 11, 16, 17),
+        (size_12, guide_size_12, 12, 15, 16),
+        (size_13, guide_size_13, 13, 14, 15),
+        (size_14, guide_size_14, 14, 13, 15),
+        (size_15, guide_size_15, 15, 12, 16),
+        (size_16, guide_size_16, 16, 11, 17),
+        (size_17, guide_size_17, 17, 10, 18),
+        (size_18, guide_size_18, 18, 9, 19),
+        (size_19, guide_size_19, 19, 8, 20),
+        (size_20, guide_size_20, 20, 7, 21),
+        (size_21, guide_size_21, 21, 6, 22),
+        (size_22, guide_size_22, 22, 5, 23),
+        (size_23, guide_size_23, 23, 4, 24),
+        (size_24, guide_size_24, 24, 3, 25),
+        (size_25, guide_size_25, 25, 2, 26),
+        (size_26, guide_size_26, 26, 1, 27),
+        (size_27, guide_size_27, 27, 0, 28),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_28,
+        (size_00, guide_size_00, 0, 28, 29),
+        (size_01, guide_size_01, 1, 27, 28),
+        (size_02, guide_size_02, 2, 26, 27),
+        (size_03, guide_size_03, 3, 25, 26),
+        (size_04, guide_size_04, 4, 24, 25),
+        (size_05, guide_size_05, 5, 23, 24),
+        (size_06, guide_size_06, 6, 22, 23),
+        (size_07, guide_size_07, 7, 21, 22),
+        (size_08, guide_size_08, 8, 20, 21),
+        (size_09, guide_size_09, 9, 19, 20),
+        (size_10, guide_size_10, 10, 18, 19),
+        (size_11, guide_size_11, 11, 17, 18),
+        (size_12, guide_size_12, 12, 16, 17),
+        (size_13, guide_size_13, 13, 15, 16),
+        (size_14, guide_size_14, 14, 14, 15),
+        (size_15, guide_size_15, 15, 13, 16),
+        (size_16, guide_size_16, 16, 12, 17),
+        (size_17, guide_size_17, 17, 11, 18),
+        (size_18, guide_size_18, 18, 10, 19),
+        (size_19, guide_size_19, 19, 9, 20),
+        (size_20, guide_size_20, 20, 8, 21),
+        (size_21, guide_size_21, 21, 7, 22),
+        (size_22, guide_size_22, 22, 6, 23),
+        (size_23, guide_size_23, 23, 5, 24),
+        (size_24, guide_size_24, 24, 4, 25),
+        (size_25, guide_size_25, 25, 3, 26),
+        (size_26, guide_size_26, 26, 2, 27),
+        (size_27, guide_size_27, 27, 1, 28),
+        (size_28, guide_size_28, 28, 0, 29),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_29,
+        (size_00, guide_size_00, 0, 29, 30),
+        (size_01, guide_size_01, 1, 28, 29),
+        (size_02, guide_size_02, 2, 27, 28),
+        (size_03, guide_size_03, 3, 26, 27),
+        (size_04, guide_size_04, 4, 25, 26),
+        (size_05, guide_size_05, 5, 24, 25),
+        (size_06, guide_size_06, 6, 23, 24),
+        (size_07, guide_size_07, 7, 22, 23),
+        (size_08, guide_size_08, 8, 21, 22),
+        (size_09, guide_size_09, 9, 20, 21),
+        (size_10, guide_size_10, 10, 19, 20),
+        (size_11, guide_size_11, 11, 18, 19),
+        (size_12, guide_size_12, 12, 17, 18),
+        (size_13, guide_size_13, 13, 16, 17),
+        (size_14, guide_size_14, 14, 15, 16),
+        (size_15, guide_size_15, 15, 14, 16),
+        (size_16, guide_size_16, 16, 13, 17),
+        (size_17, guide_size_17, 17, 12, 18),
+        (size_18, guide_size_18, 18, 11, 19),
+        (size_19, guide_size_19, 19, 10, 20),
+        (size_20, guide_size_20, 20, 9, 21),
+        (size_21, guide_size_21, 21, 8, 22),
+        (size_22, guide_size_22, 22, 7, 23),
+        (size_23, guide_size_23, 23, 6, 24),
+        (size_24, guide_size_24, 24, 5, 25),
+        (size_25, guide_size_25, 25, 4, 26),
+        (size_26, guide_size_26, 26, 3, 27),
+        (size_27, guide_size_27, 27, 2, 28),
+        (size_28, guide_size_28, 28, 1, 29),
+        (size_29, guide_size_29, 29, 0, 30),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_30,
+        (size_00, guide_size_00, 0, 30, 31),
+        (size_01, guide_size_01, 1, 29, 30),
+        (size_02, guide_size_02, 2, 28, 29),
+        (size_03, guide_size_03, 3, 27, 28),
+        (size_04, guide_size_04, 4, 26, 27),
+        (size_05, guide_size_05, 5, 25, 26),
+        (size_06, guide_size_06, 6, 24, 25),
+        (size_07, guide_size_07, 7, 23, 24),
+        (size_08, guide_size_08, 8, 22, 23),
+        (size_09, guide_size_09, 9, 21, 22),
+        (size_10, guide_size_10, 10, 20, 21),
+        (size_11, guide_size_11, 11, 19, 20),
+        (size_12, guide_size_12, 12, 18, 19),
+        (size_13, guide_size_13, 13, 17, 18),
+        (size_14, guide_size_14, 14, 16, 17),
+        (size_15, guide_size_15, 15, 15, 16),
+        (size_16, guide_size_16, 16, 14, 17),
+        (size_17, guide_size_17, 17, 13, 18),
+        (size_18, guide_size_18, 18, 12, 19),
+        (size_19, guide_size_19, 19, 11, 20),
+        (size_20, guide_size_20, 20, 10, 21),
+        (size_21, guide_size_21, 21, 9, 22),
+        (size_22, guide_size_22, 22, 8, 23),
+        (size_23, guide_size_23, 23, 7, 24),
+        (size_24, guide_size_24, 24, 6, 25),
+        (size_25, guide_size_25, 25, 5, 26),
+        (size_26, guide_size_26, 26, 4, 27),
+        (size_27, guide_size_27, 27, 3, 28),
+        (size_28, guide_size_28, 28, 2, 29),
+        (size_29, guide_size_29, 29, 1, 30),
+        (size_30, guide_size_30, 30, 0, 31),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_31,
+        (size_00, guide_size_00, 0, 31, 32),
+        (size_01, guide_size_01, 1, 30, 31),
+        (size_02, guide_size_02, 2, 29, 30),
+        (size_03, guide_size_03, 3, 28, 29),
+        (size_04, guide_size_04, 4, 27, 28),
+        (size_05, guide_size_05, 5, 26, 27),
+        (size_06, guide_size_06, 6, 25, 26),
+        (size_07, guide_size_07, 7, 24, 25),
+        (size_08, guide_size_08, 8, 23, 24),
+        (size_09, guide_size_09, 9, 22, 23),
+        (size_10, guide_size_10, 10, 21, 22),
+        (size_11, guide_size_11, 11, 20, 21),
+        (size_12, guide_size_12, 12, 19, 20),
+        (size_13, guide_size_13, 13, 18, 19),
+        (size_14, guide_size_14, 14, 17, 18),
+        (size_15, guide_size_15, 15, 16, 17),
+        (size_16, guide_size_16, 16, 15, 17),
+        (size_17, guide_size_17, 17, 14, 18),
+        (size_18, guide_size_18, 18, 13, 19),
+        (size_19, guide_size_19, 19, 12, 20),
+        (size_20, guide_size_20, 20, 11, 21),
+        (size_21, guide_size_21, 21, 10, 22),
+        (size_22, guide_size_22, 22, 9, 23),
+        (size_23, guide_size_23, 23, 8, 24),
+        (size_24, guide_size_24, 24, 7, 25),
+        (size_25, guide_size_25, 25, 6, 26),
+        (size_26, guide_size_26, 26, 5, 27),
+        (size_27, guide_size_27, 27, 4, 28),
+        (size_28, guide_size_28, 28, 3, 29),
+        (size_29, guide_size_29, 29, 2, 30),
+        (size_30, guide_size_30, 30, 1, 31),
+        (size_31, guide_size_31, 31, 0, 32),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_32,
+        (size_00, guide_size_00, 0, 32, 33),
+        (size_01, guide_size_01, 1, 31, 32),
+        (size_02, guide_size_02, 2, 30, 31),
+        (size_03, guide_size_03, 3, 29, 30),
+        (size_04, guide_size_04, 4, 28, 29),
+        (size_05, guide_size_05, 5, 27, 28),
+        (size_06, guide_size_06, 6, 26, 27),
+        (size_07, guide_size_07, 7, 25, 26),
+        (size_08, guide_size_08, 8, 24, 25),
+        (size_09, guide_size_09, 9, 23, 24),
+        (size_10, guide_size_10, 10, 22, 23),
+        (size_11, guide_size_11, 11, 21, 22),
+        (size_12, guide_size_12, 12, 20, 21),
+        (size_13, guide_size_13, 13, 19, 20),
+        (size_14, guide_size_14, 14, 18, 19),
+        (size_15, guide_size_15, 15, 17, 18),
+        (size_16, guide_size_16, 16, 16, 17),
+        (size_17, guide_size_17, 17, 15, 18),
+        (size_18, guide_size_18, 18, 14, 19),
+        (size_19, guide_size_19, 19, 13, 20),
+        (size_20, guide_size_20, 20, 12, 21),
+        (size_21, guide_size_21, 21, 11, 22),
+        (size_22, guide_size_22, 22, 10, 23),
+        (size_23, guide_size_23, 23, 9, 24),
+        (size_24, guide_size_24, 24, 8, 25),
+        (size_25, guide_size_25, 25, 7, 26),
+        (size_26, guide_size_26, 26, 6, 27),
+        (size_27, guide_size_27, 27, 5, 28),
+        (size_28, guide_size_28, 28, 4, 29),
+        (size_29, guide_size_29, 29, 3, 30),
+        (size_30, guide_size_30, 30, 2, 31),
+        (size_31, guide_size_31, 31, 1, 32),
+        (size_32, guide_size_32, 32, 0, 33),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_33,
+        (size_00, guide_size_00, 0, 33, 34),
+        (size_01, guide_size_01, 1, 32, 33),
+        (size_02, guide_size_02, 2, 31, 32),
+        (size_03, guide_size_03, 3, 30, 31),
+        (size_04, guide_size_04, 4, 29, 30),
+        (size_05, guide_size_05, 5, 28, 29),
+        (size_06, guide_size_06, 6, 27, 28),
+        (size_07, guide_size_07, 7, 26, 27),
+        (size_08, guide_size_08, 8, 25, 26),
+        (size_09, guide_size_09, 9, 24, 25),
+        (size_10, guide_size_10, 10, 23, 24),
+        (size_11, guide_size_11, 11, 22, 23),
+        (size_12, guide_size_12, 12, 21, 22),
+        (size_13, guide_size_13, 13, 20, 21),
+        (size_14, guide_size_14, 14, 19, 20),
+        (size_15, guide_size_15, 15, 18, 19),
+        (size_16, guide_size_16, 16, 17, 18),
+        (size_17, guide_size_17, 17, 16, 18),
+        (size_18, guide_size_18, 18, 15, 19),
+        (size_19, guide_size_19, 19, 14, 20),
+        (size_20, guide_size_20, 20, 13, 21),
+        (size_21, guide_size_21, 21, 12, 22),
+        (size_22, guide_size_22, 22, 11, 23),
+        (size_23, guide_size_23, 23, 10, 24),
+        (size_24, guide_size_24, 24, 9, 25),
+        (size_25, guide_size_25, 25, 8, 26),
+        (size_26, guide_size_26, 26, 7, 27),
+        (size_27, guide_size_27, 27, 6, 28),
+        (size_28, guide_size_28, 28, 5, 29),
+        (size_29, guide_size_29, 29, 4, 30),
+        (size_30, guide_size_30, 30, 3, 31),
+        (size_31, guide_size_31, 31, 2, 32),
+        (size_32, guide_size_32, 32, 1, 33),
+        (size_33, guide_size_33, 33, 0, 34),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_34,
+        (size_00, guide_size_00, 0, 34, 35),
+        (size_01, guide_size_01, 1, 33, 34),
+        (size_02, guide_size_02, 2, 32, 33),
+        (size_03, guide_size_03, 3, 31, 32),
+        (size_04, guide_size_04, 4, 30, 31),
+        (size_05, guide_size_05, 5, 29, 30),
+        (size_06, guide_size_06, 6, 28, 29),
+        (size_07, guide_size_07, 7, 27, 28),
+        (size_08, guide_size_08, 8, 26, 27),
+        (size_09, guide_size_09, 9, 25, 26),
+        (size_10, guide_size_10, 10, 24, 25),
+        (size_11, guide_size_11, 11, 23, 24),
+        (size_12, guide_size_12, 12, 22, 23),
+        (size_13, guide_size_13, 13, 21, 22),
+        (size_14, guide_size_14, 14, 20, 21),
+        (size_15, guide_size_15, 15, 19, 20),
+        (size_16, guide_size_16, 16, 18, 19),
+        (size_17, guide_size_17, 17, 17, 18),
+        (size_18, guide_size_18, 18, 16, 19),
+        (size_19, guide_size_19, 19, 15, 20),
+        (size_20, guide_size_20, 20, 14, 21),
+        (size_21, guide_size_21, 21, 13, 22),
+        (size_22, guide_size_22, 22, 12, 23),
+        (size_23, guide_size_23, 23, 11, 24),
+        (size_24, guide_size_24, 24, 10, 25),
+        (size_25, guide_size_25, 25, 9, 26),
+        (size_26, guide_size_26, 26, 8, 27),
+        (size_27, guide_size_27, 27, 7, 28),
+        (size_28, guide_size_28, 28, 6, 29),
+        (size_29, guide_size_29, 29, 5, 30),
+        (size_30, guide_size_30, 30, 4, 31),
+        (size_31, guide_size_31, 31, 3, 32),
+        (size_32, guide_size_32, 32, 2, 33),
+        (size_33, guide_size_33, 33, 1, 34),
+        (size_34, guide_size_34, 34, 0, 35),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_35,
+        (size_00, guide_size_00, 0, 35, 36),
+        (size_01, guide_size_01, 1, 34, 35),
+        (size_02, guide_size_02, 2, 33, 34),
+        (size_03, guide_size_03, 3, 32, 33),
+        (size_04, guide_size_04, 4, 31, 32),
+        (size_05, guide_size_05, 5, 30, 31),
+        (size_06, guide_size_06, 6, 29, 30),
+        (size_07, guide_size_07, 7, 28, 29),
+        (size_08, guide_size_08, 8, 27, 28),
+        (size_09, guide_size_09, 9, 26, 27),
+        (size_10, guide_size_10, 10, 25, 26),
+        (size_11, guide_size_11, 11, 24, 25),
+        (size_12, guide_size_12, 12, 23, 24),
+        (size_13, guide_size_13, 13, 22, 23),
+        (size_14, guide_size_14, 14, 21, 22),
+        (size_15, guide_size_15, 15, 20, 21),
+        (size_16, guide_size_16, 16, 19, 20),
+        (size_17, guide_size_17, 17, 18, 19),
+        (size_18, guide_size_18, 18, 17, 19),
+        (size_19, guide_size_19, 19, 16, 20),
+        (size_20, guide_size_20, 20, 15, 21),
+        (size_21, guide_size_21, 21, 14, 22),
+        (size_22, guide_size_22, 22, 13, 23),
+        (size_23, guide_size_23, 23, 12, 24),
+        (size_24, guide_size_24, 24, 11, 25),
+        (size_25, guide_size_25, 25, 10, 26),
+        (size_26, guide_size_26, 26, 9, 27),
+        (size_27, guide_size_27, 27, 8, 28),
+        (size_28, guide_size_28, 28, 7, 29),
+        (size_29, guide_size_29, 29, 6, 30),
+        (size_30, guide_size_30, 30, 5, 31),
+        (size_31, guide_size_31, 31, 4, 32),
+        (size_32, guide_size_32, 32, 3, 33),
+        (size_33, guide_size_33, 33, 2, 34),
+        (size_34, guide_size_34, 34, 1, 35),
+        (size_35, guide_size_35, 35, 0, 36),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_36,
+        (size_00, guide_size_00, 0, 36, 37),
+        (size_01, guide_size_01, 1, 35, 36),
+        (size_02, guide_size_02, 2, 34, 35),
+        (size_03, guide_size_03, 3, 33, 34),
+        (size_04, guide_size_04, 4, 32, 33),
+        (size_05, guide_size_05, 5, 31, 32),
+        (size_06, guide_size_06, 6, 30, 31),
+        (size_07, guide_size_07, 7, 29, 30),
+        (size_08, guide_size_08, 8, 28, 29),
+        (size_09, guide_size_09, 9, 27, 28),
+        (size_10, guide_size_10, 10, 26, 27),
+        (size_11, guide_size_11, 11, 25, 26),
+        (size_12, guide_size_12, 12, 24, 25),
+        (size_13, guide_size_13, 13, 23, 24),
+        (size_14, guide_size_14, 14, 22, 23),
+        (size_15, guide_size_15, 15, 21, 22),
+        (size_16, guide_size_16, 16, 20, 21),
+        (size_17, guide_size_17, 17, 19, 20),
+        (size_18, guide_size_18, 18, 18, 19),
+        (size_19, guide_size_19, 19, 17, 20),
+        (size_20, guide_size_20, 20, 16, 21),
+        (size_21, guide_size_21, 21, 15, 22),
+        (size_22, guide_size_22, 22, 14, 23),
+        (size_23, guide_size_23, 23, 13, 24),
+        (size_24, guide_size_24, 24, 12, 25),
+        (size_25, guide_size_25, 25, 11, 26),
+        (size_26, guide_size_26, 26, 10, 27),
+        (size_27, guide_size_27, 27, 9, 28),
+        (size_28, guide_size_28, 28, 8, 29),
+        (size_29, guide_size_29, 29, 7, 30),
+        (size_30, guide_size_30, 30, 6, 31),
+        (size_31, guide_size_31, 31, 5, 32),
+        (size_32, guide_size_32, 32, 4, 33),
+        (size_33, guide_size_33, 33, 3, 34),
+        (size_34, guide_size_34, 34, 2, 35),
+        (size_35, guide_size_35, 35, 1, 36),
+        (size_36, guide_size_36, 36, 0, 37),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_37,
+        (size_00, guide_size_00, 0, 37, 38),
+        (size_01, guide_size_01, 1, 36, 37),
+        (size_02, guide_size_02, 2, 35, 36),
+        (size_03, guide_size_03, 3, 34, 35),
+        (size_04, guide_size_04, 4, 33, 34),
+        (size_05, guide_size_05, 5, 32, 33),
+        (size_06, guide_size_06, 6, 31, 32),
+        (size_07, guide_size_07, 7, 30, 31),
+        (size_08, guide_size_08, 8, 29, 30),
+        (size_09, guide_size_09, 9, 28, 29),
+        (size_10, guide_size_10, 10, 27, 28),
+        (size_11, guide_size_11, 11, 26, 27),
+        (size_12, guide_size_12, 12, 25, 26),
+        (size_13, guide_size_13, 13, 24, 25),
+        (size_14, guide_size_14, 14, 23, 24),
+        (size_15, guide_size_15, 15, 22, 23),
+        (size_16, guide_size_16, 16, 21, 22),
+        (size_17, guide_size_17, 17, 20, 21),
+        (size_18, guide_size_18, 18, 19, 20),
+        (size_19, guide_size_19, 19, 18, 20),
+        (size_20, guide_size_20, 20, 17, 21),
+        (size_21, guide_size_21, 21, 16, 22),
+        (size_22, guide_size_22, 22, 15, 23),
+        (size_23, guide_size_23, 23, 14, 24),
+        (size_24, guide_size_24, 24, 13, 25),
+        (size_25, guide_size_25, 25, 12, 26),
+        (size_26, guide_size_26, 26, 11, 27),
+        (size_27, guide_size_27, 27, 10, 28),
+        (size_28, guide_size_28, 28, 9, 29),
+        (size_29, guide_size_29, 29, 8, 30),
+        (size_30, guide_size_30, 30, 7, 31),
+        (size_31, guide_size_31, 31, 6, 32),
+        (size_32, guide_size_32, 32, 5, 33),
+        (size_33, guide_size_33, 33, 4, 34),
+        (size_34, guide_size_34, 34, 3, 35),
+        (size_35, guide_size_35, 35, 2, 36),
+        (size_36, guide_size_36, 36, 1, 37),
+        (size_37, guide_size_37, 37, 0, 38),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_38,
+        (size_00, guide_size_00, 0, 38, 39),
+        (size_01, guide_size_01, 1, 37, 38),
+        (size_02, guide_size_02, 2, 36, 37),
+        (size_03, guide_size_03, 3, 35, 36),
+        (size_04, guide_size_04, 4, 34, 35),
+        (size_05, guide_size_05, 5, 33, 34),
+        (size_06, guide_size_06, 6, 32, 33),
+        (size_07, guide_size_07, 7, 31, 32),
+        (size_08, guide_size_08, 8, 30, 31),
+        (size_09, guide_size_09, 9, 29, 30),
+        (size_10, guide_size_10, 10, 28, 29),
+        (size_11, guide_size_11, 11, 27, 28),
+        (size_12, guide_size_12, 12, 26, 27),
+        (size_13, guide_size_13, 13, 25, 26),
+        (size_14, guide_size_14, 14, 24, 25),
+        (size_15, guide_size_15, 15, 23, 24),
+        (size_16, guide_size_16, 16, 22, 23),
+        (size_17, guide_size_17, 17, 21, 22),
+        (size_18, guide_size_18, 18, 20, 21),
+        (size_19, guide_size_19, 19, 19, 20),
+        (size_20, guide_size_20, 20, 18, 21),
+        (size_21, guide_size_21, 21, 17, 22),
+        (size_22, guide_size_22, 22, 16, 23),
+        (size_23, guide_size_23, 23, 15, 24),
+        (size_24, guide_size_24, 24, 14, 25),
+        (size_25, guide_size_25, 25, 13, 26),
+        (size_26, guide_size_26, 26, 12, 27),
+        (size_27, guide_size_27, 27, 11, 28),
+        (size_28, guide_size_28, 28, 10, 29),
+        (size_29, guide_size_29, 29, 9, 30),
+        (size_30, guide_size_30, 30, 8, 31),
+        (size_31, guide_size_31, 31, 7, 32),
+        (size_32, guide_size_32, 32, 6, 33),
+        (size_33, guide_size_33, 33, 5, 34),
+        (size_34, guide_size_34, 34, 4, 35),
+        (size_35, guide_size_35, 35, 3, 36),
+        (size_36, guide_size_36, 36, 2, 37),
+        (size_37, guide_size_37, 37, 1, 38),
+        (size_38, guide_size_38, 38, 0, 39),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_39,
+        (size_00, guide_size_00, 0, 39, 40),
+        (size_01, guide_size_01, 1, 38, 39),
+        (size_02, guide_size_02, 2, 37, 38),
+        (size_03, guide_size_03, 3, 36, 37),
+        (size_04, guide_size_04, 4, 35, 36),
+        (size_05, guide_size_05, 5, 34, 35),
+        (size_06, guide_size_06, 6, 33, 34),
+        (size_07, guide_size_07, 7, 32, 33),
+        (size_08, guide_size_08, 8, 31, 32),
+        (size_09, guide_size_09, 9, 30, 31),
+        (size_10, guide_size_10, 10, 29, 30),
+        (size_11, guide_size_11, 11, 28, 29),
+        (size_12, guide_size_12, 12, 27, 28),
+        (size_13, guide_size_13, 13, 26, 27),
+        (size_14, guide_size_14, 14, 25, 26),
+        (size_15, guide_size_15, 15, 24, 25),
+        (size_16, guide_size_16, 16, 23, 24),
+        (size_17, guide_size_17, 17, 22, 23),
+        (size_18, guide_size_18, 18, 21, 22),
+        (size_19, guide_size_19, 19, 20, 21),
+        (size_20, guide_size_20, 20, 19, 21),
+        (size_21, guide_size_21, 21, 18, 22),
+        (size_22, guide_size_22, 22, 17, 23),
+        (size_23, guide_size_23, 23, 16, 24),
+        (size_24, guide_size_24, 24, 15, 25),
+        (size_25, guide_size_25, 25, 14, 26),
+        (size_26, guide_size_26, 26, 13, 27),
+        (size_27, guide_size_27, 27, 12, 28),
+        (size_28, guide_size_28, 28, 11, 29),
+        (size_29, guide_size_29, 29, 10, 30),
+        (size_30, guide_size_30, 30, 9, 31),
+        (size_31, guide_size_31, 31, 8, 32),
+        (size_32, guide_size_32, 32, 7, 33),
+        (size_33, guide_size_33, 33, 6, 34),
+        (size_34, guide_size_34, 34, 5, 35),
+        (size_35, guide_size_35, 35, 4, 36),
+        (size_36, guide_size_36, 36, 3, 37),
+        (size_37, guide_size_37, 37, 2, 38),
+        (size_38, guide_size_38, 38, 1, 39),
+        (size_39, guide_size_39, 39, 0, 40),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_40,
+        (size_01, guide_size_01, 1, 39, 40),
+        (size_02, guide_size_02, 2, 38, 39),
+        (size_03, guide_size_03, 3, 37, 38),
+        (size_04, guide_size_04, 4, 36, 37),
+        (size_05, guide_size_05, 5, 35, 36),
+        (size_06, guide_size_06, 6, 34, 35),
+        (size_07, guide_size_07, 7, 33, 34),
+        (size_08, guide_size_08, 8, 32, 33),
+        (size_09, guide_size_09, 9, 31, 32),
+        (size_10, guide_size_10, 10, 30, 31),
+        (size_11, guide_size_11, 11, 29, 30),
+        (size_12, guide_size_12, 12, 28, 29),
+        (size_13, guide_size_13, 13, 27, 28),
+        (size_14, guide_size_14, 14, 26, 27),
+        (size_15, guide_size_15, 15, 25, 26),
+        (size_16, guide_size_16, 16, 24, 25),
+        (size_17, guide_size_17, 17, 23, 24),
+        (size_18, guide_size_18, 18, 22, 23),
+        (size_19, guide_size_19, 19, 21, 22),
+        (size_20, guide_size_20, 20, 20, 21),
+        (size_21, guide_size_21, 21, 19, 22),
+        (size_22, guide_size_22, 22, 18, 23),
+        (size_23, guide_size_23, 23, 17, 24),
+        (size_24, guide_size_24, 24, 16, 25),
+        (size_25, guide_size_25, 25, 15, 26),
+        (size_26, guide_size_26, 26, 14, 27),
+        (size_27, guide_size_27, 27, 13, 28),
+        (size_28, guide_size_28, 28, 12, 29),
+        (size_29, guide_size_29, 29, 11, 30),
+        (size_30, guide_size_30, 30, 10, 31),
+        (size_31, guide_size_31, 31, 9, 32),
+        (size_32, guide_size_32, 32, 8, 33),
+        (size_33, guide_size_33, 33, 7, 34),
+        (size_34, guide_size_34, 34, 6, 35),
+        (size_35, guide_size_35, 35, 5, 36),
+        (size_36, guide_size_36, 36, 4, 37),
+        (size_37, guide_size_37, 37, 3, 38),
+        (size_38, guide_size_38, 38, 2, 39),
+        (size_39, guide_size_39, 39, 1, 40),
+        (size_40, guide_size_40, 40, 0, 41),
+    );
+
+    // The cached products run the real multiplication and the model in
+    // lockstep at each `mul_digits_step`. A step multiplies digit `i` of the
+    // first factor by digit `j` of the second factor, and the log keeps one
+    // entry for each position `(i, j)`. The positions are constants in each
+    // unrolled loop, so no log index is symbolic, also when a zero digit
+    // skips a row. The real product runs first: its step at `(i, j)` records
+    // the arguments and returns arbitrary outputs. The model runs second: its
+    // step at `(i, j)` must pass the arguments of the real step at `(i, j)`,
+    // and it returns the outputs of that step. Thus the proof holds for every
+    // function in place of `mul_digits_step`, and the real one is one of them.
+    // Each position is recorded once and replayed once, and the model replays
+    // only recorded positions, so equal counts mean the same set of steps.
+    // The log replaces a comparison of two multiplier circuits.
+    struct Lockstep {
+        replay: bool,
+        recorded: usize,
+        replayed: usize,
+        recorded_at: [[bool; KANI_LIMBS]; KANI_LIMBS],
+        replayed_at: [[bool; KANI_LIMBS]; KANI_LIMBS],
+        arguments: [[(Digit, Digit, Digit, Digit); KANI_LIMBS]; KANI_LIMBS],
+        outputs: [[(Digit, Digit); KANI_LIMBS]; KANI_LIMBS],
+    }
+
+    static mut LOCKSTEP: Lockstep = Lockstep {
+        replay: false,
+        recorded: 0,
+        replayed: 0,
+        recorded_at: [[false; KANI_LIMBS]; KANI_LIMBS],
+        replayed_at: [[false; KANI_LIMBS]; KANI_LIMBS],
+        arguments: [[(0, 0, 0, 0); KANI_LIMBS]; KANI_LIMBS],
+        outputs: [[(0, 0); KANI_LIMBS]; KANI_LIMBS],
+    };
+
+    fn lockstep() -> &'static mut Lockstep {
+        // SAFETY: a harness runs on one thread, and each caller stops using
+        // the reference before the next call to this function.
+        unsafe { &mut *(&raw mut LOCKSTEP) }
+    }
+
+    fn mul_digits_step_lockstep(
+        i: usize,
+        j: usize,
+        a: Digit,
+        b: Digit,
+        c: Digit,
+        carry: Digit,
+    ) -> (Digit, Digit) {
+        assert!(i < KANI_LIMBS && j < KANI_LIMBS);
+        let state = lockstep();
+        let arguments = (a, b, c, carry);
+        if state.replay {
+            assert!(state.recorded_at[i][j] && !state.replayed_at[i][j]);
+            assert!(state.arguments[i][j] == arguments);
+            state.replayed_at[i][j] = true;
+            state.replayed += 1;
+            state.outputs[i][j]
+        } else {
+            assert!(!state.recorded_at[i][j]);
+            let outputs: (Digit, Digit) = (kani::any(), kani::any());
+            state.arguments[i][j] = arguments;
+            state.outputs[i][j] = outputs;
+            state.recorded_at[i][j] = true;
+            state.recorded += 1;
+            outputs
         }
     }
 
-    // SAFETY: we initialized that memory above.
-    (unsafe { buf[..len].assume_init_ref() }, k)
+    fn check_cached_mul_digits_model_agrees<const SIZE: usize>(digits: &[Digit]) {
+        assert!(SIZE + digits.len() <= KANI_LIMBS);
+        let mut source = Big::kani_with_arbitrary_limbs(SIZE);
+        *source.kani_limbs_mut() = kani::any();
+        let mut actual = source.clone();
+        let mut modeled = source;
+        let actual_start = &mut actual as *mut Big;
+        let modeled_start = &mut modeled as *mut Big;
+        assert!(actual.mul_digits(digits) as *mut Big == actual_start);
+        lockstep().replay = true;
+        assert!(modeled.kani_mul_digits_model(digits) as *mut Big == modeled_start);
+        let state = lockstep();
+        assert!(state.replayed == state.recorded);
+        assert!(actual.kani_same_storage(&modeled));
+        if SIZE == 0 {
+            kani::cover(true, "cached multiplication accepts empty storage");
+        }
+        if SIZE + digits.len() == KANI_LIMBS {
+            kani::cover(true, "cached multiplication accepts the largest model input");
+            kani::cover(actual.kani_size() == KANI_LIMBS, "cached multiplication appends a carry");
+        }
+    }
+
+    macro_rules! check_cached_mul_sizes {
+        ($digits:ident; $($name:ident => $size:literal),+ $(,)?) => {$(
+            #[kani::proof]
+            #[kani::unwind(41)]
+            // The patched CBMC does not link CaDiCaL, and MiniSAT times out on these products.
+            #[kani::solver(kissat)]
+            #[kani::stub(Big::mul_digits_step, mul_digits_step_lockstep)]
+            fn $name() {
+                check_cached_mul_digits_model_agrees::<$size>(&$digits);
+            }
+        )+};
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    macro_rules! check_cached_mul_extra_sizes {
+        (POW5TO16) => { check_cached_mul_sizes!(POW5TO16; size_11 => 11, size_12 => 12, size_13 => 13, size_14 => 14, size_15 => 15, size_16 => 16, size_17 => 17, size_18 => 18, size_19 => 19); };
+        (POW5TO32) => { check_cached_mul_sizes!(POW5TO32; size_11 => 11, size_12 => 12, size_13 => 13, size_14 => 14, size_15 => 15, size_16 => 16, size_17 => 17, size_18 => 18); };
+        (POW5TO64) => { check_cached_mul_sizes!(POW5TO64; size_11 => 11, size_12 => 12, size_13 => 13, size_14 => 14, size_15 => 15, size_16 => 16, size_17 => 17); };
+        (POW5TO128) => { check_cached_mul_sizes!(POW5TO128; size_11 => 11, size_12 => 12, size_13 => 13, size_14 => 14, size_15 => 15); };
+        (POW5TO256) => {  };
+    }
+
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    macro_rules! check_cached_mul_extra_sizes {
+        (POW5TO16) => { check_cached_mul_sizes!(POW5TO16; size_22 => 22, size_23 => 23, size_24 => 24, size_25 => 25, size_26 => 26, size_27 => 27, size_28 => 28, size_29 => 29, size_30 => 30, size_31 => 31, size_32 => 32, size_33 => 33, size_34 => 34, size_35 => 35, size_36 => 36, size_37 => 37, size_38 => 38); };
+        (POW5TO32) => { check_cached_mul_sizes!(POW5TO32; size_22 => 22, size_23 => 23, size_24 => 24, size_25 => 25, size_26 => 26, size_27 => 27, size_28 => 28, size_29 => 29, size_30 => 30, size_31 => 31, size_32 => 32, size_33 => 33, size_34 => 34, size_35 => 35, size_36 => 36, size_37 => 37); };
+        (POW5TO64) => { check_cached_mul_sizes!(POW5TO64; size_22 => 22, size_23 => 23, size_24 => 24, size_25 => 25, size_26 => 26, size_27 => 27, size_28 => 28, size_29 => 29, size_30 => 30, size_31 => 31, size_32 => 32, size_33 => 33, size_34 => 34, size_35 => 35); };
+        (POW5TO128) => { check_cached_mul_sizes!(POW5TO128; size_22 => 22, size_23 => 23, size_24 => 24, size_25 => 25, size_26 => 26, size_27 => 27, size_28 => 28, size_29 => 29, size_30 => 30); };
+        (POW5TO256) => {  };
+    }
+
+    macro_rules! check_cached_mul_digits {
+        ($($group:ident => $digits:ident),+ $(,)?) => {$(
+            mod $group {
+                use super::*;
+
+                check_cached_mul_sizes!($digits; size_00 => 0, size_01 => 1, size_02 => 2, size_03 => 3, size_04 => 4, size_05 => 5, size_06 => 6, size_07 => 7, size_08 => 8, size_09 => 9, size_10 => 10);
+                #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+                check_cached_mul_sizes!($digits; size_11 => 11, size_12 => 12, size_13 => 13, size_14 => 14, size_15 => 15, size_16 => 16, size_17 => 17, size_18 => 18, size_19 => 19, size_20 => 20, size_21 => 21);
+                check_cached_mul_extra_sizes!($digits);
+            }
+        )+};
+    }
+
+    check_cached_mul_digits!(
+        cached_mul_pow5_16 => POW5TO16,
+        cached_mul_pow5_32 => POW5TO32,
+        cached_mul_pow5_64 => POW5TO64,
+        cached_mul_pow5_128 => POW5TO128,
+        cached_mul_pow5_256 => POW5TO256,
+    );
+
+    fn check_mul_small_model_agrees<const SIZE: usize>() {
+        assert!(SIZE < KANI_LIMBS);
+        let source = Big::kani_with_arbitrary_limbs(SIZE);
+        let multiplier: Digit = kani::any();
+        kani::cover(source.kani_size() == 0, "multiplication accepts empty storage");
+        kani::cover(
+            source.kani_size() == KANI_LIMBS - 1,
+            "multiplication accepts the largest model input",
+        );
+        kani::cover(multiplier == 0, "multiplication accepts zero");
+        kani::cover(multiplier == Digit::MAX, "multiplication accepts the largest digit");
+        let mut actual = source.clone();
+        let mut modeled = source;
+        let actual_start = &mut actual as *mut Big;
+        let modeled_start = &mut modeled as *mut Big;
+        assert!(actual.mul_small(multiplier) as *mut Big == actual_start);
+        assert!(modeled.kani_mul_small_model(multiplier) as *mut Big == modeled_start);
+        assert!(actual.kani_same_storage(&modeled));
+        kani::cover(actual.kani_size() == KANI_LIMBS, "multiplication can append a carry limb");
+    }
+
+    macro_rules! check_mul_size {
+        ($name:ident, $size:literal) => {
+            #[kani::proof]
+            #[kani::unwind(41)]
+            #[cfg_attr(
+                target_pointer_width = "64",
+                kani::stub(u64::carrying_mul, carrying_mul_model)
+            )]
+            #[cfg_attr(
+                target_pointer_width = "64",
+                kani::stub(u64::carrying_mul_add, carrying_mul_add_model)
+            )]
+            #[cfg_attr(
+                any(target_pointer_width = "16", target_pointer_width = "32"),
+                kani::stub(u32::carrying_mul, carrying_mul_model)
+            )]
+            #[cfg_attr(
+                any(target_pointer_width = "16", target_pointer_width = "32"),
+                kani::stub(u32::carrying_mul_add, carrying_mul_add_model)
+            )]
+            #[kani::solver(z3)]
+            fn $name() {
+                check_mul_small_model_agrees::<$size>();
+            }
+        };
+    }
+
+    // Together these cases retain every storage size accepted by the model.
+    check_mul_size!(check_mul_small_model_agrees_00, 0);
+    check_mul_size!(check_mul_small_model_agrees_01, 1);
+    check_mul_size!(check_mul_small_model_agrees_02, 2);
+    check_mul_size!(check_mul_small_model_agrees_03, 3);
+    check_mul_size!(check_mul_small_model_agrees_04, 4);
+    check_mul_size!(check_mul_small_model_agrees_05, 5);
+    check_mul_size!(check_mul_small_model_agrees_06, 6);
+    check_mul_size!(check_mul_small_model_agrees_07, 7);
+    check_mul_size!(check_mul_small_model_agrees_08, 8);
+    check_mul_size!(check_mul_small_model_agrees_09, 9);
+    check_mul_size!(check_mul_small_model_agrees_10, 10);
+    check_mul_size!(check_mul_small_model_agrees_11, 11);
+    check_mul_size!(check_mul_small_model_agrees_12, 12);
+    check_mul_size!(check_mul_small_model_agrees_13, 13);
+    check_mul_size!(check_mul_small_model_agrees_14, 14);
+    check_mul_size!(check_mul_small_model_agrees_15, 15);
+    check_mul_size!(check_mul_small_model_agrees_16, 16);
+    check_mul_size!(check_mul_small_model_agrees_17, 17);
+    check_mul_size!(check_mul_small_model_agrees_18, 18);
+    check_mul_size!(check_mul_small_model_agrees_19, 19);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_20, 20);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_21, 21);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_22, 22);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_23, 23);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_24, 24);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_25, 25);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_26, 26);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_27, 27);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_28, 28);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_29, 29);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_30, 30);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_31, 31);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_32, 32);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_33, 33);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_34, 34);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_35, 35);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_36, 36);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_37, 37);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_38, 38);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_39, 39);
+
+    // Prove the exact two-limb result once before composing longer carry chains.
+    #[kani::ensures(|result| {
+        (((result.1 as WideDigit) << Digit::BITS) | result.0 as WideDigit)
+            == (digit as WideDigit)
+                .wrapping_mul(multiplier as WideDigit)
+                .wrapping_add(carry as WideDigit)
+                .wrapping_add(addend as WideDigit)
+    })]
+    fn carrying_mul_add_contract(
+        digit: Digit,
+        multiplier: Digit,
+        carry: Digit,
+        addend: Digit,
+    ) -> (Digit, Digit) {
+        digit.carrying_mul_add(multiplier, carry, addend)
+    }
+
+    // The standalone contract harness also proves this deterministic model
+    // equal to the real primitive for all four digit inputs. Sharing its
+    // expression on both sides preserves equal carry prefixes syntactically.
+    // The largest product plus two maximum digits fills exactly two limbs.
+    fn carrying_mul_add_model(
+        digit: Digit,
+        multiplier: Digit,
+        carry: Digit,
+        addend: Digit,
+    ) -> (Digit, Digit) {
+        let sum = (digit as WideDigit)
+            .wrapping_mul(multiplier as WideDigit)
+            .wrapping_add(carry as WideDigit)
+            .wrapping_add(addend as WideDigit);
+        (sum as Digit, (sum >> Digit::BITS) as Digit)
+    }
+
+    pub(crate) fn carrying_mul_model(
+        digit: Digit,
+        multiplier: Digit,
+        carry: Digit,
+    ) -> (Digit, Digit) {
+        carrying_mul_add_model(digit, multiplier, carry, 0)
+    }
+
+    #[kani::proof_for_contract(carrying_mul_add_contract)]
+    #[kani::solver(z3)]
+    fn check_carrying_mul_add_contract() {
+        let digit: Digit = kani::any();
+        let multiplier: Digit = kani::any();
+        let carry: Digit = kani::any();
+        let addend: Digit = kani::any();
+        let result = carrying_mul_add_contract(digit, multiplier, carry, addend);
+        let modeled = carrying_mul_add_model(digit, multiplier, carry, addend);
+        // First check the complete wide value. Packing two digit limbs is
+        // injective, so the subsequent limb comparison follows directly.
+        let result_bits = ((result.1 as WideDigit) << Digit::BITS) | result.0 as WideDigit;
+        let modeled_bits = ((modeled.1 as WideDigit) << Digit::BITS) | modeled.0 as WideDigit;
+        assert_eq!(result_bits, modeled_bits);
+        assert_eq!(result, modeled);
+        kani::cover(
+            digit == 0 && multiplier == 0 && addend == 0 && carry == 0,
+            "limb multiplication accepts all zero inputs",
+        );
+        kani::cover(
+            digit == Digit::MAX
+                && multiplier == Digit::MAX
+                && addend == Digit::MAX
+                && carry == Digit::MAX,
+            "limb multiplication accepts all maximum inputs",
+        );
+        kani::cover(
+            result == (Digit::MAX, Digit::MAX),
+            "limb multiplication reaches the full two-limb result",
+        );
+    }
+
+    // Bigint division needs the remainder bound to justify the next limb's
+    // division. Prove that scalar obligation separately; the storage contract
+    // below does not depend on the quotient's numeric value.
+    #[kani::requires(borrow < divisor)]
+    #[kani::ensures(|result| result.1 < divisor)]
+    fn div_rem_digit_contract(digit: Digit, divisor: Digit, borrow: Digit) -> (Digit, Digit) {
+        <Digit as crate::num::imp::bignum::FullOps>::full_div_rem(digit, divisor, borrow)
+    }
+
+    // Keep ordinary stub substitution separate from verified contract dispatch.
+    fn stub_div_rem_digit(digit: Digit, divisor: Digit, borrow: Digit) -> (Digit, Digit) {
+        div_rem_digit_contract(digit, divisor, borrow)
+    }
+
+    #[kani::proof_for_contract(div_rem_digit_contract)]
+    #[kani::solver(kissat)]
+    fn check_div_rem_digit_contract() {
+        let digit: Digit = kani::any();
+        let divisor: Digit = kani::any();
+        let borrow: Digit = kani::any();
+        let (_, remainder) = div_rem_digit_contract(digit, divisor, borrow);
+        kani::cover(divisor == 1, "limb division accepts the unit divisor");
+        kani::cover(divisor == Digit::MAX, "limb division accepts the largest divisor");
+        kani::cover(borrow == divisor - 1, "limb division accepts the largest borrow");
+        kani::cover(remainder == 0, "limb division can have no remainder");
+    }
+
+    // Verify the limb loop separately from the outer power-of-ten loop.
+    // Only limbs are writable, so stubs retain the caller's size expression.
+    #[kani::requires(divisor > 0 && value.kani_valid_storage())]
+    #[kani::ensures(|result| {
+        value.kani_valid_storage()
+            && value.kani_size() == old(value.kani_size())
+            && *result < divisor
+    })]
+    #[kani::modifies(value.kani_limbs_mut())]
+    fn div_rem_small_contract(value: &mut Big, divisor: Digit) -> Digit {
+        value.div_rem_small(divisor).1
+    }
+
+    fn stub_div_rem_small(value: &mut Big, divisor: Digit) -> (&mut Big, Digit) {
+        let remainder = div_rem_small_contract(value, divisor);
+        (value, remainder)
+    }
+
+    #[kani::proof_for_contract(div_rem_small_contract)]
+    #[cfg_attr(target_pointer_width = "64", kani::stub(
+        <u64 as crate::num::imp::bignum::FullOps>::full_div_rem,
+        stub_div_rem_digit
+    ))]
+    #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(
+        <u32 as crate::num::imp::bignum::FullOps>::full_div_rem,
+        stub_div_rem_digit
+    ))]
+    #[kani::stub_verified(div_rem_digit_contract)]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_div_rem_small_contract() {
+        let mut value = Big::kani_any_valid();
+        let divisor: Digit = kani::any();
+        let _ = div_rem_small_contract(&mut value, divisor);
+        kani::cover(divisor == 1, "bigint division accepts the unit divisor");
+        kani::cover(divisor == Digit::MAX, "bigint division accepts the largest divisor");
+        kani::cover(value.kani_size() == 0, "bigint division accepts empty zero storage");
+        kani::cover(value.kani_size() == KANI_LIMBS, "bigint division accepts all limbs");
+    }
+
+    // Division preserves the bigint's allocated prefix and unused zero limbs.
+    // Its numeric result is overapproximated; the generator still performs the
+    // real addition, exact comparison semantics, and subsequent digit extraction.
+    // Read size without constructing a slice: old expressions must not panic.
+    #[kani::requires(n <= PROOF_BUFLEN && value.kani_valid_storage())]
+    #[kani::ensures(|_| {
+        value.kani_valid_storage() && value.kani_size() == old(value.kani_size())
+    })]
+    #[kani::modifies(value.kani_limbs_mut())]
+    fn div_2pow10_contract(value: &mut Big, n: usize) {
+        let _ = div_2pow10(value, n);
+    }
+
+    fn stub_div_2pow10(value: &mut Big, n: usize) -> &mut Big {
+        div_2pow10_contract(value, n);
+        value
+    }
+
+    #[kani::proof_for_contract(div_2pow10_contract)]
+    #[kani::stub(Big::div_rem_small, stub_div_rem_small)]
+    #[kani::stub_verified(div_rem_small_contract)]
+    #[kani::unwind(5)]
+    #[kani::solver(kissat)]
+    fn check_div_2pow10_contract() {
+        let mut value = Big::kani_any_valid();
+        let n: usize = kani::any();
+        div_2pow10_contract(&mut value, n);
+        kani::cover(n == 0, "division accepts the minimum power");
+        kani::cover(n == PROOF_BUFLEN, "division accepts the maximum proof power");
+        kani::cover(value.kani_size() == 0, "division accepts empty zero storage");
+        kani::cover(value.kani_size() == KANI_LIMBS, "division accepts all bigint limbs");
+    }
+
+    // Only the additional [1, 2) probes use this adapter. Check the scaling
+    // value against the independently proved model for the actual arguments,
+    // then expose the literal zero before expanding bigint multiplication.
+    // A nonzero estimate fails the proof; it is never assumed away.
+    fn estimate_unit_scale(mant: u64, exp: i16) -> i16 {
+        assert_eq!(
+            crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor(mant, exp),
+            0
+        );
+        0
+    }
+
+    // Identity instrumentation lets each proof expose constant exponent bits
+    // before expanding the original multiplication body. The replacement
+    // checks equality on every call, so an invalid prefix fails verification.
+    pub(super) fn proof_pow10_exponent(n: usize) -> usize {
+        n
+    }
+
+    struct FixedExponentBits(usize);
+    struct VariableExponentBits(usize);
+
+    struct Pow10Prefix {
+        fixed: FixedExponentBits,
+        variable: VariableExponentBits,
+    }
+
+    impl Pow10Prefix {
+        const fn for_range(range: crate::ops::RangeInclusive<usize>) -> Self {
+            let lower = *range.start();
+            let upper = *range.end();
+            assert!(lower <= upper);
+            let different = lower ^ upper;
+            let variable = if different == 0 { 0 } else { usize::MAX >> different.leading_zeros() };
+            Self {
+                fixed: FixedExponentBits(lower & !variable),
+                variable: VariableExponentBits(variable),
+            }
+        }
+
+        fn check(&self, n: usize) -> usize {
+            let encoded = self.fixed.0 | (n & self.variable.0);
+            assert_eq!(encoded, n);
+            encoded
+        }
+    }
+
+    // For normal inputs with exponent field e, the estimator uses a binary
+    // exponent sum between e - bias and e - bias + 1. Group zero also includes
+    // subnormals, down to -149 for f32 and -1074 for f64. Applying the original
+    // integer scaling formula to those endpoints gives these magnitude ranges.
+    // They only choose an encoding; check() proves it equals the actual value.
+    const F32_POW10_PREFIXES: [Pow10Prefix; 4] = [
+        Pow10Prefix::for_range(19..=45),
+        Pow10Prefix::for_range(0..=19),
+        Pow10Prefix::for_range(0..=19),
+        Pow10Prefix::for_range(19..=38),
+    ];
+
+    const F64_POW10_PREFIXES: [Pow10Prefix; 32] = [
+        Pow10Prefix::for_range(289..=324),
+        Pow10Prefix::for_range(270..=289),
+        Pow10Prefix::for_range(251..=270),
+        Pow10Prefix::for_range(231..=251),
+        Pow10Prefix::for_range(212..=231),
+        Pow10Prefix::for_range(193..=212),
+        Pow10Prefix::for_range(174..=193),
+        Pow10Prefix::for_range(154..=174),
+        Pow10Prefix::for_range(135..=154),
+        Pow10Prefix::for_range(116..=135),
+        Pow10Prefix::for_range(97..=116),
+        Pow10Prefix::for_range(77..=97),
+        Pow10Prefix::for_range(58..=77),
+        Pow10Prefix::for_range(39..=58),
+        Pow10Prefix::for_range(19..=39),
+        Pow10Prefix::for_range(0..=19),
+        Pow10Prefix::for_range(0..=19),
+        Pow10Prefix::for_range(19..=38),
+        Pow10Prefix::for_range(38..=58),
+        Pow10Prefix::for_range(58..=77),
+        Pow10Prefix::for_range(77..=96),
+        Pow10Prefix::for_range(96..=115),
+        Pow10Prefix::for_range(115..=135),
+        Pow10Prefix::for_range(135..=154),
+        Pow10Prefix::for_range(154..=173),
+        Pow10Prefix::for_range(173..=192),
+        Pow10Prefix::for_range(192..=212),
+        Pow10Prefix::for_range(212..=231),
+        Pow10Prefix::for_range(231..=250),
+        Pow10Prefix::for_range(250..=270),
+        Pow10Prefix::for_range(270..=289),
+        Pow10Prefix::for_range(289..=308),
+    ];
+
+    fn checked_pow10_f32<const GROUP: usize>(n: usize) -> usize {
+        F32_POW10_PREFIXES[GROUP].check(n)
+    }
+
+    fn checked_pow10_f64<const GROUP: usize>(n: usize) -> usize {
+        F64_POW10_PREFIXES[GROUP].check(n)
+    }
+
+    fn checked_pow10_unit<const EXPONENT: usize>(n: usize) -> usize {
+        assert_eq!(EXPONENT, 1023);
+        Pow10Prefix::for_range(0..=0).check(n)
+    }
+
+    struct LimbCountMask(usize);
+
+    impl LimbCountMask {
+        fn check(&self, size: usize) -> usize {
+            let encoded = size & self.0;
+            assert_eq!(encoded, size);
+            encoded
+        }
+    }
+
+    fn checked_f32_limb_count(size: usize) -> usize {
+        // Scaled f32 values fit in five 32-bit limbs. The division abstraction
+        // can also add a carry limb when its result is added to the mantissa.
+        LimbCountMask(7).check(size)
+    }
+
+    fn checked_f64_limb_count<const GROUP: usize>(size: usize) -> usize {
+        let first_exponent = 64 * GROUP as i32;
+        let last_exponent = first_exponent + 63;
+        let value_bits = (1076 - first_exponent).max(last_exponent - 1021).max(64) as usize;
+        // Reserve sixteen bits for decimal scaling and digit extraction,
+        // and a full carry limb for the division abstraction's addition.
+        let limb_bound = (value_bits + 16).div_ceil(Digit::BITS as usize) + 1;
+        LimbCountMask((limb_bound + 1).next_power_of_two() - 1).check(size)
+    }
+
+    // Only the two unit-exponent diagnostics use these checked count encodings.
+    // A count outside the mask fails an assertion, without excluding any input.
+    fn unit_shortest_limb_count(size: usize) -> usize {
+        LimbCountMask(if Digit::BITS == 64 { 1 } else { 3 }).check(size)
+    }
+
+    fn unit_exact_limb_count(size: usize) -> usize {
+        LimbCountMask(if Digit::BITS == 64 { 3 } else { 7 }).check(size)
+    }
+
+    macro_rules! check_partition {
+        ($name:ident, arbitrary_finite_f32, $group:literal, $cover_fallback:literal) => {
+            check_partition!(
+                $name,
+                arbitrary_finite_f32,
+                $group,
+                $cover_fallback,
+                19,
+                33,
+                crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor,
+                checked_pow10_f32,
+                255,
+                checked_f32_limb_count,
+                checked_f32_limb_count
+            );
+        };
+        ($name:ident, $decode:ident, $group:literal, $cover_fallback:literal) => {
+            check_partition!($name, $decode, $group, $cover_fallback, 41, 41);
+        };
+        (
+            $name:ident, $decode:ident, $group:literal, $cover_fallback:literal,
+            $shortest_unwind:literal, $exact_unwind:literal
+        ) => {
+            check_partition!(
+                $name,
+                $decode,
+                $group,
+                $cover_fallback,
+                $shortest_unwind,
+                $exact_unwind,
+                crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor,
+                checked_pow10_f64,
+                2047,
+                partition_limb_count,
+                partition_limb_count
+            );
+        };
+        (
+            $name:ident, $decode:ident, $group:literal, $cover_fallback:literal,
+            $shortest_unwind:literal, $exact_unwind:literal, $estimate:path, $pow10:ident,
+            $pow2_mask:literal
+            $(, $shortest_limbs:path, $exact_limbs:path)?
+        ) => {
+            mod $name {
+                use super::*;
+
+                fn partition_limb_count(size: usize) -> usize {
+                    checked_f64_limb_count::<$group>(size)
+                }
+
+                fn stub_pow10_exponent(n: usize) -> usize {
+                    $pow10::<$group>(n)
+                }
+
+                fn stub_pow2_bits(bits: usize) -> usize {
+                    let encoded = bits & $pow2_mask;
+                    assert_eq!(encoded, bits);
+                    encoded
+                }
+
+                #[kani::proof]
+                #[kani::unwind($shortest_unwind)]
+                $(
+                    #[kani::stub(crate::num::imp::bignum::kani_loop_size, $shortest_limbs)]
+                    #[kani::stub(Big::add, Big::kani_add_model)]
+                    #[kani::stub(Big::sub, Big::kani_sub_model)]
+                    #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
+                    #[kani::stub(Big::mul_pow2, Big::kani_mul_pow2_model)]
+                )?
+                #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
+                #[kani::stub(crate::num::imp::bignum::kani_pow2_bits, stub_pow2_bits)]
+                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul, carrying_mul_model))]
+                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
+                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul, carrying_mul_model))]
+                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul_add, carrying_mul_add_model))]
+                #[kani::stub(crate::num::imp::flt2dec::estimator::estimate_scaling_factor, $estimate)]
+                #[kani::stub(
+                    u64::leading_zeros,
+                    crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u64
+                )]
+                #[kani::stub(
+                    u32::leading_zeros,
+                    crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u32
+                )]
+                #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
+                #[kani::stub(Big::is_zero, stub_is_zero)]
+                #[kani::stub(
+                    crate::num::imp::flt2dec::round_up,
+                    crate::num::imp::flt2dec::rounding_verify::stub_round_up
+                )]
+                #[kani::stub_verified(crate::num::imp::flt2dec::rounding_verify::round_up_contract)]
+                #[kani::solver(kissat)]
+                fn check_format_shortest() {
+                    let d = $decode::<$group>();
+                    let len = usize::from(kani::any::<u8>());
+                    kani::assume(len >= MAX_SIG_DIGITS && len <= PROOF_BUFLEN);
+                    let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+                    let start = buf.as_ptr().cast::<u8>();
+                    kani::cover(len == MAX_SIG_DIGITS, "shortest uses the minimum buffer");
+                    kani::cover(len == PROOF_BUFLEN, "shortest uses the largest proof buffer");
+                    let (digits, _) = format_shortest(&d, &mut buf[..len]);
+                    kani::cover(digits.len() > 1, "shortest produces multiple digits");
+                    assert!(!digits.is_empty());
+                    assert!(digits.len() <= len);
+                    assert_eq!(digits.as_ptr(), start);
+                }
+
+                #[kani::proof]
+                #[kani::unwind($exact_unwind)]
+                $(
+                    #[kani::stub(crate::num::imp::bignum::kani_loop_size, $exact_limbs)]
+                    #[kani::stub(Big::add, Big::kani_add_model)]
+                    #[kani::stub(Big::sub, Big::kani_sub_model)]
+                    #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
+                    #[kani::stub(Big::mul_pow2, Big::kani_mul_pow2_model)]
+                )?
+                #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
+                #[kani::stub(crate::num::imp::bignum::kani_pow2_bits, stub_pow2_bits)]
+                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul, carrying_mul_model))]
+                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
+                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul, carrying_mul_model))]
+                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul_add, carrying_mul_add_model))]
+                #[kani::stub(crate::num::imp::flt2dec::estimator::estimate_scaling_factor, $estimate)]
+                #[kani::stub(
+                    u64::leading_zeros,
+                    crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u64
+                )]
+                #[kani::stub(
+                    u32::leading_zeros,
+                    crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u32
+                )]
+                #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
+                #[kani::stub(Big::is_zero, stub_is_zero)]
+                #[kani::stub(
+                    crate::num::imp::flt2dec::round_up,
+                    crate::num::imp::flt2dec::rounding_verify::stub_round_up
+                )]
+                #[kani::stub_verified(crate::num::imp::flt2dec::rounding_verify::round_up_contract)]
+                #[kani::stub(fill_zeroes, fill_zeroes_model)]
+                #[kani::stub(div_2pow10, stub_div_2pow10)]
+                #[kani::stub_verified(div_2pow10_contract)]
+                #[kani::solver(kissat)]
+                fn check_format_exact() {
+                    let d = $decode::<$group>();
+                    let limit: i16 = kani::any();
+                    let len = usize::from(kani::any::<u8>());
+                    kani::assume(len <= PROOF_BUFLEN);
+                    let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+                    let start = buf.as_ptr().cast::<u8>();
+                    kani::cover(len == 0, "exact accepts an empty buffer");
+                    kani::cover(len == PROOF_BUFLEN, "exact uses the largest proof buffer");
+                    let (digits, _) = format_exact(&d, &mut buf[..len], limit);
+                    kani::cover(digits.is_empty(), "exact can return an empty prefix");
+                    kani::cover(digits.len() > 1, "exact produces multiple digits");
+                    assert!(digits.len() <= len);
+                    assert_eq!(digits.as_ptr(), start);
+                }
+            }
+        };
+    }
+
+    for_each_finite_partition!(check_partition);
+    // These inputs need fewer bigint limbs. Keep enough iterations for the
+    // digit and rounding loops; unwinding assertions check every loop bound.
+    check_partition!(
+        f64_exp_1023,
+        arbitrary_finite_f64_exponent,
+        1023,
+        false,
+        19,
+        33,
+        estimate_unit_scale,
+        checked_pow10_unit,
+        63,
+        unit_shortest_limb_count,
+        unit_exact_limb_count
+    );
 }
