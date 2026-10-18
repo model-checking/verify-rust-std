@@ -124,8 +124,9 @@ def proof_groups(pointer_width=None):
         add(f"dragon-shortest-scaling-fixed-k-{window:03d}", "contract", [
             f"{DRAGON}::dragon_scale_fixed_k_{window:03d}::check_scale_shortest"
         ], 60)
-    # Diagnostic (s45):  window 000 at K = -323 and K = -310.
-    for window, k in ((0, 323), (0, 310)):
+    # Diagnostic (s45):  window 000 at K = -323, -320, -318, -315 and -310, and window 001 at
+    # K = -319.
+    for window, k in ((0, 323), (0, 310), (0, 320), (0, 318), (0, 315), (1, 319)):
         add(f"dragon-shortest-scaling-fixed-k-{window:03d}-k{k}", "contract", [
             f"{DRAGON}::dragon_scale_fixed_k_{window:03d}_k{k}::check_scale_shortest"
         ], 60)

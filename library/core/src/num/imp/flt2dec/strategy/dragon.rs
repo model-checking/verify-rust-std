@@ -2542,6 +2542,27 @@ pub mod dragon_verify {
     check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k310, 0, -310, [1 => 1, 2 => 2, 10 => 3]);
     #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
     check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k310, 0, -310, []);
+    // Four more pairs find the edge of the slow K = -319 band.  At K = -320 (window 000) the
+    // mantissa is below 2^16, so the operands have at most 1 and 3 limbs before the 3- and
+    // 10-limb power tables.  At K = -318 and K = -315 (window 000, mantissa below 2^22 and
+    // 2^32) and at K = -319 (window 001, mantissa below 2^3), the operands have at most 1, 2
+    // and 3 limbs before the 1-, 2- and 10-limb power tables.
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k320, 0, -320, [3 => 1, 10 => 3]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k320, 0, -320, []);
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k318, 0, -318, [1 => 1, 2 => 2, 10 => 3]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k318, 0, -318, []);
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k315, 0, -315, [1 => 1, 2 => 2, 10 => 3]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k315, 0, -315, []);
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_001_k319, 1, -319, [1 => 1, 2 => 2, 10 => 3]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_001_k319, 1, -319, []);
 
     // Every contract input of windows 000 and 127 has its estimate in the window range,
     // so the fixed-K proofs of each K in that range cover the window.
