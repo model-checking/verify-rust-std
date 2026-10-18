@@ -2480,7 +2480,7 @@ pub mod dragon_verify {
                 )]
                 #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
                 #[kani::stub(Big::is_zero, stub_is_zero)]
-                #[kani::solver(kissat)]
+                #[kani::solver(cadical)]
                 fn check_scale_shortest() {
                     let mant = kani::any::<u64>() & ((1u64 << 55) - 1);
                     let minus = 1;
@@ -2510,6 +2510,20 @@ pub mod dragon_verify {
     #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
     check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000, 0, -319, []);
     check_dragon_scale_fixed_k!(dragon_scale_fixed_k_127, 127, 308, []);
+    // At K = -255 (window 011) and K = -150 (window 032) the mantissa can reach 2^54.6, so
+    // the operands of the cached products have at most 2, 2, 4 and 6 limbs before the 1-, 2-,
+    // 3- and 5-limb power tables at K = -255, and at most 2 limbs before the 1- and 5-limb
+    // power tables at K = -150.
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(
+        dragon_scale_fixed_k_011, 11, -255, [1 => 2, 2 => 2, 3 => 4, 5 => 6]
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_011, 11, -255, []);
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_032, 32, -150, [1 => 2, 5 => 2]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_032, 32, -150, []);
 
     // Every contract input of windows 000 and 127 has its estimate in the window range,
     // so the fixed-K proofs of each K in that range cover the window.
