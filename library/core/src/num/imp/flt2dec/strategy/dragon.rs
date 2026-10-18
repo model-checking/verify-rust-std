@@ -2524,6 +2524,12 @@ pub mod dragon_verify {
     check_dragon_scale_fixed_k!(dragon_scale_fixed_k_032, 32, -150, [1 => 2, 5 => 2]);
     #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
     check_dragon_scale_fixed_k!(dragon_scale_fixed_k_032, 32, -150, []);
+    // At K = -303 (window 001) the mantissa can reach 2^54.6, so the operands of the cached
+    // products have at most 2 and 3 limbs before the 2- and 10-limb power tables.
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_001, 1, -303, [2 => 2, 10 => 3]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_001, 1, -303, []);
 
     // Every contract input of windows 000 and 127 has its estimate in the window range,
     // so the fixed-K proofs of each K in that range cover the window.

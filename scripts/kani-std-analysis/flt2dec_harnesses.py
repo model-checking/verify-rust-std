@@ -118,9 +118,9 @@ def proof_groups(pointer_width=None):
         f"{DRAGON}::dragon_scale_shortest_{window:03d}::check_scale_shortest" for window in (0, 127)
     ], 60)
 
-    # Diagnostic (s37):  fixed-K proofs of windows 000, 011, 032 and 127, and the estimate range they need.
+    # Diagnostic (s37):  fixed-K proofs of windows 000, 001, 011, 032 and 127, and the estimate range they need.
     add("dragon-shortest-scaling-k-range", "equivalence", [f"{DRAGON}::check_dragon_scale_k_range"], 30)
-    for window in (0, 11, 32, 127):
+    for window in (0, 1, 11, 32, 127):
         add(f"dragon-shortest-scaling-fixed-k-{window:03d}", "contract", [
             f"{DRAGON}::dragon_scale_fixed_k_{window:03d}::check_scale_shortest"
         ], 60)
