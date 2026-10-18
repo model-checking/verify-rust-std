@@ -11,7 +11,7 @@
 //!
 //! This attribute allows configuring the choice of global allocator.
 //! You can use this to implement a completely custom global allocator
-//! to route all default allocation requests to a custom object.
+//! to route all[^system-alloc] default allocation requests to a custom object.
 //!
 //! ```rust
 //! use std::alloc::{GlobalAlloc, System, Layout};
@@ -52,20 +52,34 @@
 //!
 //! The `#[global_allocator]` can only be used once in a crate
 //! or its recursive dependencies.
+//!
+//! The global allocator is invoked via the functions in this module
+//! ([`alloc`][crate::alloc::alloc], [`alloc_zeroed`], [`dealloc`], [`realloc`]). Note, however,
+//! that invoking those functions is *not* equivalent to directly invoking the underlying methods on
+//! the declared global allocator! See the documentation of those functions for details.
+//!
+//! [^system-alloc]: Note that the Rust standard library internals may still
+//! directly call [`System`] when necessary (for example for the runtime
+//! support typically required to implement a global allocator, see [re-entrance] on [`GlobalAlloc`]
+//! for more details).
+//!
+//! [re-entrance]: trait.GlobalAlloc.html#re-entrance
 
 #![deny(unsafe_op_in_unsafe_fn)]
 #![stable(feature = "alloc_module", since = "1.28.0")]
 
 #[cfg(kani)]
 use core::kani;
-use core::ptr::NonNull;
-use core::sync::atomic::{Atomic, AtomicPtr, Ordering};
-use core::{hint, mem, ptr};
 
 #[stable(feature = "alloc_module", since = "1.28.0")]
 #[doc(inline)]
 pub use alloc_crate::alloc::*;
 use safety::requires;
+
+use crate::ptr::NonNull;
+use crate::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use crate::sys::alloc as imp;
+use crate::{hint, mem, ptr};
 
 /// The default memory allocator provided by the operating system.
 ///
@@ -131,23 +145,26 @@ use safety::requires;
 /// program opts in to using jemalloc as the global allocator, `System` will
 /// still allocate memory using `malloc` and `HeapAlloc`.
 #[stable(feature = "alloc_system_type", since = "1.28.0")]
-#[derive(Debug, Default, Copy, Clone)]
+#[derive(Copy, Debug)]
+#[derive_const(Clone, Default)]
 pub struct System;
+
+#[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")]
+unsafe impl core::alloc::AllocatorClone for System {}
+
+#[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")]
+unsafe impl core::alloc::StaticAllocator for System {}
 
 impl System {
     #[inline]
     fn alloc_impl(&self, layout: Layout, zeroed: bool) -> Result<NonNull<[u8]>, AllocError> {
         match layout.size() {
-            0 => Ok(NonNull::slice_from_raw_parts(layout.dangling(), 0)),
+            0 => Ok(layout.dangling_ptr().cast_slice(0)),
             // SAFETY: `layout` is non-zero in size,
             size => unsafe {
-                let raw_ptr = if zeroed {
-                    GlobalAlloc::alloc_zeroed(self, layout)
-                } else {
-                    GlobalAlloc::alloc(self, layout)
-                };
+                let raw_ptr = if zeroed { imp::alloc_zeroed(layout) } else { imp::alloc(layout) };
                 let ptr = NonNull::new(raw_ptr).ok_or(AllocError)?;
-                Ok(NonNull::slice_from_raw_parts(ptr, size))
+                Ok(ptr.cast_slice(size))
             },
         }
     }
@@ -182,12 +199,12 @@ impl System {
                 // `realloc` probably checks for `new_size >= old_layout.size()` or something similar.
                 hint::assert_unchecked(new_size >= old_layout.size());
 
-                let raw_ptr = GlobalAlloc::realloc(self, ptr.as_ptr(), old_layout, new_size);
+                let raw_ptr = imp::realloc(ptr.as_ptr(), old_layout, new_size);
                 let ptr = NonNull::new(raw_ptr).ok_or(AllocError)?;
                 if zeroed {
                     raw_ptr.add(old_size).write_bytes(0, new_size - old_size);
                 }
-                Ok(NonNull::slice_from_raw_parts(ptr, new_size))
+                Ok(ptr.cast_slice(new_size))
             },
 
             // SAFETY: because `new_layout.size()` must be greater than or equal to `old_size`,
@@ -205,9 +222,9 @@ impl System {
     }
 }
 
-// The Allocator impl checks the layout size to be non-zero and forwards to the GlobalAlloc impl,
-// which is in `std::sys::*::alloc`.
-#[unstable(feature = "allocator_api", issue = "32838")]
+// The Allocator impl checks the layout size to be non-zero and forwards to the
+// platform functions in `std::sys::*::alloc`.
+#[stable(feature = "allocator_api", since = "CURRENT_RUSTC_VERSION")]
 unsafe impl Allocator for System {
     #[inline]
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
@@ -225,7 +242,7 @@ unsafe impl Allocator for System {
         if layout.size() != 0 {
             // SAFETY: `layout` is non-zero in size,
             // other conditions must be upheld by the caller
-            unsafe { GlobalAlloc::dealloc(self, ptr.as_ptr(), layout) }
+            unsafe { imp::dealloc(ptr.as_ptr(), layout) }
         }
     }
 
@@ -270,7 +287,7 @@ unsafe impl Allocator for System {
             // SAFETY: conditions must be upheld by the caller
             0 => unsafe {
                 Allocator::deallocate(self, ptr, old_layout);
-                Ok(NonNull::slice_from_raw_parts(new_layout.dangling(), 0))
+                Ok(new_layout.dangling_ptr().cast_slice(0))
             },
 
             // SAFETY: `new_size` is non-zero. Other conditions must be upheld by the caller
@@ -278,9 +295,9 @@ unsafe impl Allocator for System {
                 // `realloc` probably checks for `new_size <= old_layout.size()` or something similar.
                 hint::assert_unchecked(new_size <= old_layout.size());
 
-                let raw_ptr = GlobalAlloc::realloc(self, ptr.as_ptr(), old_layout, new_size);
+                let raw_ptr = imp::realloc(ptr.as_ptr(), old_layout, new_size);
                 let ptr = NonNull::new(raw_ptr).ok_or(AllocError)?;
-                Ok(NonNull::slice_from_raw_parts(ptr, new_size))
+                Ok(ptr.cast_slice(new_size))
             },
 
             // SAFETY: because `new_size` must be smaller than or equal to `old_layout.size()`,
@@ -298,7 +315,10 @@ unsafe impl Allocator for System {
     }
 }
 
-static HOOK: Atomic<*mut ()> = AtomicPtr::new(ptr::null_mut());
+#[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")]
+unsafe impl GlobalAllocator for System {}
+
+static HOOK: AtomicPtr<()> = AtomicPtr::new(ptr::null_mut());
 
 /// Registers a custom allocation error hook, replacing any that was previously registered.
 ///
@@ -355,25 +375,68 @@ pub fn take_alloc_error_hook() -> fn(Layout) {
     if hook.is_null() { default_alloc_error_hook } else { unsafe { mem::transmute(hook) } }
 }
 
+#[optimize(size)]
 fn default_alloc_error_hook(layout: Layout) {
-    unsafe extern "Rust" {
-        // This symbol is emitted by rustc next to __rust_alloc_error_handler.
-        // Its value depends on the -Zoom={panic,abort} compiler option.
-        #[rustc_std_internal_symbol]
-        fn __rust_alloc_error_handler_should_panic_v2() -> u8;
+    if cfg!(panic = "immediate-abort") {
+        return;
     }
 
-    if unsafe { __rust_alloc_error_handler_should_panic_v2() != 0 } {
-        panic!("memory allocation of {} bytes failed", layout.size());
+    // This is the default path taken on OOM, and the only path taken on stable with std.
+    // Crucially, it does *not* call any user-defined code, and therefore users do not have to
+    // worry about allocation failure causing reentrancy issues. That makes it different from
+    // the default `__rdl_alloc_error_handler` defined in alloc (i.e., the default alloc error
+    // handler that is  called when there is no `#[alloc_error_handler]`), which triggers a
+    // regular panic and thus can invoke a user-defined panic hook, executing arbitrary
+    // user-defined code.
+
+    static PREV_ALLOC_FAILURE: AtomicBool = AtomicBool::new(false);
+    if PREV_ALLOC_FAILURE.swap(true, Ordering::Relaxed) {
+        // Don't try to print a backtrace if a previous alloc error happened. This likely means
+        // there is not enough memory to print a backtrace, although it could also mean that two
+        // threads concurrently run out of memory.
+        rtprintpanic!(
+            "memory allocation of {} bytes failed\nskipping backtrace printing to avoid potential recursion\n",
+            layout.size()
+        );
+        return;
     } else {
-        // This is the default path taken on OOM, and the only path taken on stable with std.
-        // Crucially, it does *not* call any user-defined code, and therefore users do not have to
-        // worry about allocation failure causing reentrancy issues. That makes it different from
-        // the default `__rdl_alloc_error_handler` defined in alloc (i.e., the default alloc error
-        // handler that is  called when there is no `#[alloc_error_handler]`), which triggers a
-        // regular panic and thus can invoke a user-defined panic hook, executing arbitrary
-        // user-defined code.
         rtprintpanic!("memory allocation of {} bytes failed\n", layout.size());
+    }
+
+    let Some(mut out) = crate::sys::stdio::panic_output() else {
+        return;
+    };
+
+    // Use a lock to prevent mixed output in multithreading context.
+    // Some platforms also require it when printing a backtrace, like `SymFromAddr` on Windows.
+    // Make sure to not take this lock until after checking PREV_ALLOC_FAILURE to avoid deadlocks
+    // when there is too little memory to print a backtrace.
+    let mut lock = crate::sys::backtrace::lock();
+
+    match crate::panic::get_backtrace_style() {
+        Some(crate::panic::BacktraceStyle::Short) => {
+            drop(lock.print(&mut out, crate::backtrace_rs::PrintFmt::Short))
+        }
+        Some(crate::panic::BacktraceStyle::Full) => {
+            drop(lock.print(&mut out, crate::backtrace_rs::PrintFmt::Full))
+        }
+        Some(crate::panic::BacktraceStyle::Off) => {
+            use crate::io::Write;
+            let _ = writeln!(
+                out,
+                "note: run with `RUST_BACKTRACE=1` environment variable to display a \
+                             backtrace"
+            );
+            if cfg!(miri) {
+                let _ = writeln!(
+                    out,
+                    "note: in Miri, you may have to set `MIRIFLAGS=-Zmiri-env-forward=RUST_BACKTRACE` \
+                                for the environment variable to have an effect"
+                );
+            }
+        }
+        // If backtraces aren't supported or are forced-off, do nothing.
+        None => {}
     }
 }
 
@@ -382,16 +445,17 @@ fn default_alloc_error_hook(layout: Layout) {
 #[alloc_error_handler]
 #[unstable(feature = "alloc_internals", issue = "none")]
 pub fn rust_oom(layout: Layout) -> ! {
-    let hook = HOOK.load(Ordering::Acquire);
-    let hook: fn(Layout) =
-        if hook.is_null() { default_alloc_error_hook } else { unsafe { mem::transmute(hook) } };
-    hook(layout);
-    crate::process::abort()
+    crate::sys::backtrace::__rust_end_short_backtrace(|| {
+        let hook = HOOK.load(Ordering::Acquire);
+        let hook: fn(Layout) =
+            if hook.is_null() { default_alloc_error_hook } else { unsafe { mem::transmute(hook) } };
+        hook(layout);
+        crate::process::abort()
+    })
 }
 
 #[cfg(not(test))]
 #[doc(hidden)]
-#[allow(unused_attributes)]
 #[unstable(feature = "alloc_internals", issue = "none")]
 pub mod __default_lib_allocator {
     #[cfg(kani)]
@@ -399,7 +463,11 @@ pub mod __default_lib_allocator {
 
     use safety::requires;
 
-    use super::{GlobalAlloc, Layout, System};
+    use super::Layout;
+    // We call the system functions directly to avoid any overheads introduced
+    // by the roundtrip through `impl Allocator for System` and
+    // `impl<A: GlobalAllocator> GlobalAlloc for A`.
+    use crate::sys::alloc as imp;
     // These magic symbol names are used as a fallback for implementing the
     // `__rust_alloc` etc symbols (see `src/liballoc/alloc.rs`) when there is
     // no `#[global_allocator]` attribute.
@@ -417,7 +485,7 @@ pub mod __default_lib_allocator {
         // `GlobalAlloc::alloc`.
         unsafe {
             let layout = Layout::from_size_align_unchecked(size, align);
-            System.alloc(layout)
+            imp::alloc(layout)
         }
     }
 
@@ -426,7 +494,7 @@ pub mod __default_lib_allocator {
     pub unsafe extern "C" fn __rdl_dealloc(ptr: *mut u8, size: usize, align: usize) {
         // SAFETY: see the guarantees expected by `Layout::from_size_align` and
         // `GlobalAlloc::dealloc`.
-        unsafe { System.dealloc(ptr, Layout::from_size_align_unchecked(size, align)) }
+        unsafe { imp::dealloc(ptr, Layout::from_size_align_unchecked(size, align)) }
     }
 
     #[requires(align.is_power_of_two())]
@@ -441,7 +509,7 @@ pub mod __default_lib_allocator {
         // `GlobalAlloc::realloc`.
         unsafe {
             let old_layout = Layout::from_size_align_unchecked(old_size, align);
-            System.realloc(ptr, old_layout, new_size)
+            imp::realloc(ptr, old_layout, new_size)
         }
     }
 
@@ -452,7 +520,7 @@ pub mod __default_lib_allocator {
         // `GlobalAlloc::alloc_zeroed`.
         unsafe {
             let layout = Layout::from_size_align_unchecked(size, align);
-            System.alloc_zeroed(layout)
+            imp::alloc_zeroed(layout)
         }
     }
 }

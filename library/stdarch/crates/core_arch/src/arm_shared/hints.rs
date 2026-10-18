@@ -83,8 +83,11 @@ pub unsafe fn __sevl() {
 /// improve overall system performance.
 // Section 10.1 of ACLE says that the supported arches are: 8, 6K, 6-M
 // LLVM says "instruction requires: armv6k"
+// On ARMv6 in Thumb mode, T2 is required (see Arm DDI0406C Section A8.8.427)
 #[cfg(any(
-    target_feature = "v6",
+    all(target_feature = "v6k", not(target_feature = "thumb-mode")),
+    target_feature = "v6t2",
+    all(target_feature = "v6", target_feature = "mclass"),
     target_arch = "aarch64",
     target_arch = "arm64ec",
     doc
@@ -107,7 +110,7 @@ pub unsafe fn __nop() {
     crate::arch::asm!("nop", options(nomem, nostack, preserves_flags));
 }
 
-unsafe extern "unadjusted" {
+unsafe extern "llvm-intrinsic" {
     #[cfg_attr(
         any(target_arch = "aarch64", target_arch = "arm64ec"),
         link_name = "llvm.aarch64.hint"

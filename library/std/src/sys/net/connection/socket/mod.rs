@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[cfg(not(target_os = "l4re"))]
 mod tests;
 
 use crate::ffi::{c_int, c_void};
@@ -7,9 +8,9 @@ use crate::mem::MaybeUninit;
 use crate::net::{
     Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs,
 };
-use crate::sys::common::small_c_string::run_with_cstr;
+use crate::sys::helpers::run_with_cstr;
 use crate::sys::net::connection::each_addr;
-use crate::sys_common::{AsInner, FromInner};
+use crate::sys::{AsInner, FromInner};
 use crate::time::Duration;
 use crate::{cmp, fmt, mem, ptr};
 
@@ -22,13 +23,9 @@ cfg_select! {
         mod solid;
         pub use solid::*;
     }
-    target_family = "unix" => {
+    any(target_family = "unix", target_os = "wasi") => {
         mod unix;
         pub use unix::*;
-    }
-    all(target_os = "wasi", any(target_env = "p2", target_env = "p3")) => {
-        mod wasip2;
-        pub use wasip2::*;
     }
     target_os = "windows" => {
         mod windows;
@@ -38,6 +35,9 @@ cfg_select! {
 }
 
 use netc as c;
+
+const MAX_SEND_LEN: usize =
+    if cfg!(target_vendor = "apple") { c_int::MAX as usize } else { <wrlen_t>::MAX as usize };
 
 cfg_select! {
     any(
@@ -50,26 +50,31 @@ cfg_select! {
         target_os = "haiku",
         target_os = "l4re",
         target_os = "nto",
+        target_os = "qnx",
         target_os = "nuttx",
         target_vendor = "apple",
     ) => {
-        use c::IPV6_JOIN_GROUP as IPV6_ADD_MEMBERSHIP;
-        use c::IPV6_LEAVE_GROUP as IPV6_DROP_MEMBERSHIP;
+        use c::{IPV6_JOIN_GROUP as IPV6_ADD_MEMBERSHIP, IPV6_LEAVE_GROUP as IPV6_DROP_MEMBERSHIP};
     }
     _ => {
-        use c::IPV6_ADD_MEMBERSHIP;
-        use c::IPV6_DROP_MEMBERSHIP;
+        use c::{IPV6_ADD_MEMBERSHIP, IPV6_DROP_MEMBERSHIP};
     }
 }
 
 cfg_select! {
     any(
-        target_os = "linux", target_os = "android",
+        target_os = "linux",
+        target_os = "android",
         target_os = "hurd",
-        target_os = "dragonfly", target_os = "freebsd",
-        target_os = "openbsd", target_os = "netbsd",
-        target_os = "solaris", target_os = "illumos",
-        target_os = "haiku", target_os = "nto",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "solaris",
+        target_os = "illumos",
+        target_os = "haiku",
+        target_os = "nto",
+        target_os = "qnx",
         target_os = "cygwin",
     ) => {
         use libc::MSG_NOSIGNAL;
@@ -81,10 +86,14 @@ cfg_select! {
 
 cfg_select! {
     any(
-        target_os = "dragonfly", target_os = "freebsd",
-        target_os = "openbsd", target_os = "netbsd",
-        target_os = "solaris", target_os = "illumos",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "solaris",
+        target_os = "illumos",
         target_os = "nto",
+        target_os = "qnx",
     ) => {
         use crate::ffi::c_uchar;
         type IpV4MultiCastType = c_uchar;
@@ -418,7 +427,7 @@ impl TcpStream {
         self.inner.read(buf)
     }
 
-    pub fn read_buf(&self, buf: BorrowedCursor<'_>) -> io::Result<()> {
+    pub fn read_buf(&self, buf: BorrowedCursor<'_, u8>) -> io::Result<()> {
         self.inner.read_buf(buf)
     }
 
@@ -432,7 +441,7 @@ impl TcpStream {
     }
 
     pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
-        let len = cmp::min(buf.len(), <wrlen_t>::MAX as usize) as wrlen_t;
+        let len = cmp::min(buf.len(), MAX_SEND_LEN) as wrlen_t;
         let ret = cvt(unsafe {
             c::send(self.inner.as_raw(), buf.as_ptr() as *const c_void, len, MSG_NOSIGNAL)
         })?;
@@ -470,6 +479,14 @@ impl TcpStream {
 
     pub fn linger(&self) -> io::Result<Option<Duration>> {
         self.inner.linger()
+    }
+
+    pub fn set_keepalive(&self, keepalive: bool) -> io::Result<()> {
+        self.inner.set_keepalive(keepalive)
+    }
+
+    pub fn keepalive(&self) -> io::Result<bool> {
+        self.inner.keepalive()
     }
 
     pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
@@ -700,14 +717,18 @@ impl UdpSocket {
         self.inner.peek_from(buf)
     }
 
+    // `MAX_SEND_LEN` is `usize::MAX` off Apple/Windows, where the guard is a no-op.
+    #[allow(clippy::absurd_extreme_comparisons)]
     pub fn send_to(&self, buf: &[u8], dst: &SocketAddr) -> io::Result<usize> {
-        let len = cmp::min(buf.len(), <wrlen_t>::MAX as usize) as wrlen_t;
+        if buf.len() > MAX_SEND_LEN {
+            return Err(io::Error::from_raw_os_error(c::EMSGSIZE));
+        }
         let (dst, dstlen) = socket_addr_to_c(dst);
         let ret = cvt(unsafe {
             c::sendto(
                 self.inner.as_raw(),
                 buf.as_ptr() as *const c_void,
-                len,
+                buf.len() as wrlen_t,
                 MSG_NOSIGNAL,
                 dst.as_ptr(),
                 dstlen,
@@ -763,13 +784,11 @@ impl UdpSocket {
     }
 
     pub fn set_multicast_ttl_v4(&self, multicast_ttl_v4: u32) -> io::Result<()> {
+        let ttl: u8 = multicast_ttl_v4
+            .try_into()
+            .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
         unsafe {
-            setsockopt(
-                &self.inner,
-                c::IPPROTO_IP,
-                c::IP_MULTICAST_TTL,
-                multicast_ttl_v4 as IpV4MultiCastType,
-            )
+            setsockopt(&self.inner, c::IPPROTO_IP, c::IP_MULTICAST_TTL, ttl as IpV4MultiCastType)
         }
     }
 
@@ -853,10 +872,19 @@ impl UdpSocket {
         self.inner.peek(buf)
     }
 
+    // `MAX_SEND_LEN` is `usize::MAX` off Apple/Windows, where the guard is a no-op.
+    #[allow(clippy::absurd_extreme_comparisons)]
     pub fn send(&self, buf: &[u8]) -> io::Result<usize> {
-        let len = cmp::min(buf.len(), <wrlen_t>::MAX as usize) as wrlen_t;
+        if buf.len() > MAX_SEND_LEN {
+            return Err(io::Error::from_raw_os_error(c::EMSGSIZE));
+        }
         let ret = cvt(unsafe {
-            c::send(self.inner.as_raw(), buf.as_ptr() as *const c_void, len, MSG_NOSIGNAL)
+            c::send(
+                self.inner.as_raw(),
+                buf.as_ptr() as *const c_void,
+                buf.len() as wrlen_t,
+                MSG_NOSIGNAL,
+            )
         })?;
         Ok(ret as usize)
     }

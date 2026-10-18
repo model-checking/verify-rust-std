@@ -205,6 +205,56 @@ pub trait Error: Debug + Display {
     ///     assert!(request_ref::<MyLittleTeaPot>(dyn_error).is_none());
     /// }
     /// ```
+    ///
+    /// # Delegating Impls
+    ///
+    /// <div class="warning">
+    ///
+    /// **Warning**: We recommend implementors avoid delegating implementations of `provide` to
+    /// source error implementations.
+    ///
+    /// </div>
+    ///
+    /// This method should expose context from the current piece of the source chain only, not from
+    /// sources that are exposed in the chain of sources. Delegating `provide` implementations cause
+    /// the same context to be provided by multiple errors in the chain of sources which can cause
+    /// unintended duplication of information in error reports or require heuristics to deduplicate.
+    ///
+    /// In other words, the following implementation pattern for `provide` is discouraged and should
+    /// not be used for [`Error`] types exposed in public APIs to third parties.
+    ///
+    /// ```rust
+    /// # #![feature(error_generic_member_access)]
+    /// # use core::fmt;
+    /// # use core::error::Request;
+    /// # #[derive(Debug)]
+    /// struct MyError {
+    ///     source: Error,
+    /// }
+    /// # #[derive(Debug)]
+    /// # struct Error;
+    /// # impl fmt::Display for Error {
+    /// #     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    /// #         write!(f, "Example Source Error")
+    /// #     }
+    /// # }
+    /// # impl fmt::Display for MyError {
+    /// #     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    /// #         write!(f, "Example Error")
+    /// #     }
+    /// # }
+    /// # impl std::error::Error for Error { }
+    ///
+    /// impl std::error::Error for MyError {
+    ///     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+    ///         Some(&self.source)
+    ///     }
+    ///
+    ///     fn provide<'a>(&'a self, request: &mut Request<'a>) {
+    ///         self.source.provide(request) // <--- Discouraged
+    ///     }
+    /// }
+    /// ```
     #[unstable(feature = "error_generic_member_access", issue = "99301")]
     #[allow(unused_variables)]
     fn provide<'a>(&'a self, request: &mut Request<'a>) {}
@@ -218,7 +268,7 @@ mod private {
     pub struct Internal;
 }
 
-#[unstable(feature = "never_type", issue = "35121")]
+#[stable(feature = "never_type", since = "CURRENT_RUSTC_VERSION")]
 impl Error for ! {}
 
 // Copied from `any.rs`.
@@ -444,7 +494,7 @@ where
 /// `Request` supports generic, type-driven access to data. Its use is currently restricted to the
 /// standard library in cases where trait authors wish to allow trait implementors to share generic
 /// information across trait boundaries. The motivating and prototypical use case is
-/// `core::error::Error` which would otherwise require a method per concrete type (eg.
+/// `core::error::Error` which would otherwise require a method per concrete type (e.g.
 /// `std::backtrace::Backtrace` instance that implementors want to expose to users).
 ///
 /// # Data flow
@@ -452,29 +502,29 @@ where
 /// To describe the intended data flow for Request objects, let's consider two conceptual users
 /// separated by API boundaries:
 ///
-/// * Consumer - the consumer requests objects using a Request instance; eg a crate that offers
+/// * Consumer - the consumer requests objects using a Request instance; e.g. a crate that offers
 ///   fancy `Error`/`Result` reporting to users wants to request a Backtrace from a given `dyn Error`.
 ///
-/// * Producer - the producer provides objects when requested via Request; eg. a library with an
+/// * Producer - the producer provides objects when requested via Request; e.g. a library with an
 ///   an `Error` implementation that automatically captures backtraces at the time instances are
 ///   created.
 ///
-/// The consumer only needs to know where to submit their request and are expected to handle the
+/// The consumer only needs to know where to submit their request and is expected to handle the
 /// request not being fulfilled by the use of `Option<T>` in the responses offered by the producer.
 ///
 /// * A Producer initializes the value of one of its fields of a specific type. (or is otherwise
-///   prepared to generate a value requested). eg, `backtrace::Backtrace` or
-///   `std::backtrace::Backtrace`
+///   prepared to generate a value requested). e.g., `backtrace::Backtrace` or
+///   `std::backtrace::Backtrace`.
 /// * A Consumer requests an object of a specific type (say `std::backtrace::Backtrace`). In the
 ///   case of a `dyn Error` trait object (the Producer), there are functions called `request_ref` and
 ///   `request_value` to simplify obtaining an `Option<T>` for a given type.
 /// * The Producer, when requested, populates the given Request object which is given as a mutable
 ///   reference.
 /// * The Consumer extracts a value or reference to the requested type from the `Request` object
-///   wrapped in an `Option<T>`; in the case of `dyn Error` the aforementioned `request_ref` and `
-///   request_value` methods mean that `dyn Error` users don't have to deal with the `Request` type at
+///   wrapped in an `Option<T>`; in the case of `dyn Error` the aforementioned `request_ref` and
+///   `request_value` methods mean that `dyn Error` users don't have to deal with the `Request` type at
 ///   all (but `Error` implementors do). The `None` case of the `Option` suggests only that the
-///   Producer cannot currently offer an instance of the requested type, not it can't or never will.
+///   Producer cannot currently offer an instance of the requested type, not that it can't or never will.
 ///
 /// # Examples
 ///

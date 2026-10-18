@@ -15,7 +15,7 @@
 //! * `s390x`: [`is_s390x_feature_detected`]
 
 #![unstable(feature = "stdarch_internal", issue = "none")]
-#![feature(staged_api, cfg_select, doc_cfg, allow_internal_unstable)]
+#![feature(staged_api, doc_cfg, allow_internal_unstable)]
 #![deny(rust_2018_idioms)]
 #![allow(clippy::shadow_reuse)]
 #![cfg_attr(test, allow(unused_imports))]
@@ -27,8 +27,7 @@
 extern crate std;
 
 // rust-lang/rust#83888: removing `extern crate` gives an error that `vec_spare>
-#[cfg_attr(feature = "std_detect_file_io", allow(unused_extern_crates))]
-#[cfg(feature = "std_detect_file_io")]
+#[allow(unused_extern_crates)]
 extern crate alloc;
 
 #[doc(hidden)]

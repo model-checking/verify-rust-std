@@ -250,6 +250,10 @@ mod verify {
     fn proof_for_index_range_next_unchecked() {
         let start = kani::any::<usize>();
         let end = kani::any::<usize>();
+        // Respect new_unchecked's safety precondition (start <= end); the
+        // stronger requirement of next_unchecked (start < end) is assumed
+        // from its contract.
+        kani::assume(start <= end);
 
         let mut range = unsafe { IndexRange::new_unchecked(start, end) };
 
@@ -260,6 +264,10 @@ mod verify {
     fn proof_for_index_range_next_back_unchecked() {
         let start = kani::any::<usize>();
         let end = kani::any::<usize>();
+        // Respect new_unchecked's safety precondition (start <= end); the
+        // stronger requirement of next_back_unchecked (start < end) is
+        // assumed from its contract.
+        kani::assume(start <= end);
 
         let mut range = unsafe { IndexRange::new_unchecked(start, end) };
 

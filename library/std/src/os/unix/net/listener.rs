@@ -1,16 +1,16 @@
 use super::{SocketAddr, UnixStream, sockaddr_un};
 use crate::os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use crate::path::Path;
-use crate::sys::cvt;
 use crate::sys::net::Socket;
-use crate::sys_common::{AsInner, FromInner, IntoInner};
+use crate::sys::{AsInner, FromInner, IntoInner, cvt};
 use crate::{fmt, io, mem};
 
 /// A structure representing a Unix domain socket server.
 ///
 /// # Examples
 ///
-/// ```no_run
+#[cfg_attr(target_family = "unix", doc = "```no_run")]
+#[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
 /// use std::thread;
 /// use std::os::unix::net::{UnixStream, UnixListener};
 ///
@@ -57,7 +57,8 @@ impl UnixListener {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(target_family = "unix", doc = "```no_run")]
+    #[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
     /// use std::os::unix::net::UnixListener;
     ///
     /// let listener = match UnixListener::bind("/path/to/the/socket") {
@@ -116,7 +117,8 @@ impl UnixListener {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(target_family = "unix", doc = "```no_run")]
+    #[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
     /// use std::os::unix::net::{UnixListener};
     ///
     /// fn main() -> std::io::Result<()> {
@@ -161,7 +163,8 @@ impl UnixListener {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(target_family = "unix", doc = "```no_run")]
+    #[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
     /// use std::os::unix::net::UnixListener;
     ///
     /// fn main() -> std::io::Result<()> {
@@ -191,7 +194,8 @@ impl UnixListener {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(target_family = "unix", doc = "```no_run")]
+    #[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
     /// use std::os::unix::net::UnixListener;
     ///
     /// fn main() -> std::io::Result<()> {
@@ -209,7 +213,8 @@ impl UnixListener {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(target_family = "unix", doc = "```no_run")]
+    #[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
     /// use std::os::unix::net::UnixListener;
     ///
     /// fn main() -> std::io::Result<()> {
@@ -233,7 +238,8 @@ impl UnixListener {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(target_family = "unix", doc = "```no_run")]
+    #[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
     /// use std::os::unix::net::UnixListener;
     ///
     /// fn main() -> std::io::Result<()> {
@@ -251,7 +257,8 @@ impl UnixListener {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(target_family = "unix", doc = "```no_run")]
+    #[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
     /// use std::os::unix::net::UnixListener;
     ///
     /// fn main() -> std::io::Result<()> {
@@ -278,7 +285,8 @@ impl UnixListener {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(target_family = "unix", doc = "```no_run")]
+    #[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
     /// use std::thread;
     /// use std::os::unix::net::{UnixStream, UnixListener};
     ///
@@ -373,7 +381,8 @@ impl<'a> IntoIterator for &'a UnixListener {
 ///
 /// # Examples
 ///
-/// ```no_run
+#[cfg_attr(target_family = "unix", doc = "```no_run")]
+#[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
 /// use std::thread;
 /// use std::os::unix::net::{UnixStream, UnixListener};
 ///

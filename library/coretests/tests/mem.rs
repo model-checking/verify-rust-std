@@ -1,3 +1,7 @@
+mod fn_ptr;
+mod trait_info_of;
+mod type_info;
+
 use core::mem::*;
 use core::{array, ptr};
 use std::cell::Cell;
@@ -132,32 +136,6 @@ fn test_transmute_copy_unaligned() {
 
     let u = Unaligned::default();
     assert_eq!(0_u64, unsafe { transmute_copy(&u.b) });
-}
-
-#[test]
-#[cfg(panic = "unwind")]
-fn test_transmute_copy_grow_panics() {
-    use std::panic;
-
-    let err = panic::catch_unwind(panic::AssertUnwindSafe(|| unsafe {
-        let _unused: u64 = transmute_copy(&1_u8);
-    }));
-
-    match err {
-        Ok(_) => unreachable!(),
-        Err(payload) => {
-            payload
-                .downcast::<&'static str>()
-                .and_then(|s| {
-                    if *s == "cannot transmute_copy if Dst is larger than Src" {
-                        Ok(s)
-                    } else {
-                        Err(s)
-                    }
-                })
-                .unwrap_or_else(|p| panic::resume_unwind(p));
-        }
-    }
 }
 
 #[test]
@@ -815,7 +793,7 @@ fn drop_guard_into_inner() {
     let dropped = Cell::new(false);
     let value = DropGuard::new(42, |_| dropped.set(true));
     let guard = DropGuard::new(value, |_| dropped.set(true));
-    let inner = DropGuard::into_inner(guard);
+    let inner = DropGuard::dismiss(guard);
     assert_eq!(dropped.get(), false);
     assert_eq!(*inner, 42);
 }
@@ -837,7 +815,7 @@ fn drop_guard_always_drops_value_if_closure_drop_unwinds() {
     // run the destructor of the value we passed, which we validate.
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let guard = DropGuard::new(value_with_tracked_destruction, closure_that_panics_on_drop);
-        DropGuard::into_inner(guard);
+        DropGuard::dismiss(guard);
     }));
     assert!(value_was_dropped);
 }

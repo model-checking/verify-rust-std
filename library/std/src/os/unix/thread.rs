@@ -6,7 +6,7 @@
 
 #[allow(deprecated)]
 use crate::os::unix::raw::pthread_t;
-use crate::sys_common::{AsInner, IntoInner};
+use crate::sys::{AsInner, IntoInner};
 use crate::thread::JoinHandle;
 
 #[stable(feature = "thread_extensions", since = "1.9.0")]
@@ -31,10 +31,15 @@ pub trait JoinHandleExt {
 
 #[stable(feature = "thread_extensions", since = "1.9.0")]
 impl<T> JoinHandleExt for JoinHandle<T> {
+    // This is an int2ptr cast on some platforms (e.g., *-musl) where RawPthread
+    // is an integer but libc::pthread_t is a pointer. Exposed provenance is the
+    // safe choice here, but `as` also works when it's int2int or ptr2ptr.
+    #[allow(implicit_provenance_casts)]
     fn as_pthread_t(&self) -> RawPthread {
         self.as_inner().id() as RawPthread
     }
 
+    #[allow(implicit_provenance_casts)] // see above for why
     fn into_pthread_t(self) -> RawPthread {
         self.into_inner().into_id() as RawPthread
     }

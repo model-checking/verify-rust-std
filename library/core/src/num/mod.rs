@@ -1,15 +1,24 @@
 //! Numeric traits and functions for the built-in numeric types.
 
 #![stable(feature = "rust1", since = "1.0.0")]
+#![expect(clippy::manual_is_ascii_check, reason = "this module implements various is_ascii checks")]
 
 use safety::{ensures, requires};
 
+use crate::convert::{BoundedCastFromInt, CheckedCastFromInt};
 #[cfg(kani)]
 use crate::kani;
 use crate::panic::const_panic;
 use crate::str::FromStr;
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{ascii, intrinsics, mem};
+
+// Flux defs are module-scoped; import the ascii-case helpers from `flux_info`.
+#[cfg(flux)]
+#[flux::defs {
+    use crate::flux_info::{is_ascii_lowercase, is_ascii_uppercase, to_ascii_lowercase, to_ascii_uppercase};
+}]
+const _: () = {};
 
 // FIXME(const-hack): Used because the `?` operator is not allowed in a const context.
 macro_rules! try_opt {
@@ -31,44 +40,47 @@ macro_rules! sign_dependent_expr {
     };
 }
 
-// All these modules are technically private and only exposed for coretests:
-#[cfg(not(no_fp_fmt_parse))]
-pub mod bignum;
-#[cfg(not(no_fp_fmt_parse))]
-pub mod dec2flt;
-#[cfg(not(no_fp_fmt_parse))]
-pub mod diy_float;
-#[cfg(not(no_fp_fmt_parse))]
-pub mod flt2dec;
-pub mod fmt;
+// These modules are public only for testing.
+#[doc(hidden)]
+#[unstable(
+    feature = "num_internals",
+    reason = "internal routines only exposed for testing",
+    issue = "none"
+)]
+pub mod imp;
 
 #[macro_use]
 mod int_macros; // import int_impl!
 #[macro_use]
 mod uint_macros; // import uint_impl!
 
+mod bfloat;
+mod complex;
 mod error;
-mod int_log10;
-mod int_sqrt;
-pub(crate) mod libm;
+#[cfg(not(no_fp_fmt_parse))]
+mod float_parse;
 mod nonzero;
-mod overflow_panic;
 mod saturating;
+mod traits;
 mod wrapping;
 
 /// 100% perma-unstable
 #[doc(hidden)]
 pub mod niche_types;
 
-#[stable(feature = "rust1", since = "1.0.0")]
-#[cfg(not(no_fp_fmt_parse))]
-pub use dec2flt::ParseFloatError;
+#[unstable(feature = "f16b", issue = "160630")]
+pub use bfloat::f16b;
+#[unstable(feature = "complex_numbers", issue = "154023")]
+pub use complex::Complex;
 #[stable(feature = "int_error_matching", since = "1.55.0")]
 pub use error::IntErrorKind;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use error::ParseIntError;
 #[stable(feature = "try_from", since = "1.34.0")]
 pub use error::TryFromIntError;
+#[stable(feature = "rust1", since = "1.0.0")]
+#[cfg(not(no_fp_fmt_parse))]
+pub use float_parse::ParseFloatError;
 #[stable(feature = "generic_nonzero", since = "1.79.0")]
 pub use nonzero::NonZero;
 #[unstable(
@@ -247,6 +259,137 @@ macro_rules! midpoint_impl {
     };
 }
 
+macro_rules! widening_mul_impl {
+    ($SelfT:ty, $WideT:ty) => {
+        /// Widening multiplication. Computes `self * rhs`, widening to a larger integer.
+        ///
+        /// The returned value is always exact and can never overflow.
+        ///
+        /// Note that this method is semantically equivalent to [`carrying_mul`] with a
+        /// carry of zero, with the latter instead returning a tuple denoting the low and
+        /// high parts of the result. Consider using it instead if you need
+        /// interoperability with other big int helper functions, or if this method isn't
+        /// available for a given type.
+        ///
+        /// [`carrying_mul`]: Self::carrying_mul
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// #![feature(widening_mul)]
+        ///
+        #[doc = concat!("assert_eq!(", stringify!($SelfT), "::MAX.widening_mul(0_", stringify!($SelfT), "), 0);")]
+        #[doc = concat!("assert_eq!(", stringify!($SelfT), "::MAX.widening_mul(", stringify!($SelfT), "::MAX), ", stringify!($SelfT), "::MAX as ", stringify!($WideT), " * ", stringify!($SelfT), "::MAX as ", stringify!($WideT), ");")]
+        /// ```
+        #[unstable(feature = "widening_mul", issue = "152016")]
+        #[rustc_const_unstable(feature = "widening_mul", issue = "152016")]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline]
+        pub const fn widening_mul(self, rhs: Self) -> $WideT {
+            self as $WideT * rhs as $WideT
+        }
+    }
+}
+
+macro_rules! widening_carryless_mul_impl {
+    ($SelfT:ty, $WideT:ty) => {
+        /// Performs a widening carry-less multiplication.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// #![feature(uint_carryless_mul)]
+        ///
+        #[doc = concat!("assert_eq!(", stringify!($SelfT), "::MAX.widening_carryless_mul(",
+                                stringify!($SelfT), "::MAX), ", stringify!($WideT), "::MAX / 3);")]
+        /// ```
+        #[rustc_const_unstable(feature = "uint_carryless_mul", issue = "152080")]
+        #[doc(alias = "clmul")]
+        #[unstable(feature = "uint_carryless_mul", issue = "152080")]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline]
+        pub const fn widening_carryless_mul(self, rhs: $SelfT) -> $WideT {
+            (self as $WideT).carryless_mul(rhs as $WideT)
+        }
+    }
+}
+
+macro_rules! carrying_carryless_mul_impl {
+    (u128, u256) => {
+        carrying_carryless_mul_impl! { @internal u128 =>
+            pub const fn carrying_carryless_mul(self, rhs: Self, carry: Self) -> (Self, Self) {
+                let x0 = self as u64;
+                let x1 = (self >> 64) as u64;
+                let y0 = rhs as u64;
+                let y1 = (rhs >> 64) as u64;
+
+                let z0 = u64::widening_carryless_mul(x0, y0);
+                let z2 = u64::widening_carryless_mul(x1, y1);
+
+                // The grade school algorithm would compute:
+                // z1 = x0y1 ^ x1y0
+
+                // Instead, Karatsuba first computes:
+                let z3 = u64::widening_carryless_mul(x0 ^ x1, y0 ^ y1);
+                // Since it distributes over XOR,
+                // z3 == x0y0 ^ x0y1 ^ x1y0 ^ x1y1
+                //       |--|   |---------|   |--|
+                //    ==  z0  ^     z1      ^  z2
+                // so we can compute z1 as
+                let z1 = z3 ^ z0 ^ z2;
+
+                let lo = z0 ^ (z1 << 64);
+                let hi = z2 ^ (z1 >> 64);
+
+                (lo ^ carry, hi)
+            }
+        }
+    };
+    ($SelfT:ty, $WideT:ty) => {
+        carrying_carryless_mul_impl! { @internal $SelfT =>
+            pub const fn carrying_carryless_mul(self, rhs: Self, carry: Self) -> (Self, Self) {
+                // Can't use widening_carryless_mul because it's not implemented for usize.
+                let p = (self as $WideT).carryless_mul(rhs as $WideT);
+
+                let lo = (p as $SelfT);
+                let hi = (p  >> Self::BITS) as $SelfT;
+
+                (lo ^ carry, hi)
+            }
+        }
+    };
+    (@internal $SelfT:ty => $($fn:tt)*) => {
+        /// Calculates the "full carryless multiplication" without the possibility to overflow.
+        ///
+        /// This returns the low-order (wrapping) bits and the high-order (overflow) bits
+        /// of the result as two separate values, in that order.
+        ///
+        /// # Examples
+        ///
+        /// Please note that this example is shared among integer types, which is why `u8` is used.
+        ///
+        /// ```
+        /// #![feature(uint_carryless_mul)]
+        ///
+        /// assert_eq!(0b1000_0000u8.carrying_carryless_mul(0b1000_0000, 0b0000), (0, 0b0100_0000));
+        /// assert_eq!(0b1000_0000u8.carrying_carryless_mul(0b1000_0000, 0b1111), (0b1111, 0b0100_0000));
+        #[doc = concat!("assert_eq!(",
+            stringify!($SelfT), "::MAX.carrying_carryless_mul(", stringify!($SelfT), "::MAX, ", stringify!($SelfT), "::MAX), ",
+            "(!(", stringify!($SelfT), "::MAX / 3), ", stringify!($SelfT), "::MAX / 3));"
+        )]
+        /// ```
+        #[rustc_const_unstable(feature = "uint_carryless_mul", issue = "152080")]
+        #[doc(alias = "clmul")]
+        #[unstable(feature = "uint_carryless_mul", issue = "152080")]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline]
+        $($fn)*
+    }
+}
+
 impl i8 {
     int_impl! {
         Self = i8,
@@ -257,11 +400,11 @@ impl i8 {
         Min = -128,
         Max = 127,
         rot = 2,
-        rot_op = "-0x7e",
-        rot_result = "0xa",
-        swap_op = "0x12",
-        swapped = "0x12",
-        reversed = "0x48",
+        rot_op     = "-0x7e",
+        rot_result = "0x0a",
+        swap_op    = "0x12",
+        swapped    = "0x12",
+        reversed   = "0x48",
         le_bytes = "[0x12]",
         be_bytes = "[0x12]",
         to_xe_bytes_doc = i8_xe_bytes_doc!(),
@@ -269,6 +412,7 @@ impl i8 {
         bound_condition = "",
     }
     midpoint_impl! { i8, i16, signed }
+    widening_mul_impl! { i8, i16 }
 }
 
 impl i16 {
@@ -281,11 +425,11 @@ impl i16 {
         Min = -32768,
         Max = 32767,
         rot = 4,
-        rot_op = "-0x5ffd",
-        rot_result = "0x3a",
-        swap_op = "0x1234",
-        swapped = "0x3412",
-        reversed = "0x2c48",
+        rot_op     = "-0x5ffd",
+        rot_result = "0x003a",
+        swap_op    = "0x1234",
+        swapped    = "0x3412",
+        reversed   = "0x2c48",
         le_bytes = "[0x34, 0x12]",
         be_bytes = "[0x12, 0x34]",
         to_xe_bytes_doc = "",
@@ -293,6 +437,7 @@ impl i16 {
         bound_condition = "",
     }
     midpoint_impl! { i16, i32, signed }
+    widening_mul_impl! { i16, i32 }
 }
 
 impl i32 {
@@ -305,11 +450,11 @@ impl i32 {
         Min = -2147483648,
         Max = 2147483647,
         rot = 8,
-        rot_op = "0x10000b3",
-        rot_result = "0xb301",
-        swap_op = "0x12345678",
-        swapped = "0x78563412",
-        reversed = "0x1e6a2c48",
+        rot_op     = "0x010000b3",
+        rot_result = "0x0000b301",
+        swap_op    = "0x12345678",
+        swapped    = "0x78563412",
+        reversed   = "0x1e6a2c48",
         le_bytes = "[0x78, 0x56, 0x34, 0x12]",
         be_bytes = "[0x12, 0x34, 0x56, 0x78]",
         to_xe_bytes_doc = "",
@@ -317,6 +462,7 @@ impl i32 {
         bound_condition = "",
     }
     midpoint_impl! { i32, i64, signed }
+    widening_mul_impl! { i32, i64 }
 }
 
 impl i64 {
@@ -329,11 +475,11 @@ impl i64 {
         Min = -9223372036854775808,
         Max = 9223372036854775807,
         rot = 12,
-        rot_op = "0xaa00000000006e1",
-        rot_result = "0x6e10aa",
-        swap_op = "0x1234567890123456",
-        swapped = "0x5634129078563412",
-        reversed = "0x6a2c48091e6a2c48",
+        rot_op     = "0x0aa00000000006e1",
+        rot_result = "0x00000000006e10aa",
+        swap_op    = "0x1234567890123456",
+        swapped    = "0x5634129078563412",
+        reversed   = "0x6a2c48091e6a2c48",
         le_bytes = "[0x56, 0x34, 0x12, 0x90, 0x78, 0x56, 0x34, 0x12]",
         be_bytes = "[0x12, 0x34, 0x56, 0x78, 0x90, 0x12, 0x34, 0x56]",
         to_xe_bytes_doc = "",
@@ -341,6 +487,7 @@ impl i64 {
         bound_condition = "",
     }
     midpoint_impl! { i64, signed }
+    widening_mul_impl! { i64, i128 }
 }
 
 impl i128 {
@@ -353,11 +500,11 @@ impl i128 {
         Min = -170141183460469231731687303715884105728,
         Max = 170141183460469231731687303715884105727,
         rot = 16,
-        rot_op = "0x13f40000000000000000000000004f76",
-        rot_result = "0x4f7613f4",
-        swap_op = "0x12345678901234567890123456789012",
-        swapped = "0x12907856341290785634129078563412",
-        reversed = "0x48091e6a2c48091e6a2c48091e6a2c48",
+        rot_op     = "0x13f40000000000000000000000004f76",
+        rot_result = "0x0000000000000000000000004f7613f4",
+        swap_op    = "0x12345678901234567890123456789012",
+        swapped    = "0x12907856341290785634129078563412",
+        reversed   = "0x48091e6a2c48091e6a2c48091e6a2c48",
         le_bytes = "[0x12, 0x90, 0x78, 0x56, 0x34, 0x12, 0x90, 0x78, \
             0x56, 0x34, 0x12, 0x90, 0x78, 0x56, 0x34, 0x12]",
         be_bytes = "[0x12, 0x34, 0x56, 0x78, 0x90, 0x12, 0x34, 0x56, \
@@ -369,6 +516,7 @@ impl i128 {
     midpoint_impl! { i128, signed }
 }
 
+#[doc(auto_cfg = false)]
 #[cfg(target_pointer_width = "16")]
 impl isize {
     int_impl! {
@@ -380,11 +528,11 @@ impl isize {
         Min = -32768,
         Max = 32767,
         rot = 4,
-        rot_op = "-0x5ffd",
-        rot_result = "0x3a",
-        swap_op = "0x1234",
-        swapped = "0x3412",
-        reversed = "0x2c48",
+        rot_op     = "-0x5ffd",
+        rot_result = "0x003a",
+        swap_op    = "0x1234",
+        swapped    = "0x3412",
+        reversed   = "0x2c48",
         le_bytes = "[0x34, 0x12]",
         be_bytes = "[0x12, 0x34]",
         to_xe_bytes_doc = usize_isize_to_xe_bytes_doc!(),
@@ -394,6 +542,7 @@ impl isize {
     midpoint_impl! { isize, i32, signed }
 }
 
+#[doc(auto_cfg = false)]
 #[cfg(target_pointer_width = "32")]
 impl isize {
     int_impl! {
@@ -405,11 +554,11 @@ impl isize {
         Min = -2147483648,
         Max = 2147483647,
         rot = 8,
-        rot_op = "0x10000b3",
-        rot_result = "0xb301",
-        swap_op = "0x12345678",
-        swapped = "0x78563412",
-        reversed = "0x1e6a2c48",
+        rot_op     = "0x010000b3",
+        rot_result = "0x0000b301",
+        swap_op    = "0x12345678",
+        swapped    = "0x78563412",
+        reversed   = "0x1e6a2c48",
         le_bytes = "[0x78, 0x56, 0x34, 0x12]",
         be_bytes = "[0x12, 0x34, 0x56, 0x78]",
         to_xe_bytes_doc = usize_isize_to_xe_bytes_doc!(),
@@ -419,6 +568,7 @@ impl isize {
     midpoint_impl! { isize, i64, signed }
 }
 
+#[doc(auto_cfg = false)]
 #[cfg(target_pointer_width = "64")]
 impl isize {
     int_impl! {
@@ -430,11 +580,11 @@ impl isize {
         Min = -9223372036854775808,
         Max = 9223372036854775807,
         rot = 12,
-        rot_op = "0xaa00000000006e1",
-        rot_result = "0x6e10aa",
-        swap_op = "0x1234567890123456",
-        swapped = "0x5634129078563412",
-        reversed = "0x6a2c48091e6a2c48",
+        rot_op     = "0x0aa00000000006e1",
+        rot_result = "0x00000000006e10aa",
+        swap_op    = "0x1234567890123456",
+        swapped    = "0x5634129078563412",
+        reversed   = "0x6a2c48091e6a2c48",
         le_bytes = "[0x56, 0x34, 0x12, 0x90, 0x78, 0x56, 0x34, 0x12]",
         be_bytes = "[0x12, 0x34, 0x56, 0x78, 0x90, 0x12, 0x34, 0x56]",
         to_xe_bytes_doc = usize_isize_to_xe_bytes_doc!(),
@@ -456,14 +606,17 @@ impl u8 {
         BITS_MINUS_ONE = 7,
         MAX = 255,
         rot = 2,
-        rot_op = "0x82",
-        rot_result = "0xa",
-        fsh_op = "0x36",
-        fshl_result = "0x8",
-        fshr_result = "0x8d",
-        swap_op = "0x12",
-        swapped = "0x12",
-        reversed = "0x48",
+        rot_op       = "0x82",
+        rot_result   = "0x0a",
+        fsh_op       = "0x36",
+        fshl_result  = "0x08",
+        fshr_result  = "0x8d",
+        clmul_lhs    = "0x12",
+        clmul_rhs    = "0x34",
+        clmul_result = "0x28",
+        swap_op      = "0x12",
+        swapped      = "0x12",
+        reversed     = "0x48",
         le_bytes = "[0x12]",
         be_bytes = "[0x12]",
         to_xe_bytes_doc = u8_xe_bytes_doc!(),
@@ -471,6 +624,9 @@ impl u8 {
         bound_condition = "",
     }
     midpoint_impl! { u8, u16, unsigned }
+    widening_mul_impl! { u8, u16 }
+    widening_carryless_mul_impl! { u8, u16 }
+    carrying_carryless_mul_impl! { u8, u16 }
 
     /// Checks if the value is within the ASCII range.
     ///
@@ -593,6 +749,7 @@ impl u8 {
     /// ```
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
     #[rustc_const_stable(feature = "const_ascii_methods_on_intrinsics", since = "1.52.0")]
+    #[expect(clippy::manual_ignore_case_cmp, reason = "implements eq_ignore_ascii_case")]
     #[inline]
     pub const fn eq_ignore_ascii_case(&self, other: &u8) -> bool {
         self.to_ascii_lowercase() == other.to_ascii_lowercase()
@@ -895,7 +1052,8 @@ impl u8 {
         matches!(*self, b'0'..=b'9') | matches!(*self, b'A'..=b'F') | matches!(*self, b'a'..=b'f')
     }
 
-    /// Checks if the value is an ASCII punctuation character:
+    /// Checks if the value is an ASCII punctuation or symbol character
+    /// (i.e. not alphanumeric, whitespace, or control):
     ///
     /// - U+0021 ..= U+002F `! " # $ % & ' ( ) * + , - . /`, or
     /// - U+003A ..= U+0040 `: ; < = > ? @`, or
@@ -936,7 +1094,8 @@ impl u8 {
             | matches!(*self, b'{'..=b'~')
     }
 
-    /// Checks if the value is an ASCII graphic character:
+    /// Checks if the value is an ASCII graphic character
+    /// (i.e. not whitespace or control):
     /// U+0021 '!' ..= U+007E '~'.
     ///
     /// # Examples
@@ -974,6 +1133,9 @@ impl u8 {
     /// U+0020 SPACE, U+0009 HORIZONTAL TAB, U+000A LINE FEED,
     /// U+000C FORM FEED, or U+000D CARRIAGE RETURN.
     ///
+    /// **Warning:** Because the list above excludes U+000B VERTICAL TAB,
+    /// `b.is_ascii_whitespace()` is **not** equivalent to `char::from(b).is_whitespace()`.
+    ///
     /// Rust uses the WhatWG Infra Standard's [definition of ASCII
     /// whitespace][infra-aw]. There are several other definitions in
     /// wide use. For instance, [the POSIX locale][pct] includes
@@ -987,8 +1149,8 @@ impl u8 {
     /// before using this function.
     ///
     /// [infra-aw]: https://infra.spec.whatwg.org/#ascii-whitespace
-    /// [pct]: https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap07.html#tag_07_03_01
-    /// [bfs]: https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#tag_18_06_05
+    /// [pct]: https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/V1_chap07.html#tag_07_03_01
+    /// [bfs]: https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_06_05
     ///
     /// # Examples
     ///
@@ -1098,14 +1260,17 @@ impl u16 {
         BITS_MINUS_ONE = 15,
         MAX = 65535,
         rot = 4,
-        rot_op = "0xa003",
-        rot_result = "0x3a",
-        fsh_op = "0x2de",
-        fshl_result = "0x30",
-        fshr_result = "0x302d",
-        swap_op = "0x1234",
-        swapped = "0x3412",
-        reversed = "0x2c48",
+        rot_op       = "0xa003",
+        rot_result   = "0x003a",
+        fsh_op       = "0x02de",
+        fshl_result  = "0x0030",
+        fshr_result  = "0x302d",
+        clmul_lhs    = "0x9012",
+        clmul_rhs    = "0xcd34",
+        clmul_result = "0x0928",
+        swap_op      = "0x1234",
+        swapped      = "0x3412",
+        reversed     = "0x2c48",
         le_bytes = "[0x34, 0x12]",
         be_bytes = "[0x12, 0x34]",
         to_xe_bytes_doc = "",
@@ -1113,6 +1278,9 @@ impl u16 {
         bound_condition = "",
     }
     midpoint_impl! { u16, u32, unsigned }
+    widening_mul_impl! { u16, u32 }
+    widening_carryless_mul_impl! { u16, u32 }
+    carrying_carryless_mul_impl! { u16, u32 }
 
     /// Checks if the value is a Unicode surrogate code point, which are disallowed values for [`char`].
     ///
@@ -1148,14 +1316,17 @@ impl u32 {
         BITS_MINUS_ONE = 31,
         MAX = 4294967295,
         rot = 8,
-        rot_op = "0x10000b3",
-        rot_result = "0xb301",
-        fsh_op = "0x2fe78e45",
-        fshl_result = "0xb32f",
-        fshr_result = "0xb32fe78e",
-        swap_op = "0x12345678",
-        swapped = "0x78563412",
-        reversed = "0x1e6a2c48",
+        rot_op       = "0x010000b3",
+        rot_result   = "0x0000b301",
+        fsh_op       = "0x2fe78e45",
+        fshl_result  = "0x0000b32f",
+        fshr_result  = "0xb32fe78e",
+        clmul_lhs    = "0x56789012",
+        clmul_rhs    = "0xf52ecd34",
+        clmul_result = "0x9b980928",
+        swap_op      = "0x12345678",
+        swapped      = "0x78563412",
+        reversed     = "0x1e6a2c48",
         le_bytes = "[0x78, 0x56, 0x34, 0x12]",
         be_bytes = "[0x12, 0x34, 0x56, 0x78]",
         to_xe_bytes_doc = "",
@@ -1163,6 +1334,9 @@ impl u32 {
         bound_condition = "",
     }
     midpoint_impl! { u32, u64, unsigned }
+    widening_mul_impl! { u32, u64 }
+    widening_carryless_mul_impl! { u32, u64 }
+    carrying_carryless_mul_impl! { u32, u64 }
 }
 
 impl u64 {
@@ -1174,14 +1348,17 @@ impl u64 {
         BITS_MINUS_ONE = 63,
         MAX = 18446744073709551615,
         rot = 12,
-        rot_op = "0xaa00000000006e1",
-        rot_result = "0x6e10aa",
-        fsh_op = "0x2fe78e45983acd98",
-        fshl_result = "0x6e12fe",
-        fshr_result = "0x6e12fe78e45983ac",
-        swap_op = "0x1234567890123456",
-        swapped = "0x5634129078563412",
-        reversed = "0x6a2c48091e6a2c48",
+        rot_op       = "0x0aa00000000006e1",
+        rot_result   = "0x00000000006e10aa",
+        fsh_op       = "0x2fe78e45983acd98",
+        fshl_result  = "0x00000000006e12fe",
+        fshr_result  = "0x6e12fe78e45983ac",
+        clmul_lhs    = "0x7890123456789012",
+        clmul_rhs    = "0xdd358416f52ecd34",
+        clmul_result = "0x0a6299579b980928",
+        swap_op      = "0x1234567890123456",
+        swapped      = "0x5634129078563412",
+        reversed     = "0x6a2c48091e6a2c48",
         le_bytes = "[0x56, 0x34, 0x12, 0x90, 0x78, 0x56, 0x34, 0x12]",
         be_bytes = "[0x12, 0x34, 0x56, 0x78, 0x90, 0x12, 0x34, 0x56]",
         to_xe_bytes_doc = "",
@@ -1189,6 +1366,9 @@ impl u64 {
         bound_condition = "",
     }
     midpoint_impl! { u64, u128, unsigned }
+    widening_mul_impl! { u64, u128 }
+    widening_carryless_mul_impl! { u64, u128 }
+    carrying_carryless_mul_impl! { u64, u128 }
 }
 
 impl u128 {
@@ -1200,14 +1380,17 @@ impl u128 {
         BITS_MINUS_ONE = 127,
         MAX = 340282366920938463463374607431768211455,
         rot = 16,
-        rot_op = "0x13f40000000000000000000000004f76",
-        rot_result = "0x4f7613f4",
-        fsh_op = "0x2fe78e45983acd98039000008736273",
-        fshl_result = "0x4f7602fe",
-        fshr_result = "0x4f7602fe78e45983acd9803900000873",
-        swap_op = "0x12345678901234567890123456789012",
-        swapped = "0x12907856341290785634129078563412",
-        reversed = "0x48091e6a2c48091e6a2c48091e6a2c48",
+        rot_op       = "0x13f40000000000000000000000004f76",
+        rot_result   = "0x0000000000000000000000004f7613f4",
+        fsh_op       = "0x02fe78e45983acd98039000008736273",
+        fshl_result  = "0x0000000000000000000000004f7602fe",
+        fshr_result  = "0x4f7602fe78e45983acd9803900000873",
+        clmul_lhs    = "0x12345678901234567890123456789012",
+        clmul_rhs    = "0x4317e40ab4ddcf05dd358416f52ecd34",
+        clmul_result = "0xb9cf660de35d0c170a6299579b980928",
+        swap_op      = "0x12345678901234567890123456789012",
+        swapped      = "0x12907856341290785634129078563412",
+        reversed     = "0x48091e6a2c48091e6a2c48091e6a2c48",
         le_bytes = "[0x12, 0x90, 0x78, 0x56, 0x34, 0x12, 0x90, 0x78, \
             0x56, 0x34, 0x12, 0x90, 0x78, 0x56, 0x34, 0x12]",
         be_bytes = "[0x12, 0x34, 0x56, 0x78, 0x90, 0x12, 0x34, 0x56, \
@@ -1217,8 +1400,10 @@ impl u128 {
         bound_condition = "",
     }
     midpoint_impl! { u128, unsigned }
+    carrying_carryless_mul_impl! { u128, u256 }
 }
 
+#[doc(auto_cfg = false)]
 #[cfg(target_pointer_width = "16")]
 impl usize {
     uint_impl! {
@@ -1229,14 +1414,17 @@ impl usize {
         BITS_MINUS_ONE = 15,
         MAX = 65535,
         rot = 4,
-        rot_op = "0xa003",
-        rot_result = "0x3a",
-        fsh_op = "0x2fe78e45983acd98039000008736273",
-        fshl_result = "0x4f7602fe",
-        fshr_result = "0x4f7602fe78e45983acd9803900000873",
-        swap_op = "0x1234",
-        swapped = "0x3412",
-        reversed = "0x2c48",
+        rot_op       = "0xa003",
+        rot_result   = "0x003a",
+        fsh_op       = "0x02de",
+        fshl_result  = "0x0030",
+        fshr_result  = "0x302d",
+        clmul_lhs    = "0x9012",
+        clmul_rhs    = "0xcd34",
+        clmul_result = "0x0928",
+        swap_op      = "0x1234",
+        swapped      = "0x3412",
+        reversed     = "0x2c48",
         le_bytes = "[0x34, 0x12]",
         be_bytes = "[0x12, 0x34]",
         to_xe_bytes_doc = usize_isize_to_xe_bytes_doc!(),
@@ -1244,8 +1432,10 @@ impl usize {
         bound_condition = " on 16-bit targets",
     }
     midpoint_impl! { usize, u32, unsigned }
+    carrying_carryless_mul_impl! { usize, u32 }
 }
 
+#[doc(auto_cfg = false)]
 #[cfg(target_pointer_width = "32")]
 impl usize {
     uint_impl! {
@@ -1256,14 +1446,17 @@ impl usize {
         BITS_MINUS_ONE = 31,
         MAX = 4294967295,
         rot = 8,
-        rot_op = "0x10000b3",
-        rot_result = "0xb301",
-        fsh_op = "0x2fe78e45",
-        fshl_result = "0xb32f",
-        fshr_result = "0xb32fe78e",
-        swap_op = "0x12345678",
-        swapped = "0x78563412",
-        reversed = "0x1e6a2c48",
+        rot_op       = "0x010000b3",
+        rot_result   = "0x0000b301",
+        fsh_op       = "0x2fe78e45",
+        fshl_result  = "0x0000b32f",
+        fshr_result  = "0xb32fe78e",
+        clmul_lhs    = "0x56789012",
+        clmul_rhs    = "0xf52ecd34",
+        clmul_result = "0x9b980928",
+        swap_op      = "0x12345678",
+        swapped      = "0x78563412",
+        reversed     = "0x1e6a2c48",
         le_bytes = "[0x78, 0x56, 0x34, 0x12]",
         be_bytes = "[0x12, 0x34, 0x56, 0x78]",
         to_xe_bytes_doc = usize_isize_to_xe_bytes_doc!(),
@@ -1271,8 +1464,10 @@ impl usize {
         bound_condition = " on 32-bit targets",
     }
     midpoint_impl! { usize, u64, unsigned }
+    carrying_carryless_mul_impl! { usize, u64 }
 }
 
+#[doc(auto_cfg = false)]
 #[cfg(target_pointer_width = "64")]
 impl usize {
     uint_impl! {
@@ -1283,14 +1478,17 @@ impl usize {
         BITS_MINUS_ONE = 63,
         MAX = 18446744073709551615,
         rot = 12,
-        rot_op = "0xaa00000000006e1",
-        rot_result = "0x6e10aa",
-        fsh_op = "0x2fe78e45983acd98",
-        fshl_result = "0x6e12fe",
-        fshr_result = "0x6e12fe78e45983ac",
-        swap_op = "0x1234567890123456",
-        swapped = "0x5634129078563412",
-        reversed = "0x6a2c48091e6a2c48",
+        rot_op       = "0x0aa00000000006e1",
+        rot_result   = "0x00000000006e10aa",
+        fsh_op       = "0x2fe78e45983acd98",
+        fshl_result  = "0x00000000006e12fe",
+        fshr_result  = "0x6e12fe78e45983ac",
+        clmul_lhs    = "0x7890123456789012",
+        clmul_rhs    = "0xdd358416f52ecd34",
+        clmul_result = "0xa6299579b980928",
+        swap_op      = "0x1234567890123456",
+        swapped      = "0x5634129078563412",
+        reversed     = "0x6a2c48091e6a2c48",
         le_bytes = "[0x56, 0x34, 0x12, 0x90, 0x78, 0x56, 0x34, 0x12]",
         be_bytes = "[0x12, 0x34, 0x56, 0x78, 0x90, 0x12, 0x34, 0x56]",
         to_xe_bytes_doc = usize_isize_to_xe_bytes_doc!(),
@@ -1298,6 +1496,7 @@ impl usize {
         bound_condition = " on 64-bit targets",
     }
     midpoint_impl! { usize, u128, unsigned }
+    carrying_carryless_mul_impl! { usize, u128 }
 }
 
 impl usize {
@@ -1393,6 +1592,16 @@ pub enum FpCategory {
 #[inline(always)]
 #[unstable(issue = "none", feature = "std_internals")]
 pub const fn can_not_overflow<T>(radix: u32, is_signed_ty: bool, digits: &[u8]) -> bool {
+    // Assume that `digits` represents a whole number N in base `radix`.
+    // Then in infinite precision arithmetic (on whole numbers), we have:
+    //
+    // |N| <= pow(radix, digits.len()) - 1
+    //     <= pow(16, 2 * size_of::<T>() - is_signed) - 1
+    //     == pow(2, 8 * size_of::<T>() - 4 * is_signed) - 1
+    //     <= pow(2, 8 * size_of::<T>() - is_signed) - 1
+    //     == T::MAX
+    //
+    // Therefore this condition is sufficient for having no overflow.
     radix <= 16 && digits.len() <= size_of::<T>() * 2 - is_signed_ty as usize
 }
 
@@ -1400,10 +1609,10 @@ pub const fn can_not_overflow<T>(radix: u32, is_signed_ty: bool, digits: &[u8]) 
 #[cfg_attr(panic = "immediate-abort", inline)]
 #[cold]
 #[track_caller]
-const fn from_ascii_radix_panic(radix: u32) -> ! {
+const fn from_ascii_bytes_radix_panic(radix: u32) -> ! {
     const_panic!(
-        "from_ascii_radix: radix must lie in the range `[2, 36]`",
-        "from_ascii_radix: radix must lie in the range `[2, 36]` - found {radix}",
+        "from_ascii_bytes_radix: radix must lie in the range `[2, 36]`",
+        "from_ascii_bytes_radix: radix must lie in the range `[2, 36]` - found {radix}",
         radix: u32 = radix,
     )
 }
@@ -1412,7 +1621,7 @@ macro_rules! from_str_int_impl {
     ($signedness:ident $($int_ty:ty)+) => {$(
         #[stable(feature = "rust1", since = "1.0.0")]
         #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
-        impl const FromStr for $int_ty {
+        const impl FromStr for $int_ty {
             type Err = ParseIntError;
 
             /// Parses an integer from a string slice with decimal digits.
@@ -1501,7 +1710,7 @@ macro_rules! from_str_int_impl {
             #[rustc_const_stable(feature = "const_int_from_str", since = "1.82.0")]
             #[inline]
             pub const fn from_str_radix(src: &str, radix: u32) -> Result<$int_ty, ParseIntError> {
-                <$int_ty>::from_ascii_radix(src.as_bytes(), radix)
+                <$int_ty>::from_ascii_bytes_radix_impl(src.as_bytes(), radix)
             }
 
             /// Parses an integer from an ASCII-byte slice with decimal digits.
@@ -1525,18 +1734,22 @@ macro_rules! from_str_int_impl {
             /// ```
             /// #![feature(int_from_ascii)]
             ///
-            #[doc = concat!("assert_eq!(", stringify!($int_ty), "::from_ascii(b\"+10\"), Ok(10));")]
+            #[doc = concat!("assert_eq!(", stringify!($int_ty), "::from_ascii_bytes(b\"+10\"), Ok(10));")]
             /// ```
             /// Trailing space returns error:
             /// ```
             /// # #![feature(int_from_ascii)]
             /// #
-            #[doc = concat!("assert!(", stringify!($int_ty), "::from_ascii(b\"1 \").is_err());")]
+            #[doc = concat!("assert!(", stringify!($int_ty), "::from_ascii_bytes(b\"1 \").is_err());")]
             /// ```
             #[unstable(feature = "int_from_ascii", issue = "134821")]
+            #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
             #[inline]
-            pub const fn from_ascii(src: &[u8]) -> Result<$int_ty, ParseIntError> {
-                <$int_ty>::from_ascii_radix(src, 10)
+            pub const fn from_ascii_bytes<T>(src: T) -> Result<$int_ty, ParseIntError>
+            where
+                T: [const] AsRef<[u8]> + [const] crate::marker::Destruct
+            {
+                <$int_ty>::from_ascii_bytes_radix(src.as_ref(), 10)
             }
 
             /// Parses an integer from an ASCII-byte slice with digits in a given base.
@@ -1569,22 +1782,32 @@ macro_rules! from_str_int_impl {
             /// ```
             /// #![feature(int_from_ascii)]
             ///
-            #[doc = concat!("assert_eq!(", stringify!($int_ty), "::from_ascii_radix(b\"A\", 16), Ok(10));")]
+            #[doc = concat!("assert_eq!(", stringify!($int_ty), "::from_ascii_bytes_radix(b\"A\", 16), Ok(10));")]
             /// ```
             /// Trailing space returns error:
             /// ```
             /// # #![feature(int_from_ascii)]
             /// #
-            #[doc = concat!("assert!(", stringify!($int_ty), "::from_ascii_radix(b\"1 \", 10).is_err());")]
+            #[doc = concat!("assert!(", stringify!($int_ty), "::from_ascii_bytes_radix(b\"1 \", 10).is_err());")]
             /// ```
             #[unstable(feature = "int_from_ascii", issue = "134821")]
+            #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
             #[inline]
-            pub const fn from_ascii_radix(src: &[u8], radix: u32) -> Result<$int_ty, ParseIntError> {
+            pub const fn from_ascii_bytes_radix<T>(src: T, radix: u32) -> Result<$int_ty, ParseIntError>
+            where
+                T: [const] AsRef<[u8]> + [const] crate::marker::Destruct
+            {
+                <$int_ty>::from_ascii_bytes_radix_impl(src.as_ref(), radix)
+            }
+
+            #[inline]
+            #[cfg_attr(flux, flux::trusted(reason = "flux does not support subslice patterns (unsupported place `(*_1)[1:]`)"))]
+            pub(super) const fn from_ascii_bytes_radix_impl(src: &[u8], radix: u32) -> Result<$int_ty, ParseIntError> {
                 use self::IntErrorKind::*;
                 use self::ParseIntError as PIE;
 
                 if 2 > radix || radix > 36 {
-                    from_ascii_radix_panic(radix);
+                    from_ascii_bytes_radix_panic(radix);
                 }
 
                 if src.is_empty() {
@@ -1623,20 +1846,23 @@ macro_rules! from_str_int_impl {
                     // Consider radix 16 as it has the highest information density per digit and will thus overflow the earliest:
                     // `u8::MAX` is `ff` - any str of len 2 is guaranteed to not overflow.
                     // `i8::MAX` is `7f` - only a str of len 1 is guaranteed to not overflow.
-                    macro_rules! run_unchecked_loop {
-                        ($unchecked_additive_op:tt) => {{
+                    //
+                    // NOTE: We could use unchecked arithmetic here, but we don't, based on the observation
+                    // that it produces the same assembly as wrapping ones. See #163099.
+                    macro_rules! run_no_check_loop {
+                        ($additive_op:ident) => {{
                             while let [c, rest @ ..] = digits {
-                                result = result * (radix as $int_ty);
+                                result = <$int_ty>::wrapping_mul(result, radix as _);
                                 let x = unwrap_or_PIE!((*c as char).to_digit(radix), InvalidDigit);
-                                result = result $unchecked_additive_op (x as $int_ty);
+                                result = result.$additive_op(x as $int_ty);
                                 digits = rest;
                             }
                         }};
                     }
                     if is_positive {
-                        run_unchecked_loop!(+)
+                        run_no_check_loop!(wrapping_add)
                     } else {
-                        run_unchecked_loop!(-)
+                        run_no_check_loop!(wrapping_sub)
                     };
                 } else {
                     macro_rules! run_checked_loop {
@@ -1777,16 +2003,12 @@ mod verify {
                     kani::assume(lhs >= $min && lhs <= $max);
                     kani::assume(rhs >= $min && rhs <= $max);
 
-                    let (result_low, result_high) = lhs.widening_mul(rhs);
+                    let result = lhs.widening_mul(rhs);
 
                     // Compute expected result using wider type
                     let expected = (lhs as $wide_type) * (rhs as $wide_type);
 
-                    let expected_low = expected as $type;
-                    let expected_high = (expected >> <$type>::BITS) as $type;
-
-                    assert_eq!(result_low, expected_low);
-                    assert_eq!(result_high, expected_high);
+                    assert_eq!(result, expected);
                 }
             )+
         }
@@ -2174,8 +2396,6 @@ mod verify {
         checked_f128_to_int_unchecked_i32,
         i64,
         checked_f128_to_int_unchecked_i64,
-        i128,
-        checked_f128_to_int_unchecked_i128,
         isize,
         checked_f128_to_int_unchecked_isize,
         u8,
@@ -2191,4 +2411,25 @@ mod verify {
         usize,
         checked_f128_to_int_unchecked_usize
     );
+
+    // FIXME(kani): this harness is hand-written (instead of being generated via
+    // generate_to_int_unchecked_harness! above) because Kani's f128 -> i128 lower bound in
+    // float_to_int_in_range is unsound (-2^128 instead of -(2^127 + 2^15)), so the contract
+    // instrumentation admits out-of-range values; see
+    // https://github.com/model-checking/kani/issues/4662. Until the fix
+    // (https://github.com/model-checking/kani/pull/4663) is part of the Kani version pinned
+    // here, constrain the input to the sound range explicitly.
+    #[kani::proof_for_contract(f128::to_int_unchecked)]
+    pub fn checked_f128_to_int_unchecked_i128() {
+        let num1: f128 = kani::any_where(|f: &f128| {
+            // -(2^127 + 2^15) is the largest f128 whose truncation is below i128::MIN;
+            // require the value to be strictly above it (and below i128::MAX + 1 = 2^127).
+            f.is_finite()
+                && *f > -170141183460469231731687303715884138496.0
+                && *f < 170141183460469231731687303715884105728.0
+        });
+        let result = unsafe { num1.to_int_unchecked::<i128>() };
+
+        assert_eq!(result, num1 as i128);
+    }
 }

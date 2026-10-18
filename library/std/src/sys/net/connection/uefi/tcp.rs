@@ -1,13 +1,17 @@
 use super::tcp4;
 use crate::io::{self, IoSlice, IoSliceMut};
 use crate::net::SocketAddr;
-use crate::ptr::NonNull;
-use crate::sys::{helpers, unsupported};
+use crate::sys::pal::{helpers, unsupported};
 use crate::time::Duration;
 
 pub(crate) enum Tcp {
     V4(tcp4::Tcp4),
 }
+
+// SAFETY: UEFI has no regular threads, and as per <https://github.com/rust-lang/rust/issues/133604>
+// std does not support being invoked from "irregular threads" such as interrupt handlers or other
+// CPU cores that run outside the scope of UEFI.
+unsafe impl Send for Tcp {}
 
 impl Tcp {
     pub(crate) fn connect(addr: &SocketAddr, timeout: Option<Duration>) -> io::Result<Self> {
@@ -18,7 +22,24 @@ impl Tcp {
                 temp.connect(timeout)?;
                 Ok(Tcp::V4(temp))
             }
-            SocketAddr::V6(_) => todo!(),
+            SocketAddr::V6(_) => unsupported(),
+        }
+    }
+
+    pub(crate) fn bind(addr: &SocketAddr) -> io::Result<Self> {
+        match addr {
+            SocketAddr::V4(x) => {
+                let temp = tcp4::Tcp4::new()?;
+                temp.configure(false, None, Some(x))?;
+                Ok(Tcp::V4(temp))
+            }
+            SocketAddr::V6(_) => unsupported(),
+        }
+    }
+
+    pub(crate) fn accept(&self) -> io::Result<Self> {
+        match self {
+            Self::V4(client) => client.accept().map(Tcp::V4),
         }
     }
 
@@ -63,11 +84,8 @@ impl Tcp {
     pub(crate) fn nodelay(&self) -> io::Result<bool> {
         match self {
             Self::V4(client) => {
-                let temp = client.get_mode_data()?;
-                match NonNull::new(temp.control_option) {
-                    Some(x) => unsafe { Ok(x.as_ref().enable_nagle.into()) },
-                    None => unsupported(),
-                }
+                let nagle: bool = client.get_control_option()?.enable_nagle.into();
+                Ok(!nagle)
             }
         }
     }

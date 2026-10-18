@@ -8,9 +8,8 @@ use crate::net::{Shutdown, SocketAddr};
 use crate::os::windows::io::{
     AsRawSocket, AsSocket, BorrowedSocket, FromRawSocket, IntoRawSocket, OwnedSocket, RawSocket,
 };
-use crate::sys::c;
 use crate::sys::pal::winsock::last_error;
-use crate::sys_common::{AsInner, FromInner, IntoInner};
+use crate::sys::{AsInner, FromInner, IntoInner, c};
 use crate::time::Duration;
 use crate::{cmp, mem, ptr, sys};
 
@@ -32,8 +31,8 @@ pub(super) mod netc {
         IP_DROP_MEMBERSHIP, IP_MULTICAST_LOOP, IP_MULTICAST_TTL, IP_TTL, IPPROTO_IP, IPPROTO_IPV6,
         IPV6_ADD_MEMBERSHIP, IPV6_DROP_MEMBERSHIP, IPV6_MULTICAST_LOOP, IPV6_V6ONLY, SO_BROADCAST,
         SO_RCVTIMEO, SO_SNDTIMEO, SOCK_DGRAM, SOCK_STREAM, SOCKADDR as sockaddr,
-        SOCKADDR_STORAGE as sockaddr_storage, SOL_SOCKET, bind, connect, freeaddrinfo, getpeername,
-        getsockname, getsockopt, listen, setsockopt,
+        SOCKADDR_STORAGE as sockaddr_storage, SOL_SOCKET, WSAEMSGSIZE as EMSGSIZE, bind, connect,
+        freeaddrinfo, getpeername, getsockname, getsockopt, listen, setsockopt,
     };
 
     #[allow(non_camel_case_types)]
@@ -89,7 +88,7 @@ pub(super) mod netc {
     }
 
     pub unsafe fn send(socket: SOCKET, buf: *const c_void, len: c_int, flags: c_int) -> c_int {
-        unsafe { c::send(socket, buf.cast::<u8>(), len, flags) }
+        unsafe { c::send(socket, buf.cast::<i8>(), len, flags) }
     }
     pub unsafe fn sendto(
         socket: SOCKET,
@@ -99,7 +98,7 @@ pub(super) mod netc {
         addr: *const SOCKADDR,
         addrlen: c_int,
     ) -> c_int {
-        unsafe { c::sendto(socket, buf.cast::<u8>(), len, flags, addr, addrlen) }
+        unsafe { c::sendto(socket, buf.cast::<i8>(), len, flags, addr, addrlen) }
     }
     pub unsafe fn getaddrinfo(
         node: *const c_char,
@@ -226,7 +225,7 @@ impl Socket {
         Ok(Self(self.0.try_clone()?))
     }
 
-    fn recv_with_flags(&self, mut buf: BorrowedCursor<'_>, flags: c_int) -> io::Result<()> {
+    fn recv_with_flags(&self, mut buf: BorrowedCursor<'_, u8>, flags: c_int) -> io::Result<()> {
         // On unix when a socket is shut down all further reads return 0, so we
         // do the same on windows to map a shut down socket to returning EOF.
         let length = cmp::min(buf.capacity(), i32::MAX as usize) as i32;
@@ -244,7 +243,7 @@ impl Socket {
                 }
             }
             _ => {
-                unsafe { buf.advance_unchecked(result as usize) };
+                unsafe { buf.advance(result as usize) };
                 Ok(())
             }
         }
@@ -256,7 +255,7 @@ impl Socket {
         Ok(buf.len())
     }
 
-    pub fn read_buf(&self, buf: BorrowedCursor<'_>) -> io::Result<()> {
+    pub fn read_buf(&self, buf: BorrowedCursor<'_, u8>) -> io::Result<()> {
         self.recv_with_flags(buf, 0)
     }
 
@@ -414,7 +413,8 @@ impl Socket {
     pub fn set_linger(&self, linger: Option<Duration>) -> io::Result<()> {
         let linger = c::LINGER {
             l_onoff: linger.is_some() as c_ushort,
-            l_linger: linger.unwrap_or_default().as_secs() as c_ushort,
+            l_linger: cmp::min(linger.unwrap_or_default().as_secs(), c_ushort::MAX as u64)
+                as c_ushort,
         };
 
         unsafe { setsockopt(self, c::SOL_SOCKET, c::SO_LINGER, linger) }
@@ -424,6 +424,15 @@ impl Socket {
         let val: c::LINGER = unsafe { getsockopt(self, c::SOL_SOCKET, c::SO_LINGER)? };
 
         Ok((val.l_onoff != 0).then(|| Duration::from_secs(val.l_linger as u64)))
+    }
+
+    pub fn set_keepalive(&self, keepalive: bool) -> io::Result<()> {
+        unsafe { setsockopt(self, c::SOL_SOCKET, c::SO_KEEPALIVE, keepalive as c::BOOL) }
+    }
+
+    pub fn keepalive(&self) -> io::Result<bool> {
+        let raw: c::BOOL = unsafe { getsockopt(self, c::SOL_SOCKET, c::SO_KEEPALIVE)? };
+        Ok(raw != 0)
     }
 
     pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
@@ -440,7 +449,6 @@ impl Socket {
         if raw == 0 { Ok(None) } else { Ok(Some(io::Error::from_raw_os_error(raw as i32))) }
     }
 
-    // This is used by sys_common code to abstract over Windows and Unix.
     pub fn as_raw(&self) -> c::SOCKET {
         debug_assert_eq!(size_of::<c::SOCKET>(), size_of::<RawSocket>());
         debug_assert_eq!(align_of::<c::SOCKET>(), align_of::<RawSocket>());
@@ -453,7 +461,6 @@ impl Socket {
     }
 }
 
-#[unstable(reason = "not public", issue = "none", feature = "fd_read")]
 impl<'a> Read for &'a Socket {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         (**self).read(buf)

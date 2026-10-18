@@ -1,5 +1,5 @@
-// Using runtime feature detection requires atomics. Currently there are no x86 targets
-// that support sse but not `AtomicPtr`.
+//! Using runtime feature detection requires atomics. Currently there are no x86 targets
+//! that support sse but not `AtomicPtr`.
 
 #[cfg(target_arch = "x86")]
 use core::arch::x86::{__cpuid, __cpuid_count, _xgetbv, CpuidResult};
@@ -39,6 +39,8 @@ pub fn get_cpu_features() -> Flags {
 /// Implementation is taken from [std-detect][std-detect].
 ///
 /// [std-detect]: https://github.com/rust-lang/stdarch/blob/690b3a6334d482874163bd6fcef408e0518febe9/crates/std_detect/src/detect/os/x86.rs#L142
+// FIXME(msrv): Remove unsafe block around __cpuid once https://github.com/rust-lang/stdarch/pull/1935 is available in MSRV.
+#[allow(unused_unsafe)]
 fn load_x86_features() -> Flags {
     let mut value = Flags::empty();
 

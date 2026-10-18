@@ -7,12 +7,13 @@
 use moto_rt::libc;
 
 use super::raw::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
+use crate::alloc::Allocator;
 #[cfg(not(target_os = "trusty"))]
 use crate::fs;
 use crate::marker::PhantomData;
 use crate::mem::ManuallyDrop;
 #[cfg(not(any(
-    target_arch = "wasm32",
+    all(target_arch = "wasm32", not(target_os = "emscripten")),
     target_env = "sgx",
     target_os = "hermit",
     target_os = "trusty",
@@ -20,7 +21,7 @@ use crate::mem::ManuallyDrop;
 )))]
 use crate::sys::cvt;
 #[cfg(not(target_os = "trusty"))]
-use crate::sys_common::{AsInner, FromInner, IntoInner};
+use crate::sys::{AsInner, FromInner, IntoInner};
 use crate::{fmt, io};
 
 type ValidRawFd = core::num::niche_types::NotAllOnes<RawFd>;
@@ -77,7 +78,11 @@ impl BorrowedFd<'_> {
     /// # Safety
     ///
     /// The resource pointed to by `fd` must remain open for the duration of
-    /// the returned `BorrowedFd`, and it must not have the value `-1`.
+    /// the returned `BorrowedFd`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the raw file descriptor has the value `-1`.
     #[inline]
     #[track_caller]
     #[rustc_const_stable(feature = "io_safety", since = "1.63.0")]
@@ -91,7 +96,7 @@ impl OwnedFd {
     /// Creates a new `OwnedFd` instance that shares the same underlying file
     /// description as the existing `OwnedFd` instance.
     #[stable(feature = "io_safety", since = "1.63.0")]
-    pub fn try_clone(&self) -> crate::io::Result<Self> {
+    pub fn try_clone(&self) -> io::Result<Self> {
         self.as_fd().try_clone_to_owned()
     }
 }
@@ -100,13 +105,13 @@ impl BorrowedFd<'_> {
     /// Creates a new `OwnedFd` instance that shares the same underlying file
     /// description as the existing `BorrowedFd` instance.
     #[cfg(not(any(
-        target_arch = "wasm32",
+        all(target_arch = "wasm32", not(target_os = "emscripten")),
         target_os = "hermit",
         target_os = "trusty",
         target_os = "motor"
     )))]
     #[stable(feature = "io_safety", since = "1.63.0")]
-    pub fn try_clone_to_owned(&self) -> crate::io::Result<OwnedFd> {
+    pub fn try_clone_to_owned(&self) -> io::Result<OwnedFd> {
         // We want to atomically duplicate this file descriptor and set the
         // CLOEXEC flag, and currently that's done via F_DUPFD_CLOEXEC. This
         // is a POSIX flag that was added to Linux in 2.6.24.
@@ -127,17 +132,21 @@ impl BorrowedFd<'_> {
 
     /// Creates a new `OwnedFd` instance that shares the same underlying file
     /// description as the existing `BorrowedFd` instance.
-    #[cfg(any(target_arch = "wasm32", target_os = "hermit", target_os = "trusty"))]
+    #[cfg(any(
+        all(target_arch = "wasm32", not(target_os = "emscripten")),
+        target_os = "hermit",
+        target_os = "trusty"
+    ))]
     #[stable(feature = "io_safety", since = "1.63.0")]
-    pub fn try_clone_to_owned(&self) -> crate::io::Result<OwnedFd> {
-        Err(crate::io::Error::UNSUPPORTED_PLATFORM)
+    pub fn try_clone_to_owned(&self) -> io::Result<OwnedFd> {
+        Err(io::Error::UNSUPPORTED_PLATFORM)
     }
 
     /// Creates a new `OwnedFd` instance that shares the same underlying file
     /// description as the existing `BorrowedFd` instance.
     #[cfg(target_os = "motor")]
     #[stable(feature = "io_safety", since = "1.63.0")]
-    pub fn try_clone_to_owned(&self) -> crate::io::Result<OwnedFd> {
+    pub fn try_clone_to_owned(&self) -> io::Result<OwnedFd> {
         let fd = moto_rt::fs::duplicate(self.as_raw_fd()).map_err(crate::sys::map_motor_error)?;
         Ok(unsafe { OwnedFd::from_raw_fd(fd) })
     }
@@ -177,6 +186,10 @@ impl FromRawFd for OwnedFd {
     /// [ownership][io-safety]. The resource must not require any cleanup other than `close`.
     ///
     /// [io-safety]: io#io-safety
+    ///
+    /// # Panics
+    ///
+    /// Panics if the raw file descriptor has the value `-1`.
     #[inline]
     #[track_caller]
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
@@ -191,7 +204,7 @@ impl Drop for OwnedFd {
         unsafe {
             // Note that errors are ignored when closing a file descriptor. According to POSIX 2024,
             // we can and indeed should retry `close` on `EINTR`
-            // (https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/functions/close.html),
+            // (https://pubs.opengroup.org/onlinepubs/9799919799/functions/close.html),
             // but it is not clear yet how well widely-used implementations are conforming with this
             // mandate since older versions of POSIX left the state of the FD after an `EINTR`
             // unspecified. Ignoring errors is "fine" because some of the major Unices (in
@@ -229,11 +242,8 @@ impl fmt::Debug for OwnedFd {
 
 macro_rules! impl_is_terminal {
     ($($t:ty),*$(,)?) => {$(
-        #[unstable(feature = "sealed", issue = "none")]
-        impl crate::sealed::Sealed for $t {}
-
         #[stable(feature = "is_terminal", since = "1.70.0")]
-        impl crate::io::IsTerminal for $t {
+        impl io::IsTerminal for $t {
             #[inline]
             fn is_terminal(&self) -> bool {
                 crate::sys::io::is_terminal(self)
@@ -350,7 +360,7 @@ impl From<crate::net::TcpStream> for OwnedFd {
     /// Takes ownership of a [`TcpStream`](crate::net::TcpStream)'s socket file descriptor.
     #[inline]
     fn from(tcp_stream: crate::net::TcpStream) -> OwnedFd {
-        tcp_stream.into_inner().into_socket().into_inner().into_inner().into()
+        tcp_stream.into_inner().into_socket().into_inner().into_inner()
     }
 }
 
@@ -380,7 +390,7 @@ impl From<crate::net::TcpListener> for OwnedFd {
     /// Takes ownership of a [`TcpListener`](crate::net::TcpListener)'s socket file descriptor.
     #[inline]
     fn from(tcp_listener: crate::net::TcpListener) -> OwnedFd {
-        tcp_listener.into_inner().into_socket().into_inner().into_inner().into()
+        tcp_listener.into_inner().into_socket().into_inner().into_inner()
     }
 }
 
@@ -410,7 +420,7 @@ impl From<crate::net::UdpSocket> for OwnedFd {
     /// Takes ownership of a [`UdpSocket`](crate::net::UdpSocket)'s file descriptor.
     #[inline]
     fn from(udp_socket: crate::net::UdpSocket) -> OwnedFd {
-        udp_socket.into_inner().into_socket().into_inner().into_inner().into()
+        udp_socket.into_inner().into_socket().into_inner().into_inner()
     }
 }
 
@@ -465,7 +475,7 @@ impl<T: AsFd + ?Sized> AsFd for crate::rc::UniqueRc<T> {
 }
 
 #[stable(feature = "asfd_ptrs", since = "1.64.0")]
-impl<T: AsFd + ?Sized> AsFd for Box<T> {
+impl<T: AsFd + ?Sized, A: Allocator> AsFd for Box<T, A> {
     #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
         (**self).as_fd()

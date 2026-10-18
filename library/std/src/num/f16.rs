@@ -16,8 +16,14 @@ use crate::intrinsics;
 use crate::sys::cmath;
 
 #[cfg(not(test))]
+#[doc(test(attr(allow(unused_features))))]
 impl f16 {
     /// Raises a number to a floating point power.
+    ///
+    /// Note that this function is special in that it can return non-NaN results for NaN inputs. For
+    /// example, `f16::powf(f16::NAN, 0.0)` returns `1.0`. However, if an input is a *signaling*
+    /// NaN, then the result is non-deterministically either a NaN or the result that the
+    /// corresponding quiet NaN would produce.
     ///
     /// # Unspecified precision
     ///
@@ -28,12 +34,11 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 2.0_f16;
     /// let abs_difference = (x.powf(2.0) - (x * x)).abs();
-    /// assert!(abs_difference <= f16::EPSILON);
+    /// assert!(abs_difference <= 1e-1);
     ///
     /// assert_eq!(f16::powf(1.0, f16::NAN), 1.0);
     /// assert_eq!(f16::powf(f16::NAN, 0.0), 1.0);
@@ -59,7 +64,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let one = 1.0f16;
@@ -69,7 +73,7 @@ impl f16 {
     /// // ln(e) - 1 == 0
     /// let abs_difference = (e.ln() - 1.0).abs();
     ///
-    /// assert!(abs_difference <= f16::EPSILON);
+    /// assert!(abs_difference <= 1e-2);
     /// # }
     /// ```
     #[inline]
@@ -77,7 +81,7 @@ impl f16 {
     #[unstable(feature = "f16", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn exp(self) -> f16 {
-        intrinsics::expf16(self)
+        intrinsics::exp(self)
     }
 
     /// Returns `2^(self)`.
@@ -91,7 +95,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let f = 2.0f16;
@@ -99,7 +102,7 @@ impl f16 {
     /// // 2^2 - 4 == 0
     /// let abs_difference = (f.exp2() - 4.0).abs();
     ///
-    /// assert!(abs_difference <= f16::EPSILON);
+    /// assert!(abs_difference <= 1e-1);
     /// # }
     /// ```
     #[inline]
@@ -107,7 +110,7 @@ impl f16 {
     #[unstable(feature = "f16", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn exp2(self) -> f16 {
-        intrinsics::exp2f16(self)
+        intrinsics::exp2(self)
     }
 
     /// Returns the natural logarithm of the number.
@@ -123,7 +126,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let one = 1.0f16;
@@ -133,14 +135,13 @@ impl f16 {
     /// // ln(e) - 1 == 0
     /// let abs_difference = (e.ln() - 1.0).abs();
     ///
-    /// assert!(abs_difference <= f16::EPSILON);
+    /// assert!(abs_difference <= 1e-2);
     /// # }
     /// ```
     ///
     /// Non-positive values:
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// assert_eq!(0_f16.ln(), f16::NEG_INFINITY);
@@ -152,7 +153,7 @@ impl f16 {
     #[unstable(feature = "f16", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn ln(self) -> f16 {
-        intrinsics::logf16(self)
+        intrinsics::log(self)
     }
 
     /// Returns the logarithm of the number with respect to an arbitrary base.
@@ -172,7 +173,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let five = 5.0f16;
@@ -180,14 +180,13 @@ impl f16 {
     /// // log5(5) - 1 == 0
     /// let abs_difference = (five.log(5.0) - 1.0).abs();
     ///
-    /// assert!(abs_difference <= f16::EPSILON);
+    /// assert!(abs_difference <= 1e-2);
     /// # }
     /// ```
     ///
     /// Non-positive values:
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// assert_eq!(0_f16.log(10.0), f16::NEG_INFINITY);
@@ -215,7 +214,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let two = 2.0f16;
@@ -223,14 +221,13 @@ impl f16 {
     /// // log2(2) - 1 == 0
     /// let abs_difference = (two.log2() - 1.0).abs();
     ///
-    /// assert!(abs_difference <= f16::EPSILON);
+    /// assert!(abs_difference <= 1e-2);
     /// # }
     /// ```
     ///
     /// Non-positive values:
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// assert_eq!(0_f16.log2(), f16::NEG_INFINITY);
@@ -242,7 +239,7 @@ impl f16 {
     #[unstable(feature = "f16", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn log2(self) -> f16 {
-        intrinsics::log2f16(self)
+        intrinsics::log2(self)
     }
 
     /// Returns the base 10 logarithm of the number.
@@ -258,7 +255,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let ten = 10.0f16;
@@ -266,14 +262,13 @@ impl f16 {
     /// // log10(10) - 1 == 0
     /// let abs_difference = (ten.log10() - 1.0).abs();
     ///
-    /// assert!(abs_difference <= f16::EPSILON);
+    /// assert!(abs_difference <= 1e-2);
     /// # }
     /// ```
     ///
     /// Non-positive values:
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// assert_eq!(0_f16.log10(), f16::NEG_INFINITY);
@@ -285,7 +280,7 @@ impl f16 {
     #[unstable(feature = "f16", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn log10(self) -> f16 {
-        intrinsics::log10f16(self)
+        intrinsics::log10(self)
     }
 
     /// Compute the distance between the origin and a point (`x`, `y`) on the
@@ -305,7 +300,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 2.0f16;
@@ -314,7 +308,7 @@ impl f16 {
     /// // sqrt(x^2 + y^2)
     /// let abs_difference = (x.hypot(y) - (x.powi(2) + y.powi(2)).sqrt()).abs();
     ///
-    /// assert!(abs_difference <= f16::EPSILON);
+    /// assert!(abs_difference <= 1e-2);
     /// # }
     /// ```
     #[inline]
@@ -336,14 +330,13 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = std::f16::consts::FRAC_PI_2;
     ///
     /// let abs_difference = (x.sin() - 1.0).abs();
     ///
-    /// assert!(abs_difference <= f16::EPSILON);
+    /// assert!(abs_difference <= 1e-2);
     /// # }
     /// ```
     #[inline]
@@ -351,7 +344,7 @@ impl f16 {
     #[unstable(feature = "f16", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn sin(self) -> f16 {
-        intrinsics::sinf16(self)
+        intrinsics::sin(self)
     }
 
     /// Computes the cosine of a number (in radians).
@@ -365,14 +358,13 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 2.0 * std::f16::consts::PI;
     ///
     /// let abs_difference = (x.cos() - 1.0).abs();
     ///
-    /// assert!(abs_difference <= f16::EPSILON);
+    /// assert!(abs_difference <= 1e-2);
     /// # }
     /// ```
     #[inline]
@@ -380,7 +372,7 @@ impl f16 {
     #[unstable(feature = "f16", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn cos(self) -> f16 {
-        intrinsics::cosf16(self)
+        intrinsics::cos(self)
     }
 
     /// Computes the tangent of a number (in radians).
@@ -397,7 +389,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = std::f16::consts::FRAC_PI_4;
@@ -430,7 +421,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let f = std::f16::consts::FRAC_PI_4;
@@ -438,7 +428,7 @@ impl f16 {
     /// // asin(sin(pi/2))
     /// let abs_difference = (f.sin().asin() - f).abs();
     ///
-    /// assert!(abs_difference <= f16::EPSILON);
+    /// assert!(abs_difference <= 1e-2);
     /// # }
     /// ```
     #[inline]
@@ -466,7 +456,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let f = std::f16::consts::FRAC_PI_4;
@@ -474,7 +463,7 @@ impl f16 {
     /// // acos(cos(pi/4))
     /// let abs_difference = (f.cos().acos() - std::f16::consts::FRAC_PI_4).abs();
     ///
-    /// assert!(abs_difference <= f16::EPSILON);
+    /// assert!(abs_difference <= 1e-2);
     /// # }
     /// ```
     #[inline]
@@ -501,7 +490,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let f = 1.0f16;
@@ -542,7 +530,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// // Positive angles measured counter-clockwise
@@ -585,7 +572,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = std::f16::consts::FRAC_PI_4;
@@ -594,14 +580,15 @@ impl f16 {
     /// let abs_difference_0 = (f.0 - x.sin()).abs();
     /// let abs_difference_1 = (f.1 - x.cos()).abs();
     ///
-    /// assert!(abs_difference_0 <= f16::EPSILON);
-    /// assert!(abs_difference_1 <= f16::EPSILON);
+    /// assert!(abs_difference_0 <= 1e-2);
+    /// assert!(abs_difference_1 <= 1e-2);
     /// # }
     /// ```
     #[inline]
     #[doc(alias = "sincos")]
     #[rustc_allow_incoherent_impl]
     #[unstable(feature = "f16", issue = "116909")]
+    #[must_use = "this returns the result of the operation, without modifying the original"]
     pub fn sin_cos(self) -> (f16, f16) {
         (self.sin(), self.cos())
     }
@@ -621,7 +608,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 1e-4_f16;
@@ -658,7 +644,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 1e-4_f16;
@@ -674,7 +659,6 @@ impl f16 {
     /// Out-of-range values:
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// assert_eq!((-1.0_f16).ln_1p(), f16::NEG_INFINITY);
@@ -704,7 +688,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let e = std::f16::consts::E;
@@ -740,7 +723,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let e = std::f16::consts::E;
@@ -776,7 +758,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let e = std::f16::consts::E;
@@ -809,7 +790,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 1.0f16;
@@ -826,9 +806,7 @@ impl f16 {
     #[unstable(feature = "f16", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn asinh(self) -> f16 {
-        let ax = self.abs();
-        let ix = 1.0 / ax;
-        (ax + (ax / (Self::hypot(1.0, ix) + ix))).ln_1p().copysign(self)
+        cmath::asinhf(self as f32) as f16
     }
 
     /// Inverse hyperbolic cosine function.
@@ -842,7 +820,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 1.0f16;
@@ -859,11 +836,7 @@ impl f16 {
     #[unstable(feature = "f16", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn acosh(self) -> f16 {
-        if self < 1.0 {
-            Self::NAN
-        } else {
-            (self + ((self - 1.0).sqrt() * (self + 1.0).sqrt())).ln()
-        }
+        cmath::acoshf(self as f32) as f16
     }
 
     /// Inverse hyperbolic tangent function.
@@ -877,7 +850,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = std::f16::consts::FRAC_PI_6;
@@ -911,8 +883,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// #![feature(float_gamma)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 5.0f16;
@@ -947,8 +917,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// #![feature(float_gamma)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 2.0f16;
@@ -983,8 +951,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// #![feature(float_erf)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     /// /// The error function relates what percent of a normal distribution lies
     /// /// within `x` standard deviations (scaled by `1/sqrt(2)`).
@@ -1023,8 +989,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// #![feature(float_erf)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     /// let x: f16 = 0.123;
     ///

@@ -1,6 +1,6 @@
 use crate::fmt::{Debug, Display, Formatter, LowerExp, Result, UpperExp};
 use crate::mem::MaybeUninit;
-use crate::num::{flt2dec, fmt as numfmt};
+use crate::num::imp::{flt2dec, fmt as numfmt};
 
 #[doc(hidden)]
 trait GeneralFormat: PartialOrd {
@@ -13,8 +13,14 @@ macro_rules! impl_general_format {
     ($($t:ident)*) => {
         $(impl GeneralFormat for $t {
             fn already_rounded_value_should_use_exponential(&self) -> bool {
+                // `max_abs` rounds to infinity for `f16`. This is fine to save us from a more
+                // complex macro, it just means a positive-exponent `f16` will never print as
+                // scientific notation by default (reasonably, the max is 65504.0).
+                #[allow(overflowing_literals)]
+                let max_abs = 1e+16;
+
                 let abs = $t::abs(*self);
-                (abs != 0.0 && abs < 1e-4) || abs >= 1e+16
+                (abs != 0.0 && abs < 1e-4) || abs >= max_abs
             }
         })*
     }
@@ -165,8 +171,7 @@ where
     };
 
     if let Some(precision) = fmt.options.get_precision() {
-        // 1 integral digit + `precision` fractional digits = `precision + 1` total digits
-        float_to_exponential_common_exact(fmt, num, sign, precision + 1, upper)
+        float_to_exponential_common_exact(fmt, num, sign, precision, upper)
     } else {
         float_to_exponential_common_shortest(fmt, num, sign, upper)
     }
@@ -236,7 +241,7 @@ floating! { f32 f64 }
 #[cfg(target_has_reliable_f16)]
 floating! { f16 }
 
-// FIXME(f16_f128): A fallback is used when the backend+target does not support f16 well, in order
+// FIXME(f16): A fallback is used when the backend+target does not support f16 well, in order
 // to avoid ICEs.
 
 #[cfg(not(target_has_reliable_f16))]

@@ -1,4 +1,7 @@
 #![feature(duration_constants)]
+#![feature(duration_constructors)]
+#![feature(time_systemtime_limits)]
+#![feature(time_saturating_systemtime)]
 
 use std::fmt::Debug;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -102,7 +105,8 @@ fn instant_math_is_associative() {
 #[test]
 fn instant_duration_since_saturates() {
     let a = Instant::now();
-    assert_eq!((a - Duration::SECOND).duration_since(a), Duration::ZERO);
+    // This also checks that computing an instant before program startup works.
+    assert_eq!((a - Duration::from_days(1)).duration_since(a), Duration::ZERO);
 }
 
 #[test]
@@ -177,6 +181,7 @@ fn system_time_elapsed() {
 }
 
 #[test]
+#[cfg_attr(target_os = "l4re", ignore = "No wallclock time support in L4Re")]
 fn since_epoch() {
     let ts = SystemTime::now();
     let a = ts.duration_since(UNIX_EPOCH + Duration::SECOND).unwrap();
@@ -237,9 +242,72 @@ fn system_time_duration_since_max_range_on_unix() {
     let min = SystemTime::UNIX_EPOCH - (Duration::new(i64::MAX as u64 + 1, 0));
     let max = SystemTime::UNIX_EPOCH + (Duration::new(i64::MAX as u64, 999_999_999));
 
+    assert_eq!(min, SystemTime::MIN);
+    assert_eq!(max, SystemTime::MAX);
+
     let delta_a = max.duration_since(min).expect("duration_since overflow");
     let delta_b = min.duration_since(max).expect_err("duration_since overflow").duration();
 
     assert_eq!(Duration::MAX, delta_a);
     assert_eq!(Duration::MAX, delta_b);
+}
+
+#[test]
+fn system_time_max_min() {
+    #[cfg(not(target_os = "windows"))]
+    /// Most (all?) non-Windows systems have nanosecond precision.
+    const MIN_INTERVAL: Duration = Duration::new(0, 1);
+    #[cfg(target_os = "windows")]
+    /// Windows' time precision is at 100ns.
+    const MIN_INTERVAL: Duration = Duration::new(0, 100);
+
+    // First, test everything with checked_* and Duration::ZERO.
+    assert_eq!(SystemTime::MAX.checked_add(Duration::ZERO), Some(SystemTime::MAX));
+    assert_eq!(SystemTime::MAX.checked_sub(Duration::ZERO), Some(SystemTime::MAX));
+    assert_eq!(SystemTime::MIN.checked_add(Duration::ZERO), Some(SystemTime::MIN));
+    assert_eq!(SystemTime::MIN.checked_sub(Duration::ZERO), Some(SystemTime::MIN));
+
+    // Now do the same again with checked_* but try by ± the lowest time precision.
+    assert!(SystemTime::MAX.checked_add(MIN_INTERVAL).is_none());
+    assert!(SystemTime::MAX.checked_sub(MIN_INTERVAL).is_some());
+    assert!(SystemTime::MIN.checked_add(MIN_INTERVAL).is_some());
+    assert!(SystemTime::MIN.checked_sub(MIN_INTERVAL).is_none());
+}
+
+#[test]
+fn system_time_saturating() {
+    // Perform saturating addition on SystemTime::MAX to see how it behaves.
+    assert_eq!(SystemTime::MAX.saturating_add(Duration::ZERO), SystemTime::MAX);
+    assert_eq!(SystemTime::MAX.saturating_add(Duration::new(1, 0)), SystemTime::MAX);
+    assert!(SystemTime::MAX.checked_add(Duration::new(1, 0)).is_none());
+    assert_eq!(
+        SystemTime::MAX.saturating_sub(Duration::new(1, 0)),
+        SystemTime::MAX.checked_sub(Duration::new(1, 0)).unwrap()
+    );
+
+    // Perform saturating subtraction on SystemTime::MIn to see how it behaves.
+    assert_eq!(SystemTime::MIN.saturating_sub(Duration::ZERO), SystemTime::MIN);
+    assert_eq!(SystemTime::MIN.saturating_sub(Duration::new(1, 0)), SystemTime::MIN);
+    assert!(SystemTime::MIN.checked_sub(Duration::new(1, 0)).is_none());
+    assert_eq!(
+        SystemTime::MIN.saturating_add(Duration::new(1, 0)),
+        SystemTime::MIN.checked_add(Duration::new(1, 0)).unwrap()
+    );
+
+    // Check saturating_duration_since with various constant values.
+    assert!(SystemTime::MAX.saturating_duration_since(SystemTime::MIN) >= Duration::ZERO);
+    assert_eq!(SystemTime::MAX.saturating_duration_since(SystemTime::MAX), Duration::ZERO);
+    assert!(SystemTime::MAX.duration_since(SystemTime::MAX).is_ok());
+    assert_eq!(SystemTime::MIN.saturating_duration_since(SystemTime::MAX), Duration::ZERO);
+    assert!(SystemTime::MIN.duration_since(SystemTime::MAX).is_err());
+    assert_eq!(
+        (SystemTime::UNIX_EPOCH + Duration::new(1, 0))
+            .saturating_duration_since(SystemTime::UNIX_EPOCH),
+        Duration::new(1, 0)
+    );
+    assert_eq!(
+        SystemTime::UNIX_EPOCH
+            .saturating_duration_since(SystemTime::UNIX_EPOCH + Duration::new(1, 0)),
+        Duration::ZERO
+    );
 }
