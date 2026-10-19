@@ -2411,14 +2411,20 @@ pub mod dragon_verify {
     // estimate is K, and the estimator stub checks the same value, so the fixed-K proofs
     // of a window and check_dragon_scale_k_range together cover the window. Each
     // `len => bound` pair bounds the limb count of the bigint operand of a cached product
-    // with a power table of `len` limbs, and the stub asserts the actual count.
+    // with a power table of `len` limbs, and the stub asserts the actual count. The optional
+    // `low, high` pair (exponent offsets in the window) limits the proof to part of the window.
     macro_rules! check_dragon_scale_fixed_k {
         ($name:ident, $window:literal, $k:expr, [$($len:literal => $bound:expr),* $(,)?]) => {
+            check_dragon_scale_fixed_k!($name, $window, $k, 0, 15, [$($len => $bound),*]);
+        };
+        ($name:ident, $window:literal, $k:expr, $low:literal, $high:literal, [$($len:literal => $bound:expr),* $(,)?]) => {
             mod $name {
                 use super::*;
 
                 const FIRST: i16 = -1076 + 16 * $window;
                 const LAST: i16 = if FIRST + 15 < 970 { FIRST + 15 } else { 970 };
+                const LOW: i16 = FIRST + $low;
+                const HIGH: i16 = if FIRST + $high < LAST { FIRST + $high } else { LAST };
                 const K: i16 = $k;
 
                 fn window_limb_count(size: usize) -> usize {
@@ -2489,7 +2495,7 @@ pub mod dragon_verify {
                     kani::assume(plus == 1 || mant == 1 << 25 || mant == 1 << 54);
                     kani::assume(mant as u128 + plus as u128 <= ((minus as u128 + plus as u128) << 53));
                     let exp = FIRST + i16::from(kani::any::<u8>() & 15);
-                    kani::assume(exp <= LAST);
+                    kani::assume(LOW <= exp && exp <= HIGH);
                     kani::assume(
                         crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor(mant + plus, exp)
                             == K
@@ -2585,6 +2591,32 @@ pub mod dragon_verify {
     check_dragon_scale_fixed_k!(dragon_scale_fixed_k_011_k262, 11, -262, [10 => 1]);
     #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
     check_dragon_scale_fixed_k!(dragon_scale_fixed_k_011_k262, 11, -262, []);
+
+    // At K = -255 (window 013, mantissa below 2^24) the operands have at most 1, 2, 3 and 5
+    // limbs before the 1-, 2-, 3- and 5-limb power tables.
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_013_k255, 13, -255, [1 => 1, 2 => 2, 3 => 3, 5 => 5]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_013_k255, 13, -255, []);
+
+    // Window 000 at K = -315 split into 4 quarters of 4 exponents each, with the bounds of the
+    // whole window.
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k315_e00, 0, -315, 0, 3, [1 => 1, 2 => 2, 10 => 3]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k315_e00, 0, -315, 0, 3, []);
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k315_e04, 0, -315, 4, 7, [1 => 1, 2 => 2, 10 => 3]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k315_e04, 0, -315, 4, 7, []);
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k315_e08, 0, -315, 8, 11, [1 => 1, 2 => 2, 10 => 3]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k315_e08, 0, -315, 8, 11, []);
+    #[cfg(target_pointer_width = "64")]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k315_e12, 0, -315, 12, 15, [1 => 1, 2 => 2, 10 => 3]);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_dragon_scale_fixed_k!(dragon_scale_fixed_k_000_k315_e12, 0, -315, 12, 15, []);
 
     // Every contract input of windows 000 and 127 has its estimate in the window range,
     // so the fixed-K proofs of each K in that range cover the window.
