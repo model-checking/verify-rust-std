@@ -810,11 +810,13 @@ mod verify {
 
     // The challenge table lists `<dyn Error>::downcast_unchecked`. That API
     // does not exist: unchecked downcast lives on `Box<dyn Any (+ Send) (+ Sync)>`.
-    // Kani cannot `proof_for_contract` these three methods: the resolver sees
-    // multiple `downcast_unchecked` impls on `Box` and rejects every path.
-    // Contracts remain on the methods; harnesses check the bodies under `is::<T>()`.
+    // Those impls sit in this module rather than in `Box`'s own, and Kani's
+    // contract resolver could not match such out-of-module impls until
+    // model-checking/kani#4778, which the pinned Kani includes. The target paths
+    // use the impl's generic name `A` and fully qualified auto traits, the
+    // spelling that fix matches.
 
-    #[kani::proof]
+    #[kani::proof_for_contract(Box::<dyn core::any::Any + 'static, A>::downcast_unchecked::<i32>)]
     pub fn check_downcast_unchecked_any() {
         let value: i32 = kani::any();
         let erased: Box<dyn Any> = Box::new(value);
@@ -822,7 +824,7 @@ mod verify {
         assert!(*boxed == value);
     }
 
-    #[kani::proof]
+    #[kani::proof_for_contract(Box::<dyn core::any::Any + core::marker::Send + 'static, A>::downcast_unchecked::<i32>)]
     pub fn check_downcast_unchecked_any_send() {
         let value: i32 = kani::any();
         let erased: Box<dyn Any + Send> = Box::new(value);
@@ -830,7 +832,7 @@ mod verify {
         assert!(*boxed == value);
     }
 
-    #[kani::proof]
+    #[kani::proof_for_contract(Box::<dyn core::any::Any + core::marker::Send + core::marker::Sync + 'static, A>::downcast_unchecked::<bool>)]
     pub fn check_downcast_unchecked_any_send_sync() {
         let value: bool = kani::any();
         let erased: Box<dyn Any + Send + Sync> = Box::new(value);
