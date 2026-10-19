@@ -86,7 +86,7 @@ class Flt2decHarnessesTests(unittest.TestCase):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
         # The diagnostic probes (branch g4-diag-s19 only) add groups, so the counts skip them.
         real = [group for group in self.groups if "::probe_" not in group["harnesses"][0]]
-        self.assertEqual(len(real), 536)
+        self.assertEqual(len(real), 537)
         self.assertEqual(len({group["name"] for group in self.groups}), len(self.groups))
         self.assertEqual(sum(len(group["harnesses"]) for group in real), 3540)
         self.assertEqual(len(set(self.dedicated)), len(self.dedicated))
@@ -199,11 +199,11 @@ class Flt2decHarnessesTests(unittest.TestCase):
                                  "dragon-" + "abcd"[(window >= 34) + (window >= 68) + (window >= 98)])
                 self.assertEqual(group["timeout_minutes"], minutes)
                 self.assertLessEqual(len(group["harnesses"]), batch_size)
-        self.assertEqual(len(DRAGON_SLOW_PAIRS), 15)
-        self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 180), 24)
+        self.assertEqual(len(DRAGON_SLOW_PAIRS), 16)
+        self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 180), 25)
         self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 60), 3)
         self.assertEqual(tuple(len(proof_matrix(matrix_job=job)["group"])
-                               for job in ("dragon-a", "dragon-b", "dragon-c", "dragon-d")), (110, 98, 81, 81))
+                               for job in ("dragon-a", "dragon-b", "dragon-c", "dragon-d")), (111, 98, 81, 81))
 
     def test_all_float_partitions_and_equivalence_cases_remain(self):
         self.assertIn(
