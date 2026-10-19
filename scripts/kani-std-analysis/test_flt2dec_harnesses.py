@@ -3,7 +3,8 @@ import re
 import unittest
 
 from flt2dec_harnesses import (
-    OPERATING_SYSTEMS, group_harnesses, proof_groups, proof_matrix, remaining_harnesses,
+    DRAGON, DRAGON_SLOW_BAND, MATRIX_JOBS, OPERATING_SYSTEMS, dragon_fixed_k_harness,
+    dragon_fixed_k_pairs, group_harnesses, proof_groups, proof_matrix, remaining_harnesses,
 )
 
 
@@ -85,11 +86,11 @@ class Flt2decHarnessesTests(unittest.TestCase):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
         # The diagnostic probes (branch g4-diag-s19 only) add groups, so the counts skip them.
         real = [group for group in self.groups if "::probe_" not in group["harnesses"][0]]
-        self.assertEqual(len(real), 187)
+        self.assertEqual(len(real), 362)
         self.assertEqual(len({group["name"] for group in self.groups}), len(self.groups))
-        self.assertEqual(sum(len(group["harnesses"]) for group in real), 814)
+        self.assertEqual(sum(len(group["harnesses"]) for group in real), 2255)
         self.assertEqual(len(set(self.dedicated)), len(self.dedicated))
-        for part in ("core", "long"):
+        for part in MATRIX_JOBS:
             parts = [group for group in proof_matrix(matrix_job=part)["group"]
                      if "::probe_" not in group["harnesses"][0]]
             self.assertLessEqual(len(parts) * len(OPERATING_SYSTEMS), 256)
@@ -117,8 +118,8 @@ class Flt2decHarnessesTests(unittest.TestCase):
 
     def test_ci_matrix_fits_the_job_limit(self):
         # The matrix job runs on a 64-bit host, so only that catalog is expanded.
-        # Each of the two flt2dec matrix jobs holds at most 256 jobs.
-        for part in ("core", "long"):
+        # Each flt2dec matrix job holds at most 256 jobs.
+        for part in MATRIX_JOBS:
             with self.subTest(matrix_job=part):
                 matrix = proof_matrix(pointer_width=64, matrix_job=part)
                 self.assertTrue(matrix["group"])
@@ -128,7 +129,7 @@ class Flt2decHarnessesTests(unittest.TestCase):
         for width in (16, 32, 64):
             groups = proof_groups(width)
             parts = {part: proof_matrix(pointer_width=width, matrix_job=part)["group"]
-                     for part in ("core", "long")}
+                     for part in MATRIX_JOBS}
             with self.subTest(pointer_width=width):
                 self.assertTrue(all(group["matrix_job"] in parts for group in groups))
                 self.assertTrue(all(group["matrix_job"] == part
@@ -140,8 +141,13 @@ class Flt2decHarnessesTests(unittest.TestCase):
         for group in self.groups:
             in_long_job = (group["kind"].startswith("generator-")
                            or group["name"].startswith("cached-multiplication-equivalence-"))
+            in_dragon_job = group["name"].startswith(("dragon-shortest-scaling-fixed-k-",
+                                                      "dragon-shortest-scaling-contract-"))
             with self.subTest(group=group["name"]):
-                self.assertEqual(group["matrix_job"], "long" if in_long_job else "core")
+                if in_dragon_job:
+                    self.assertIn(group["matrix_job"], ("dragon-a", "dragon-b"))
+                else:
+                    self.assertEqual(group["matrix_job"], "long" if in_long_job else "core")
 
     def test_manual_selection_splits_between_matrix_jobs(self):
         names = ["dragon-exact-loop-frame", "grisu-exact-f32"]
@@ -153,6 +159,56 @@ class Flt2decHarnessesTests(unittest.TestCase):
         for part in ("all", ""):
             with self.subTest(matrix_job=part), self.assertRaises(ValueError):
                 proof_matrix(matrix_job=part)
+
+    def test_matrix_job_selection_expands_to_every_group_of_the_job(self):
+        matrix = proof_matrix(["matrix-job:dragon-a", "matrix-job:dragon-b"])
+        self.assertEqual(matrix["os"], OPERATING_SYSTEMS)
+        self.assertEqual(sorted(group["catalog_name"] for group in matrix["group"]),
+                         sorted(group["name"] for group in self.groups
+                                if group["matrix_job"] in ("dragon-a", "dragon-b")))
+        self.assertEqual(proof_matrix(["matrix-job:dragon-a"], matrix_job="core")["group"], [])
+        self.assertEqual(len(proof_matrix(["matrix-job:dragon-a"], matrix_job="dragon-a")["group"]),
+                         len(proof_matrix(matrix_job="dragon-a")["group"]))
+        with self.assertRaises(ValueError):
+            proof_matrix(["matrix-job:unknown"])
+
+    def test_dragon_fixed_k_groups_cover_every_pair_once_with_the_band_routing(self):
+        pairs = dragon_fixed_k_pairs()
+        self.assertEqual(len(pairs), 1460)
+        self.assertEqual((pairs[0], pairs[21], pairs[22], pairs[-1]),
+                         ((0, -324), (0, -303), (1, -319), (67, 19)))
+        self.assertEqual(sum(1 for _, k in pairs if k >= 0), 54)
+        groups = [group for group in self.groups
+                  if group["name"].startswith("dragon-shortest-scaling-fixed-k-")]
+        routed = [(group, int(window), (-1 if sign == "k" else 1) * int(k))
+                  for group in groups for harness in group["harnesses"]
+                  for window, sign, k in re.findall(r"::w(\d{3})::([kp])(\d{3})::check_scale_shortest$",
+                                                    harness)]
+        self.assertEqual(len(routed), sum(len(group["harnesses"]) for group in groups))
+        self.assertEqual(sorted((window, k) for _, window, k in routed), pairs)
+        self.assertEqual([harness for group in groups for harness in group["harnesses"]
+                          if harness == dragon_fixed_k_harness(0, -324)],
+                         [f"{DRAGON}::dragon_scale_fixed_k::w000::k324::check_scale_shortest"])
+        for group, window, k in routed:
+            in_band = window in (0, 1) and k in DRAGON_SLOW_BAND
+            minutes, batch_size = (180, 1) if in_band and window == 0 else (60, 4) if in_band else (30, 8)
+            with self.subTest(group=group["name"], window=window, k=k):
+                self.assertEqual(group["matrix_job"], "dragon-a" if window < 34 else "dragon-b")
+                self.assertEqual(group["timeout_minutes"], minutes)
+                self.assertLessEqual(len(group["harnesses"]), batch_size)
+        self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 180), 9)
+        self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 60), 3)
+        self.assertEqual((len(proof_matrix(matrix_job="dragon-a")["group"]),
+                          len(proof_matrix(matrix_job="dragon-b")["group"])), (101, 95))
+
+    def test_dragon_partition_probes_run_in_the_dragon_b_job(self):
+        for window in (68, 100, 127):
+            name = f"dragon-shortest-scaling-contract-{window:03d}"
+            group = next(group for group in self.groups if group["name"] == name)
+            with self.subTest(group=name):
+                self.assertEqual((group["harnesses"], group["timeout_minutes"], group["matrix_job"]),
+                                 ([f"{DRAGON}::dragon_scale_shortest_{window:03d}::check_scale_shortest"],
+                                  60, "dragon-b"))
 
     def test_all_float_partitions_and_equivalence_cases_remain(self):
         self.assertIn(

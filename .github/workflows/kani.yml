@@ -174,8 +174,12 @@ jobs:
     outputs:
       matrix: ${{ steps.groups.outputs.matrix }}
       matrix_long: ${{ steps.groups.outputs.matrix_long }}
+      matrix_dragon_a: ${{ steps.groups.outputs.matrix_dragon_a }}
+      matrix_dragon_b: ${{ steps.groups.outputs.matrix_dragon_b }}
       core_groups: ${{ steps.groups.outputs.core_groups }}
       long_groups: ${{ steps.groups.outputs.long_groups }}
+      dragon_a_groups: ${{ steps.groups.outputs.dragon_a_groups }}
+      dragon_b_groups: ${{ steps.groups.outputs.dragon_b_groups }}
     steps:
       - uses: actions/checkout@v4
       - name: Check proof routing
@@ -197,17 +201,27 @@ jobs:
           if [[ -n "$SELECTED_PROOF_GROUPS" ]]; then
             matrix_args+=(--matrix-groups "$SELECTED_PROOF_GROUPS" --matrix-platform "$SELECTED_PROOF_PLATFORM")
           fi
-          # One matrix holds at most 256 jobs, so generator and cached proofs run in a second job.
+          # One matrix holds at most 256 jobs, so generator and cached proofs run in a second job
+          # and the Dragon fixed-K proofs run in two more (dragon-a, dragon-b).
           core_matrix=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py "${matrix_args[@]}" --matrix-job core)
           long_matrix=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py "${matrix_args[@]}" --matrix-job long)
+          dragon_a_matrix=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py "${matrix_args[@]}" --matrix-job dragon-a)
+          dragon_b_matrix=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py "${matrix_args[@]}" --matrix-job dragon-b)
           core_groups=$(jq '.group | length' <<< "$core_matrix")
           long_groups=$(jq '.group | length' <<< "$long_matrix")
-          printf 'Core groups: %s, long groups: %s\n' "$core_groups" "$long_groups"
+          dragon_a_groups=$(jq '.group | length' <<< "$dragon_a_matrix")
+          dragon_b_groups=$(jq '.group | length' <<< "$dragon_b_matrix")
+          printf 'Core groups: %s, long groups: %s, dragon-a groups: %s, dragon-b groups: %s\n' \
+            "$core_groups" "$long_groups" "$dragon_a_groups" "$dragon_b_groups"
           {
             printf 'matrix=%s\n' "$core_matrix"
             printf 'matrix_long=%s\n' "$long_matrix"
+            printf 'matrix_dragon_a=%s\n' "$dragon_a_matrix"
+            printf 'matrix_dragon_b=%s\n' "$dragon_b_matrix"
             printf 'core_groups=%s\n' "$core_groups"
             printf 'long_groups=%s\n' "$long_groups"
+            printf 'dragon_a_groups=%s\n' "$dragon_a_groups"
+            printf 'dragon_b_groups=%s\n' "$dragon_b_groups"
           } >> "$GITHUB_OUTPUT"
 
   check-flt2dec:
@@ -361,6 +375,30 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_long) }}
     # The aliases reuse the environment and steps of check-flt2dec.
+    env: *flt2dec_env
+    steps: *flt2dec_steps
+
+  # The Dragon fixed-K proofs of windows 000..033 run in a third matrix job.
+  check-flt2dec-dragon-a:
+    name: Verify flt2dec dragon-a (${{ matrix.group.name }}, ${{ matrix.os }})
+    needs: [flt2dec_matrix, build-flat-smt-cbmc]
+    if: needs.flt2dec_matrix.outputs.dragon_a_groups != '0'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_dragon_a) }}
+    env: *flt2dec_env
+    steps: *flt2dec_steps
+
+  # The Dragon fixed-K proofs of windows 034..067 and the partition probes run in a fourth matrix job.
+  check-flt2dec-dragon-b:
+    name: Verify flt2dec dragon-b (${{ matrix.group.name }}, ${{ matrix.os }})
+    needs: [flt2dec_matrix, build-flat-smt-cbmc]
+    if: needs.flt2dec_matrix.outputs.dragon_b_groups != '0'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_dragon_b) }}
     env: *flt2dec_env
     steps: *flt2dec_steps
 
