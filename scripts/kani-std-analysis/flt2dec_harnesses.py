@@ -17,14 +17,20 @@ GRISU_PROBES = {
     "integral-step": "num::imp::flt2dec::strategy::grisu::generate_integral_digits.loop_invariant_step.1",
 }
 # Dragon shortest scaling:  dragon.rs estimates K = floor((nbits + exp) * DRAGON_K_ESTIMATE / 2^32)
-# for nbits in 2..=55 and proves windows 000..067 (every K < 0) one (window, K) pair at a time.
+# for nbits in 2..=55 and proves windows 000..127 one (window, K) pair at a time.
 DRAGON_K_ESTIMATE = 1292913986
-DRAGON_FIXED_K_WINDOWS = 68
+DRAGON_FIXED_K_WINDOWS = 128
 # Windows 000 and 001 at K = -319..-311 are the slow band (routing ruling s46).
 DRAGON_SLOW_BAND = range(-319, -310)
-# One CI matrix holds at most 256 jobs:  core, long (generator and cached proofs),
-# dragon-a (fixed-K windows 000..033) and dragon-b (fixed-K windows 034..067, partition probes).
-MATRIX_JOBS = ("core", "long", "dragon-a", "dragon-b")
+# Pairs that timed out at 30 or 60 minutes in their group of eight or four (run 39215660085,
+# ubuntu or macOS):  each runs alone at 180 minutes, its group keeps the other pairs (ruling s54 (a)).
+DRAGON_SLOW_PAIRS = (
+    (1, -310), (1, -314), (6, -285), (23, -201), (23, -204), (28, -183), (29, -172), (29, -174),
+    (29, -175), (34, -151), (34, -152), (34, -154), (34, -155), (46, -94), (47, -91),
+)
+# One CI matrix holds at most 256 jobs:  core, long (generator and cached proofs), and the fixed-K
+# pairs in four:  dragon-a (windows 000..033), dragon-b (034..067), dragon-c (068..097), dragon-d (098..127).
+MATRIX_JOBS = ("core", "long", "dragon-a", "dragon-b", "dragon-c", "dragon-d")
 
 
 def dragon_window_exponents(window):
@@ -40,7 +46,7 @@ def dragon_fixed_k_range(window):
 
 
 def dragon_fixed_k_pairs():
-    """Every (window, K) pair of the fixed-K proofs (windows 000..067), in (window, K) order."""
+    """Every (window, K) pair of the fixed-K proofs (windows 000..127), in (window, K) order."""
     return [(window, k) for window in range(DRAGON_FIXED_K_WINDOWS) for k in dragon_fixed_k_range(window)]
 
 
@@ -55,8 +61,10 @@ def dragon_fixed_k_harness(window, k):
 
 
 def dragon_matrix_job(window):
-    """Windows 000..033 run in the dragon-a matrix job, 034..127 in dragon-b."""
-    return "dragon-a" if window < 34 else "dragon-b"
+    """Windows 000..033 run in the dragon-a matrix job, 034..067 in dragon-b, 068..097 in dragon-c
+    and 098..127 in dragon-d."""
+    return next(job for first, job in ((98, "dragon-d"), (68, "dragon-c"), (34, "dragon-b"), (0, "dragon-a"))
+                if window >= first)
 
 
 def proof_groups(pointer_width=None):
@@ -154,14 +162,7 @@ def proof_groups(pointer_width=None):
         for first in range(0, len(harnesses), 8):
             add(f"foundations-{kind}-{first:02d}", kind, harnesses[first:first + 8], 30)
 
-    # Dragon shortest scaling, windows 068..127 (K >= 0):  one partition proof per window of 16
-    # exponents.  Probes of windows 068, 100 and 127 first (ruling s47 Q2).
-    for window in (68, 100, 127):
-        add(f"dragon-shortest-scaling-contract-{window:03d}", "contract", [
-            f"{DRAGON}::dragon_scale_shortest_{window:03d}::check_scale_shortest"
-        ], 60, matrix_job=dragon_matrix_job(window))
-
-    # Windows 000..067:  one fixed-K proof per (window, K) pair, and the estimate range the pairs cover.
+    # Windows 000..127:  one fixed-K proof per (window, K) pair, and the estimate range the pairs cover.
     add("dragon-shortest-scaling-k-range", "equivalence", [f"{DRAGON}::check_dragon_scale_k_range"], 30)
 
     def add_fixed_k(pairs, timeout_minutes):
@@ -176,16 +177,22 @@ def proof_groups(pointer_width=None):
 
     # Routing (ruling s46):  the slow band runs window 000 at 180 minutes alone and window 001 at
     # 60 minutes in fours;  every other pair runs at 30 minutes in eights, contiguous in
-    # (window, K) order within its matrix job.
-    for window, batch_size, timeout_minutes in ((0, 1, 180), (1, 4, 60)):
-        pairs = [(window, k) for k in DRAGON_SLOW_BAND]
+    # (window, K) order within its matrix job.  The chunks form first;  then each slow pair
+    # (ruling s54 (a)) leaves its chunk, so the other group names stay, and runs alone at
+    # 180 minutes.
+    def add_fixed_k_chunks(pairs, batch_size, timeout_minutes):
         for first in range(0, len(pairs), batch_size):
-            add_fixed_k(pairs[first:first + batch_size], timeout_minutes)
-    for job in ("dragon-a", "dragon-b"):
-        pairs = [(window, k) for window, k in dragon_fixed_k_pairs()
-                 if dragon_matrix_job(window) == job and not in_slow_band(window, k)]
-        for first in range(0, len(pairs), 8):
-            add_fixed_k(pairs[first:first + 8], 30)
+            chunk = [pair for pair in pairs[first:first + batch_size] if pair not in DRAGON_SLOW_PAIRS]
+            if chunk:
+                add_fixed_k(chunk, timeout_minutes)
+
+    for window, batch_size, timeout_minutes in ((0, 1, 180), (1, 4, 60)):
+        add_fixed_k_chunks([(window, k) for k in DRAGON_SLOW_BAND], batch_size, timeout_minutes)
+    for job in ("dragon-a", "dragon-b", "dragon-c", "dragon-d"):
+        add_fixed_k_chunks([(window, k) for window, k in dragon_fixed_k_pairs()
+                            if dragon_matrix_job(window) == job and not in_slow_band(window, k)], 8, 30)
+    for pair in DRAGON_SLOW_PAIRS:
+        add_fixed_k([pair], 180)
 
     # The index 51 proof (group 29) does not finish on the whole domain, so grisu.rs proves
     # it in two pieces that split on the top bit of v and together cover every input.
