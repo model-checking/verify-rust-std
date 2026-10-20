@@ -72,7 +72,7 @@ jobs:
   flt2dec_runtime:
     name: Test flt2dec runtime (${{ matrix.os }})
     needs: flt2dec_matrix
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -86,7 +86,7 @@ jobs:
   build-flat-smt-cbmc:
     name: Build patched CBMC (${{ matrix.os }})
     needs: flt2dec_matrix
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -112,7 +112,7 @@ jobs:
   check-kani-on-std:
     name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Verify std library (partition ${{ matrix.partition }})
     if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -240,7 +240,7 @@ jobs:
     name: Verify flt2dec (${{ matrix.group.name }}, ${{ matrix.os }})
     needs: [flt2dec_matrix, build-flat-smt-cbmc]
     if: needs.flt2dec_matrix.outputs.core_groups != '0'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix) }}
@@ -382,7 +382,7 @@ jobs:
     name: Verify flt2dec long (${{ matrix.group.name }}, ${{ matrix.os }})
     needs: [flt2dec_matrix, build-flat-smt-cbmc]
     if: needs.flt2dec_matrix.outputs.long_groups != '0'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_long) }}
@@ -395,7 +395,7 @@ jobs:
     name: Verify flt2dec dragon-a (${{ matrix.group.name }}, ${{ matrix.os }})
     needs: [flt2dec_matrix, build-flat-smt-cbmc]
     if: needs.flt2dec_matrix.outputs.dragon_a_groups != '0'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_dragon_a) }}
@@ -407,7 +407,7 @@ jobs:
     name: Verify flt2dec dragon-b (${{ matrix.group.name }}, ${{ matrix.os }})
     needs: [flt2dec_matrix, build-flat-smt-cbmc]
     if: needs.flt2dec_matrix.outputs.dragon_b_groups != '0'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_dragon_b) }}
@@ -419,7 +419,7 @@ jobs:
     name: Verify flt2dec dragon-c (${{ matrix.group.name }}, ${{ matrix.os }})
     needs: [flt2dec_matrix, build-flat-smt-cbmc]
     if: needs.flt2dec_matrix.outputs.dragon_c_groups != '0'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_dragon_c) }}
@@ -431,7 +431,7 @@ jobs:
     name: Verify flt2dec dragon-d (${{ matrix.group.name }}, ${{ matrix.os }})
     needs: [flt2dec_matrix, build-flat-smt-cbmc]
     if: needs.flt2dec_matrix.outputs.dragon_d_groups != '0'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_dragon_d) }}
@@ -441,7 +441,7 @@ jobs:
   kani_autoharness:
     name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Verify std library using autoharness
     if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -625,7 +625,7 @@ jobs:
   run_kani_metrics:
     name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Kani Metrics
     if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -697,7 +697,7 @@ jobs:
     name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Build JSON from logs
     if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
     needs: [run_kani_metrics, kani_autoharness]
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
