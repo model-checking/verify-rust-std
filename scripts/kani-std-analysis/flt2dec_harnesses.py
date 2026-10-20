@@ -26,8 +26,8 @@ DRAGON_SLOW_BAND = range(-319, -310)
 # ubuntu or macOS):  each runs alone at 180 minutes, its group keeps the other pairs (ruling s54 (a)).
 DRAGON_SLOW_PAIRS = (
     (1, -310), (1, -314), (6, -285), (7, -283), (23, -200), (23, -201), (23, -204), (28, -183),
-    (28, -184), (29, -172), (29, -174), (29, -175), (34, -151), (34, -152), (34, -154), (34, -155),
-    (46, -92), (46, -94), (47, -90), (47, -91),
+    (28, -184), (29, -172), (29, -173), (29, -174), (29, -175), (34, -151), (34, -152), (34, -153),
+    (34, -154), (34, -155), (46, -92), (46, -94), (46, -95), (47, -90), (47, -91),
 )
 # One CI matrix holds at most 256 jobs:  core, long (generator and cached proofs), and the fixed-K
 # pairs in four:  dragon-a (windows 000..033), dragon-b (034..067), dragon-c (068..097), dragon-d (098..127).
