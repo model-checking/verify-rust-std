@@ -2,4 +2,4 @@
 # incompatible with the verify-std repo.
 
 [kani]
-commit = "152c6a8c875d9886a67e229247b4826d6105ccfd"
+commit = "6ce55b95437ad334c7e0a319400c2aebb07db58f"

@@ -5,6 +5,9 @@ use crate::cell::{Cell, UnsafeCell};
 use crate::mem::MaybeUninit;
 use crate::ptr;
 
+#[cfg(target_has_threads)]
+compile_error!("Using no_threads implementation on a target with threads");
+
 #[doc(hidden)]
 #[allow_internal_unstable(thread_local_internals)]
 #[allow_internal_unsafe]
@@ -28,14 +31,18 @@ pub macro thread_local_inner {
 
     // used to generate the `LocalKey` value for `thread_local!`
     (@key $t:ty, $(#[$align_attr:meta])*, $init:expr) => {{
+        // We intentionally have an argument-position `'static` lifetime so that elided lifetimes in `$t`
+        // become `'static` like they do for `const`s and `static`s, including in the other two
+        // `thread_local!` implementations.
+        #[allow(mismatched_lifetime_syntaxes)]
         #[inline]
-        fn __rust_std_internal_init_fn() -> $t { $init }
+        fn __rust_std_internal_init_fn(_lifetime_elision: $crate::marker::PhantomData<&'static ()>) -> $t { $init }
 
         unsafe {
             $crate::thread::LocalKey::new(|__rust_std_internal_init| {
                 $(#[$align_attr])*
                 static __RUST_STD_INTERNAL_VAL: $crate::thread::local_impl::LazyStorage<$t> = $crate::thread::local_impl::LazyStorage::new();
-                __RUST_STD_INTERNAL_VAL.get(__rust_std_internal_init, __rust_std_internal_init_fn)
+                __RUST_STD_INTERNAL_VAL.get(__rust_std_internal_init, || __rust_std_internal_init_fn($crate::marker::PhantomData))
             })
         }
     }},
@@ -92,7 +99,7 @@ impl<T> LazyStorage<T> {
         let value = i.and_then(Option::take).unwrap_or_else(f);
 
         // Destroy the old value if it is initialized
-        // FIXME(#110897): maybe panic on recursive initialization.
+        // FIXME(#110897): maybe abort on recursive initialization.
         if self.state.get() == State::Alive {
             self.state.set(State::Destroying);
             // Safety: we check for no initialization during drop below
@@ -104,7 +111,7 @@ impl<T> LazyStorage<T> {
 
         // Guard against initialization during drop
         if self.state.get() == State::Destroying {
-            panic!("Attempted to initialize thread-local while it is being dropped");
+            rtabort!("Attempted to initialize thread-local while it is being dropped");
         }
 
         unsafe {

@@ -90,6 +90,8 @@ impl RawWaker {
 /// pointers to *different* functions can compare equal (since identical functions can be
 /// deduplicated within a codegen unit).
 ///
+/// This struct is guaranteed to be aligned to at least 8 bytes.
+///
 /// # Thread safety
 /// If the [`RawWaker`] will be used to construct a [`Waker`] then
 /// these functions must all be thread-safe (even though [`RawWaker`] is
@@ -106,6 +108,8 @@ impl RawWaker {
 #[stable(feature = "futures_api", since = "1.36.0")]
 #[allow(unpredictable_function_pointer_comparisons)]
 #[derive(PartialEq, Copy, Clone, Debug)]
+// For bit-stuffing pointers we guarantee align >= 8.
+#[repr(align(8))]
 pub struct RawWakerVTable {
     /// This function will be called when the [`RawWaker`] gets cloned, e.g. when
     /// the [`Waker`] in which the [`RawWaker`] is stored gets cloned.
@@ -245,14 +249,14 @@ impl<'a> Context<'a> {
     #[stable(feature = "futures_api", since = "1.36.0")]
     #[rustc_const_stable(feature = "const_waker", since = "1.82.0")]
     pub const fn waker(&self) -> &'a Waker {
-        &self.waker
+        self.waker
     }
 
     /// Returns a reference to the [`LocalWaker`] for the current task.
     #[inline]
     #[unstable(feature = "local_waker", issue = "118959")]
     pub const fn local_waker(&self) -> &'a LocalWaker {
-        &self.local_waker
+        self.local_waker
     }
 
     /// Returns a reference to the extension data for the current task.
@@ -418,15 +422,16 @@ unsafe impl Sync for Waker {}
 impl Waker {
     /// Wakes up the task associated with this `Waker`.
     ///
-    /// As long as the executor keeps running and the task is not finished, it is
-    /// guaranteed that each invocation of [`wake()`](Self::wake) (or
+    /// As long as the executor keeps running and the task is not finished,
+    /// it is guaranteed that each invocation of [`wake()`](Self::wake) (or
     /// [`wake_by_ref()`](Self::wake_by_ref)) will be followed by at least one
-    /// [`poll()`] of the task to which this `Waker` belongs. This makes
-    /// it possible to temporarily yield to other tasks while running potentially
-    /// unbounded processing loops.
+    /// [`poll()`] of the task to which this `Waker` belongs, such that the call to
+    /// [`wake()`](Self::wake) (or [`wake_by_ref()`](Self::wake_by_ref)) _happens-before_
+    /// the beginning of the invocation of [`poll()`]. This makes it possible to temporarily
+    /// yield to other tasks while running potentially unbounded processing loops.
     ///
     /// Note that the above implies that multiple wake-ups may be coalesced into a
-    /// single [`poll()`] invocation by the runtime.
+    /// single [`poll()`] invocation by the executor.
     ///
     /// Also note that yielding to competing tasks is not guaranteed: it is the
     /// executor’s choice which task to run and the executor may choose to run the
@@ -946,7 +951,7 @@ impl Clone for LocalWaker {
 
 #[unstable(feature = "local_waker", issue = "118959")]
 #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
-impl const AsRef<LocalWaker> for Waker {
+const impl AsRef<LocalWaker> for Waker {
     fn as_ref(&self) -> &LocalWaker {
         // SAFETY: LocalWaker is just Waker without thread safety
         unsafe { transmute(self) }

@@ -1,4 +1,5 @@
 #![feature(duration_constants)]
+#![feature(duration_constructors)]
 #![feature(time_systemtime_limits)]
 #![feature(time_saturating_systemtime)]
 
@@ -28,7 +29,7 @@ fn instant_monotonic() {
 }
 
 #[test]
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 fn instant_monotonic_concurrent() -> std::thread::Result<()> {
     let threads: Vec<_> = (0..8)
         .map(|_| {
@@ -104,7 +105,8 @@ fn instant_math_is_associative() {
 #[test]
 fn instant_duration_since_saturates() {
     let a = Instant::now();
-    assert_eq!((a - Duration::SECOND).duration_since(a), Duration::ZERO);
+    // This also checks that computing an instant before program startup works.
+    assert_eq!((a - Duration::from_days(1)).duration_since(a), Duration::ZERO);
 }
 
 #[test]
@@ -179,6 +181,7 @@ fn system_time_elapsed() {
 }
 
 #[test]
+#[cfg_attr(target_os = "l4re", ignore = "No wallclock time support in L4Re")]
 fn since_epoch() {
     let ts = SystemTime::now();
     let a = ts.duration_since(UNIX_EPOCH + Duration::SECOND).unwrap();

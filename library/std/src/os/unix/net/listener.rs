@@ -9,7 +9,8 @@ use crate::{fmt, io, mem};
 ///
 /// # Examples
 ///
-/// ```no_run
+#[cfg_attr(target_family = "unix", doc = "```no_run")]
+#[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
 /// use std::thread;
 /// use std::os::unix::net::{UnixStream, UnixListener};
 ///
@@ -56,7 +57,8 @@ impl UnixListener {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(target_family = "unix", doc = "```no_run")]
+    #[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
     /// use std::os::unix::net::UnixListener;
     ///
     /// let listener = match UnixListener::bind("/path/to/the/socket") {
@@ -115,14 +117,14 @@ impl UnixListener {
     ///
     /// # Examples
     ///
-    /// ```no_run
-    /// use std::os::unix::net::{UnixListener};
+    #[cfg_attr(target_family = "unix", doc = "```no_run")]
+    #[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
+    /// use std::os::unix::net::{SocketAddr, UnixListener};
     ///
     /// fn main() -> std::io::Result<()> {
-    ///     let listener1 = UnixListener::bind("path/to/socket")?;
-    ///     let addr = listener1.local_addr()?;
+    ///     let addr = SocketAddr::from_pathname("path/to/socket")?;
     ///
-    ///     let listener2 = match UnixListener::bind_addr(&addr) {
+    ///     let listener = match UnixListener::bind_addr(&addr) {
     ///         Ok(sock) => sock,
     ///         Err(err) => {
     ///             println!("Couldn't bind: {err:?}");
@@ -160,7 +162,8 @@ impl UnixListener {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(target_family = "unix", doc = "```no_run")]
+    #[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
     /// use std::os::unix::net::UnixListener;
     ///
     /// fn main() -> std::io::Result<()> {
@@ -190,12 +193,13 @@ impl UnixListener {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(target_family = "unix", doc = "```no_run")]
+    #[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
     /// use std::os::unix::net::UnixListener;
     ///
     /// fn main() -> std::io::Result<()> {
     ///     let listener = UnixListener::bind("/path/to/the/socket")?;
-    ///     let listener_copy = listener.try_clone().expect("try_clone failed");
+    ///     let listener_copy = listener.try_clone().expect("`UnixListener::try_clone` should not fail");
     ///     Ok(())
     /// }
     /// ```
@@ -208,12 +212,13 @@ impl UnixListener {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(target_family = "unix", doc = "```no_run")]
+    #[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
     /// use std::os::unix::net::UnixListener;
     ///
     /// fn main() -> std::io::Result<()> {
     ///     let listener = UnixListener::bind("/path/to/the/socket")?;
-    ///     let addr = listener.local_addr().expect("Couldn't get local address");
+    ///     let addr = listener.local_addr().expect("`UnixListener::local_addr` should not fail");
     ///     Ok(())
     /// }
     /// ```
@@ -232,12 +237,13 @@ impl UnixListener {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(target_family = "unix", doc = "```no_run")]
+    #[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
     /// use std::os::unix::net::UnixListener;
     ///
     /// fn main() -> std::io::Result<()> {
     ///     let listener = UnixListener::bind("/path/to/the/socket")?;
-    ///     listener.set_nonblocking(true).expect("Couldn't set non blocking");
+    ///     listener.set_nonblocking(true).expect("`UnixListener::set_nonblocking` should not fail");
     ///     Ok(())
     /// }
     /// ```
@@ -250,7 +256,8 @@ impl UnixListener {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(target_family = "unix", doc = "```no_run")]
+    #[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
     /// use std::os::unix::net::UnixListener;
     ///
     /// fn main() -> std::io::Result<()> {
@@ -277,7 +284,8 @@ impl UnixListener {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(target_family = "unix", doc = "```no_run")]
+    #[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
     /// use std::thread;
     /// use std::os::unix::net::{UnixStream, UnixListener};
     ///
@@ -372,7 +380,8 @@ impl<'a> IntoIterator for &'a UnixListener {
 ///
 /// # Examples
 ///
-/// ```no_run
+#[cfg_attr(target_family = "unix", doc = "```no_run")]
+#[cfg_attr(not(target_family = "unix"), doc = "```ignore (needs unix)")]
 /// use std::thread;
 /// use std::os::unix::net::{UnixStream, UnixListener};
 ///

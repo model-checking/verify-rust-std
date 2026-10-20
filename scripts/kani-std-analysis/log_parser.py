@@ -84,6 +84,43 @@ def crate_from_file(file_name, known_crates):
     return None
 
 
+def erase_generic_args(name):
+    """Drop the generic argument lists of every path segment in `name`.
+
+    Autoharness instantiates generic functions with concrete types, so the
+    automatic harness for the contract of
+    `<array::iter::IntoIter<T, N> as Iterator>::__iterator_get_unchecked` is
+    named `<array::iter::IntoIter<i32, 2> as Iterator>::__iterator_get_unchecked`.
+    Both erase to `<array::iter::IntoIter as Iterator>::__iterator_get_unchecked`.
+    `<impl ...>` segments are erased too (`<impl [u8; N]>` is instantiated as
+    `<impl [u8; 2]>`), so distinct functions can collide; callers must check
+    that a lookup is unique. A `<` that does not follow a path segment (the
+    qualified-path `<T as Trait>` opener) is kept, and the `>` of `->` is not
+    treated as a bracket.
+    """
+    out = []
+    i = 0
+    while i < len(name):
+        prev = ''.join(out)
+        if name[i] == '<' and prev and (prev[-1].isalnum() or prev[-1] == '_'
+                                        or prev.endswith('::')):
+            depth = 0
+            while i < len(name):
+                if name[i] == '<':
+                    depth += 1
+                elif name[i] == '>' and name[i - 1] != '-':
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+            if prev.endswith('::'):
+                out = out[:-2]
+        else:
+            out.append(name[i])
+        i += 1
+    return ''.join(out)
+
+
 def read_scanner_results(scanner_results_dir):
     """Parse information produced by Kani's scanner tool."""
     crate_pattern = re.compile(r'^.*/(.+)_scan_functions.csv$')
@@ -149,7 +186,18 @@ def read_kani_list(kani_list_file, scanner_data):
     standard_harnesses = {}
     for file_name, l in harnesses['standard-harnesses'].items():
         for h in l:
-            assert standard_harnesses.get(h) is None
+            # Automatic harnesses are named after the function path without
+            # the crate, so a function defined at the same path in two crates
+            # (e.g., `__rust_panic_cleanup` in both panic_abort and
+            # panic_unwind) yields the same harness name twice. The log cannot
+            # tell them apart either, so record one entry for all crates.
+            if entry := standard_harnesses.get(h):
+                crate = crate_from_file(file_name, known_crates)
+                crates = entry['crate'] if isinstance(entry['crate'], list) \
+                    else [entry['crate']]
+                if crate not in crates:
+                    entry['crate'] = crates + [crate]
+                continue
             if harness_match := re.match(harness_pattern1, h):
                 fn = harness_match.group(1) + harness_match.group(3)
             elif harness_match := re.match(harness_pattern2, h):
@@ -206,13 +254,30 @@ def read_kani_list(kani_list_file, scanner_data):
                     'target_safeness': None,
                     'public_target': None
                 }
+    # Automatic harnesses of generic functions are named after the
+    # instantiation, not the generic function; see `erase_generic_args`.
+    by_erased_name = {}
+    for h in contract_harnesses:
+        by_erased_name.setdefault(erase_generic_args(h), []).append(h)
+
+    def automatic_harness_entry(fn):
+        if entry := contract_harnesses.get(fn):
+            return entry
+        candidates = by_erased_name.get(erase_generic_args(fn), [])
+        if len(candidates) == 1:
+            return contract_harnesses[candidates[0]]
+        print(f'No unique automatic harness for {fn}: {candidates}',
+              file=sys.stderr)
+        return None
+
     for o in harnesses['contracts']:
         for h in o['harnesses']:
             fn = o['function']
-            if h == 'core::kani::internal::automatic_harness':
-                entry = contract_harnesses[fn]
-            elif h == 'kani::internal::automatic_harness':
-                entry = contract_harnesses[fn]
+            if h in ('core::kani::internal::automatic_harness',
+                     'kani::internal::automatic_harness'):
+                entry = automatic_harness_entry(fn)
+                if entry is None:
+                    continue
             else:
                 entry = contract_harnesses[h]
                 if o['file'] != entry['file_name']:
@@ -463,6 +528,41 @@ def parse_autoharness_info(lines, i):
     return i, autoharness_info
 
 
+def regroup_thread_output(lines):
+    """Convert Kani's per-line thread prefixes into the block format that
+    `parse_log_lines` expects.
+
+    Since kani#4944, every line a worker prints for a harness is prefixed with
+    `Thread N: `, and lines of different workers interleave. Older Kani
+    printed a bare `Thread N:` line followed by the whole unprefixed result.
+    Collect each worker's lines and emit them as one such block just before
+    that worker's next harness starts (or at the end of the log). Logs in the
+    old format are returned unchanged.
+    """
+    prefix_pattern = re.compile(r'^Thread (\d+): (.*)$', re.DOTALL)
+    start_pattern = re.compile(r'(Autoharness: )?Checking (function|harness) ')
+    pending = {}  # thread_id -> buffered result lines
+    out = []
+
+    def flush(thread_id):
+        if block := pending.pop(thread_id, None):
+            out.append(f'Thread {thread_id}:\n')
+            out.extend(block)
+
+    for line in lines:
+        m = prefix_pattern.match(line)
+        if m is None:
+            out.append(line)
+        elif start_pattern.match(m.group(2)):
+            flush(m.group(1))
+            out.append(line)
+        else:
+            pending.setdefault(m.group(1), []).append(m.group(2))
+    for thread_id in list(pending):
+        flush(thread_id)
+    return out
+
+
 def parse_log_lines(
         lines, contract_harnesses, standard_harnesses, scanner_data):
     """Parse (terse) output from multi-threaded Kani run while considering list
@@ -597,7 +697,7 @@ def main():
             args.kani_list_file, scanner_data)
 
     with open(args.log_file, 'r') as f:
-        log_lines = f.readlines()
+        log_lines = regroup_thread_output(f.readlines())
 
     results = parse_log_lines(
             log_lines, contract_harnesses, standard_harnesses, scanner_data)
