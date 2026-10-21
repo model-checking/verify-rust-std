@@ -2351,6 +2351,15 @@ pub mod dragon_verify {
         }
     }
 
+    // True if `los` lists the piece offsets next, next + 4, ..., 12 once, in increasing order:
+    // the pieces of a split pair, 4 exponents each, then cover the 16 exponents of its window.
+    const fn fixed_k_pieces_cover(los: &[i16], next: i16) -> bool {
+        match los {
+            [] => next == 16,
+            [lo, rest @ ..] => *lo == next && fixed_k_pieces_cover(rest, next + 4),
+        }
+    }
+
     // The power-of-5 tables of mul_pow10 as (power, length in 64-bit limbs).
     #[cfg(target_pointer_width = "64")]
     const FIXED_K_POW5_TABLES: [(usize, usize); 5] =
@@ -2505,10 +2514,13 @@ pub mod dragon_verify {
                 check_dragon_scale_fixed_k_harness!($window, $k, 0, 15);
             }
         };
-        // A split pair: one module per piece, each piece a proof over 4 exponents.
+        // A split pair: one module per piece, each piece a proof over 4 exponents. The offsets
+        // must be 0, 4, 8, 12 in that order, or the build fails.
         ($name:ident, $window:literal, $k:expr, [$($piece:ident => $lo:literal),* $(,)?]) => {
             mod $name {
                 use super::*;
+
+                const _: () = assert!(fixed_k_pieces_cover(&[$($lo),*], 0));
 
                 $(mod $piece {
                     check_dragon_scale_fixed_k_harness!($window, $k, $lo, 3);
@@ -2550,8 +2562,8 @@ pub mod dragon_verify {
 
         check_dragon_scale_fixed_k_window!(w000, 0, [
             k324 => -324, k323 => -323, k322 => -322, k321 => -321, k320 => -320, k319 => -319,
-            k318 => -318, k317 => -317 => [e00 => 0], k316 => -316, k315 => -315,
-            k314 => -314, k313 => -313,
+            k318 => -318, k317 => -317 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
+            k316 => -316, k315 => -315, k314 => -314, k313 => -313,
             k312 => -312, k311 => -311, k310 => -310, k309 => -309, k308 => -308, k307 => -307,
             k306 => -306, k305 => -305, k304 => -304, k303 => -303,
         ]);

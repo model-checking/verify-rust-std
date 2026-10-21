@@ -32,7 +32,7 @@ DRAGON_SLOW_PAIRS = (
 )
 # Pairs whose proof splits on the exponent (dragon.rs `kNNN => K => [eNN => offset]`):  pair -> the
 # exponent offsets of its pieces;  each piece covers 4 exponents and runs alone at 180 minutes.
-DRAGON_SPLIT_PAIRS = {(0, -317): (0,)}
+DRAGON_SPLIT_PAIRS = {(0, -317): (0, 4, 8, 12)}
 # One CI matrix holds at most 256 jobs:  core, long (generator and cached proofs), and the fixed-K
 # pairs in four:  dragon-a (windows 000..033), dragon-b (034..067), dragon-c (068..097), dragon-d (098..127).
 MATRIX_JOBS = ("core", "long", "dragon-a", "dragon-b", "dragon-c", "dragon-d")
