@@ -87,9 +87,9 @@ class Flt2decHarnessesTests(unittest.TestCase):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
         # The diagnostic probes (branch g4-diag-s19 only) add groups, so the counts skip them.
         real = [group for group in self.groups if "::probe_" not in group["harnesses"][0]]
-        self.assertEqual(len(real), 728)
+        self.assertEqual(len(real), 740)
         self.assertEqual(len({group["name"] for group in self.groups}), len(self.groups))
-        self.assertEqual(sum(len(group["harnesses"]) for group in real), 3717)
+        self.assertEqual(sum(len(group["harnesses"]) for group in real), 3729)
         self.assertEqual(len(set(self.dedicated)), len(self.dedicated))
         for part in MATRIX_JOBS:
             parts = [group for group in proof_matrix(matrix_job=part)["group"]
@@ -203,10 +203,10 @@ class Flt2decHarnessesTests(unittest.TestCase):
                 self.assertEqual(group["timeout_minutes"], minutes)
                 self.assertLessEqual(len(group["harnesses"]), batch_size)
         self.assertEqual(len(DRAGON_SLOW_PAIRS), 16)
-        self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 180), 216)
+        self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 180), 228)
         self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 60), 3)
         self.assertEqual(tuple(len(proof_matrix(matrix_job=job)["group"])
-                               for job in MATRIX_JOBS[2:]), (108, 100, 81, 81, 96, 96))
+                               for job in MATRIX_JOBS[2:]), (108, 100, 81, 81, 102, 102))
 
     def test_all_float_partitions_and_equivalence_cases_remain(self):
         self.assertIn(
@@ -383,7 +383,7 @@ class Flt2decHarnessesTests(unittest.TestCase):
 
     def test_dragon_split_pairs_run_one_group_per_piece(self):
         self.assertEqual(len(DRAGON_SPLIT_PAIRS), 15)
-        self.assertEqual(sum(len(offsets) == 16 for offsets in DRAGON_SPLIT_PAIRS.values()), 11)
+        self.assertEqual(sum(len(offsets) == 16 for offsets in DRAGON_SPLIT_PAIRS.values()), 12)
         self.assertEqual(set(DRAGON_SPLIT_PAIRS) & set(DRAGON_SLOW_PAIRS), set())
         names = {group["name"]: group for group in self.groups}
         harnesses = [harness for group in self.groups for harness in group["harnesses"]]

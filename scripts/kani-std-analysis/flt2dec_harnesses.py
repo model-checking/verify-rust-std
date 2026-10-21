@@ -34,10 +34,10 @@ DRAGON_SLOW_PAIRS = (
 # They run in 4 pieces of 4 exponents;  the 11 pairs whose pieces hit the cap again run in
 # 16 pieces of 1 exponent.
 DRAGON_SPLIT_PAIRS = {
-    **{pair: (0, 4, 8, 12) for pair in ((0, -317), (23, -200), (29, -172), (47, -91))},
+    **{pair: (0, 4, 8, 12) for pair in ((0, -317), (29, -172), (47, -91))},
     **{pair: tuple(range(16)) for pair in (
-        (23, -201), (23, -202), (23, -203), (23, -204), (23, -205), (28, -183), (29, -173),
-        (29, -174), (34, -151), (34, -152), (34, -153),
+        (23, -200), (23, -201), (23, -202), (23, -203), (23, -204), (23, -205), (28, -183),
+        (29, -173), (29, -174), (34, -151), (34, -152), (34, -153),
     )},
 }
 # One CI matrix holds at most 256 jobs:  core, long (generator and cached proofs), and the fixed-K
