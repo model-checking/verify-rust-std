@@ -87,9 +87,9 @@ class Flt2decHarnessesTests(unittest.TestCase):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
         # The diagnostic probes (branch g4-diag-s19 only) add groups, so the counts skip them.
         real = [group for group in self.groups if "::probe_" not in group["harnesses"][0]]
-        self.assertEqual(len(real), 596)
+        self.assertEqual(len(real), 728)
         self.assertEqual(len({group["name"] for group in self.groups}), len(self.groups))
-        self.assertEqual(sum(len(group["harnesses"]) for group in real), 3585)
+        self.assertEqual(sum(len(group["harnesses"]) for group in real), 3717)
         self.assertEqual(len(set(self.dedicated)), len(self.dedicated))
         for part in MATRIX_JOBS:
             parts = [group for group in proof_matrix(matrix_job=part)["group"]
@@ -146,7 +146,7 @@ class Flt2decHarnessesTests(unittest.TestCase):
                                                       "dragon-shortest-scaling-contract-"))
             with self.subTest(group=group["name"]):
                 if in_dragon_job:
-                    self.assertIn(group["matrix_job"], ("dragon-a", "dragon-b", "dragon-c", "dragon-d"))
+                    self.assertIn(group["matrix_job"], MATRIX_JOBS[2:])
                 else:
                     self.assertEqual(group["matrix_job"], "long" if in_long_job else "core")
 
@@ -198,15 +198,15 @@ class Flt2decHarnessesTests(unittest.TestCase):
             minutes, batch_size = ((180, 1) if slow or (in_band and window == 0)
                                    else (60, 4) if in_band else (30, 8))
             with self.subTest(group=group["name"], window=window, k=k):
-                self.assertEqual(group["matrix_job"], "dragon-" + "cd"[int(piece) >= 8] if piece else
+                self.assertEqual(group["matrix_job"], "dragon-" + "ef"[int(piece) >= 8] if piece else
                                  "dragon-" + "abcd"[(window >= 34) + (window >= 68) + (window >= 98)])
                 self.assertEqual(group["timeout_minutes"], minutes)
                 self.assertLessEqual(len(group["harnesses"]), batch_size)
         self.assertEqual(len(DRAGON_SLOW_PAIRS), 16)
-        self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 180), 84)
+        self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 180), 216)
         self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 60), 3)
         self.assertEqual(tuple(len(proof_matrix(matrix_job=job)["group"])
-                               for job in ("dragon-a", "dragon-b", "dragon-c", "dragon-d")), (108, 100, 111, 111))
+                               for job in MATRIX_JOBS[2:]), (108, 100, 81, 81, 96, 96))
 
     def test_all_float_partitions_and_equivalence_cases_remain(self):
         self.assertIn(
@@ -383,20 +383,21 @@ class Flt2decHarnessesTests(unittest.TestCase):
 
     def test_dragon_split_pairs_run_one_group_per_piece(self):
         self.assertEqual(len(DRAGON_SPLIT_PAIRS), 15)
+        self.assertEqual(sum(len(offsets) == 16 for offsets in DRAGON_SPLIT_PAIRS.values()), 11)
         self.assertEqual(set(DRAGON_SPLIT_PAIRS) & set(DRAGON_SLOW_PAIRS), set())
         names = {group["name"]: group for group in self.groups}
         harnesses = [harness for group in self.groups for harness in group["harnesses"]]
         for (window, k), offsets in DRAGON_SPLIT_PAIRS.items():
             plain = f"dragon-shortest-scaling-fixed-k-{window:03d}-{'k' if k < 0 else 'p'}{abs(k):03d}"
             with self.subTest(window=window, k=k):
-                self.assertEqual(offsets, (0, 4, 8, 12))
+                self.assertIn(offsets, ((0, 4, 8, 12), tuple(range(16))))
                 self.assertNotIn(plain, names)
                 self.assertNotIn(dragon_fixed_k_harness(window, k), harnesses)
                 for offset in offsets:
                     group = names[f"{plain}-e{offset:02d}"]
                     self.assertEqual(group["harnesses"], [dragon_fixed_k_piece_harness(window, k, offset)])
                     self.assertEqual(group["timeout_minutes"], 180)
-                    self.assertEqual(group["matrix_job"], "dragon-" + "cd"[offset >= 8])
+                    self.assertEqual(group["matrix_job"], "dragon-" + "ef"[offset >= 8])
         self.assertEqual(dragon_fixed_k_piece_harness(0, -317, 0),
                          f"{DRAGON}::dragon_scale_fixed_k::w000::k317::e00::check_scale_shortest")
 

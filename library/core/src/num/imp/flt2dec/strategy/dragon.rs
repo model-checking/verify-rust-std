@@ -2351,12 +2351,22 @@ pub mod dragon_verify {
         }
     }
 
-    // True if `los` lists the piece offsets next, next + 4, ..., 12 once, in increasing order:
-    // the pieces of a split pair, 4 exponents each, then cover the 16 exponents of its window.
-    const fn fixed_k_pieces_cover(los: &[i16], next: i16) -> bool {
+    // True if `los` lists the piece offsets next, next + width, ..., 16 - width once, in
+    // increasing order:  the pieces of a split pair, width exponents each, then cover the 16
+    // exponents of its window.
+    const fn fixed_k_pieces_cover(los: &[u8], next: u8, width: u8) -> bool {
         match los {
             [] => next == 16,
-            [lo, rest @ ..] => *lo == next && fixed_k_pieces_cover(rest, next + 4),
+            [lo, rest @ ..] => *lo == next && fixed_k_pieces_cover(rest, next + width, width),
+        }
+    }
+
+    // The exponents in each piece of a split pair:  16 less the last offset, so 4 for the
+    // offsets 0, 4, 8, 12 and 1 for the offsets 0 to 15.
+    const fn fixed_k_piece_width(los: &[u8]) -> u8 {
+        match los {
+            [.., last] => 16 - *last,
+            [] => 0,
         }
     }
 
@@ -2419,7 +2429,7 @@ pub mod dragon_verify {
     // The proof of one fixed-K pair over the exponents FIRST + $exp_lo + (0..=$exp_mask) of its
     // window: (0, 15) is the whole window, a piece of a split pair takes 4 exponents.
     macro_rules! check_dragon_scale_fixed_k_harness {
-        ($window:literal, $k:expr, $exp_lo:literal, $exp_mask:literal) => {
+        ($window:literal, $k:expr, $exp_lo:literal, $exp_mask:expr) => {
             use super::*;
 
             const FIRST: i16 = -1076 + 16 * $window;
@@ -2514,16 +2524,20 @@ pub mod dragon_verify {
                 check_dragon_scale_fixed_k_harness!($window, $k, 0, 15);
             }
         };
-        // A split pair: one module per piece, each piece a proof over 4 exponents. The offsets
-        // must be 0, 4, 8, 12 in that order, or the build fails.
+        // A split pair: one module per piece, each piece a proof over PIECE_WIDTH exponents
+        // (4 pieces of 4 or 16 pieces of 1). The offsets must step by PIECE_WIDTH from 0 to
+        // 16 - PIECE_WIDTH in increasing order, or the build fails.
         ($name:ident, $window:literal, $k:expr, [$($piece:ident => $lo:literal),* $(,)?]) => {
             mod $name {
                 use super::*;
 
-                const _: () = assert!(fixed_k_pieces_cover(&[$($lo),*], 0));
+                const PIECE_LOS: &[u8] = &[$($lo),*];
+                const PIECE_WIDTH: u8 = fixed_k_piece_width(PIECE_LOS);
+                const PIECE_MASK: u8 = PIECE_WIDTH - 1;
+                const _: () = assert!(fixed_k_pieces_cover(PIECE_LOS, 0, PIECE_WIDTH));
 
                 $(mod $piece {
-                    check_dragon_scale_fixed_k_harness!($window, $k, $lo, 3);
+                    check_dragon_scale_fixed_k_harness!($window, $k, $lo, PIECE_MASK);
                 })*
             }
         };
@@ -2702,11 +2716,36 @@ pub mod dragon_verify {
         check_dragon_scale_fixed_k_window!(w023, 23, [
             k213 => -213, k212 => -212, k211 => -211, k210 => -210, k209 => -209, k208 => -208,
             k207 => -207, k206 => -206,
-            k205 => -205 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
-            k204 => -204 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
-            k203 => -203 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
-            k202 => -202 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
-            k201 => -201 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
+            k205 => -205 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k204 => -204 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k203 => -203 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k202 => -202 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k201 => -201 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
             k200 => -200 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
             k199 => -199, k198 => -198, k197 => -197, k196 => -196, k195 => -195, k194 => -194,
             k193 => -193,
@@ -2737,7 +2776,12 @@ pub mod dragon_verify {
         ]);
         check_dragon_scale_fixed_k_window!(w028, 28, [
             k189 => -189, k188 => -188, k187 => -187, k186 => -186, k185 => -185, k184 => -184,
-            k183 => -183 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
+            k183 => -183 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
             k182 => -182, k181 => -181, k180 => -180, k179 => -179, k178 => -178, k177 => -177,
             k176 => -176, k175 => -175, k174 => -174, k173 => -173, k172 => -172, k171 => -171,
             k170 => -170, k169 => -169, k168 => -168,
@@ -2745,8 +2789,18 @@ pub mod dragon_verify {
         check_dragon_scale_fixed_k_window!(w029, 29, [
             k184 => -184, k183 => -183, k182 => -182, k181 => -181, k180 => -180, k179 => -179,
             k178 => -178, k177 => -177, k176 => -176, k175 => -175,
-            k174 => -174 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
-            k173 => -173 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
+            k174 => -174 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k173 => -173 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
             k172 => -172 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
             k171 => -171, k170 => -170, k169 => -169, k168 => -168, k167 => -167, k166 => -166,
             k165 => -165, k164 => -164,
@@ -2778,9 +2832,24 @@ pub mod dragon_verify {
         check_dragon_scale_fixed_k_window!(w034, 34, [
             k160 => -160, k159 => -159, k158 => -158, k157 => -157, k156 => -156, k155 => -155,
             k154 => -154,
-            k153 => -153 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
-            k152 => -152 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
-            k151 => -151 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
+            k153 => -153 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k152 => -152 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k151 => -151 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
             k150 => -150, k149 => -149, k148 => -148, k147 => -147, k146 => -146, k145 => -145,
             k144 => -144, k143 => -143, k142 => -142, k141 => -141, k140 => -140,
         ]);
