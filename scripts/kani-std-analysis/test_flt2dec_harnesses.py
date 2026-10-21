@@ -87,9 +87,9 @@ class Flt2decHarnessesTests(unittest.TestCase):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
         # The diagnostic probes (branch g4-diag-s19 only) add groups, so the counts skip them.
         real = [group for group in self.groups if "::probe_" not in group["harnesses"][0]]
-        self.assertEqual(len(real), 554)
+        self.assertEqual(len(real), 596)
         self.assertEqual(len({group["name"] for group in self.groups}), len(self.groups))
-        self.assertEqual(sum(len(group["harnesses"]) for group in real), 3543)
+        self.assertEqual(sum(len(group["harnesses"]) for group in real), 3585)
         self.assertEqual(len(set(self.dedicated)), len(self.dedicated))
         for part in MATRIX_JOBS:
             parts = [group for group in proof_matrix(matrix_job=part)["group"]
@@ -192,21 +192,21 @@ class Flt2decHarnessesTests(unittest.TestCase):
         self.assertEqual([harness for group in groups for harness in group["harnesses"]
                           if harness == dragon_fixed_k_harness(0, -324)],
                          [f"{DRAGON}::dragon_scale_fixed_k::w000::k324::check_scale_shortest"])
-        for group, window, k, _ in routed:
+        for group, window, k, piece in routed:
             in_band = window in (0, 1) and k in DRAGON_SLOW_BAND
-            slow = (window, k) in DRAGON_SLOW_PAIRS
+            slow = (window, k) in DRAGON_SLOW_PAIRS or (window, k) in DRAGON_SPLIT_PAIRS
             minutes, batch_size = ((180, 1) if slow or (in_band and window == 0)
                                    else (60, 4) if in_band else (30, 8))
             with self.subTest(group=group["name"], window=window, k=k):
-                self.assertEqual(group["matrix_job"],
+                self.assertEqual(group["matrix_job"], "dragon-" + "cd"[int(piece) >= 8] if piece else
                                  "dragon-" + "abcd"[(window >= 34) + (window >= 68) + (window >= 98)])
                 self.assertEqual(group["timeout_minutes"], minutes)
                 self.assertLessEqual(len(group["harnesses"]), batch_size)
-        self.assertEqual(len(DRAGON_SLOW_PAIRS), 30)
-        self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 180), 42)
+        self.assertEqual(len(DRAGON_SLOW_PAIRS), 16)
+        self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 180), 84)
         self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 60), 3)
         self.assertEqual(tuple(len(proof_matrix(matrix_job=job)["group"])
-                               for job in ("dragon-a", "dragon-b", "dragon-c", "dragon-d")), (122, 104, 81, 81))
+                               for job in ("dragon-a", "dragon-b", "dragon-c", "dragon-d")), (108, 100, 111, 111))
 
     def test_all_float_partitions_and_equivalence_cases_remain(self):
         self.assertIn(
@@ -382,7 +382,8 @@ class Flt2decHarnessesTests(unittest.TestCase):
         self.assertEqual(split, [("v0", "0", "1 << 63"), ("v1", "1 << 63", "1 << 64")])
 
     def test_dragon_split_pairs_run_one_group_per_piece(self):
-        self.assertEqual(DRAGON_SPLIT_PAIRS, {(0, -317): (0, 4, 8, 12)})
+        self.assertEqual(len(DRAGON_SPLIT_PAIRS), 15)
+        self.assertEqual(set(DRAGON_SPLIT_PAIRS) & set(DRAGON_SLOW_PAIRS), set())
         names = {group["name"]: group for group in self.groups}
         harnesses = [harness for group in self.groups for harness in group["harnesses"]]
         for (window, k), offsets in DRAGON_SPLIT_PAIRS.items():
@@ -395,7 +396,7 @@ class Flt2decHarnessesTests(unittest.TestCase):
                     group = names[f"{plain}-e{offset:02d}"]
                     self.assertEqual(group["harnesses"], [dragon_fixed_k_piece_harness(window, k, offset)])
                     self.assertEqual(group["timeout_minutes"], 180)
-                    self.assertEqual(group["matrix_job"], "dragon-a")
+                    self.assertEqual(group["matrix_job"], "dragon-" + "cd"[offset >= 8])
         self.assertEqual(dragon_fixed_k_piece_harness(0, -317, 0),
                          f"{DRAGON}::dragon_scale_fixed_k::w000::k317::e00::check_scale_shortest")
 
