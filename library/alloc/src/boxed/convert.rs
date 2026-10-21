@@ -944,10 +944,27 @@ mod verify {
         fmt::Error
     );
 
+    // Independent symbolic ASCII bytes make every prefix a valid UTF-8 string.
+    fn symbolic_ascii_bytes() -> [u8; 8] {
+        let mut bytes: [u8; 8] = kani::any();
+        bytes[0] &= 0x7f;
+        bytes[1] &= 0x7f;
+        bytes[2] &= 0x7f;
+        bytes[3] &= 0x7f;
+        bytes[4] &= 0x7f;
+        bytes[5] &= 0x7f;
+        bytes[6] &= 0x7f;
+        bytes[7] &= 0x7f;
+        bytes
+    }
+
     /// Checks <Box<str> as From<&str>>::from for empty and nonempty input.
     #[kani::proof]
     fn harness_box_from_str() {
-        let value = if kani::any() { "" } else { "test" };
+        let source = symbolic_ascii_bytes();
+        let len = kani::any_where(|len: &usize| *len <= source.len());
+        let ascii = core::str::from_utf8(&source).unwrap();
+        let value = ascii.get(..len).unwrap();
         let boxed = Box::<str>::from(value);
         assert_eq!(boxed.len(), value.len());
         // Compare an arbitrary byte without introducing a memcmp loop.
@@ -962,8 +979,14 @@ mod verify {
     /// Checks <Box<[u8]> as From<Box<str>>>::from.
     #[kani::proof]
     fn harness_box_from_box_str_to_u8_slice() {
-        let value = if kani::any() { "" } else { "test" };
-        let bytes = Box::<[u8]>::from(Box::<str>::from(value));
+        let source = symbolic_ascii_bytes();
+        let len = kani::any_where(|len: &usize| *len <= source.len());
+        let ascii = core::str::from_utf8(&source).unwrap();
+        let value = ascii.get(..len).unwrap();
+        let boxed = Box::<str>::from(value);
+        let address = boxed.as_ptr();
+        let bytes = Box::<[u8]>::from(boxed);
+        assert_eq!(bytes.as_ptr(), address);
         assert_eq!(bytes.len(), value.len());
         // Compare an arbitrary byte without introducing a memcmp loop.
         if !value.is_empty() {
@@ -1013,36 +1036,77 @@ mod verify {
         kani::cover(!source.is_empty(), "Box::from slice clone copies an element");
     }
 
-    // Symbolic lengths cover success (len == N) and failure for fixed N = 100.
+    // N = 0 and N = 2 cover empty/nonempty targets.
     macro_rules! slice_to_array {
-        ($name:ident, $ty:ty) => {
+        ($name:ident, $ty:ty, $n:expr) => {
             mod $name {
                 use super::*;
-                const N: usize = 100;
+                const N: usize = $n;
 
                 /// Checks TryFrom<Box<[T]>> for Box<[T; N]>.
                 #[kani::proof]
                 fn boxed_slice() {
-                    let boxed = verifier_nondet_vec_box::<$ty>().into_boxed_slice();
-                    let matches = boxed.len() == N;
-                    assert_eq!(Box::<[$ty; N]>::try_from(boxed).is_ok(), matches);
-                    kani::cover(matches, "Box slice to array accepts matching length");
-                    kani::cover(!matches, "Box slice to array rejects mismatched length");
+                    let boxed = if N == 0 {
+                        // Bound this setup to 10 elements to work around CBMC's vector::reserve error.
+                        let values: [$ty; 10] = kani::any();
+                        Box::<[$ty]>::from(kani::slice::any_slice_of_array(&values))
+                    } else {
+                        verifier_nondet_vec_box::<$ty>().into_boxed_slice()
+                    };
+                    let (len, address) = (boxed.len(), boxed.as_ptr());
+                    let index = if len == 0 { 0 } else { kani::any_where(|i: &usize| *i < len) };
+                    let expected = boxed.get(index).copied();
+                    let recovered: Box<[$ty]> = match Box::<[$ty; N]>::try_from(boxed) {
+                        Ok(array) => {
+                            assert_eq!(len, N);
+                            array
+                        }
+                        Err(rest) => {
+                            assert_ne!(len, N);
+                            rest
+                        }
+                    };
+                    assert_eq!(recovered.len(), len);
+                    assert_eq!(recovered.as_ptr(), address);
+                    assert_eq!(recovered.get(index).copied(), expected);
+                    kani::cover(len == N, "Box slice to array accepts matching length");
+                    kani::cover(len != N, "Box slice to array rejects mismatched length");
                 }
 
                 /// Checks TryFrom<Vec<T>> for Box<[T; N]>.
                 #[kani::proof]
                 fn vector() {
                     let vec = verifier_nondet_vec_box::<$ty>();
-                    let matches = vec.len() == N;
-                    assert_eq!(Box::<[$ty; N]>::try_from(vec).is_ok(), matches);
-                    kani::cover(matches, "Box Vec to array accepts matching length");
-                    kani::cover(!matches, "Box Vec to array rejects mismatched length");
+                    let (len, capacity, address) = (vec.len(), vec.capacity(), vec.as_ptr());
+                    let index = if len == 0 { 0 } else { kani::any_where(|i: &usize| *i < len) };
+                    let expected = vec.get(index).copied();
+                    let result = Box::<[$ty; N]>::try_from(vec);
+                    let recovered: &[$ty] = match &result {
+                        Ok(array) => {
+                            assert_eq!(len, N);
+                            // Excess capacity may legitimately require reallocation.
+                            if capacity == N {
+                                assert_eq!(array.as_ptr(), address);
+                            }
+                            &array[..]
+                        }
+                        Err(rest) => {
+                            assert_ne!(len, N);
+                            assert_eq!(rest.as_ptr(), address);
+                            assert_eq!(rest.capacity(), capacity);
+                            rest.as_slice()
+                        }
+                    };
+                    assert_eq!(recovered.len(), len);
+                    assert_eq!(recovered.get(index).copied(), expected);
+                    kani::cover(len == N, "Box Vec to array accepts matching length");
+                    kani::cover(len != N, "Box Vec to array rejects mismatched length");
                 }
             }
         };
     }
 
-    slice_to_array!(harness_box_try_from_array_i32, i32);
-    slice_to_array!(harness_box_try_from_array_unit, ());
+    slice_to_array!(harness_box_try_from_array_i32, i32, 2);
+    slice_to_array!(harness_box_try_from_array_unit, (), 2);
+    slice_to_array!(harness_box_try_from_array_empty, u8, 0);
 }

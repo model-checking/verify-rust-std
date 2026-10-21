@@ -215,6 +215,16 @@ use crate::raw_vec::RawVec;
 #[cfg(not(no_global_oom_handling))]
 use crate::str::from_boxed_utf8_unchecked_in;
 
+// Checks the expressible layout and validity requirements for raw reconstruction.
+// Unique ownership and matching allocator provenance remain caller obligations.
+#[cfg(kani)]
+fn box_raw_valid<T: ?Sized>(raw: *const T) -> bool {
+    !raw.is_null()
+        && kani::mem::checked_align_of_raw(raw).is_some()
+        && kani::mem::checked_size_of_raw(raw).is_some_and(|n| n <= isize::MAX as usize)
+        && core::ub_checks::can_dereference(raw)
+}
+
 /// Conversion related impls for `Box<_>` (`From`, `downcast`, etc)
 mod convert;
 /// Iterator related impls for `Box<_>`.
@@ -1420,15 +1430,7 @@ impl<T: ?Sized> Box<T> {
     #[stable(feature = "box_raw", since = "1.4.0")]
     #[inline]
     #[must_use = "call `drop(Box::from_raw(ptr))` if you intend to drop the `Box`"]
-    #[requires({
-        let align = kani::mem::checked_align_of_raw(raw);
-        let size = kani::mem::checked_size_of_raw(raw);
-
-        !raw.is_null()
-            && align.is_some()
-            && size.map_or(false, |size| size <= isize::MAX as usize)
-            && core::ub_checks::can_dereference(raw)
-    })]
+    #[requires(box_raw_valid(raw))]
     #[ensures(|result: &Self| (&**result) as *const T == raw as *const T)]
     pub unsafe fn from_raw(raw: *mut T) -> Self {
         // SAFETY: Upheld by caller.
@@ -1483,15 +1485,7 @@ impl<T: ?Sized> Box<T> {
     #[stable(feature = "box_vec_non_null", since = "1.99.0")]
     #[inline]
     #[must_use = "call `drop(Box::from_non_null(ptr))` if you intend to drop the `Box`"]
-    #[requires({
-        let raw = ptr.as_ptr();
-        let align = kani::mem::checked_align_of_raw(raw);
-        let size = kani::mem::checked_size_of_raw(raw);
-
-        align.is_some()
-            && size.map_or(false, |size| size <= isize::MAX as usize)
-            && core::ub_checks::can_dereference(raw)
-    })]
+    #[requires(box_raw_valid(ptr.as_ptr()))]
     #[ensures(|result: &Self| {
         let raw = ptr.as_ptr();
         (&**result) as *const T == raw
@@ -1674,15 +1668,7 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     /// [considerations for unsafe code]: self#considerations-for-unsafe-code
     #[stable(feature = "allocator_api", since = "1.100.0")]
     #[inline]
-    #[requires({
-        let align = kani::mem::checked_align_of_raw(raw);
-        let size = kani::mem::checked_size_of_raw(raw);
-
-        !raw.is_null()
-            && align.is_some()
-            && size.map_or(false, |size| size <= isize::MAX as usize)
-            && core::ub_checks::can_dereference(raw)
-    })]
+    #[requires(box_raw_valid(raw))]
     #[ensures(|result: &Self| (&**result) as *const T == raw)]
     pub unsafe fn from_raw_in(raw: *mut T, alloc: A) -> Self {
         // SAFETY: Upheld by caller.
@@ -1737,15 +1723,7 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     /// [considerations for unsafe code]: self#considerations-for-unsafe-code
     #[stable(feature = "allocator_api", since = "1.100.0")]
     #[inline]
-    #[requires({
-        let ptr = raw.as_ptr();
-        let align = kani::mem::checked_align_of_raw(ptr);
-        let size = kani::mem::checked_size_of_raw(ptr);
-
-        align.is_some()
-            && size.map_or(false, |size| size <= isize::MAX as usize)
-            && core::ub_checks::can_dereference(ptr)
-    })]
+    #[requires(box_raw_valid(raw.as_ptr()))]
     #[ensures(|result: &Self| (&**result) as *const T == raw.as_ptr())]
     pub unsafe fn from_non_null_in(raw: NonNull<T>, alloc: A) -> Self {
         // SAFETY: guaranteed by the caller.
@@ -3259,26 +3237,38 @@ mod verify {
     gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_u32, u32);
     gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_unit, ());
 
-    // Symbolic lengths exercise both len == N and len != N for fixed N = 100.
-    // Checks Box::into_array.
+    // Keep source lengths symbolic for both empty and nonempty array targets.
     macro_rules! gen_box_into_array_slice_harness {
-        ($name:ident, $ty:ty) => {
+        ($name:ident, $ty:ty, $n:expr) => {
             #[kani::proof]
             pub fn $name() {
-                let vec: Vec<$ty> = verifier_nondet_vec_box::<$ty>();
-                let boxed: Box<[$ty]> = vec.into_boxed_slice();
-                const N: usize = 100;
-                let matches = boxed.len() == N;
-                assert_eq!(boxed.into_array::<N>().is_ok(), matches);
-                kani::cover(matches, "Box::into_array accepts matching length");
-                kani::cover(!matches, "Box::into_array rejects mismatched length");
+                let boxed = verifier_nondet_vec_box::<$ty>().into_boxed_slice();
+                let (len, address) = (boxed.len(), boxed.as_ptr());
+                let index = if len == 0 { 0 } else { kani::any_where(|i: &usize| *i < len) };
+                let expected = boxed.get(index).copied();
+                let recovered: Box<[$ty]> = match boxed.into_array::<$n>() {
+                    Ok(array) => {
+                        assert_eq!(len, $n);
+                        array
+                    }
+                    Err(rest) => {
+                        assert_ne!(len, $n);
+                        rest
+                    }
+                };
+                assert_eq!(recovered.len(), len);
+                assert_eq!(recovered.as_ptr(), address);
+                assert_eq!(recovered.get(index).copied(), expected);
+                kani::cover(len == $n, "Box::into_array accepts matching length");
+                kani::cover(len != $n, "Box::into_array rejects mismatched length");
             }
         };
     }
 
-    gen_box_into_array_slice_harness!(harness_box_into_array_slice_u8, u8);
-    gen_box_into_array_slice_harness!(harness_box_into_array_slice_u32, u32);
-    gen_box_into_array_slice_harness!(harness_box_into_array_slice_unit, ());
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_u8, u8, 2);
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_u32, u32, 2);
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_unit, (), 2);
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_empty, u8, 0);
 
     // Checks Box::new_uninit_slice_in.
     macro_rules! gen_box_new_uninit_slice_in_harness {
@@ -3602,16 +3592,15 @@ mod verify {
         ($name:ident, $elem:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
+                // Fix the length at 10 to avoid CBMC incomplete-result errors in CI.
+                let values: [$elem; 10] = kani::any();
+                let value: Vec<$elem> = Vec::from(values);
                 let boxed: Box<Vec<$elem>, Global> = Box::new_in(value, Global);
                 let cloned: Box<Vec<$elem>, Global> = Clone::clone(&boxed);
                 assert_eq!(cloned.len(), boxed.len());
-                if !boxed.is_empty() {
-                    let index = kani::any_where(|i: &usize| *i < boxed.len());
-                    assert_eq!(cloned[index], boxed[index]);
-                }
-                kani::cover(boxed.is_empty(), "Box::clone preserves an empty Vec");
-                kani::cover(!boxed.is_empty(), "Box::clone preserves a nonempty Vec");
+                let index = kani::any_where(|i: &usize| *i < boxed.len());
+                assert_eq!(cloned[index], boxed[index]);
+                kani::cover(true, "Box::clone preserves a Vec of length 10");
             }
         };
     }
