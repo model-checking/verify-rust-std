@@ -2407,6 +2407,94 @@ pub mod dragon_verify {
         KANI_LIMBS
     }
 
+    // The proof of one fixed-K pair over the exponents FIRST + $exp_lo + (0..=$exp_mask) of its
+    // window: (0, 15) is the whole window, a piece of a split pair takes 4 exponents.
+    macro_rules! check_dragon_scale_fixed_k_harness {
+        ($window:literal, $k:expr, $exp_lo:literal, $exp_mask:literal) => {
+            use super::*;
+
+            const FIRST: i16 = -1076 + 16 * $window;
+            const LAST: i16 = fixed_k_last(FIRST);
+            const K: i16 = $k;
+
+            fn window_limb_count(size: usize) -> usize {
+                let limb_bound = dragon_limb_bound(FIRST).max(dragon_limb_bound(LAST));
+                LimbCountMask((limb_bound + 1).next_power_of_two() - 1).check(size)
+            }
+
+            fn stub_pow10_exponent(n: usize) -> usize {
+                let magnitude = usize::from(K.unsigned_abs());
+                Pow10Prefix::for_range(magnitude..=magnitude).check(n)
+            }
+
+            fn stub_pow2_bits(bits: usize) -> usize {
+                let encoded = bits & 2047;
+                assert_eq!(encoded, bits);
+                encoded
+            }
+
+            fn stub_estimate(mant: u64, exp: i16) -> i16 {
+                assert_eq!(
+                    crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor(mant, exp),
+                    K
+                );
+                K
+            }
+
+            fn stub_mul_limb_bound(size: usize, other_len: usize) -> usize {
+                let bound = fixed_k_limb_bound(FIRST, K, other_len);
+                assert!(size <= bound);
+                bound
+            }
+
+            #[kani::proof_for_contract(scale_shortest_contract)]
+            #[kani::unwind(41)]
+            #[kani::stub(crate::num::imp::bignum::kani_loop_size, window_limb_count)]
+            #[kani::stub(Big::add, Big::kani_add_model)]
+            #[kani::stub(Big::sub, Big::kani_sub_model)]
+            #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
+            #[kani::stub(Big::mul_pow2, Big::kani_mul_pow2_model)]
+            #[kani::stub(Big::mul_digits, Big::kani_mul_digits_model)]
+            #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
+            #[kani::stub(crate::num::imp::bignum::kani_pow2_bits, stub_pow2_bits)]
+            #[kani::stub(crate::num::imp::bignum::kani_mul_limb_bound, stub_mul_limb_bound)]
+            #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul, carrying_mul_model))]
+            #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
+            #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul, carrying_mul_model))]
+            #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul_add, carrying_mul_add_model))]
+            #[kani::stub(crate::num::imp::flt2dec::estimator::estimate_scaling_factor, stub_estimate)]
+            #[kani::stub(
+                u64::leading_zeros,
+                crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u64
+            )]
+            #[kani::stub(
+                u32::leading_zeros,
+                crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u32
+            )]
+            #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
+            #[kani::stub(Big::is_zero, stub_is_zero)]
+            #[kani::solver(cadical)]
+            fn check_scale_shortest() {
+                let mant = kani::any::<u64>() & ((1u64 << 55) - 1);
+                let minus = 1;
+                let plus = if kani::any::<bool>() { 1 } else { 2 };
+                kani::assume(mant >= 2);
+                kani::assume(plus == 1 || mant == 1 << 25 || mant == 1 << 54);
+                kani::assume(mant as u128 + plus as u128 <= ((minus as u128 + plus as u128) << 53));
+                let exp = FIRST + $exp_lo + i16::from(kani::any::<u8>() & $exp_mask);
+                kani::assume(exp <= LAST);
+                kani::assume(
+                    crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor(mant + plus, exp)
+                        == K
+                );
+                let inclusive = kani::any::<bool>();
+                scale_shortest_contract(mant, minus, plus, exp, inclusive);
+                kani::cover(inclusive, "fixed-K scaling includes inclusive intervals");
+                kani::cover(!inclusive, "fixed-K scaling includes exclusive intervals");
+            }
+        };
+    }
+
     // One proof per (window, K) pair, with the estimate fixed to K. The proof assumes that
     // the estimate is K, and the estimator stub checks the same value. The stub of
     // kani_mul_limb_bound asserts that each bigint operand of a cached product of mul_pow10
@@ -2414,87 +2502,17 @@ pub mod dragon_verify {
     macro_rules! check_dragon_scale_fixed_k_pair {
         ($name:ident, $window:literal, $k:expr) => {
             mod $name {
+                check_dragon_scale_fixed_k_harness!($window, $k, 0, 15);
+            }
+        };
+        // A split pair: one module per piece, each piece a proof over 4 exponents.
+        ($name:ident, $window:literal, $k:expr, [$($piece:ident => $lo:literal),* $(,)?]) => {
+            mod $name {
                 use super::*;
 
-                const FIRST: i16 = -1076 + 16 * $window;
-                const LAST: i16 = fixed_k_last(FIRST);
-                const K: i16 = $k;
-
-                fn window_limb_count(size: usize) -> usize {
-                    let limb_bound = dragon_limb_bound(FIRST).max(dragon_limb_bound(LAST));
-                    LimbCountMask((limb_bound + 1).next_power_of_two() - 1).check(size)
-                }
-
-                fn stub_pow10_exponent(n: usize) -> usize {
-                    let magnitude = usize::from(K.unsigned_abs());
-                    Pow10Prefix::for_range(magnitude..=magnitude).check(n)
-                }
-
-                fn stub_pow2_bits(bits: usize) -> usize {
-                    let encoded = bits & 2047;
-                    assert_eq!(encoded, bits);
-                    encoded
-                }
-
-                fn stub_estimate(mant: u64, exp: i16) -> i16 {
-                    assert_eq!(
-                        crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor(mant, exp),
-                        K
-                    );
-                    K
-                }
-
-                fn stub_mul_limb_bound(size: usize, other_len: usize) -> usize {
-                    let bound = fixed_k_limb_bound(FIRST, K, other_len);
-                    assert!(size <= bound);
-                    bound
-                }
-
-                #[kani::proof_for_contract(scale_shortest_contract)]
-                #[kani::unwind(41)]
-                #[kani::stub(crate::num::imp::bignum::kani_loop_size, window_limb_count)]
-                #[kani::stub(Big::add, Big::kani_add_model)]
-                #[kani::stub(Big::sub, Big::kani_sub_model)]
-                #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
-                #[kani::stub(Big::mul_pow2, Big::kani_mul_pow2_model)]
-                #[kani::stub(Big::mul_digits, Big::kani_mul_digits_model)]
-                #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
-                #[kani::stub(crate::num::imp::bignum::kani_pow2_bits, stub_pow2_bits)]
-                #[kani::stub(crate::num::imp::bignum::kani_mul_limb_bound, stub_mul_limb_bound)]
-                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul, carrying_mul_model))]
-                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
-                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul, carrying_mul_model))]
-                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul_add, carrying_mul_add_model))]
-                #[kani::stub(crate::num::imp::flt2dec::estimator::estimate_scaling_factor, stub_estimate)]
-                #[kani::stub(
-                    u64::leading_zeros,
-                    crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u64
-                )]
-                #[kani::stub(
-                    u32::leading_zeros,
-                    crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u32
-                )]
-                #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
-                #[kani::stub(Big::is_zero, stub_is_zero)]
-                #[kani::solver(cadical)]
-                fn check_scale_shortest() {
-                    let mant = kani::any::<u64>() & ((1u64 << 55) - 1);
-                    let minus = 1;
-                    let plus = if kani::any::<bool>() { 1 } else { 2 };
-                    kani::assume(mant >= 2);
-                    kani::assume(plus == 1 || mant == 1 << 25 || mant == 1 << 54);
-                    kani::assume(mant as u128 + plus as u128 <= ((minus as u128 + plus as u128) << 53));
-                    let exp = FIRST + i16::from(kani::any::<u8>() & 15);
-                    kani::assume(exp <= LAST);
-                    kani::assume(
-                        crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor(mant + plus, exp)
-                            == K
-                    );
-                    let inclusive = kani::any::<bool>();
-                    scale_shortest_contract(mant, minus, plus, exp, inclusive);
-                    kani::cover(inclusive, "fixed-K scaling includes inclusive intervals");
-                    kani::cover(!inclusive, "fixed-K scaling includes exclusive intervals");
-                }
+                $(mod $piece {
+                    check_dragon_scale_fixed_k_harness!($window, $k, $lo, 3);
+                })*
             }
         };
     }
@@ -2502,8 +2520,13 @@ pub mod dragon_verify {
     // The fixed-K proofs of one window. The list must name each K of
     // fixed_k_min(FIRST)..=fixed_k_max(FIRST) once, in increasing order, or the build fails.
     // With check_dragon_scale_k_range the proofs cover every input of the window.
+    // An entry `kNNN => K => [eNN => offset, ...]` splits the proof of K into pieces.
     macro_rules! check_dragon_scale_fixed_k_window {
-        ($name:ident, $window:literal, [$($k_name:ident => $k:expr),* $(,)?]) => {
+        (
+            $name:ident,
+            $window:literal,
+            [$($k_name:ident => $k:expr $(=> [$($piece:ident => $lo:literal),* $(,)?])?),* $(,)?]
+        ) => {
             mod $name {
                 use super::*;
 
@@ -2512,7 +2535,9 @@ pub mod dragon_verify {
                     assert!(fixed_k_list_covers(&[$($k),*], fixed_k_min(first), fixed_k_max(first)));
                 };
 
-                $(check_dragon_scale_fixed_k_pair!($k_name, $window, $k);)*
+                $(check_dragon_scale_fixed_k_pair!(
+                    $k_name, $window, $k $(, [$($piece => $lo),*])?
+                );)*
             }
         };
     }
@@ -2525,7 +2550,8 @@ pub mod dragon_verify {
 
         check_dragon_scale_fixed_k_window!(w000, 0, [
             k324 => -324, k323 => -323, k322 => -322, k321 => -321, k320 => -320, k319 => -319,
-            k318 => -318, k317 => -317, k316 => -316, k315 => -315, k314 => -314, k313 => -313,
+            k318 => -318, k317 => -317 => [e00 => 0], k316 => -316, k315 => -315,
+            k314 => -314, k313 => -313,
             k312 => -312, k311 => -311, k310 => -310, k309 => -309, k308 => -308, k307 => -307,
             k306 => -306, k305 => -305, k304 => -304, k303 => -303,
         ]);

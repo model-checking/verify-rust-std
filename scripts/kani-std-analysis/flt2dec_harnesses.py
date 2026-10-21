@@ -30,6 +30,9 @@ DRAGON_SLOW_PAIRS = (
     (29, -174), (29, -175), (34, -151), (34, -152), (34, -153), (34, -154), (34, -155), (46, -91),
     (46, -92), (46, -93), (46, -94), (46, -95), (47, -90), (47, -91),
 )
+# Pairs whose proof splits on the exponent (dragon.rs `kNNN => K => [eNN => offset]`):  pair -> the
+# exponent offsets of its pieces;  each piece covers 4 exponents and runs alone at 180 minutes.
+DRAGON_SPLIT_PAIRS = {(0, -317): (0,)}
 # One CI matrix holds at most 256 jobs:  core, long (generator and cached proofs), and the fixed-K
 # pairs in four:  dragon-a (windows 000..033), dragon-b (034..067), dragon-c (068..097), dragon-d (098..127).
 MATRIX_JOBS = ("core", "long", "dragon-a", "dragon-b", "dragon-c", "dragon-d")
@@ -60,6 +63,12 @@ def dragon_fixed_k_name(window, k):
 def dragon_fixed_k_harness(window, k):
     """The Kani harness of one pair:  module wNNN holds one module kNNN (K < 0) or pNNN (K >= 0)."""
     return f"{DRAGON}::dragon_scale_fixed_k::w{window:03d}::{'k' if k < 0 else 'p'}{abs(k):03d}::check_scale_shortest"
+
+
+def dragon_fixed_k_piece_harness(window, k, offset):
+    """The Kani harness of one piece of a split pair:  module eNN (NN = offset) inside the pair module."""
+    pair = dragon_fixed_k_harness(window, k).removesuffix("::check_scale_shortest")
+    return f"{pair}::e{offset:02d}::check_scale_shortest"
 
 
 def dragon_matrix_job(window):
@@ -181,10 +190,11 @@ def proof_groups(pointer_width=None):
     # 60 minutes in fours;  every other pair runs at 30 minutes in eights, contiguous in
     # (window, K) order within its matrix job.  The chunks form first;  then each slow pair
     # (ruling s54 (a)) leaves its chunk, so the other group names stay, and runs alone at
-    # 180 minutes.
+    # 180 minutes.  A split pair leaves its chunk the same way and runs one group per piece.
     def add_fixed_k_chunks(pairs, batch_size, timeout_minutes):
         for first in range(0, len(pairs), batch_size):
-            chunk = [pair for pair in pairs[first:first + batch_size] if pair not in DRAGON_SLOW_PAIRS]
+            chunk = [pair for pair in pairs[first:first + batch_size]
+                     if pair not in DRAGON_SLOW_PAIRS and pair not in DRAGON_SPLIT_PAIRS]
             if chunk:
                 add_fixed_k(chunk, timeout_minutes)
 
@@ -195,6 +205,10 @@ def proof_groups(pointer_width=None):
                             if dragon_matrix_job(window) == job and not in_slow_band(window, k)], 8, 30)
     for pair in DRAGON_SLOW_PAIRS:
         add_fixed_k([pair], 180)
+    for (window, k), offsets in DRAGON_SPLIT_PAIRS.items():
+        for offset in offsets:
+            add(f"dragon-shortest-scaling-fixed-k-{dragon_fixed_k_name(window, k)}-e{offset:02d}", "contract",
+                [dragon_fixed_k_piece_harness(window, k, offset)], 180, matrix_job=dragon_matrix_job(window))
 
     # The index 51 proof (group 29) does not finish on the whole domain, so grisu.rs proves
     # it in two pieces that split on the top bit of v and together cover every input.

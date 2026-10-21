@@ -3,7 +3,8 @@ import re
 import unittest
 
 from flt2dec_harnesses import (
-    DRAGON, DRAGON_SLOW_BAND, DRAGON_SLOW_PAIRS, MATRIX_JOBS, OPERATING_SYSTEMS, dragon_fixed_k_harness,
+    DRAGON, DRAGON_SLOW_BAND, DRAGON_SLOW_PAIRS, DRAGON_SPLIT_PAIRS, MATRIX_JOBS, OPERATING_SYSTEMS,
+    dragon_fixed_k_harness, dragon_fixed_k_piece_harness,
     dragon_fixed_k_pairs, group_harnesses, proof_groups, proof_matrix, remaining_harnesses,
 )
 
@@ -182,8 +183,8 @@ class Flt2decHarnessesTests(unittest.TestCase):
                   if group["name"].startswith("dragon-shortest-scaling-fixed-k-")]
         routed = [(group, int(window), (-1 if sign == "k" else 1) * int(k))
                   for group in groups for harness in group["harnesses"]
-                  for window, sign, k in re.findall(r"::w(\d{3})::([kp])(\d{3})::check_scale_shortest$",
-                                                    harness)]
+                  for window, sign, k, _ in re.findall(
+                      r"::w(\d{3})::([kp])(\d{3})(?:::e(\d{2}))?::check_scale_shortest$", harness)]
         self.assertEqual(len(routed), sum(len(group["harnesses"]) for group in groups))
         self.assertEqual(sorted((window, k) for _, window, k in routed), pairs)
         self.assertEqual([harness for group in groups for harness in group["harnesses"]
@@ -377,6 +378,24 @@ class Flt2decHarnessesTests(unittest.TestCase):
         split = re.findall(r"verify_multiply_shortest!\(\s*check_multiply_shortest_29_(v\d)\s*,"
                            r"\s*51\s*,\s*([^,]+?)\s*,\s*([^,)]+?)\s*[,)]", source)
         self.assertEqual(split, [("v0", "0", "1 << 63"), ("v1", "1 << 63", "1 << 64")])
+
+    def test_dragon_split_pairs_run_one_group_per_piece(self):
+        self.assertEqual(DRAGON_SPLIT_PAIRS, {(0, -317): (0,)})
+        names = {group["name"]: group for group in self.groups}
+        harnesses = [harness for group in self.groups for harness in group["harnesses"]]
+        for (window, k), offsets in DRAGON_SPLIT_PAIRS.items():
+            plain = f"dragon-shortest-scaling-fixed-k-{window:03d}-{'k' if k < 0 else 'p'}{abs(k):03d}"
+            with self.subTest(window=window, k=k):
+                self.assertEqual(offsets, (0, 4, 8, 12)[:len(offsets)])
+                self.assertNotIn(plain, names)
+                self.assertNotIn(dragon_fixed_k_harness(window, k), harnesses)
+                for offset in offsets:
+                    group = names[f"{plain}-e{offset:02d}"]
+                    self.assertEqual(group["harnesses"], [dragon_fixed_k_piece_harness(window, k, offset)])
+                    self.assertEqual(group["timeout_minutes"], 180)
+                    self.assertEqual(group["matrix_job"], "dragon-a")
+        self.assertEqual(dragon_fixed_k_piece_harness(0, -317, 0),
+                         f"{DRAGON}::dragon_scale_fixed_k::w000::k317::e00::check_scale_shortest")
 
     def test_only_exact_catalog_names_are_removed(self):
         retained = ["num::imp::flt2dec::check_wrapper", "num::imp::flt2dec::check_future_proof",
