@@ -26,6 +26,23 @@ impl<A: Iterator, B: Iterator> Zip<A, B> {
         ZipImpl::new(a, b)
     }
     fn super_nth(&mut self, mut n: usize) -> Option<(A::Item, B::Item)> {
+        #[cfg_attr(
+            kani,
+            kani::loop_invariant(
+                self.index <= self.len
+                    && self.len <= self.a.size_hint().0
+                    && self.len <= self.b.size_hint().0
+            )
+        )]
+        #[cfg_attr(
+            kani,
+            kani::loop_modifies(
+                &mut self.a,
+                &mut self.b,
+                &mut self.index,
+                &mut n
+            )
+        )]
         while let Some(x) = Iterator::next(self) {
             if n == 0 {
                 return Some(x);
@@ -265,6 +282,7 @@ where
     }
 
     #[inline]
+    #[requires(idx < TrustedRandomAccessNoCoerce::size(self))]
     #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn get_unchecked(&mut self, idx: usize) -> <Self as Iterator>::Item {
         let idx = self.index + idx;
@@ -280,6 +298,18 @@ where
     {
         let mut accum = init;
         let len = ZipImpl::size_hint(&self).0;
+        #[cfg_attr(
+            kani,
+            kani::loop_invariant(
+                kani::index <= len
+                    && len <= ZipImpl::size_hint(&self).0
+                    && self.index <= self.a.size()
+                    && len <= self.a.size() - self.index
+                    && self.index <= self.b.size()
+                    && len <= self.b.size() - self.index
+            )
+        )]
+        #[cfg_attr(kani, kani::loop_modifies(&self, &accum, &f))]
         for i in 0..len {
             // SAFETY: since Self: TrustedRandomAccessNoCoerce we can trust the size-hint to
             // calculate the length and then use that to do unchecked iteration.
@@ -328,6 +358,19 @@ where
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         let delta = cmp::min(n, self.len - self.index);
         let end = self.index + delta;
+        #[cfg_attr(
+            kani,
+            kani::loop_invariant(
+                self.index <= end
+                    && end <= self.len
+                    && self.len <= self.a.size()
+                    && self.len <= self.b.size()
+            )
+        )]
+        #[cfg_attr(
+            kani,
+            kani::loop_modifies(&mut self.index, &mut self.a, &mut self.b)
+        )]
         while self.index < end {
             let i = self.index;
             // since get_unchecked executes code which can panic we increment the counters beforehand
@@ -678,4 +721,369 @@ impl<A: TrustedLen, B: TrustedLen> SpecFold for Zip<A, B> {
         }
         accum
     }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Harnesses for `__iterator_get_unchecked` for Zip.
+    macro_rules! generate_zip_iterator_get_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(
+                            <Zip<
+                                crate::iter::Map<crate::ops::Range<usize>, fn(usize) -> $ty>,
+                                crate::iter::Map<crate::ops::Range<usize>, fn(usize) -> $ty>,
+                            > as crate::iter::Iterator>::__iterator_get_unchecked
+                        )]
+            pub fn $name() {
+                let left_len: usize = kani::any();
+                let right_len: usize = kani::any();
+                let index: usize = kani::any();
+                let idx: usize = kani::any();
+                let left_value: $ty = kani::any();
+                let right_value: $ty = kani::any();
+                let left = (0..left_len).map(move |_| left_value);
+                let right = (0..right_len).map(move |_| right_value);
+                let mut zip = Zip::new(left, right);
+                zip.index = index.min(zip.len);
+                let _ = unsafe { Iterator::__iterator_get_unchecked(&mut zip, idx) };
+                let remaining = zip.len - zip.index;
+                kani::cover(zip.index == 0 && idx == 0, "first element");
+                kani::cover(zip.index > 0 && idx == 0, "first element after a prefix");
+                kani::cover(idx > 0 && idx < remaining - 1, "interior element");
+                kani::cover(idx == remaining - 1, "last element");
+                kani::cover(left_len < right_len, "left iterator is shorter");
+                kani::cover(left_len > right_len, "right iterator is shorter");
+                kani::cover(
+                    left_len == usize::MAX && right_len == usize::MAX && idx == usize::MAX - 1,
+                    "last element at the maximum logical length",
+                );
+            }
+        };
+    }
+
+    #[kani::proof_for_contract(
+        <Zip<
+            crate::ops::Range<usize>,
+            crate::ops::Range<usize>,
+        > as crate::iter::Iterator>::__iterator_get_unchecked
+    )]
+    fn harness_zip_iterator_get_unchecked_unbounded() {
+        let left_len: usize = kani::any();
+        let right_len: usize = kani::any();
+        let index: usize = kani::any();
+        let idx: usize = kani::any();
+        let mut zip = Zip::new(0..left_len, 0..right_len);
+        zip.len = kani::any::<usize>().min(zip.len);
+        zip.index = index.min(zip.len);
+        let _ = unsafe { Iterator::__iterator_get_unchecked(&mut zip, idx) };
+        let remaining = zip.len - zip.index;
+        kani::cover(zip.index == 0 && idx == 0, "first element");
+        kani::cover(zip.index > 0 && idx == 0, "first element after a prefix");
+        kani::cover(idx > 0 && idx < remaining - 1, "interior element");
+        kani::cover(idx == remaining - 1, "last element");
+        kani::cover(zip.len < left_len.min(right_len), "access after consuming from the back");
+        kani::cover(
+            left_len == usize::MAX && right_len == usize::MAX && idx == usize::MAX - 1,
+            "last element at the maximum logical length",
+        );
+    }
+
+    generate_zip_iterator_get_unchecked_harness!(harness_zip_iterator_get_unchecked_i8, i8);
+    generate_zip_iterator_get_unchecked_harness!(harness_zip_iterator_get_unchecked_i16, i16);
+    generate_zip_iterator_get_unchecked_harness!(harness_zip_iterator_get_unchecked_i32, i32);
+    generate_zip_iterator_get_unchecked_harness!(harness_zip_iterator_get_unchecked_i64, i64);
+    generate_zip_iterator_get_unchecked_harness!(harness_zip_iterator_get_unchecked_i128, i128);
+    generate_zip_iterator_get_unchecked_harness!(harness_zip_iterator_get_unchecked_u8, u8);
+    generate_zip_iterator_get_unchecked_harness!(harness_zip_iterator_get_unchecked_u16, u16);
+    generate_zip_iterator_get_unchecked_harness!(harness_zip_iterator_get_unchecked_u32, u32);
+    generate_zip_iterator_get_unchecked_harness!(harness_zip_iterator_get_unchecked_u64, u64);
+    generate_zip_iterator_get_unchecked_harness!(harness_zip_iterator_get_unchecked_u128, u128);
+    generate_zip_iterator_get_unchecked_harness!(harness_zip_iterator_get_unchecked_array, [u8; 4]);
+    generate_zip_iterator_get_unchecked_harness!(harness_zip_iterator_get_unchecked_bool, bool);
+    generate_zip_iterator_get_unchecked_harness!(harness_zip_iterator_get_unchecked_unit, ());
+
+    // Harnesses for `get_unchecked` for ZipImpl.
+    macro_rules! generate_zip_get_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(
+                <Zip<
+                    crate::iter::Map<crate::ops::Range<usize>, fn(usize) -> (usize, $ty)>,
+                    crate::iter::Map<crate::ops::Range<usize>, fn(usize) -> (usize, $ty)>,
+                > as ZipImpl<
+                    crate::iter::Map<crate::ops::Range<usize>, fn(usize) -> (usize, $ty)>,
+                    crate::iter::Map<crate::ops::Range<usize>, fn(usize) -> (usize, $ty)>,
+                >>::get_unchecked
+            )]
+            pub fn $name() {
+                let left_len: usize = kani::any();
+                let right_len: usize = kani::any();
+                let index: usize = kani::any();
+                let idx: usize = kani::any();
+                let left_value: $ty = kani::any();
+                let right_value: $ty = kani::any();
+                let left = (0..left_len).map(move |position| (position, left_value));
+                let right = (0..right_len).map(move |position| (position, right_value));
+                let mut zip = Zip::new(left, right);
+                zip.index = index.min(zip.len);
+                let _ = unsafe { ZipImpl::get_unchecked(&mut zip, idx) };
+                let remaining = zip.len - zip.index;
+                kani::cover(zip.index == 0 && idx == 0, "first element");
+                kani::cover(zip.index > 0 && idx == 0, "first element after a prefix");
+                kani::cover(idx > 0 && idx < remaining - 1, "interior element");
+                kani::cover(idx == remaining - 1, "last element");
+                kani::cover(left_len < right_len, "left iterator is shorter");
+                kani::cover(left_len > right_len, "right iterator is shorter");
+                kani::cover(zip.index == usize::MAX - 1 && idx == 0, "maximum valid offset");
+                kani::cover(
+                    left_len == usize::MAX && right_len == usize::MAX && idx == usize::MAX - 1,
+                    "last element at the maximum logical length",
+                );
+            }
+        };
+    }
+
+    #[kani::proof_for_contract(
+        <Zip<
+            crate::ops::Range<usize>,
+            crate::ops::Range<usize>,
+        > as ZipImpl<
+            crate::ops::Range<usize>,
+            crate::ops::Range<usize>,
+        >>::get_unchecked
+    )]
+    fn harness_zip_get_unchecked_unbounded() {
+        let left_len: usize = kani::any();
+        let right_len: usize = kani::any();
+        let index: usize = kani::any();
+        let idx: usize = kani::any();
+        let mut zip = Zip::new(0..left_len, 0..right_len);
+        // For ranges, front/back consumption changes only index/len.
+        zip.len = kani::any::<usize>().min(zip.len);
+        zip.index = index.min(zip.len);
+        let _ = unsafe { ZipImpl::get_unchecked(&mut zip, idx) };
+        let remaining = zip.len - zip.index;
+        kani::cover(zip.index == 0 && idx == 0, "first element");
+        kani::cover(zip.index > 0 && idx == 0, "first element after a prefix");
+        kani::cover(idx > 0 && idx < remaining - 1, "interior element");
+        kani::cover(idx == remaining - 1, "last element");
+        kani::cover(zip.len < left_len.min(right_len), "access after consuming from the back");
+        kani::cover(zip.index == usize::MAX - 1 && idx == 0, "maximum valid offset");
+        kani::cover(
+            left_len == usize::MAX && right_len == usize::MAX && idx == usize::MAX - 1,
+            "last element at the maximum logical length",
+        );
+    }
+
+    generate_zip_get_unchecked_harness!(harness_zip_get_unchecked_i8, i8);
+    generate_zip_get_unchecked_harness!(harness_zip_get_unchecked_i16, i16);
+    generate_zip_get_unchecked_harness!(harness_zip_get_unchecked_i32, i32);
+    generate_zip_get_unchecked_harness!(harness_zip_get_unchecked_i64, i64);
+    generate_zip_get_unchecked_harness!(harness_zip_get_unchecked_i128, i128);
+    generate_zip_get_unchecked_harness!(harness_zip_get_unchecked_u8, u8);
+    generate_zip_get_unchecked_harness!(harness_zip_get_unchecked_u16, u16);
+    generate_zip_get_unchecked_harness!(harness_zip_get_unchecked_u32, u32);
+    generate_zip_get_unchecked_harness!(harness_zip_get_unchecked_u64, u64);
+    generate_zip_get_unchecked_harness!(harness_zip_get_unchecked_u128, u128);
+    generate_zip_get_unchecked_harness!(harness_zip_get_unchecked_array, [u8; 4]);
+    generate_zip_get_unchecked_harness!(harness_zip_get_unchecked_bool, bool);
+    generate_zip_get_unchecked_harness!(harness_zip_get_unchecked_unit, ());
+
+    // Harnesses for `fold` for ZipImpl.
+    macro_rules! generate_zip_fold_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $name() {
+                // Generate independent symbolic lengths for both sides.
+                let left_len: usize = kani::any();
+                let right_len: usize = kani::any();
+
+                // Generate independent symbolic payloads for both sides.
+                let left_value: $ty = kani::any();
+                let right_value: $ty = kani::any();
+
+                // Map preserves full trusted random access with unbounded lengths.
+                let left = (0..left_len).map(move |_| left_value);
+                let right = (0..right_len).map(move |_| right_value);
+                let mut zip = Zip::new(left, right);
+
+                // Model any reachable offset in the full trusted-random-access Zip.
+                let index: usize = kani::any();
+                kani::assume(index <= zip.len);
+                zip.index = index;
+
+                // Call the specialized safe function directly.
+                ZipImpl::fold(zip, (), |(), _pair| ());
+            }
+        };
+    }
+
+    generate_zip_fold_harness!(harness_zip_fold_i8, i8);
+    generate_zip_fold_harness!(harness_zip_fold_i16, i16);
+    generate_zip_fold_harness!(harness_zip_fold_i32, i32);
+    generate_zip_fold_harness!(harness_zip_fold_i64, i64);
+    generate_zip_fold_harness!(harness_zip_fold_i128, i128);
+    generate_zip_fold_harness!(harness_zip_fold_u8, u8);
+    generate_zip_fold_harness!(harness_zip_fold_u16, u16);
+    generate_zip_fold_harness!(harness_zip_fold_u32, u32);
+    generate_zip_fold_harness!(harness_zip_fold_u64, u64);
+    generate_zip_fold_harness!(harness_zip_fold_u128, u128);
+    generate_zip_fold_harness!(harness_zip_fold_bool, bool);
+    generate_zip_fold_harness!(harness_zip_fold_unit, ());
+    generate_zip_fold_harness!(harness_zip_fold_array, [u8; 4]);
+
+    // Harnesses for `next` for ZipImpl.
+    macro_rules! generate_zip_next_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $name() {
+                // Generate independent symbolic lengths for both sides.
+                let left_len: usize = kani::any();
+                let right_len: usize = kani::any();
+
+                // Generate independent symbolic payloads for both sides.
+                let left_value: $ty = kani::any();
+                let right_value: $ty = kani::any();
+
+                // Map over Range preserves TrustedRandomAccess.
+                let left = (0..left_len).map(move |_| left_value);
+                let right = (0..right_len).map(move |_| right_value);
+                let mut zip = Zip::new(left, right);
+
+                // Model any reachable offset in the full trusted-random-access Zip.
+                let index: usize = kani::any();
+                kani::assume(index <= zip.len);
+                zip.index = index;
+
+                // Call the specialized safe function directly.
+                ZipImpl::next(&mut zip);
+            }
+        };
+    }
+
+    generate_zip_next_harness!(harness_zip_next_i8, i8);
+    generate_zip_next_harness!(harness_zip_next_i16, i16);
+    generate_zip_next_harness!(harness_zip_next_i32, i32);
+    generate_zip_next_harness!(harness_zip_next_i64, i64);
+    generate_zip_next_harness!(harness_zip_next_i128, i128);
+    generate_zip_next_harness!(harness_zip_next_u8, u8);
+    generate_zip_next_harness!(harness_zip_next_u16, u16);
+    generate_zip_next_harness!(harness_zip_next_u32, u32);
+    generate_zip_next_harness!(harness_zip_next_u64, u64);
+    generate_zip_next_harness!(harness_zip_next_u128, u128);
+    generate_zip_next_harness!(harness_zip_next_bool, bool);
+    generate_zip_next_harness!(harness_zip_next_unit, ());
+    generate_zip_next_harness!(harness_zip_next_array, [u8; 4]);
+
+    // Harnesses for `next` for ZipImpl.
+    macro_rules! generate_zip_nth_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $name() {
+                // Generate independent symbolic lengths and the requested index.
+                let left_len: usize = kani::any();
+                let right_len: usize = kani::any();
+                let n: usize = kani::any();
+
+                // Generate independent symbolic payloads for both sides.
+                let left_value: $ty = kani::any();
+                let right_value: $ty = kani::any();
+
+                // Map selects the full trusted-random-access specialization.
+                let left = (0..left_len).map(move |_| left_value);
+                let right = (0..right_len).map(move |_| right_value);
+                let mut zip = Zip::new(left, right);
+
+                // Model any state reachable by prior forward iteration.
+                let index: usize = kani::any();
+                kani::assume(index <= zip.len);
+                zip.index = index;
+
+                // Call the specialized safe function directly.
+                ZipImpl::nth(&mut zip, n);
+            }
+        };
+    }
+
+    generate_zip_nth_harness!(harness_zip_nth_i8, i8);
+    generate_zip_nth_harness!(harness_zip_nth_i16, i16);
+    generate_zip_nth_harness!(harness_zip_nth_i32, i32);
+    generate_zip_nth_harness!(harness_zip_nth_i64, i64);
+    generate_zip_nth_harness!(harness_zip_nth_i128, i128);
+    generate_zip_nth_harness!(harness_zip_nth_u8, u8);
+    generate_zip_nth_harness!(harness_zip_nth_u16, u16);
+    generate_zip_nth_harness!(harness_zip_nth_u32, u32);
+    generate_zip_nth_harness!(harness_zip_nth_u64, u64);
+    generate_zip_nth_harness!(harness_zip_nth_u128, u128);
+    generate_zip_nth_harness!(harness_zip_nth_bool, bool);
+    generate_zip_nth_harness!(harness_zip_nth_unit, ());
+    generate_zip_nth_harness!(harness_zip_nth_array, [u8; 4]);
+
+    // Harnesses for `next_back` for ZipImpl.
+    #[kani::proof]
+    fn harness_zip_next_back() {
+        // Generate independent unbounded lengths.
+        let left_len: usize = kani::any();
+        let right_len: usize = kani::any();
+
+        // Core Range iterators provide trusted random access.
+        let left = 0..left_len;
+        let right = 0..right_len;
+        let mut zip = Zip::new(left, right);
+
+        // Model any state reachable after prior forward iteration.
+        let index: usize = kani::any();
+        kani::assume(index <= zip.len);
+        zip.index = index;
+
+        // Call the specialized safe function directly.
+        ZipImpl::next_back(&mut zip);
+    }
+
+    // Harnesses for `spec_fold` for ZipImpl.
+    macro_rules! generate_zip_spec_fold_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            #[kani::unwind(8)]
+            pub fn $name() {
+                // Generate independent symbolic lengths, bounded for unwinding.
+                let left_len: usize = kani::any();
+                let right_len: usize = kani::any();
+                kani::assume(left_len <= 4 && right_len <= 4);
+                kani::cover(true, "bounded input is satisfiable");
+                // Generate independent symbolic payloads.
+                let left_value: $ty = kani::any();
+                let right_value: $ty = kani::any();
+                // Take<Repeat<T>> provides a finite TrustedLen iterator.
+                let left = crate::iter::repeat(left_value).take(left_len);
+                let right = crate::iter::repeat(right_value).take(right_len);
+                let zip = Zip::new(left, right);
+                // Exercise the real TrustedLen-specialized implementation.
+                let count = SpecFold::spec_fold(zip, 0usize, |count, _pair| count + 1);
+                // The fold must process exactly min(left_len, right_len) pairs.
+                assert_eq!(count, left_len.min(right_len));
+                kani::cover(left_len == 0 || right_len == 0, "empty zip");
+                kani::cover(left_len < right_len, "left iterator is shorter");
+                kani::cover(left_len > right_len, "right iterator is shorter");
+                kani::cover(left_len == right_len && left_len > 0, "equal nonempty lengths");
+                kani::cover(left_len == 4 && right_len == 4, "maximum bounded length");
+            }
+        };
+    }
+
+    generate_zip_spec_fold_harness!(harness_zip_spec_fold_i8, i8);
+    generate_zip_spec_fold_harness!(harness_zip_spec_fold_i16, i16);
+    generate_zip_spec_fold_harness!(harness_zip_spec_fold_i32, i32);
+    generate_zip_spec_fold_harness!(harness_zip_spec_fold_i64, i64);
+    generate_zip_spec_fold_harness!(harness_zip_spec_fold_i128, i128);
+    generate_zip_spec_fold_harness!(harness_zip_spec_fold_u8, u8);
+    generate_zip_spec_fold_harness!(harness_zip_spec_fold_u16, u16);
+    generate_zip_spec_fold_harness!(harness_zip_spec_fold_u32, u32);
+    generate_zip_spec_fold_harness!(harness_zip_spec_fold_u64, u64);
+    generate_zip_spec_fold_harness!(harness_zip_spec_fold_u128, u128);
+    generate_zip_spec_fold_harness!(harness_zip_spec_fold_bool, bool);
+    generate_zip_spec_fold_harness!(harness_zip_spec_fold_unit, ());
+    generate_zip_spec_fold_harness!(harness_zip_spec_fold_array, [u8; 4]);
 }

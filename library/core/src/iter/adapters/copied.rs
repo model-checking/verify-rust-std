@@ -284,3 +284,91 @@ unsafe impl<I: InPlaceIterable> InPlaceIterable for Copied<I> {
     const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
     const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Harnesses for `__iterator_get_unchecked` for Copied.
+    macro_rules! generate_copied_get_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(
+                            <Copied<crate::slice::Iter<'static, $ty>> as crate::iter::Iterator>::
+                                __iterator_get_unchecked
+                        )]
+            pub fn $name() {
+                let len: usize = kani::any();
+                let idx: usize = kani::any();
+                let value: $ty = kani::any();
+                let source = (0..len).map(|_| &value);
+                let mut iter = Copied::new(source);
+                let _ = unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
+                kani::cover(idx == 0, "first element");
+                kani::cover(idx > 0 && idx < len - 1, "interior element");
+                kani::cover(idx == len - 1, "last element");
+                kani::cover(
+                    len == usize::MAX && idx == len - 1,
+                    "last element at the maximum logical length",
+                );
+            }
+        };
+    }
+
+    generate_copied_get_unchecked_harness!(harness_copied_iterator_get_unchecked_i8, i8);
+    generate_copied_get_unchecked_harness!(harness_copied_iterator_get_unchecked_i16, i16);
+    generate_copied_get_unchecked_harness!(harness_copied_iterator_get_unchecked_i32, i32);
+    generate_copied_get_unchecked_harness!(harness_copied_iterator_get_unchecked_i64, i64);
+    generate_copied_get_unchecked_harness!(harness_copied_iterator_get_unchecked_i128, i128);
+    generate_copied_get_unchecked_harness!(harness_copied_iterator_get_unchecked_u8, u8);
+    generate_copied_get_unchecked_harness!(harness_copied_iterator_get_unchecked_u16, u16);
+    generate_copied_get_unchecked_harness!(harness_copied_iterator_get_unchecked_u32, u32);
+    generate_copied_get_unchecked_harness!(harness_copied_iterator_get_unchecked_u64, u64);
+    generate_copied_get_unchecked_harness!(harness_copied_iterator_get_unchecked_u128, u128);
+    generate_copied_get_unchecked_harness!(harness_copied_iterator_get_unchecked_array, [u8; 4]);
+    generate_copied_get_unchecked_harness!(harness_copied_iterator_get_unchecked_bool, bool);
+    generate_copied_get_unchecked_harness!(harness_copied_iterator_get_unchecked_unit, ());
+
+    // Harnesses for `spec_next_chunk` for Copied
+    macro_rules! generate_copied_spec_next_chunk_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Provide valid symbolic storage for every relevant length around N = 4.
+                let values: [$ty; 5] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&values);
+                let mut iter = slice.iter();
+                // Directly call the specialized safe function under test.
+                let _ = <crate::slice::Iter<'_, $ty> as SpecNextChunk<'_, 4, $ty>>::spec_next_chunk(
+                    &mut iter,
+                );
+            }
+        };
+    }
+
+    generate_copied_spec_next_chunk_harness!(harness_copied_spec_next_chunk_i8, i8);
+    generate_copied_spec_next_chunk_harness!(harness_copied_spec_next_chunk_i16, i16);
+    generate_copied_spec_next_chunk_harness!(harness_copied_spec_next_chunk_i32, i32);
+    generate_copied_spec_next_chunk_harness!(harness_copied_spec_next_chunk_i64, i64);
+    generate_copied_spec_next_chunk_harness!(harness_copied_spec_next_chunk_i128, i128);
+    generate_copied_spec_next_chunk_harness!(harness_copied_spec_next_chunk_u8, u8);
+    generate_copied_spec_next_chunk_harness!(harness_copied_spec_next_chunk_u16, u16);
+    generate_copied_spec_next_chunk_harness!(harness_copied_spec_next_chunk_u32, u32);
+    generate_copied_spec_next_chunk_harness!(harness_copied_spec_next_chunk_u64, u64);
+    generate_copied_spec_next_chunk_harness!(harness_copied_spec_next_chunk_u128, u128);
+    generate_copied_spec_next_chunk_harness!(harness_copied_spec_next_chunk_array, [u8; 4]);
+    generate_copied_spec_next_chunk_harness!(harness_copied_spec_next_chunk_bool, bool);
+
+    #[kani::proof]
+    pub fn harness_copied_spec_next_chunk_unit() {
+        // Generate a truly unbounded symbolic length for the zero-sized type.
+        let len: usize = kani::any();
+        let data = crate::ptr::NonNull::<()>::dangling().as_ptr();
+        // SAFETY: the pointer is non-null and aligned, and `()` occupies zero bytes.
+        let slice = unsafe { crate::slice::from_raw_parts(data, len) };
+        let mut iter = slice.iter();
+        // Directly call the ZST branch of the specialized safe function.
+        let _ =
+            <crate::slice::Iter<'_, ()> as SpecNextChunk<'_, 4, ()>>::spec_next_chunk(&mut iter);
+    }
+}
