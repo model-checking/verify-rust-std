@@ -478,6 +478,13 @@ pub(crate) fn kani_pow2_bits(bits: usize) -> usize {
     bits
 }
 
+// Proofs can bound the limb count of the bigint operand of a cached product.
+// A replacement asserts the actual size against its constant bound.
+#[cfg(kani)]
+pub(crate) fn kani_mul_limb_bound(_size: usize, _other_len: usize) -> usize {
+    KANI_LIMBS
+}
+
 #[cfg(kani)]
 impl crate::kani::Arbitrary for Big {
     fn any() -> Self {
@@ -542,6 +549,85 @@ impl Big {
 
     // Invariant-only arithmetic avoids shared callees and their DFCC parameters.
     pub(crate) fn kani_invariant_cmp_scaled_sum(
+        &self,
+        left: &Self,
+        right: &Self,
+        decimal_digits: usize,
+    ) -> KaniInvariantOrdering {
+        if self.size <= KANI_LIMBS
+            && left.size <= KANI_LIMBS
+            && right.size <= KANI_LIMBS
+            && decimal_digits <= 16
+        {
+            let factor: u128 = match decimal_digits {
+                0 => 1,
+                1 => 10,
+                2 => 100,
+                3 => 1_000,
+                4 => 10_000,
+                5 => 100_000,
+                6 => 1_000_000,
+                7 => 10_000_000,
+                8 => 100_000_000,
+                9 => 1_000_000_000,
+                10 => 10_000_000_000,
+                11 => 100_000_000_000,
+                12 => 1_000_000_000_000,
+                13 => 10_000_000_000_000,
+                14 => 100_000_000_000_000,
+                15 => 1_000_000_000_000_000,
+                16 => 10_000_000_000_000_000,
+                _ => 0,
+            };
+            macro_rules! compare_scaled_sum {
+                ($($index:literal),+ $(,)?) => {{
+                    let carry = 0u128;
+                    let ordering = KaniInvariantOrdering::Equal;
+                    $(
+                        let a = if left.size > $index { left.base[$index] as u128 } else { 0 };
+                        let b = if right.size > $index { right.base[$index] as u128 } else { 0 };
+                        let product = (a + b) * factor + carry;
+                        let digit = product as Digit;
+                        let own = if self.size > $index { self.base[$index] } else { 0 };
+                        let ordering = if own < digit {
+                            KaniInvariantOrdering::Less
+                        } else if own > digit {
+                            KaniInvariantOrdering::Greater
+                        } else {
+                            ordering
+                        };
+                        let carry = product >> Digit::BITS;
+                    )+
+                    if carry == 0 { ordering } else { KaniInvariantOrdering::Unrepresentable }
+                }};
+            }
+            kani_for_each_limb!(compare_scaled_sum)
+        } else {
+            KaniInvariantOrdering::Unrepresentable
+        }
+    }
+
+    // Contract-only twins of the invariant helpers above. A postcondition that
+    // shares the loop-invariant helpers can receive a mismatched DFCC parameter:
+    // model-checking/kani#4796. Each twin checks the sizes before any limb access.
+    pub(crate) fn kani_contract_zero() -> Self {
+        Self { size: 0, base: [0; KANI_LIMBS] }
+    }
+
+    pub(crate) fn kani_contract_size(&self) -> usize {
+        self.size
+    }
+
+    pub(crate) fn kani_contract_valid_storage(&self) -> bool {
+        macro_rules! inactive_limbs_are_zero {
+            ($($index:literal),+ $(,)?) => {
+                true $(& ((self.size > $index) | (self.base[$index] == 0)))+
+            };
+        }
+        self.size <= KANI_LIMBS && kani_for_each_limb!(inactive_limbs_are_zero)
+    }
+
+    pub(crate) fn kani_contract_cmp_scaled_sum(
         &self,
         left: &Self,
         right: &Self,
@@ -735,25 +821,37 @@ impl Big {
         let size = kani_loop_size(self.size);
         assert!(size <= KANI_LIMBS && other.len() <= KANI_LIMBS);
         assert!(size + other.len() <= KANI_LIMBS);
+        let bound = kani_mul_limb_bound(size, other.len());
         let mut ret = [0; KANI_LIMBS];
-        let retsz = if size < other.len() {
-            Self::kani_mul_digits_product(&mut ret, &self.base[..size], other)
+        let retsz = if bound < other.len() || size < other.len() {
+            Self::kani_mul_digits_product(&mut ret, &self.base[..size], other, bound, KANI_LIMBS)
         } else {
-            Self::kani_mul_digits_product(&mut ret, other, &self.base[..size])
+            Self::kani_mul_digits_product(&mut ret, other, &self.base[..size], KANI_LIMBS, bound)
         };
         self.base = ret;
         self.size = retsz;
         self
     }
 
-    fn kani_mul_digits_product(ret: &mut [Digit; KANI_LIMBS], aa: &[Digit], bb: &[Digit]) -> usize {
+    fn kani_mul_digits_product(
+        ret: &mut [Digit; KANI_LIMBS],
+        aa: &[Digit],
+        bb: &[Digit],
+        aa_bound: usize,
+        bb_bound: usize,
+    ) -> usize {
+        // The caller gives the shorter operand as `aa`, so the bound `bb.len()` removes no
+        // row, but a constant `bb` (a power table) bounds the rows before the solver starts.
+        // The caller checks that each operand length is at most its limb bound, so the
+        // limb bounds remove no row or column either.
+        assert!(aa.len() <= bb.len());
         let mut retsz = 0;
         macro_rules! multiply_rows {
             ($($index:literal),+ $(,)?) => {$(
-                if $index < aa.len() {
+                if $index < aa_bound && $index < aa.len() && $index < bb.len() {
                     let a = aa[$index];
                     if a != 0 {
-                        let sz = Self::kani_mul_digits_row(ret, a, bb, $index);
+                        let sz = Self::kani_mul_digits_row(ret, a, bb, $index, bb_bound);
                         if retsz < $index + sz {
                             retsz = $index + sz;
                         }
@@ -770,11 +868,12 @@ impl Big {
         a: Digit,
         bb: &[Digit],
         index: usize,
+        bb_bound: usize,
     ) -> usize {
         let mut carry = 0;
         macro_rules! multiply_columns {
             ($($column:literal),+ $(,)?) => {$(
-                if $column < bb.len() {
+                if $column < bb_bound && $column < bb.len() {
                     let output = index + $column;
                     assert!(output < KANI_LIMBS);
                     let (c, v) =

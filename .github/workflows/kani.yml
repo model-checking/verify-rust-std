@@ -20,12 +20,17 @@ on:
       native_solver:
         description: Optional SAT solver for the native pass of explicitly selected proof groups
         type: choice
-        options: [default, kissat]
+        options: [default, kissat, cadical, minisat]
         default: default
       harness_timeout:
         description: Optional per-harness timeout in minutes for explicitly selected proof groups (empty keeps the catalog value)
         type: string
         default: ''
+      assertion_reach_checks:
+        description: Optional diagnostic switch for Kani assertion reachability checks in explicitly selected proof groups (disabled passes --no-assertion-reach-checks)
+        type: choice
+        options: [enabled, disabled]
+        default: enabled
       proof_backend:
         description: Optional backend for every harness of explicitly selected proof groups
         type: choice
@@ -67,7 +72,7 @@ jobs:
   flt2dec_runtime:
     name: Test flt2dec runtime (${{ matrix.os }})
     needs: flt2dec_matrix
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -81,7 +86,7 @@ jobs:
   build-flat-smt-cbmc:
     name: Build patched CBMC (${{ matrix.os }})
     needs: flt2dec_matrix
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -107,7 +112,7 @@ jobs:
   check-kani-on-std:
     name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Verify std library (partition ${{ matrix.partition }})
     if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -169,8 +174,20 @@ jobs:
     outputs:
       matrix: ${{ steps.groups.outputs.matrix }}
       matrix_long: ${{ steps.groups.outputs.matrix_long }}
+      matrix_dragon_a: ${{ steps.groups.outputs.matrix_dragon_a }}
+      matrix_dragon_b: ${{ steps.groups.outputs.matrix_dragon_b }}
+      matrix_dragon_c: ${{ steps.groups.outputs.matrix_dragon_c }}
+      matrix_dragon_d: ${{ steps.groups.outputs.matrix_dragon_d }}
+      matrix_dragon_e: ${{ steps.groups.outputs.matrix_dragon_e }}
+      matrix_dragon_f: ${{ steps.groups.outputs.matrix_dragon_f }}
       core_groups: ${{ steps.groups.outputs.core_groups }}
       long_groups: ${{ steps.groups.outputs.long_groups }}
+      dragon_a_groups: ${{ steps.groups.outputs.dragon_a_groups }}
+      dragon_b_groups: ${{ steps.groups.outputs.dragon_b_groups }}
+      dragon_c_groups: ${{ steps.groups.outputs.dragon_c_groups }}
+      dragon_d_groups: ${{ steps.groups.outputs.dragon_d_groups }}
+      dragon_e_groups: ${{ steps.groups.outputs.dragon_e_groups }}
+      dragon_f_groups: ${{ steps.groups.outputs.dragon_f_groups }}
     steps:
       - uses: actions/checkout@v4
       - name: Check proof routing
@@ -192,24 +209,50 @@ jobs:
           if [[ -n "$SELECTED_PROOF_GROUPS" ]]; then
             matrix_args+=(--matrix-groups "$SELECTED_PROOF_GROUPS" --matrix-platform "$SELECTED_PROOF_PLATFORM")
           fi
-          # One matrix holds at most 256 jobs, so generator and cached proofs run in a second job.
+          # One matrix holds at most 256 jobs, so generator and cached proofs run in a second job
+          # and the Dragon fixed-K proofs run in six more (dragon-a to dragon-f).
           core_matrix=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py "${matrix_args[@]}" --matrix-job core)
           long_matrix=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py "${matrix_args[@]}" --matrix-job long)
+          dragon_a_matrix=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py "${matrix_args[@]}" --matrix-job dragon-a)
+          dragon_b_matrix=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py "${matrix_args[@]}" --matrix-job dragon-b)
+          dragon_c_matrix=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py "${matrix_args[@]}" --matrix-job dragon-c)
+          dragon_d_matrix=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py "${matrix_args[@]}" --matrix-job dragon-d)
+          dragon_e_matrix=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py "${matrix_args[@]}" --matrix-job dragon-e)
+          dragon_f_matrix=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py "${matrix_args[@]}" --matrix-job dragon-f)
           core_groups=$(jq '.group | length' <<< "$core_matrix")
           long_groups=$(jq '.group | length' <<< "$long_matrix")
-          printf 'Core groups: %s, long groups: %s\n' "$core_groups" "$long_groups"
+          dragon_a_groups=$(jq '.group | length' <<< "$dragon_a_matrix")
+          dragon_b_groups=$(jq '.group | length' <<< "$dragon_b_matrix")
+          dragon_c_groups=$(jq '.group | length' <<< "$dragon_c_matrix")
+          dragon_d_groups=$(jq '.group | length' <<< "$dragon_d_matrix")
+          dragon_e_groups=$(jq '.group | length' <<< "$dragon_e_matrix")
+          dragon_f_groups=$(jq '.group | length' <<< "$dragon_f_matrix")
+          printf 'Core groups: %s, long groups: %s, dragon-a groups: %s, dragon-b groups: %s, dragon-c groups: %s, dragon-d groups: %s, dragon-e groups: %s, dragon-f groups: %s\n' \
+            "$core_groups" "$long_groups" "$dragon_a_groups" "$dragon_b_groups" "$dragon_c_groups" "$dragon_d_groups" "$dragon_e_groups" "$dragon_f_groups"
           {
             printf 'matrix=%s\n' "$core_matrix"
             printf 'matrix_long=%s\n' "$long_matrix"
+            printf 'matrix_dragon_a=%s\n' "$dragon_a_matrix"
+            printf 'matrix_dragon_b=%s\n' "$dragon_b_matrix"
+            printf 'matrix_dragon_c=%s\n' "$dragon_c_matrix"
+            printf 'matrix_dragon_d=%s\n' "$dragon_d_matrix"
+            printf 'matrix_dragon_e=%s\n' "$dragon_e_matrix"
+            printf 'matrix_dragon_f=%s\n' "$dragon_f_matrix"
             printf 'core_groups=%s\n' "$core_groups"
             printf 'long_groups=%s\n' "$long_groups"
+            printf 'dragon_a_groups=%s\n' "$dragon_a_groups"
+            printf 'dragon_b_groups=%s\n' "$dragon_b_groups"
+            printf 'dragon_c_groups=%s\n' "$dragon_c_groups"
+            printf 'dragon_d_groups=%s\n' "$dragon_d_groups"
+            printf 'dragon_e_groups=%s\n' "$dragon_e_groups"
+            printf 'dragon_f_groups=%s\n' "$dragon_f_groups"
           } >> "$GITHUB_OUTPUT"
 
   check-flt2dec:
     name: Verify flt2dec (${{ matrix.group.name }}, ${{ matrix.os }})
     needs: [flt2dec_matrix, build-flat-smt-cbmc]
     if: needs.flt2dec_matrix.outputs.core_groups != '0'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix) }}
@@ -228,6 +271,7 @@ jobs:
       KANI_MEMORY_DIAGNOSTICS: ${{ contains(join(matrix.group.harnesses, ' '), '::cached_mul_pow5_') || startsWith(matrix.group.catalog_name || matrix.group.name, 'dragon-') }}
       # Manual runs can compare SAT solvers.  Other runs keep the default solver.
       KANI_NATIVE_SOLVER: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && inputs.native_solver || 'default' }}
+      KANI_ASSERTION_REACH_CHECKS: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && inputs.assertion_reach_checks || 'enabled' }}
       KANI_MANUAL_PROBE: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && matrix.group.probe_property != '' }}
       KANI_PROBE_PROPERTY: ${{ matrix.group.probe_property || '' }}
       KANI_OBJECT_BITS: ${{ contains(join(matrix.group.harnesses, ' '), '::cached_mul_pow5_') && '16' || ((matrix.group.catalog_name || matrix.group.name) == 'dragon-exact-loop-frame' || startsWith(matrix.group.catalog_name || matrix.group.name, 'grisu-shortest-')) && '10' || (matrix.group.kind == 'contract' || matrix.group.kind == 'equivalence') && '12' || '14' }}
@@ -325,9 +369,13 @@ jobs:
               export KANI_FLAT_SMT_CVC5=true
               solver_args=(--solver minisat)
             fi
+            reach_args=()
+            if [[ "$KANI_ASSERTION_REACH_CHECKS" == disabled ]]; then
+              reach_args=(--no-assertion-reach-checks)
+            fi
             head/scripts/run-kani.sh --path "${GITHUB_WORKSPACE}/head" \
               --kani-args --jobs 1 --harness-timeout "$KANI_HARNESS_TIMEOUT" --fail-fast --output-format="$output_format" \
-              "${solver_args[@]}" "${temporary_args[@]}" --exact "${harness_args[@]}"
+              "${solver_args[@]}" "${reach_args[@]}" "${temporary_args[@]}" --exact "${harness_args[@]}"
           done
       - name: Retain selected proof models
         if: always() && github.event_name == 'workflow_dispatch' && inputs.proof_groups != ''
@@ -346,7 +394,7 @@ jobs:
     name: Verify flt2dec long (${{ matrix.group.name }}, ${{ matrix.os }})
     needs: [flt2dec_matrix, build-flat-smt-cbmc]
     if: needs.flt2dec_matrix.outputs.long_groups != '0'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_long) }}
@@ -354,10 +402,82 @@ jobs:
     env: *flt2dec_env
     steps: *flt2dec_steps
 
+  # The Dragon fixed-K proofs of windows 000..033 run in a third matrix job.
+  check-flt2dec-dragon-a:
+    name: Verify flt2dec dragon-a (${{ matrix.group.name }}, ${{ matrix.os }})
+    needs: [flt2dec_matrix, build-flat-smt-cbmc]
+    if: needs.flt2dec_matrix.outputs.dragon_a_groups != '0'
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_dragon_a) }}
+    env: *flt2dec_env
+    steps: *flt2dec_steps
+
+  # The Dragon fixed-K proofs of windows 034..067 run in a fourth matrix job.
+  check-flt2dec-dragon-b:
+    name: Verify flt2dec dragon-b (${{ matrix.group.name }}, ${{ matrix.os }})
+    needs: [flt2dec_matrix, build-flat-smt-cbmc]
+    if: needs.flt2dec_matrix.outputs.dragon_b_groups != '0'
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_dragon_b) }}
+    env: *flt2dec_env
+    steps: *flt2dec_steps
+
+  # The Dragon fixed-K proofs of windows 068..097 run in a fifth matrix job.
+  check-flt2dec-dragon-c:
+    name: Verify flt2dec dragon-c (${{ matrix.group.name }}, ${{ matrix.os }})
+    needs: [flt2dec_matrix, build-flat-smt-cbmc]
+    if: needs.flt2dec_matrix.outputs.dragon_c_groups != '0'
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_dragon_c) }}
+    env: *flt2dec_env
+    steps: *flt2dec_steps
+
+  # The Dragon fixed-K proofs of windows 098..127 run in a sixth matrix job.
+  check-flt2dec-dragon-d:
+    name: Verify flt2dec dragon-d (${{ matrix.group.name }}, ${{ matrix.os }})
+    needs: [flt2dec_matrix, build-flat-smt-cbmc]
+    if: needs.flt2dec_matrix.outputs.dragon_d_groups != '0'
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_dragon_d) }}
+    env: *flt2dec_env
+    steps: *flt2dec_steps
+
+  # The pieces of the split pairs at offsets 0..7 run in a seventh matrix job.
+  check-flt2dec-dragon-e:
+    name: Verify flt2dec dragon-e (${{ matrix.group.name }}, ${{ matrix.os }})
+    needs: [flt2dec_matrix, build-flat-smt-cbmc]
+    if: needs.flt2dec_matrix.outputs.dragon_e_groups != '0'
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_dragon_e) }}
+    env: *flt2dec_env
+    steps: *flt2dec_steps
+
+  # The pieces at offsets 8..15 run in an eighth matrix job.
+  check-flt2dec-dragon-f:
+    name: Verify flt2dec dragon-f (${{ matrix.group.name }}, ${{ matrix.os }})
+    needs: [flt2dec_matrix, build-flat-smt-cbmc]
+    if: needs.flt2dec_matrix.outputs.dragon_f_groups != '0'
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_dragon_f) }}
+    env: *flt2dec_env
+    steps: *flt2dec_steps
+
   kani_autoharness:
     name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Verify std library using autoharness
     if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -541,7 +661,7 @@ jobs:
   run_kani_metrics:
     name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Kani Metrics
     if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -613,7 +733,7 @@ jobs:
     name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Build JSON from logs
     if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
     needs: [run_kani_metrics, kani_autoharness]
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]

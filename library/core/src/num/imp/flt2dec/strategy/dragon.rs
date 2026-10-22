@@ -138,30 +138,19 @@ fn div_rem_upto_16<'a>(
     (d, x)
 }
 
-/// The shortest mode implementation for Dragon.
-pub fn format_shortest<'a>(
-    d: &Decoded,
-    buf: &'a mut [MaybeUninit<u8>],
-) -> (/*digits*/ &'a [u8], /*exp*/ i16) {
-    // the number `v` to format is known to be:
-    // - equal to `mant * 2^exp`;
-    // - preceded by `(mant - 2 * minus) * 2^exp` in the original type; and
-    // - followed by `(mant + 2 * plus) * 2^exp` in the original type.
-    //
-    // obviously, `minus` and `plus` cannot be zero. (for infinities, we use out-of-range values.)
-    // also we assume that at least one digit is generated, i.e., `mant` cannot be zero too.
-    //
-    // this also means that any number between `low = (mant - minus) * 2^exp` and
-    // `high = (mant + plus) * 2^exp` will map to this exact floating point number,
-    // with bounds included when the original mantissa was even (i.e., `!mant_was_odd`).
+/// The scaled state of `format_shortest` before digit generation.
+struct ShortestScaled {
+    k: i16,
+    mant: Big,
+    minus: Big,
+    plus: Big,
+    scale: Big,
+}
 
-    assert!(d.mant > 0);
-    assert!(d.minus > 0);
-    assert!(d.plus > 0);
-    assert!(d.mant.checked_add(d.plus).is_some());
-    assert!(d.mant.checked_sub(d.minus).is_some());
-    assert!(buf.len() >= MAX_SIG_DIGITS);
-
+/// Converts `{mant, minus, plus} * 2^exp` into the fractional form `{mant, minus, plus} / scale`
+/// and finds `k` such that `scale < mant + plus <= scale * 10` (`<=` on the left when inclusive).
+#[inline]
+fn scale_shortest(d: &Decoded) -> ShortestScaled {
     // `a.cmp(&b) < rounding` is `if d.inclusive {a <= b} else {a < b}`
     let rounding = if d.inclusive { Ordering::Greater } else { Ordering::Equal };
 
@@ -208,6 +197,39 @@ pub fn format_shortest<'a>(
         minus.mul_small(10);
         plus.mul_small(10);
     }
+
+    ShortestScaled { k, mant, minus, plus, scale }
+}
+
+/// The shortest mode implementation for Dragon.
+pub fn format_shortest<'a>(
+    d: &Decoded,
+    buf: &'a mut [MaybeUninit<u8>],
+) -> (/*digits*/ &'a [u8], /*exp*/ i16) {
+    // the number `v` to format is known to be:
+    // - equal to `mant * 2^exp`;
+    // - preceded by `(mant - 2 * minus) * 2^exp` in the original type; and
+    // - followed by `(mant + 2 * plus) * 2^exp` in the original type.
+    //
+    // obviously, `minus` and `plus` cannot be zero. (for infinities, we use out-of-range values.)
+    // also we assume that at least one digit is generated, i.e., `mant` cannot be zero too.
+    //
+    // this also means that any number between `low = (mant - minus) * 2^exp` and
+    // `high = (mant + plus) * 2^exp` will map to this exact floating point number,
+    // with bounds included when the original mantissa was even (i.e., `!mant_was_odd`).
+
+    assert!(d.mant > 0);
+    assert!(d.minus > 0);
+    assert!(d.plus > 0);
+    assert!(d.mant.checked_add(d.plus).is_some());
+    assert!(d.mant.checked_sub(d.minus).is_some());
+    assert!(buf.len() >= MAX_SIG_DIGITS);
+
+    // `a.cmp(&b) < rounding` is `if d.inclusive {a <= b} else {a < b}`
+    let rounding = if d.inclusive { Ordering::Greater } else { Ordering::Equal };
+
+    // scale the inputs so that `scale < mant + plus <= scale * 10` (see `scale_shortest`).
+    let ShortestScaled { mut k, mut mant, mut minus, mut plus, scale } = scale_shortest(d);
 
     // cache `(2, 4, 8) * scale` for digit generation.
     let mut scale2 = scale.clone();
@@ -2196,6 +2218,1226 @@ pub mod dragon_verify {
         kani::cover(n == PROOF_BUFLEN, "division accepts the maximum proof power");
         kani::cover(value.kani_size() == 0, "division accepts empty zero storage");
         kani::cover(value.kani_size() == KANI_LIMBS, "division accepts all bigint limbs");
+    }
+
+    // Dragon decodes every finite value with `-1076 <= exp <= 970`. This is the
+    // bound of `checked_f64_limb_count` for one exponent: the value bits,
+    // sixteen bits for decimal scaling, and one carry limb.
+    fn dragon_limb_bound(exp: i16) -> usize {
+        let exp = i32::from(exp);
+        let value_bits = (-exp).max(exp + 55).max(64) as usize;
+        (value_bits + 16).div_ceil(Digit::BITS as usize) + 1
+    }
+
+    // The size checks come before any limb access, so the limb predicates
+    // never read a limb at a havocked size.
+    fn dragon_scaled_storage_valid(value: &Big, limb_bound: usize) -> bool {
+        value.kani_contract_size() > 0
+            && value.kani_contract_size() <= limb_bound
+            && value.kani_contract_valid_storage()
+    }
+
+    // `value < scale * 10`.
+    fn dragon_scaled_below_scale10(value: &Big, scale: &Big, zero: &Big) -> bool {
+        value.kani_contract_cmp_scaled_sum(scale, zero, 1) == KaniInvariantOrdering::Less
+    }
+
+    // `0 < value`.
+    fn dragon_scaled_nonzero(value: &Big, zero: &Big) -> bool {
+        zero.kani_contract_cmp_scaled_sum(value, zero, 0) == KaniInvariantOrdering::Less
+    }
+
+    // The facts that the digit loop of `format_shortest` needs at `i == 0`,
+    // with each limb count bounded by `exp`.
+    fn dragon_shortest_scaling_valid(exp: i16, result: &(i16, Big, Big, Big, Big)) -> bool {
+        let (k, mant, minus, plus, scale) = result;
+        let limb_bound = dragon_limb_bound(exp);
+        let zero = Big::kani_contract_zero();
+        -400 <= *k
+            && *k <= 400
+            && dragon_scaled_storage_valid(mant, limb_bound)
+            && dragon_scaled_storage_valid(minus, limb_bound)
+            && dragon_scaled_storage_valid(plus, limb_bound)
+            && dragon_scaled_storage_valid(scale, limb_bound)
+            && (minus.kani_contract_size() <= mant.kani_contract_size()
+                || minus.kani_contract_size() <= scale.kani_contract_size())
+            && (plus.kani_contract_size() <= mant.kani_contract_size()
+                || plus.kani_contract_size() <= scale.kani_contract_size())
+            && dragon_scaled_below_scale10(mant, scale, &zero)
+            && dragon_scaled_below_scale10(minus, scale, &zero)
+            && dragon_scaled_below_scale10(plus, scale, &zero)
+            && dragon_scaled_nonzero(minus, &zero)
+            && dragon_scaled_nonzero(plus, &zero)
+            && scale.kani_contract_cmp_scaled_sum(minus, plus, MAX_SIG_DIGITS - 1)
+                == KaniInvariantOrdering::Less
+    }
+
+    #[kani::requires(
+        mant >= 2 && minus == 1
+            && (plus == 1 || (plus == 2 && (mant == 1 << 25 || mant == 1 << 54)))
+            && exp >= -1076 && exp <= 970
+            && mant as u128 + plus as u128 <= ((minus as u128 + plus as u128) << 53)
+    )]
+    #[kani::ensures(|result| dragon_shortest_scaling_valid(exp, result))]
+    fn scale_shortest_contract(
+        mant: u64,
+        minus: u64,
+        plus: u64,
+        exp: i16,
+        inclusive: bool,
+    ) -> (i16, Big, Big, Big, Big) {
+        let d = Decoded { mant, minus, plus, exp, inclusive };
+        let ShortestScaled { k, mant, minus, plus, scale } = scale_shortest(&d);
+        // Establish the size bounds in separate checked steps, so the value
+        // properties of the postcondition can use the bounds already established.
+        let limb_bound = dragon_limb_bound(exp);
+        assert!(-400 <= k && k <= 400);
+        assert!(mant.kani_size() > 0 && mant.kani_size() <= limb_bound);
+        assert!(minus.kani_size() > 0 && minus.kani_size() <= limb_bound);
+        assert!(plus.kani_size() > 0 && plus.kani_size() <= limb_bound);
+        assert!(scale.kani_size() > 0 && scale.kani_size() <= limb_bound);
+        (k, mant, minus, plus, scale)
+    }
+
+    fn stub_scale_shortest(d: &Decoded) -> ShortestScaled {
+        let (k, mant, minus, plus, scale) =
+            scale_shortest_contract(d.mant, d.minus, d.plus, d.exp, d.inclusive);
+        ShortestScaled { k, mant, minus, plus, scale }
+    }
+
+    // Each window of 16 exponents has its own contract proof. Together the
+    // windows cover every Dragon exponent, and each limb bound fits the storage.
+    #[kani::proof]
+    fn check_dragon_scale_partitioning() {
+        let exp = kani::any::<i16>();
+        kani::assume((-1076..=970).contains(&exp));
+        let index = (i32::from(exp) + 1076) / 16;
+        assert!((0..128).contains(&index));
+        let first = -1076 + 16 * index;
+        let last = (first + 15).min(970);
+        assert!(first <= i32::from(exp) && i32::from(exp) <= last);
+        assert!(last - first < 16);
+        assert!(dragon_limb_bound(exp) < KANI_LIMBS);
+        kani::cover(exp == -1076, "partitions include the lowest Dragon exponent");
+        kani::cover(exp == 970, "partitions include the highest Dragon exponent");
+    }
+
+    // The estimate of estimate_scaling_factor for a contract input with exponent `exp`, where
+    // `nbits` is the bit count of mant + plus - 1.
+    const fn fixed_k_estimate(nbits: i16, exp: i16) -> i16 {
+        (((nbits as i64 + exp as i64) * 1292913986) >> 32) as i16
+    }
+
+    const fn fixed_k_last(first: i16) -> i16 {
+        if first + 15 < 970 { first + 15 } else { 970 }
+    }
+
+    // Every contract input has mant + plus in [3, 2^54 + 2], so nbits is in 2..=55, and the
+    // estimate of each input of the window that starts at `first` is in
+    // fixed_k_min(first)..=fixed_k_max(first) (check_dragon_scale_k_range).
+    const fn fixed_k_min(first: i16) -> i16 {
+        fixed_k_estimate(2, first)
+    }
+
+    const fn fixed_k_max(first: i16) -> i16 {
+        fixed_k_estimate(55, fixed_k_last(first))
+    }
+
+    // True if `ks` lists each K of next..=last once, in increasing order.
+    const fn fixed_k_list_covers(ks: &[i16], next: i16, last: i16) -> bool {
+        match ks {
+            [] => next == last + 1,
+            [k, rest @ ..] => *k == next && fixed_k_list_covers(rest, next + 1, last),
+        }
+    }
+
+    // True if `los` lists the piece offsets next, next + width, ..., 16 - width once, in
+    // increasing order:  the pieces of a split pair, width exponents each, then cover the 16
+    // exponents of its window.
+    const fn fixed_k_pieces_cover(los: &[u8], next: u8, width: u8) -> bool {
+        match los {
+            [] => next == 16,
+            [lo, rest @ ..] => *lo == next && fixed_k_pieces_cover(rest, next + width, width),
+        }
+    }
+
+    // The exponents in each piece of a split pair:  16 less the last offset, so 4 for the
+    // offsets 0, 4, 8, 12 and 1 for the offsets 0 to 15.
+    const fn fixed_k_piece_width(los: &[u8]) -> u8 {
+        match los {
+            [.., last] => 16 - *last,
+            [] => 0,
+        }
+    }
+
+    // The power-of-5 tables of mul_pow10 as (power, length in 64-bit limbs).
+    #[cfg(target_pointer_width = "64")]
+    const FIXED_K_POW5_TABLES: [(usize, usize); 5] =
+        [(16, 1), (32, 2), (64, 3), (128, 5), (256, 10)];
+
+    // Walks the power-of-5 tables that mul_pow10(x, n) multiplies in, in order. The operand
+    // is below 2^(millibits / 1000) before each table, and each power of 5 adds at most
+    // 2.322 bits (log2 5 < 2.322).
+    #[cfg(target_pointer_width = "64")]
+    const fn fixed_k_pow5_limbs(
+        tables: &[(usize, usize)],
+        n: usize,
+        millibits: usize,
+        other_len: usize,
+    ) -> usize {
+        match tables {
+            [] => KANI_LIMBS,
+            [(power, len), rest @ ..] => {
+                if n & *power == 0 {
+                    fixed_k_pow5_limbs(rest, n, millibits, other_len)
+                } else if *len == other_len {
+                    millibits.div_ceil(1000).div_ceil(64)
+                } else {
+                    fixed_k_pow5_limbs(rest, n, millibits + 2322 * *power, other_len)
+                }
+            }
+        }
+    }
+
+    // A bound on the limb count of the bigint operand of the cached product of mul_pow10
+    // with the power table of `other_len` limbs, for each input of the window that starts at
+    // `first` with the estimate fixed to K. For K < 0, mant, minus and plus are below
+    // 2^bits before mul_pow10(-K), where bits = min(55, s_max - first) and s_max is the
+    // largest nbits + exp with an estimate of K. The stub of kani_mul_limb_bound asserts the
+    // actual count, so a wrong bound fails the proof; only the cost depends on it.
+    #[cfg(target_pointer_width = "64")]
+    const fn fixed_k_limb_bound(first: i16, k: i16, other_len: usize) -> usize {
+        if k >= 0 {
+            KANI_LIMBS
+        } else {
+            let n = k.unsigned_abs() as usize;
+            // Division truncates toward zero, so for K < 0 this is
+            // ceil((K + 1) * 2^32 / 1292913986) - 1.
+            let s_max = (k as i64 + 1) * (1 << 32) / 1292913986 - 1;
+            let window_bits = s_max - first as i64;
+            let bits = if window_bits < 55 { window_bits as usize } else { 55 };
+            fixed_k_pow5_limbs(&FIXED_K_POW5_TABLES, n, 1000 * bits + 2322 * (n & 15), other_len)
+        }
+    }
+
+    // 16- and 32-bit targets keep the storage bound.
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    const fn fixed_k_limb_bound(_first: i16, _k: i16, _other_len: usize) -> usize {
+        KANI_LIMBS
+    }
+
+    // The proof of one fixed-K pair over the exponents FIRST + $exp_lo + (0..=$exp_mask) of its
+    // window: (0, 15) is the whole window, a piece of a split pair takes 4 exponents.
+    macro_rules! check_dragon_scale_fixed_k_harness {
+        ($window:literal, $k:expr, $exp_lo:literal, $exp_mask:expr) => {
+            use super::*;
+
+            const FIRST: i16 = -1076 + 16 * $window;
+            const LAST: i16 = fixed_k_last(FIRST);
+            const K: i16 = $k;
+
+            fn window_limb_count(size: usize) -> usize {
+                let limb_bound = dragon_limb_bound(FIRST).max(dragon_limb_bound(LAST));
+                LimbCountMask((limb_bound + 1).next_power_of_two() - 1).check(size)
+            }
+
+            fn stub_pow10_exponent(n: usize) -> usize {
+                let magnitude = usize::from(K.unsigned_abs());
+                Pow10Prefix::for_range(magnitude..=magnitude).check(n)
+            }
+
+            fn stub_pow2_bits(bits: usize) -> usize {
+                let encoded = bits & 2047;
+                assert_eq!(encoded, bits);
+                encoded
+            }
+
+            fn stub_estimate(mant: u64, exp: i16) -> i16 {
+                assert_eq!(
+                    crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor(mant, exp),
+                    K
+                );
+                K
+            }
+
+            fn stub_mul_limb_bound(size: usize, other_len: usize) -> usize {
+                let bound = fixed_k_limb_bound(FIRST, K, other_len);
+                assert!(size <= bound);
+                bound
+            }
+
+            #[kani::proof_for_contract(scale_shortest_contract)]
+            #[kani::unwind(41)]
+            #[kani::stub(crate::num::imp::bignum::kani_loop_size, window_limb_count)]
+            #[kani::stub(Big::add, Big::kani_add_model)]
+            #[kani::stub(Big::sub, Big::kani_sub_model)]
+            #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
+            #[kani::stub(Big::mul_pow2, Big::kani_mul_pow2_model)]
+            #[kani::stub(Big::mul_digits, Big::kani_mul_digits_model)]
+            #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
+            #[kani::stub(crate::num::imp::bignum::kani_pow2_bits, stub_pow2_bits)]
+            #[kani::stub(crate::num::imp::bignum::kani_mul_limb_bound, stub_mul_limb_bound)]
+            #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul, carrying_mul_model))]
+            #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
+            #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul, carrying_mul_model))]
+            #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul_add, carrying_mul_add_model))]
+            #[kani::stub(crate::num::imp::flt2dec::estimator::estimate_scaling_factor, stub_estimate)]
+            #[kani::stub(
+                u64::leading_zeros,
+                crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u64
+            )]
+            #[kani::stub(
+                u32::leading_zeros,
+                crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u32
+            )]
+            #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
+            #[kani::stub(Big::is_zero, stub_is_zero)]
+            #[kani::solver(cadical)]
+            fn check_scale_shortest() {
+                let mant = kani::any::<u64>() & ((1u64 << 55) - 1);
+                let minus = 1;
+                let plus = if kani::any::<bool>() { 1 } else { 2 };
+                kani::assume(mant >= 2);
+                kani::assume(plus == 1 || mant == 1 << 25 || mant == 1 << 54);
+                kani::assume(mant as u128 + plus as u128 <= ((minus as u128 + plus as u128) << 53));
+                let exp = FIRST + $exp_lo + i16::from(kani::any::<u8>() & $exp_mask);
+                kani::assume(exp <= LAST);
+                kani::assume(
+                    crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor(mant + plus, exp)
+                        == K
+                );
+                let inclusive = kani::any::<bool>();
+                scale_shortest_contract(mant, minus, plus, exp, inclusive);
+                kani::cover(inclusive, "fixed-K scaling includes inclusive intervals");
+                kani::cover(!inclusive, "fixed-K scaling includes exclusive intervals");
+            }
+        };
+    }
+
+    // One proof per (window, K) pair, with the estimate fixed to K. The proof assumes that
+    // the estimate is K, and the estimator stub checks the same value. The stub of
+    // kani_mul_limb_bound asserts that each bigint operand of a cached product of mul_pow10
+    // fits fixed_k_limb_bound.
+    macro_rules! check_dragon_scale_fixed_k_pair {
+        ($name:ident, $window:literal, $k:expr) => {
+            mod $name {
+                check_dragon_scale_fixed_k_harness!($window, $k, 0, 15);
+            }
+        };
+        // A split pair: one module per piece, each piece a proof over PIECE_WIDTH exponents
+        // (4 pieces of 4 or 16 pieces of 1). The offsets must step by PIECE_WIDTH from 0 to
+        // 16 - PIECE_WIDTH in increasing order, or the build fails.
+        ($name:ident, $window:literal, $k:expr, [$($piece:ident => $lo:literal),* $(,)?]) => {
+            mod $name {
+                use super::*;
+
+                const PIECE_LOS: &[u8] = &[$($lo),*];
+                const PIECE_WIDTH: u8 = fixed_k_piece_width(PIECE_LOS);
+                const PIECE_MASK: u8 = PIECE_WIDTH - 1;
+                const _: () = assert!(fixed_k_pieces_cover(PIECE_LOS, 0, PIECE_WIDTH));
+
+                $(mod $piece {
+                    check_dragon_scale_fixed_k_harness!($window, $k, $lo, PIECE_MASK);
+                })*
+            }
+        };
+    }
+
+    // The fixed-K proofs of one window. The list must name each K of
+    // fixed_k_min(FIRST)..=fixed_k_max(FIRST) once, in increasing order, or the build fails.
+    // With check_dragon_scale_k_range the proofs cover every input of the window.
+    // An entry `kNNN => K => [eNN => offset, ...]` splits the proof of K into pieces.
+    macro_rules! check_dragon_scale_fixed_k_window {
+        (
+            $name:ident,
+            $window:literal,
+            [$($k_name:ident => $k:expr $(=> [$($piece:ident => $lo:literal),* $(,)?])?),* $(,)?]
+        ) => {
+            mod $name {
+                use super::*;
+
+                const _: () = {
+                    let first: i16 = -1076 + 16 * $window;
+                    assert!(fixed_k_list_covers(&[$($k),*], fixed_k_min(first), fixed_k_max(first)));
+                };
+
+                $(check_dragon_scale_fixed_k_pair!(
+                    $k_name, $window, $k $(, [$($piece => $lo),*])?
+                );)*
+            }
+        };
+    }
+
+    // Windows 000 to 127: one module per window, one fixed-K proof per K. Windows 000 to 062
+    // have K < 0, windows 063 to 067 have both signs, windows 068 to 127 have K >= 0. A K < 0
+    // name is k and |K|, a K >= 0 name is p and K.
+    mod dragon_scale_fixed_k {
+        use super::*;
+
+        check_dragon_scale_fixed_k_window!(w000, 0, [
+            k324 => -324, k323 => -323, k322 => -322, k321 => -321, k320 => -320, k319 => -319,
+            k318 => -318, k317 => -317 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
+            k316 => -316, k315 => -315, k314 => -314, k313 => -313,
+            k312 => -312, k311 => -311, k310 => -310, k309 => -309, k308 => -308, k307 => -307,
+            k306 => -306, k305 => -305, k304 => -304, k303 => -303,
+        ]);
+        check_dragon_scale_fixed_k_window!(w001, 1, [
+            k319 => -319, k318 => -318, k317 => -317, k316 => -316, k315 => -315, k314 => -314,
+            k313 => -313, k312 => -312, k311 => -311, k310 => -310, k309 => -309, k308 => -308,
+            k307 => -307, k306 => -306, k305 => -305, k304 => -304, k303 => -303, k302 => -302,
+            k301 => -301, k300 => -300, k299 => -299,
+        ]);
+        check_dragon_scale_fixed_k_window!(w002, 2, [
+            k314 => -314, k313 => -313, k312 => -312, k311 => -311, k310 => -310, k309 => -309,
+            k308 => -308, k307 => -307, k306 => -306, k305 => -305, k304 => -304, k303 => -303,
+            k302 => -302, k301 => -301, k300 => -300, k299 => -299, k298 => -298, k297 => -297,
+            k296 => -296, k295 => -295, k294 => -294,
+        ]);
+        check_dragon_scale_fixed_k_window!(w003, 3, [
+            k309 => -309, k308 => -308, k307 => -307, k306 => -306, k305 => -305, k304 => -304,
+            k303 => -303, k302 => -302, k301 => -301, k300 => -300, k299 => -299, k298 => -298,
+            k297 => -297, k296 => -296, k295 => -295, k294 => -294, k293 => -293, k292 => -292,
+            k291 => -291, k290 => -290, k289 => -289,
+        ]);
+        check_dragon_scale_fixed_k_window!(w004, 4, [
+            k305 => -305, k304 => -304, k303 => -303, k302 => -302, k301 => -301, k300 => -300,
+            k299 => -299, k298 => -298, k297 => -297, k296 => -296, k295 => -295, k294 => -294,
+            k293 => -293, k292 => -292, k291 => -291, k290 => -290, k289 => -289, k288 => -288,
+            k287 => -287, k286 => -286, k285 => -285, k284 => -284,
+        ]);
+        check_dragon_scale_fixed_k_window!(w005, 5, [
+            k300 => -300, k299 => -299, k298 => -298, k297 => -297, k296 => -296, k295 => -295,
+            k294 => -294, k293 => -293, k292 => -292, k291 => -291, k290 => -290, k289 => -289,
+            k288 => -288, k287 => -287, k286 => -286, k285 => -285, k284 => -284, k283 => -283,
+            k282 => -282, k281 => -281, k280 => -280, k279 => -279,
+        ]);
+        check_dragon_scale_fixed_k_window!(w006, 6, [
+            k295 => -295, k294 => -294, k293 => -293, k292 => -292, k291 => -291, k290 => -290,
+            k289 => -289, k288 => -288, k287 => -287, k286 => -286, k285 => -285, k284 => -284,
+            k283 => -283, k282 => -282, k281 => -281, k280 => -280, k279 => -279, k278 => -278,
+            k277 => -277, k276 => -276, k275 => -275, k274 => -274,
+        ]);
+        check_dragon_scale_fixed_k_window!(w007, 7, [
+            k290 => -290, k289 => -289, k288 => -288, k287 => -287, k286 => -286, k285 => -285,
+            k284 => -284, k283 => -283, k282 => -282, k281 => -281, k280 => -280, k279 => -279,
+            k278 => -278, k277 => -277, k276 => -276, k275 => -275, k274 => -274, k273 => -273,
+            k272 => -272, k271 => -271, k270 => -270,
+        ]);
+        check_dragon_scale_fixed_k_window!(w008, 8, [
+            k285 => -285, k284 => -284, k283 => -283, k282 => -282, k281 => -281, k280 => -280,
+            k279 => -279, k278 => -278, k277 => -277, k276 => -276, k275 => -275, k274 => -274,
+            k273 => -273, k272 => -272, k271 => -271, k270 => -270, k269 => -269, k268 => -268,
+            k267 => -267, k266 => -266, k265 => -265,
+        ]);
+        check_dragon_scale_fixed_k_window!(w009, 9, [
+            k280 => -280, k279 => -279, k278 => -278, k277 => -277, k276 => -276, k275 => -275,
+            k274 => -274, k273 => -273, k272 => -272, k271 => -271, k270 => -270, k269 => -269,
+            k268 => -268, k267 => -267, k266 => -266, k265 => -265, k264 => -264, k263 => -263,
+            k262 => -262, k261 => -261, k260 => -260,
+        ]);
+        check_dragon_scale_fixed_k_window!(w010, 10, [
+            k276 => -276, k275 => -275, k274 => -274, k273 => -273, k272 => -272, k271 => -271,
+            k270 => -270, k269 => -269, k268 => -268, k267 => -267, k266 => -266, k265 => -265,
+            k264 => -264, k263 => -263, k262 => -262, k261 => -261, k260 => -260, k259 => -259,
+            k258 => -258, k257 => -257, k256 => -256, k255 => -255,
+        ]);
+        check_dragon_scale_fixed_k_window!(w011, 11, [
+            k271 => -271, k270 => -270, k269 => -269, k268 => -268, k267 => -267, k266 => -266,
+            k265 => -265, k264 => -264, k263 => -263, k262 => -262, k261 => -261, k260 => -260,
+            k259 => -259, k258 => -258, k257 => -257, k256 => -256, k255 => -255, k254 => -254,
+            k253 => -253, k252 => -252, k251 => -251, k250 => -250,
+        ]);
+        check_dragon_scale_fixed_k_window!(w012, 12, [
+            k266 => -266, k265 => -265, k264 => -264, k263 => -263, k262 => -262, k261 => -261,
+            k260 => -260, k259 => -259, k258 => -258, k257 => -257, k256 => -256, k255 => -255,
+            k254 => -254, k253 => -253, k252 => -252, k251 => -251, k250 => -250, k249 => -249,
+            k248 => -248, k247 => -247, k246 => -246,
+        ]);
+        check_dragon_scale_fixed_k_window!(w013, 13, [
+            k261 => -261, k260 => -260, k259 => -259, k258 => -258, k257 => -257, k256 => -256,
+            k255 => -255, k254 => -254, k253 => -253, k252 => -252, k251 => -251, k250 => -250,
+            k249 => -249, k248 => -248, k247 => -247, k246 => -246, k245 => -245, k244 => -244,
+            k243 => -243, k242 => -242, k241 => -241,
+        ]);
+        check_dragon_scale_fixed_k_window!(w014, 14, [
+            k256 => -256, k255 => -255, k254 => -254, k253 => -253, k252 => -252, k251 => -251,
+            k250 => -250, k249 => -249, k248 => -248, k247 => -247, k246 => -246, k245 => -245,
+            k244 => -244, k243 => -243, k242 => -242, k241 => -241, k240 => -240, k239 => -239,
+            k238 => -238, k237 => -237, k236 => -236,
+        ]);
+        check_dragon_scale_fixed_k_window!(w015, 15, [
+            k252 => -252, k251 => -251, k250 => -250, k249 => -249, k248 => -248, k247 => -247,
+            k246 => -246, k245 => -245, k244 => -244, k243 => -243, k242 => -242, k241 => -241,
+            k240 => -240, k239 => -239, k238 => -238, k237 => -237, k236 => -236, k235 => -235,
+            k234 => -234, k233 => -233, k232 => -232, k231 => -231,
+        ]);
+        check_dragon_scale_fixed_k_window!(w016, 16, [
+            k247 => -247, k246 => -246, k245 => -245, k244 => -244, k243 => -243, k242 => -242,
+            k241 => -241, k240 => -240, k239 => -239, k238 => -238, k237 => -237, k236 => -236,
+            k235 => -235, k234 => -234, k233 => -233, k232 => -232, k231 => -231, k230 => -230,
+            k229 => -229, k228 => -228, k227 => -227, k226 => -226,
+        ]);
+        check_dragon_scale_fixed_k_window!(w017, 17, [
+            k242 => -242, k241 => -241, k240 => -240, k239 => -239, k238 => -238, k237 => -237,
+            k236 => -236, k235 => -235, k234 => -234, k233 => -233, k232 => -232, k231 => -231,
+            k230 => -230, k229 => -229, k228 => -228, k227 => -227, k226 => -226, k225 => -225,
+            k224 => -224, k223 => -223, k222 => -222, k221 => -221,
+        ]);
+        check_dragon_scale_fixed_k_window!(w018, 18, [
+            k237 => -237, k236 => -236, k235 => -235, k234 => -234, k233 => -233, k232 => -232,
+            k231 => -231, k230 => -230, k229 => -229, k228 => -228, k227 => -227, k226 => -226,
+            k225 => -225, k224 => -224, k223 => -223, k222 => -222, k221 => -221, k220 => -220,
+            k219 => -219, k218 => -218, k217 => -217,
+        ]);
+        check_dragon_scale_fixed_k_window!(w019, 19, [
+            k232 => -232, k231 => -231, k230 => -230, k229 => -229, k228 => -228, k227 => -227,
+            k226 => -226, k225 => -225, k224 => -224, k223 => -223, k222 => -222, k221 => -221,
+            k220 => -220, k219 => -219, k218 => -218, k217 => -217, k216 => -216, k215 => -215,
+            k214 => -214, k213 => -213, k212 => -212,
+        ]);
+        check_dragon_scale_fixed_k_window!(w020, 20, [
+            k227 => -227, k226 => -226, k225 => -225, k224 => -224, k223 => -223, k222 => -222,
+            k221 => -221, k220 => -220, k219 => -219, k218 => -218, k217 => -217, k216 => -216,
+            k215 => -215, k214 => -214, k213 => -213, k212 => -212, k211 => -211, k210 => -210,
+            k209 => -209, k208 => -208, k207 => -207,
+        ]);
+        check_dragon_scale_fixed_k_window!(w021, 21, [
+            k223 => -223, k222 => -222, k221 => -221, k220 => -220, k219 => -219, k218 => -218,
+            k217 => -217, k216 => -216, k215 => -215, k214 => -214, k213 => -213, k212 => -212,
+            k211 => -211, k210 => -210, k209 => -209, k208 => -208, k207 => -207, k206 => -206,
+            k205 => -205, k204 => -204, k203 => -203, k202 => -202,
+        ]);
+        check_dragon_scale_fixed_k_window!(w022, 22, [
+            k218 => -218, k217 => -217, k216 => -216, k215 => -215, k214 => -214, k213 => -213,
+            k212 => -212, k211 => -211, k210 => -210, k209 => -209, k208 => -208, k207 => -207,
+            k206 => -206, k205 => -205, k204 => -204, k203 => -203, k202 => -202, k201 => -201,
+            k200 => -200, k199 => -199, k198 => -198, k197 => -197,
+        ]);
+        check_dragon_scale_fixed_k_window!(w023, 23, [
+            k213 => -213, k212 => -212, k211 => -211, k210 => -210, k209 => -209, k208 => -208,
+            k207 => -207, k206 => -206,
+            k205 => -205 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k204 => -204 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k203 => -203 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k202 => -202 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k201 => -201 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k200 => -200 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k199 => -199, k198 => -198, k197 => -197, k196 => -196, k195 => -195, k194 => -194,
+            k193 => -193,
+        ]);
+        check_dragon_scale_fixed_k_window!(w024, 24, [
+            k208 => -208, k207 => -207, k206 => -206, k205 => -205, k204 => -204, k203 => -203,
+            k202 => -202, k201 => -201, k200 => -200, k199 => -199, k198 => -198, k197 => -197,
+            k196 => -196, k195 => -195, k194 => -194, k193 => -193, k192 => -192, k191 => -191,
+            k190 => -190, k189 => -189, k188 => -188,
+        ]);
+        check_dragon_scale_fixed_k_window!(w025, 25, [
+            k203 => -203, k202 => -202, k201 => -201, k200 => -200, k199 => -199, k198 => -198,
+            k197 => -197, k196 => -196, k195 => -195, k194 => -194, k193 => -193, k192 => -192,
+            k191 => -191, k190 => -190, k189 => -189, k188 => -188, k187 => -187, k186 => -186,
+            k185 => -185, k184 => -184, k183 => -183,
+        ]);
+        check_dragon_scale_fixed_k_window!(w026, 26, [
+            k199 => -199, k198 => -198, k197 => -197, k196 => -196, k195 => -195, k194 => -194,
+            k193 => -193, k192 => -192, k191 => -191, k190 => -190, k189 => -189, k188 => -188,
+            k187 => -187, k186 => -186, k185 => -185, k184 => -184, k183 => -183, k182 => -182,
+            k181 => -181, k180 => -180, k179 => -179, k178 => -178,
+        ]);
+        check_dragon_scale_fixed_k_window!(w027, 27, [
+            k194 => -194, k193 => -193, k192 => -192, k191 => -191, k190 => -190, k189 => -189,
+            k188 => -188, k187 => -187, k186 => -186, k185 => -185, k184 => -184, k183 => -183,
+            k182 => -182, k181 => -181, k180 => -180, k179 => -179, k178 => -178, k177 => -177,
+            k176 => -176, k175 => -175, k174 => -174, k173 => -173,
+        ]);
+        check_dragon_scale_fixed_k_window!(w028, 28, [
+            k189 => -189, k188 => -188, k187 => -187, k186 => -186, k185 => -185, k184 => -184,
+            k183 => -183 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k182 => -182, k181 => -181, k180 => -180, k179 => -179, k178 => -178, k177 => -177,
+            k176 => -176, k175 => -175, k174 => -174, k173 => -173, k172 => -172, k171 => -171,
+            k170 => -170, k169 => -169, k168 => -168,
+        ]);
+        check_dragon_scale_fixed_k_window!(w029, 29, [
+            k184 => -184, k183 => -183, k182 => -182, k181 => -181, k180 => -180, k179 => -179,
+            k178 => -178, k177 => -177, k176 => -176, k175 => -175,
+            k174 => -174 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k173 => -173 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k172 => -172 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
+            k171 => -171, k170 => -170, k169 => -169, k168 => -168, k167 => -167, k166 => -166,
+            k165 => -165, k164 => -164,
+        ]);
+        check_dragon_scale_fixed_k_window!(w030, 30, [
+            k179 => -179, k178 => -178, k177 => -177, k176 => -176, k175 => -175, k174 => -174,
+            k173 => -173, k172 => -172, k171 => -171, k170 => -170, k169 => -169, k168 => -168,
+            k167 => -167, k166 => -166, k165 => -165, k164 => -164, k163 => -163, k162 => -162,
+            k161 => -161, k160 => -160, k159 => -159,
+        ]);
+        check_dragon_scale_fixed_k_window!(w031, 31, [
+            k174 => -174, k173 => -173, k172 => -172, k171 => -171, k170 => -170, k169 => -169,
+            k168 => -168, k167 => -167, k166 => -166, k165 => -165, k164 => -164, k163 => -163,
+            k162 => -162, k161 => -161, k160 => -160, k159 => -159, k158 => -158, k157 => -157,
+            k156 => -156, k155 => -155, k154 => -154,
+        ]);
+        check_dragon_scale_fixed_k_window!(w032, 32, [
+            k170 => -170, k169 => -169, k168 => -168, k167 => -167, k166 => -166, k165 => -165,
+            k164 => -164, k163 => -163, k162 => -162, k161 => -161, k160 => -160, k159 => -159,
+            k158 => -158, k157 => -157, k156 => -156, k155 => -155, k154 => -154, k153 => -153,
+            k152 => -152, k151 => -151, k150 => -150, k149 => -149,
+        ]);
+        check_dragon_scale_fixed_k_window!(w033, 33, [
+            k165 => -165, k164 => -164, k163 => -163, k162 => -162, k161 => -161, k160 => -160,
+            k159 => -159, k158 => -158, k157 => -157, k156 => -156, k155 => -155, k154 => -154,
+            k153 => -153, k152 => -152, k151 => -151, k150 => -150, k149 => -149, k148 => -148,
+            k147 => -147, k146 => -146, k145 => -145, k144 => -144,
+        ]);
+        check_dragon_scale_fixed_k_window!(w034, 34, [
+            k160 => -160, k159 => -159, k158 => -158, k157 => -157, k156 => -156, k155 => -155,
+            k154 => -154,
+            k153 => -153 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k152 => -152 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k151 => -151 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k150 => -150, k149 => -149, k148 => -148, k147 => -147, k146 => -146, k145 => -145,
+            k144 => -144, k143 => -143, k142 => -142, k141 => -141, k140 => -140,
+        ]);
+        check_dragon_scale_fixed_k_window!(w035, 35, [
+            k155 => -155, k154 => -154, k153 => -153, k152 => -152, k151 => -151, k150 => -150,
+            k149 => -149, k148 => -148, k147 => -147, k146 => -146, k145 => -145, k144 => -144,
+            k143 => -143, k142 => -142, k141 => -141, k140 => -140, k139 => -139, k138 => -138,
+            k137 => -137, k136 => -136, k135 => -135,
+        ]);
+        check_dragon_scale_fixed_k_window!(w036, 36, [
+            k150 => -150, k149 => -149, k148 => -148, k147 => -147, k146 => -146, k145 => -145,
+            k144 => -144, k143 => -143, k142 => -142, k141 => -141, k140 => -140, k139 => -139,
+            k138 => -138, k137 => -137, k136 => -136, k135 => -135, k134 => -134, k133 => -133,
+            k132 => -132, k131 => -131, k130 => -130,
+        ]);
+        check_dragon_scale_fixed_k_window!(w037, 37, [
+            k146 => -146, k145 => -145, k144 => -144, k143 => -143, k142 => -142, k141 => -141,
+            k140 => -140, k139 => -139, k138 => -138, k137 => -137, k136 => -136, k135 => -135,
+            k134 => -134, k133 => -133, k132 => -132, k131 => -131, k130 => -130, k129 => -129,
+            k128 => -128, k127 => -127, k126 => -126, k125 => -125,
+        ]);
+        check_dragon_scale_fixed_k_window!(w038, 38, [
+            k141 => -141, k140 => -140, k139 => -139, k138 => -138, k137 => -137, k136 => -136,
+            k135 => -135, k134 => -134, k133 => -133, k132 => -132, k131 => -131, k130 => -130,
+            k129 => -129, k128 => -128, k127 => -127, k126 => -126, k125 => -125, k124 => -124,
+            k123 => -123, k122 => -122, k121 => -121, k120 => -120,
+        ]);
+        check_dragon_scale_fixed_k_window!(w039, 39, [
+            k136 => -136, k135 => -135, k134 => -134, k133 => -133, k132 => -132, k131 => -131,
+            k130 => -130, k129 => -129, k128 => -128, k127 => -127, k126 => -126, k125 => -125,
+            k124 => -124, k123 => -123, k122 => -122, k121 => -121, k120 => -120, k119 => -119,
+            k118 => -118, k117 => -117, k116 => -116, k115 => -115,
+        ]);
+        check_dragon_scale_fixed_k_window!(w040, 40, [
+            k131 => -131, k130 => -130, k129 => -129, k128 => -128, k127 => -127, k126 => -126,
+            k125 => -125, k124 => -124, k123 => -123, k122 => -122, k121 => -121, k120 => -120,
+            k119 => -119, k118 => -118, k117 => -117, k116 => -116, k115 => -115, k114 => -114,
+            k113 => -113, k112 => -112, k111 => -111,
+        ]);
+        check_dragon_scale_fixed_k_window!(w041, 41, [
+            k126 => -126, k125 => -125, k124 => -124, k123 => -123, k122 => -122, k121 => -121,
+            k120 => -120, k119 => -119, k118 => -118, k117 => -117, k116 => -116, k115 => -115,
+            k114 => -114, k113 => -113, k112 => -112, k111 => -111, k110 => -110, k109 => -109,
+            k108 => -108, k107 => -107, k106 => -106,
+        ]);
+        check_dragon_scale_fixed_k_window!(w042, 42, [
+            k122 => -122, k121 => -121, k120 => -120, k119 => -119, k118 => -118, k117 => -117,
+            k116 => -116, k115 => -115, k114 => -114, k113 => -113, k112 => -112, k111 => -111,
+            k110 => -110, k109 => -109, k108 => -108, k107 => -107, k106 => -106, k105 => -105,
+            k104 => -104, k103 => -103, k102 => -102, k101 => -101,
+        ]);
+        check_dragon_scale_fixed_k_window!(w043, 43, [
+            k117 => -117, k116 => -116, k115 => -115, k114 => -114, k113 => -113, k112 => -112,
+            k111 => -111, k110 => -110, k109 => -109, k108 => -108, k107 => -107, k106 => -106,
+            k105 => -105, k104 => -104, k103 => -103, k102 => -102, k101 => -101, k100 => -100,
+            k099 => -99, k098 => -98, k097 => -97, k096 => -96,
+        ]);
+        check_dragon_scale_fixed_k_window!(w044, 44, [
+            k112 => -112, k111 => -111, k110 => -110, k109 => -109, k108 => -108, k107 => -107,
+            k106 => -106, k105 => -105, k104 => -104, k103 => -103, k102 => -102, k101 => -101,
+            k100 => -100, k099 => -99, k098 => -98, k097 => -97, k096 => -96, k095 => -95,
+            k094 => -94, k093 => -93, k092 => -92, k091 => -91,
+        ]);
+        check_dragon_scale_fixed_k_window!(w045, 45, [
+            k107 => -107, k106 => -106, k105 => -105, k104 => -104, k103 => -103, k102 => -102,
+            k101 => -101, k100 => -100, k099 => -99, k098 => -98, k097 => -97, k096 => -96,
+            k095 => -95, k094 => -94, k093 => -93, k092 => -92, k091 => -91, k090 => -90,
+            k089 => -89, k088 => -88, k087 => -87,
+        ]);
+        check_dragon_scale_fixed_k_window!(w046, 46, [
+            k102 => -102, k101 => -101, k100 => -100, k099 => -99, k098 => -98, k097 => -97,
+            k096 => -96, k095 => -95, k094 => -94, k093 => -93, k092 => -92, k091 => -91,
+            k090 => -90, k089 => -89, k088 => -88, k087 => -87, k086 => -86, k085 => -85,
+            k084 => -84, k083 => -83, k082 => -82,
+        ]);
+        check_dragon_scale_fixed_k_window!(w047, 47, [
+            k097 => -97, k096 => -96, k095 => -95, k094 => -94, k093 => -93, k092 => -92,
+            k091 => -91 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
+            k090 => -90, k089 => -89, k088 => -88, k087 => -87, k086 => -86, k085 => -85,
+            k084 => -84, k083 => -83, k082 => -82, k081 => -81, k080 => -80, k079 => -79,
+            k078 => -78, k077 => -77,
+        ]);
+        check_dragon_scale_fixed_k_window!(w048, 48, [
+            k093 => -93, k092 => -92, k091 => -91, k090 => -90, k089 => -89, k088 => -88,
+            k087 => -87, k086 => -86, k085 => -85, k084 => -84, k083 => -83, k082 => -82,
+            k081 => -81, k080 => -80, k079 => -79, k078 => -78, k077 => -77, k076 => -76,
+            k075 => -75, k074 => -74, k073 => -73, k072 => -72,
+        ]);
+        check_dragon_scale_fixed_k_window!(w049, 49, [
+            k088 => -88, k087 => -87, k086 => -86, k085 => -85, k084 => -84, k083 => -83,
+            k082 => -82, k081 => -81, k080 => -80, k079 => -79, k078 => -78, k077 => -77,
+            k076 => -76, k075 => -75, k074 => -74, k073 => -73, k072 => -72, k071 => -71,
+            k070 => -70, k069 => -69, k068 => -68, k067 => -67,
+        ]);
+        check_dragon_scale_fixed_k_window!(w050, 50, [
+            k083 => -83, k082 => -82, k081 => -81, k080 => -80, k079 => -79, k078 => -78,
+            k077 => -77, k076 => -76, k075 => -75, k074 => -74, k073 => -73, k072 => -72,
+            k071 => -71, k070 => -70, k069 => -69, k068 => -68, k067 => -67, k066 => -66,
+            k065 => -65, k064 => -64, k063 => -63,
+        ]);
+        check_dragon_scale_fixed_k_window!(w051, 51, [
+            k078 => -78, k077 => -77, k076 => -76, k075 => -75, k074 => -74, k073 => -73,
+            k072 => -72, k071 => -71, k070 => -70, k069 => -69, k068 => -68, k067 => -67,
+            k066 => -66, k065 => -65, k064 => -64, k063 => -63, k062 => -62, k061 => -61,
+            k060 => -60, k059 => -59, k058 => -58,
+        ]);
+        check_dragon_scale_fixed_k_window!(w052, 52, [
+            k073 => -73, k072 => -72, k071 => -71, k070 => -70, k069 => -69, k068 => -68,
+            k067 => -67, k066 => -66, k065 => -65, k064 => -64, k063 => -63, k062 => -62,
+            k061 => -61, k060 => -60, k059 => -59, k058 => -58, k057 => -57, k056 => -56,
+            k055 => -55, k054 => -54, k053 => -53,
+        ]);
+        check_dragon_scale_fixed_k_window!(w053, 53, [
+            k069 => -69, k068 => -68, k067 => -67, k066 => -66, k065 => -65, k064 => -64,
+            k063 => -63, k062 => -62, k061 => -61, k060 => -60, k059 => -59, k058 => -58,
+            k057 => -57, k056 => -56, k055 => -55, k054 => -54, k053 => -53, k052 => -52,
+            k051 => -51, k050 => -50, k049 => -49, k048 => -48,
+        ]);
+        check_dragon_scale_fixed_k_window!(w054, 54, [
+            k064 => -64, k063 => -63, k062 => -62, k061 => -61, k060 => -60, k059 => -59,
+            k058 => -58, k057 => -57, k056 => -56, k055 => -55, k054 => -54, k053 => -53,
+            k052 => -52, k051 => -51, k050 => -50, k049 => -49, k048 => -48, k047 => -47,
+            k046 => -46, k045 => -45, k044 => -44, k043 => -43,
+        ]);
+        check_dragon_scale_fixed_k_window!(w055, 55, [
+            k059 => -59, k058 => -58, k057 => -57, k056 => -56, k055 => -55, k054 => -54,
+            k053 => -53, k052 => -52, k051 => -51, k050 => -50, k049 => -49, k048 => -48,
+            k047 => -47, k046 => -46, k045 => -45, k044 => -44, k043 => -43, k042 => -42,
+            k041 => -41, k040 => -40, k039 => -39, k038 => -38,
+        ]);
+        check_dragon_scale_fixed_k_window!(w056, 56, [
+            k054 => -54, k053 => -53, k052 => -52, k051 => -51, k050 => -50, k049 => -49,
+            k048 => -48, k047 => -47, k046 => -46, k045 => -45, k044 => -44, k043 => -43,
+            k042 => -42, k041 => -41, k040 => -40, k039 => -39, k038 => -38, k037 => -37,
+            k036 => -36, k035 => -35, k034 => -34,
+        ]);
+        check_dragon_scale_fixed_k_window!(w057, 57, [
+            k049 => -49, k048 => -48, k047 => -47, k046 => -46, k045 => -45, k044 => -44,
+            k043 => -43, k042 => -42, k041 => -41, k040 => -40, k039 => -39, k038 => -38,
+            k037 => -37, k036 => -36, k035 => -35, k034 => -34, k033 => -33, k032 => -32,
+            k031 => -31, k030 => -30, k029 => -29,
+        ]);
+        check_dragon_scale_fixed_k_window!(w058, 58, [
+            k044 => -44, k043 => -43, k042 => -42, k041 => -41, k040 => -40, k039 => -39,
+            k038 => -38, k037 => -37, k036 => -36, k035 => -35, k034 => -34, k033 => -33,
+            k032 => -32, k031 => -31, k030 => -30, k029 => -29, k028 => -28, k027 => -27,
+            k026 => -26, k025 => -25, k024 => -24,
+        ]);
+        check_dragon_scale_fixed_k_window!(w059, 59, [
+            k040 => -40, k039 => -39, k038 => -38, k037 => -37, k036 => -36, k035 => -35,
+            k034 => -34, k033 => -33, k032 => -32, k031 => -31, k030 => -30, k029 => -29,
+            k028 => -28, k027 => -27, k026 => -26, k025 => -25, k024 => -24, k023 => -23,
+            k022 => -22, k021 => -21, k020 => -20, k019 => -19,
+        ]);
+        check_dragon_scale_fixed_k_window!(w060, 60, [
+            k035 => -35, k034 => -34, k033 => -33, k032 => -32, k031 => -31, k030 => -30,
+            k029 => -29, k028 => -28, k027 => -27, k026 => -26, k025 => -25, k024 => -24,
+            k023 => -23, k022 => -22, k021 => -21, k020 => -20, k019 => -19, k018 => -18,
+            k017 => -17, k016 => -16, k015 => -15, k014 => -14,
+        ]);
+        check_dragon_scale_fixed_k_window!(w061, 61, [
+            k030 => -30, k029 => -29, k028 => -28, k027 => -27, k026 => -26, k025 => -25,
+            k024 => -24, k023 => -23, k022 => -22, k021 => -21, k020 => -20, k019 => -19,
+            k018 => -18, k017 => -17, k016 => -16, k015 => -15, k014 => -14, k013 => -13,
+            k012 => -12, k011 => -11, k010 => -10,
+        ]);
+        check_dragon_scale_fixed_k_window!(w062, 62, [
+            k025 => -25, k024 => -24, k023 => -23, k022 => -22, k021 => -21, k020 => -20,
+            k019 => -19, k018 => -18, k017 => -17, k016 => -16, k015 => -15, k014 => -14,
+            k013 => -13, k012 => -12, k011 => -11, k010 => -10, k009 => -9, k008 => -8,
+            k007 => -7, k006 => -6, k005 => -5,
+        ]);
+        check_dragon_scale_fixed_k_window!(w063, 63, [
+            k020 => -20, k019 => -19, k018 => -18, k017 => -17, k016 => -16, k015 => -15,
+            k014 => -14, k013 => -13, k012 => -12, k011 => -11, k010 => -10, k009 => -9,
+            k008 => -8, k007 => -7, k006 => -6, k005 => -5, k004 => -4, k003 => -3,
+            k002 => -2, k001 => -1, p000 => 0,
+        ]);
+        check_dragon_scale_fixed_k_window!(w064, 64, [
+            k016 => -16, k015 => -15, k014 => -14, k013 => -13, k012 => -12, k011 => -11,
+            k010 => -10, k009 => -9, k008 => -8, k007 => -7, k006 => -6, k005 => -5,
+            k004 => -4, k003 => -3, k002 => -2, k001 => -1, p000 => 0, p001 => 1,
+            p002 => 2, p003 => 3, p004 => 4, p005 => 5,
+        ]);
+        check_dragon_scale_fixed_k_window!(w065, 65, [
+            k011 => -11, k010 => -10, k009 => -9, k008 => -8, k007 => -7, k006 => -6,
+            k005 => -5, k004 => -4, k003 => -3, k002 => -2, k001 => -1, p000 => 0,
+            p001 => 1, p002 => 2, p003 => 3, p004 => 4, p005 => 5, p006 => 6,
+            p007 => 7, p008 => 8, p009 => 9, p010 => 10,
+        ]);
+        check_dragon_scale_fixed_k_window!(w066, 66, [
+            k006 => -6, k005 => -5, k004 => -4, k003 => -3, k002 => -2, k001 => -1,
+            p000 => 0, p001 => 1, p002 => 2, p003 => 3, p004 => 4, p005 => 5,
+            p006 => 6, p007 => 7, p008 => 8, p009 => 9, p010 => 10, p011 => 11,
+            p012 => 12, p013 => 13, p014 => 14, p015 => 15,
+        ]);
+        check_dragon_scale_fixed_k_window!(w067, 67, [
+            k001 => -1, p000 => 0, p001 => 1, p002 => 2, p003 => 3, p004 => 4,
+            p005 => 5, p006 => 6, p007 => 7, p008 => 8, p009 => 9, p010 => 10,
+            p011 => 11, p012 => 12, p013 => 13, p014 => 14, p015 => 15, p016 => 16,
+            p017 => 17, p018 => 18, p019 => 19,
+        ]);
+        check_dragon_scale_fixed_k_window!(w068, 68, [
+            p004 => 4, p005 => 5, p006 => 6, p007 => 7, p008 => 8, p009 => 9,
+            p010 => 10, p011 => 11, p012 => 12, p013 => 13, p014 => 14, p015 => 15,
+            p016 => 16, p017 => 17, p018 => 18, p019 => 19, p020 => 20, p021 => 21,
+            p022 => 22, p023 => 23, p024 => 24,
+        ]);
+        check_dragon_scale_fixed_k_window!(w069, 69, [
+            p009 => 9, p010 => 10, p011 => 11, p012 => 12, p013 => 13, p014 => 14,
+            p015 => 15, p016 => 16, p017 => 17, p018 => 18, p019 => 19, p020 => 20,
+            p021 => 21, p022 => 22, p023 => 23, p024 => 24, p025 => 25, p026 => 26,
+            p027 => 27, p028 => 28, p029 => 29,
+        ]);
+        check_dragon_scale_fixed_k_window!(w070, 70, [
+            p013 => 13, p014 => 14, p015 => 15, p016 => 16, p017 => 17, p018 => 18,
+            p019 => 19, p020 => 20, p021 => 21, p022 => 22, p023 => 23, p024 => 24,
+            p025 => 25, p026 => 26, p027 => 27, p028 => 28, p029 => 29, p030 => 30,
+            p031 => 31, p032 => 32, p033 => 33, p034 => 34,
+        ]);
+        check_dragon_scale_fixed_k_window!(w071, 71, [
+            p018 => 18, p019 => 19, p020 => 20, p021 => 21, p022 => 22, p023 => 23,
+            p024 => 24, p025 => 25, p026 => 26, p027 => 27, p028 => 28, p029 => 29,
+            p030 => 30, p031 => 31, p032 => 32, p033 => 33, p034 => 34, p035 => 35,
+            p036 => 36, p037 => 37, p038 => 38, p039 => 39,
+        ]);
+        check_dragon_scale_fixed_k_window!(w072, 72, [
+            p023 => 23, p024 => 24, p025 => 25, p026 => 26, p027 => 27, p028 => 28,
+            p029 => 29, p030 => 30, p031 => 31, p032 => 32, p033 => 33, p034 => 34,
+            p035 => 35, p036 => 36, p037 => 37, p038 => 38, p039 => 39, p040 => 40,
+            p041 => 41, p042 => 42, p043 => 43,
+        ]);
+        check_dragon_scale_fixed_k_window!(w073, 73, [
+            p028 => 28, p029 => 29, p030 => 30, p031 => 31, p032 => 32, p033 => 33,
+            p034 => 34, p035 => 35, p036 => 36, p037 => 37, p038 => 38, p039 => 39,
+            p040 => 40, p041 => 41, p042 => 42, p043 => 43, p044 => 44, p045 => 45,
+            p046 => 46, p047 => 47, p048 => 48,
+        ]);
+        check_dragon_scale_fixed_k_window!(w074, 74, [
+            p033 => 33, p034 => 34, p035 => 35, p036 => 36, p037 => 37, p038 => 38,
+            p039 => 39, p040 => 40, p041 => 41, p042 => 42, p043 => 43, p044 => 44,
+            p045 => 45, p046 => 46, p047 => 47, p048 => 48, p049 => 49, p050 => 50,
+            p051 => 51, p052 => 52, p053 => 53,
+        ]);
+        check_dragon_scale_fixed_k_window!(w075, 75, [
+            p037 => 37, p038 => 38, p039 => 39, p040 => 40, p041 => 41, p042 => 42,
+            p043 => 43, p044 => 44, p045 => 45, p046 => 46, p047 => 47, p048 => 48,
+            p049 => 49, p050 => 50, p051 => 51, p052 => 52, p053 => 53, p054 => 54,
+            p055 => 55, p056 => 56, p057 => 57, p058 => 58,
+        ]);
+        check_dragon_scale_fixed_k_window!(w076, 76, [
+            p042 => 42, p043 => 43, p044 => 44, p045 => 45, p046 => 46, p047 => 47,
+            p048 => 48, p049 => 49, p050 => 50, p051 => 51, p052 => 52, p053 => 53,
+            p054 => 54, p055 => 55, p056 => 56, p057 => 57, p058 => 58, p059 => 59,
+            p060 => 60, p061 => 61, p062 => 62, p063 => 63,
+        ]);
+        check_dragon_scale_fixed_k_window!(w077, 77, [
+            p047 => 47, p048 => 48, p049 => 49, p050 => 50, p051 => 51, p052 => 52,
+            p053 => 53, p054 => 54, p055 => 55, p056 => 56, p057 => 57, p058 => 58,
+            p059 => 59, p060 => 60, p061 => 61, p062 => 62, p063 => 63, p064 => 64,
+            p065 => 65, p066 => 66, p067 => 67, p068 => 68,
+        ]);
+        check_dragon_scale_fixed_k_window!(w078, 78, [
+            p052 => 52, p053 => 53, p054 => 54, p055 => 55, p056 => 56, p057 => 57,
+            p058 => 58, p059 => 59, p060 => 60, p061 => 61, p062 => 62, p063 => 63,
+            p064 => 64, p065 => 65, p066 => 66, p067 => 67, p068 => 68, p069 => 69,
+            p070 => 70, p071 => 71, p072 => 72,
+        ]);
+        check_dragon_scale_fixed_k_window!(w079, 79, [
+            p057 => 57, p058 => 58, p059 => 59, p060 => 60, p061 => 61, p062 => 62,
+            p063 => 63, p064 => 64, p065 => 65, p066 => 66, p067 => 67, p068 => 68,
+            p069 => 69, p070 => 70, p071 => 71, p072 => 72, p073 => 73, p074 => 74,
+            p075 => 75, p076 => 76, p077 => 77,
+        ]);
+        check_dragon_scale_fixed_k_window!(w080, 80, [
+            p062 => 62, p063 => 63, p064 => 64, p065 => 65, p066 => 66, p067 => 67,
+            p068 => 68, p069 => 69, p070 => 70, p071 => 71, p072 => 72, p073 => 73,
+            p074 => 74, p075 => 75, p076 => 76, p077 => 77, p078 => 78, p079 => 79,
+            p080 => 80, p081 => 81, p082 => 82,
+        ]);
+        check_dragon_scale_fixed_k_window!(w081, 81, [
+            p066 => 66, p067 => 67, p068 => 68, p069 => 69, p070 => 70, p071 => 71,
+            p072 => 72, p073 => 73, p074 => 74, p075 => 75, p076 => 76, p077 => 77,
+            p078 => 78, p079 => 79, p080 => 80, p081 => 81, p082 => 82, p083 => 83,
+            p084 => 84, p085 => 85, p086 => 86, p087 => 87,
+        ]);
+        check_dragon_scale_fixed_k_window!(w082, 82, [
+            p071 => 71, p072 => 72, p073 => 73, p074 => 74, p075 => 75, p076 => 76,
+            p077 => 77, p078 => 78, p079 => 79, p080 => 80, p081 => 81, p082 => 82,
+            p083 => 83, p084 => 84, p085 => 85, p086 => 86, p087 => 87, p088 => 88,
+            p089 => 89, p090 => 90, p091 => 91, p092 => 92,
+        ]);
+        check_dragon_scale_fixed_k_window!(w083, 83, [
+            p076 => 76, p077 => 77, p078 => 78, p079 => 79, p080 => 80, p081 => 81,
+            p082 => 82, p083 => 83, p084 => 84, p085 => 85, p086 => 86, p087 => 87,
+            p088 => 88, p089 => 89, p090 => 90, p091 => 91, p092 => 92, p093 => 93,
+            p094 => 94, p095 => 95, p096 => 96,
+        ]);
+        check_dragon_scale_fixed_k_window!(w084, 84, [
+            p081 => 81, p082 => 82, p083 => 83, p084 => 84, p085 => 85, p086 => 86,
+            p087 => 87, p088 => 88, p089 => 89, p090 => 90, p091 => 91, p092 => 92,
+            p093 => 93, p094 => 94, p095 => 95, p096 => 96, p097 => 97, p098 => 98,
+            p099 => 99, p100 => 100, p101 => 101,
+        ]);
+        check_dragon_scale_fixed_k_window!(w085, 85, [
+            p086 => 86, p087 => 87, p088 => 88, p089 => 89, p090 => 90, p091 => 91,
+            p092 => 92, p093 => 93, p094 => 94, p095 => 95, p096 => 96, p097 => 97,
+            p098 => 98, p099 => 99, p100 => 100, p101 => 101, p102 => 102, p103 => 103,
+            p104 => 104, p105 => 105, p106 => 106,
+        ]);
+        check_dragon_scale_fixed_k_window!(w086, 86, [
+            p090 => 90, p091 => 91, p092 => 92, p093 => 93, p094 => 94, p095 => 95,
+            p096 => 96, p097 => 97, p098 => 98, p099 => 99, p100 => 100, p101 => 101,
+            p102 => 102, p103 => 103, p104 => 104, p105 => 105, p106 => 106, p107 => 107,
+            p108 => 108, p109 => 109, p110 => 110, p111 => 111,
+        ]);
+        check_dragon_scale_fixed_k_window!(w087, 87, [
+            p095 => 95, p096 => 96, p097 => 97, p098 => 98, p099 => 99, p100 => 100,
+            p101 => 101, p102 => 102, p103 => 103, p104 => 104, p105 => 105, p106 => 106,
+            p107 => 107, p108 => 108, p109 => 109, p110 => 110, p111 => 111, p112 => 112,
+            p113 => 113, p114 => 114, p115 => 115, p116 => 116,
+        ]);
+        check_dragon_scale_fixed_k_window!(w088, 88, [
+            p100 => 100, p101 => 101, p102 => 102, p103 => 103, p104 => 104, p105 => 105,
+            p106 => 106, p107 => 107, p108 => 108, p109 => 109, p110 => 110, p111 => 111,
+            p112 => 112, p113 => 113, p114 => 114, p115 => 115, p116 => 116, p117 => 117,
+            p118 => 118, p119 => 119, p120 => 120, p121 => 121,
+        ]);
+        check_dragon_scale_fixed_k_window!(w089, 89, [
+            p105 => 105, p106 => 106, p107 => 107, p108 => 108, p109 => 109, p110 => 110,
+            p111 => 111, p112 => 112, p113 => 113, p114 => 114, p115 => 115, p116 => 116,
+            p117 => 117, p118 => 118, p119 => 119, p120 => 120, p121 => 121, p122 => 122,
+            p123 => 123, p124 => 124, p125 => 125,
+        ]);
+        check_dragon_scale_fixed_k_window!(w090, 90, [
+            p110 => 110, p111 => 111, p112 => 112, p113 => 113, p114 => 114, p115 => 115,
+            p116 => 116, p117 => 117, p118 => 118, p119 => 119, p120 => 120, p121 => 121,
+            p122 => 122, p123 => 123, p124 => 124, p125 => 125, p126 => 126, p127 => 127,
+            p128 => 128, p129 => 129, p130 => 130,
+        ]);
+        check_dragon_scale_fixed_k_window!(w091, 91, [
+            p114 => 114, p115 => 115, p116 => 116, p117 => 117, p118 => 118, p119 => 119,
+            p120 => 120, p121 => 121, p122 => 122, p123 => 123, p124 => 124, p125 => 125,
+            p126 => 126, p127 => 127, p128 => 128, p129 => 129, p130 => 130, p131 => 131,
+            p132 => 132, p133 => 133, p134 => 134, p135 => 135,
+        ]);
+        check_dragon_scale_fixed_k_window!(w092, 92, [
+            p119 => 119, p120 => 120, p121 => 121, p122 => 122, p123 => 123, p124 => 124,
+            p125 => 125, p126 => 126, p127 => 127, p128 => 128, p129 => 129, p130 => 130,
+            p131 => 131, p132 => 132, p133 => 133, p134 => 134, p135 => 135, p136 => 136,
+            p137 => 137, p138 => 138, p139 => 139, p140 => 140,
+        ]);
+        check_dragon_scale_fixed_k_window!(w093, 93, [
+            p124 => 124, p125 => 125, p126 => 126, p127 => 127, p128 => 128, p129 => 129,
+            p130 => 130, p131 => 131, p132 => 132, p133 => 133, p134 => 134, p135 => 135,
+            p136 => 136, p137 => 137, p138 => 138, p139 => 139, p140 => 140, p141 => 141,
+            p142 => 142, p143 => 143, p144 => 144, p145 => 145,
+        ]);
+        check_dragon_scale_fixed_k_window!(w094, 94, [
+            p129 => 129, p130 => 130, p131 => 131, p132 => 132, p133 => 133, p134 => 134,
+            p135 => 135, p136 => 136, p137 => 137, p138 => 138, p139 => 139, p140 => 140,
+            p141 => 141, p142 => 142, p143 => 143, p144 => 144, p145 => 145, p146 => 146,
+            p147 => 147, p148 => 148, p149 => 149,
+        ]);
+        check_dragon_scale_fixed_k_window!(w095, 95, [
+            p134 => 134, p135 => 135, p136 => 136, p137 => 137, p138 => 138, p139 => 139,
+            p140 => 140, p141 => 141, p142 => 142, p143 => 143, p144 => 144, p145 => 145,
+            p146 => 146, p147 => 147, p148 => 148, p149 => 149, p150 => 150, p151 => 151,
+            p152 => 152, p153 => 153, p154 => 154,
+        ]);
+        check_dragon_scale_fixed_k_window!(w096, 96, [
+            p139 => 139, p140 => 140, p141 => 141, p142 => 142, p143 => 143, p144 => 144,
+            p145 => 145, p146 => 146, p147 => 147, p148 => 148, p149 => 149, p150 => 150,
+            p151 => 151, p152 => 152, p153 => 153, p154 => 154, p155 => 155, p156 => 156,
+            p157 => 157, p158 => 158, p159 => 159,
+        ]);
+        check_dragon_scale_fixed_k_window!(w097, 97, [
+            p143 => 143, p144 => 144, p145 => 145, p146 => 146, p147 => 147, p148 => 148,
+            p149 => 149, p150 => 150, p151 => 151, p152 => 152, p153 => 153, p154 => 154,
+            p155 => 155, p156 => 156, p157 => 157, p158 => 158, p159 => 159, p160 => 160,
+            p161 => 161, p162 => 162, p163 => 163, p164 => 164,
+        ]);
+        check_dragon_scale_fixed_k_window!(w098, 98, [
+            p148 => 148, p149 => 149, p150 => 150, p151 => 151, p152 => 152, p153 => 153,
+            p154 => 154, p155 => 155, p156 => 156, p157 => 157, p158 => 158, p159 => 159,
+            p160 => 160, p161 => 161, p162 => 162, p163 => 163, p164 => 164, p165 => 165,
+            p166 => 166, p167 => 167, p168 => 168, p169 => 169,
+        ]);
+        check_dragon_scale_fixed_k_window!(w099, 99, [
+            p153 => 153, p154 => 154, p155 => 155, p156 => 156, p157 => 157, p158 => 158,
+            p159 => 159, p160 => 160, p161 => 161, p162 => 162, p163 => 163, p164 => 164,
+            p165 => 165, p166 => 166, p167 => 167, p168 => 168, p169 => 169, p170 => 170,
+            p171 => 171, p172 => 172, p173 => 173,
+        ]);
+        check_dragon_scale_fixed_k_window!(w100, 100, [
+            p158 => 158, p159 => 159, p160 => 160, p161 => 161, p162 => 162, p163 => 163,
+            p164 => 164, p165 => 165, p166 => 166, p167 => 167, p168 => 168, p169 => 169,
+            p170 => 170, p171 => 171, p172 => 172, p173 => 173, p174 => 174, p175 => 175,
+            p176 => 176, p177 => 177, p178 => 178,
+        ]);
+        check_dragon_scale_fixed_k_window!(w101, 101, [
+            p163 => 163, p164 => 164, p165 => 165, p166 => 166, p167 => 167, p168 => 168,
+            p169 => 169, p170 => 170, p171 => 171, p172 => 172, p173 => 173, p174 => 174,
+            p175 => 175, p176 => 176, p177 => 177, p178 => 178, p179 => 179, p180 => 180,
+            p181 => 181, p182 => 182, p183 => 183,
+        ]);
+        check_dragon_scale_fixed_k_window!(w102, 102, [
+            p167 => 167, p168 => 168, p169 => 169, p170 => 170, p171 => 171, p172 => 172,
+            p173 => 173, p174 => 174, p175 => 175, p176 => 176, p177 => 177, p178 => 178,
+            p179 => 179, p180 => 180, p181 => 181, p182 => 182, p183 => 183, p184 => 184,
+            p185 => 185, p186 => 186, p187 => 187, p188 => 188,
+        ]);
+        check_dragon_scale_fixed_k_window!(w103, 103, [
+            p172 => 172, p173 => 173, p174 => 174, p175 => 175, p176 => 176, p177 => 177,
+            p178 => 178, p179 => 179, p180 => 180, p181 => 181, p182 => 182, p183 => 183,
+            p184 => 184, p185 => 185, p186 => 186, p187 => 187, p188 => 188, p189 => 189,
+            p190 => 190, p191 => 191, p192 => 192, p193 => 193,
+        ]);
+        check_dragon_scale_fixed_k_window!(w104, 104, [
+            p177 => 177, p178 => 178, p179 => 179, p180 => 180, p181 => 181, p182 => 182,
+            p183 => 183, p184 => 184, p185 => 185, p186 => 186, p187 => 187, p188 => 188,
+            p189 => 189, p190 => 190, p191 => 191, p192 => 192, p193 => 193, p194 => 194,
+            p195 => 195, p196 => 196, p197 => 197, p198 => 198,
+        ]);
+        check_dragon_scale_fixed_k_window!(w105, 105, [
+            p182 => 182, p183 => 183, p184 => 184, p185 => 185, p186 => 186, p187 => 187,
+            p188 => 188, p189 => 189, p190 => 190, p191 => 191, p192 => 192, p193 => 193,
+            p194 => 194, p195 => 195, p196 => 196, p197 => 197, p198 => 198, p199 => 199,
+            p200 => 200, p201 => 201, p202 => 202,
+        ]);
+        check_dragon_scale_fixed_k_window!(w106, 106, [
+            p187 => 187, p188 => 188, p189 => 189, p190 => 190, p191 => 191, p192 => 192,
+            p193 => 193, p194 => 194, p195 => 195, p196 => 196, p197 => 197, p198 => 198,
+            p199 => 199, p200 => 200, p201 => 201, p202 => 202, p203 => 203, p204 => 204,
+            p205 => 205, p206 => 206, p207 => 207,
+        ]);
+        check_dragon_scale_fixed_k_window!(w107, 107, [
+            p192 => 192, p193 => 193, p194 => 194, p195 => 195, p196 => 196, p197 => 197,
+            p198 => 198, p199 => 199, p200 => 200, p201 => 201, p202 => 202, p203 => 203,
+            p204 => 204, p205 => 205, p206 => 206, p207 => 207, p208 => 208, p209 => 209,
+            p210 => 210, p211 => 211, p212 => 212,
+        ]);
+        check_dragon_scale_fixed_k_window!(w108, 108, [
+            p196 => 196, p197 => 197, p198 => 198, p199 => 199, p200 => 200, p201 => 201,
+            p202 => 202, p203 => 203, p204 => 204, p205 => 205, p206 => 206, p207 => 207,
+            p208 => 208, p209 => 209, p210 => 210, p211 => 211, p212 => 212, p213 => 213,
+            p214 => 214, p215 => 215, p216 => 216, p217 => 217,
+        ]);
+        check_dragon_scale_fixed_k_window!(w109, 109, [
+            p201 => 201, p202 => 202, p203 => 203, p204 => 204, p205 => 205, p206 => 206,
+            p207 => 207, p208 => 208, p209 => 209, p210 => 210, p211 => 211, p212 => 212,
+            p213 => 213, p214 => 214, p215 => 215, p216 => 216, p217 => 217, p218 => 218,
+            p219 => 219, p220 => 220, p221 => 221, p222 => 222,
+        ]);
+        check_dragon_scale_fixed_k_window!(w110, 110, [
+            p206 => 206, p207 => 207, p208 => 208, p209 => 209, p210 => 210, p211 => 211,
+            p212 => 212, p213 => 213, p214 => 214, p215 => 215, p216 => 216, p217 => 217,
+            p218 => 218, p219 => 219, p220 => 220, p221 => 221, p222 => 222, p223 => 223,
+            p224 => 224, p225 => 225, p226 => 226,
+        ]);
+        check_dragon_scale_fixed_k_window!(w111, 111, [
+            p211 => 211, p212 => 212, p213 => 213, p214 => 214, p215 => 215, p216 => 216,
+            p217 => 217, p218 => 218, p219 => 219, p220 => 220, p221 => 221, p222 => 222,
+            p223 => 223, p224 => 224, p225 => 225, p226 => 226, p227 => 227, p228 => 228,
+            p229 => 229, p230 => 230, p231 => 231,
+        ]);
+        check_dragon_scale_fixed_k_window!(w112, 112, [
+            p216 => 216, p217 => 217, p218 => 218, p219 => 219, p220 => 220, p221 => 221,
+            p222 => 222, p223 => 223, p224 => 224, p225 => 225, p226 => 226, p227 => 227,
+            p228 => 228, p229 => 229, p230 => 230, p231 => 231, p232 => 232, p233 => 233,
+            p234 => 234, p235 => 235, p236 => 236,
+        ]);
+        check_dragon_scale_fixed_k_window!(w113, 113, [
+            p220 => 220, p221 => 221, p222 => 222, p223 => 223, p224 => 224, p225 => 225,
+            p226 => 226, p227 => 227, p228 => 228, p229 => 229, p230 => 230, p231 => 231,
+            p232 => 232, p233 => 233, p234 => 234, p235 => 235, p236 => 236, p237 => 237,
+            p238 => 238, p239 => 239, p240 => 240, p241 => 241,
+        ]);
+        check_dragon_scale_fixed_k_window!(w114, 114, [
+            p225 => 225, p226 => 226, p227 => 227, p228 => 228, p229 => 229, p230 => 230,
+            p231 => 231, p232 => 232, p233 => 233, p234 => 234, p235 => 235, p236 => 236,
+            p237 => 237, p238 => 238, p239 => 239, p240 => 240, p241 => 241, p242 => 242,
+            p243 => 243, p244 => 244, p245 => 245, p246 => 246,
+        ]);
+        check_dragon_scale_fixed_k_window!(w115, 115, [
+            p230 => 230, p231 => 231, p232 => 232, p233 => 233, p234 => 234, p235 => 235,
+            p236 => 236, p237 => 237, p238 => 238, p239 => 239, p240 => 240, p241 => 241,
+            p242 => 242, p243 => 243, p244 => 244, p245 => 245, p246 => 246, p247 => 247,
+            p248 => 248, p249 => 249, p250 => 250, p251 => 251,
+        ]);
+        check_dragon_scale_fixed_k_window!(w116, 116, [
+            p235 => 235, p236 => 236, p237 => 237, p238 => 238, p239 => 239, p240 => 240,
+            p241 => 241, p242 => 242, p243 => 243, p244 => 244, p245 => 245, p246 => 246,
+            p247 => 247, p248 => 248, p249 => 249, p250 => 250, p251 => 251, p252 => 252,
+            p253 => 253, p254 => 254, p255 => 255,
+        ]);
+        check_dragon_scale_fixed_k_window!(w117, 117, [
+            p240 => 240, p241 => 241, p242 => 242, p243 => 243, p244 => 244, p245 => 245,
+            p246 => 246, p247 => 247, p248 => 248, p249 => 249, p250 => 250, p251 => 251,
+            p252 => 252, p253 => 253, p254 => 254, p255 => 255, p256 => 256, p257 => 257,
+            p258 => 258, p259 => 259, p260 => 260,
+        ]);
+        check_dragon_scale_fixed_k_window!(w118, 118, [
+            p245 => 245, p246 => 246, p247 => 247, p248 => 248, p249 => 249, p250 => 250,
+            p251 => 251, p252 => 252, p253 => 253, p254 => 254, p255 => 255, p256 => 256,
+            p257 => 257, p258 => 258, p259 => 259, p260 => 260, p261 => 261, p262 => 262,
+            p263 => 263, p264 => 264, p265 => 265,
+        ]);
+        check_dragon_scale_fixed_k_window!(w119, 119, [
+            p249 => 249, p250 => 250, p251 => 251, p252 => 252, p253 => 253, p254 => 254,
+            p255 => 255, p256 => 256, p257 => 257, p258 => 258, p259 => 259, p260 => 260,
+            p261 => 261, p262 => 262, p263 => 263, p264 => 264, p265 => 265, p266 => 266,
+            p267 => 267, p268 => 268, p269 => 269, p270 => 270,
+        ]);
+        check_dragon_scale_fixed_k_window!(w120, 120, [
+            p254 => 254, p255 => 255, p256 => 256, p257 => 257, p258 => 258, p259 => 259,
+            p260 => 260, p261 => 261, p262 => 262, p263 => 263, p264 => 264, p265 => 265,
+            p266 => 266, p267 => 267, p268 => 268, p269 => 269, p270 => 270, p271 => 271,
+            p272 => 272, p273 => 273, p274 => 274, p275 => 275,
+        ]);
+        check_dragon_scale_fixed_k_window!(w121, 121, [
+            p259 => 259, p260 => 260, p261 => 261, p262 => 262, p263 => 263, p264 => 264,
+            p265 => 265, p266 => 266, p267 => 267, p268 => 268, p269 => 269, p270 => 270,
+            p271 => 271, p272 => 272, p273 => 273, p274 => 274, p275 => 275, p276 => 276,
+            p277 => 277, p278 => 278, p279 => 279,
+        ]);
+        check_dragon_scale_fixed_k_window!(w122, 122, [
+            p264 => 264, p265 => 265, p266 => 266, p267 => 267, p268 => 268, p269 => 269,
+            p270 => 270, p271 => 271, p272 => 272, p273 => 273, p274 => 274, p275 => 275,
+            p276 => 276, p277 => 277, p278 => 278, p279 => 279, p280 => 280, p281 => 281,
+            p282 => 282, p283 => 283, p284 => 284,
+        ]);
+        check_dragon_scale_fixed_k_window!(w123, 123, [
+            p269 => 269, p270 => 270, p271 => 271, p272 => 272, p273 => 273, p274 => 274,
+            p275 => 275, p276 => 276, p277 => 277, p278 => 278, p279 => 279, p280 => 280,
+            p281 => 281, p282 => 282, p283 => 283, p284 => 284, p285 => 285, p286 => 286,
+            p287 => 287, p288 => 288, p289 => 289,
+        ]);
+        check_dragon_scale_fixed_k_window!(w124, 124, [
+            p273 => 273, p274 => 274, p275 => 275, p276 => 276, p277 => 277, p278 => 278,
+            p279 => 279, p280 => 280, p281 => 281, p282 => 282, p283 => 283, p284 => 284,
+            p285 => 285, p286 => 286, p287 => 287, p288 => 288, p289 => 289, p290 => 290,
+            p291 => 291, p292 => 292, p293 => 293, p294 => 294,
+        ]);
+        check_dragon_scale_fixed_k_window!(w125, 125, [
+            p278 => 278, p279 => 279, p280 => 280, p281 => 281, p282 => 282, p283 => 283,
+            p284 => 284, p285 => 285, p286 => 286, p287 => 287, p288 => 288, p289 => 289,
+            p290 => 290, p291 => 291, p292 => 292, p293 => 293, p294 => 294, p295 => 295,
+            p296 => 296, p297 => 297, p298 => 298, p299 => 299,
+        ]);
+        check_dragon_scale_fixed_k_window!(w126, 126, [
+            p283 => 283, p284 => 284, p285 => 285, p286 => 286, p287 => 287, p288 => 288,
+            p289 => 289, p290 => 290, p291 => 291, p292 => 292, p293 => 293, p294 => 294,
+            p295 => 295, p296 => 296, p297 => 297, p298 => 298, p299 => 299, p300 => 300,
+            p301 => 301, p302 => 302, p303 => 303, p304 => 304,
+        ]);
+        check_dragon_scale_fixed_k_window!(w127, 127, [
+            p288 => 288, p289 => 289, p290 => 290, p291 => 291, p292 => 292, p293 => 293,
+            p294 => 294, p295 => 295, p296 => 296, p297 => 297, p298 => 298, p299 => 299,
+            p300 => 300, p301 => 301, p302 => 302, p303 => 303, p304 => 304, p305 => 305,
+            p306 => 306, p307 => 307, p308 => 308,
+        ]);
+    }
+
+    // Every contract input of windows 000 to 127 has its estimate in the window range, so
+    // the fixed-K proofs of each K in that range cover the window.
+    #[kani::proof]
+    fn check_dragon_scale_k_range() {
+        let mant = kani::any::<u64>() & ((1u64 << 55) - 1);
+        let plus: u64 = if kani::any::<bool>() { 1 } else { 2 };
+        kani::assume(mant >= 2);
+        kani::assume(plus == 1 || mant == 1 << 25 || mant == 1 << 54);
+        kani::assume(mant as u128 + plus as u128 <= ((1 + plus as u128) << 53));
+        let window = kani::any::<u8>();
+        kani::assume(window <= 127);
+        let first = -1076 + 16 * i16::from(window);
+        let exp = first + i16::from(kani::any::<u8>() & 15);
+        kani::assume(exp <= fixed_k_last(first));
+        let k =
+            crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor(mant + plus, exp);
+        assert!(fixed_k_min(first) <= k && k <= fixed_k_max(first));
+        kani::cover(window == 0, "the K range includes the lowest window");
+        kani::cover(window == 127, "the K range includes the last fixed-K window");
     }
 
     // Only the additional [1, 2) probes use this adapter. Check the scaling

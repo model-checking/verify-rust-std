@@ -16,6 +16,75 @@ GRISU_PROBES = {
     "step": "num::imp::flt2dec::strategy::grisu::generate_shortest.loop_invariant_step.1",
     "integral-step": "num::imp::flt2dec::strategy::grisu::generate_integral_digits.loop_invariant_step.1",
 }
+# Dragon shortest scaling:  dragon.rs estimates K = floor((nbits + exp) * DRAGON_K_ESTIMATE / 2^32)
+# for nbits in 2..=55 and proves windows 000..127 one (window, K) pair at a time.
+DRAGON_K_ESTIMATE = 1292913986
+DRAGON_FIXED_K_WINDOWS = 128
+# Windows 000 and 001 at K = -319..-311 are the slow band (routing ruling s46).
+DRAGON_SLOW_BAND = range(-319, -310)
+# Pairs that timed out at 30 or 60 minutes in their group of eight or four (run 39215660085,
+# ubuntu or macOS):  each runs alone at 180 minutes, its group keeps the other pairs (ruling s54 (a)).
+DRAGON_SLOW_PAIRS = (
+    (1, -310), (1, -314), (6, -285), (6, -286), (7, -283), (23, -206), (28, -184), (29, -175),
+    (34, -154), (34, -155), (46, -91), (46, -92), (46, -93), (46, -94), (46, -95), (47, -90),
+)
+# Pairs whose proof splits on the exponent (dragon.rs `kNNN => K => [eNN => offset]`):  pair -> the
+# exponent offsets of its pieces;  each piece covers 4 exponents and runs alone at 180 minutes.
+# Each pair here hit the 180-minute cap alone:  (0, -317) in the slow band, the rest as slow pairs.
+# They run in 4 pieces of 4 exponents;  the 11 pairs whose pieces hit the cap again run in
+# 16 pieces of 1 exponent.
+DRAGON_SPLIT_PAIRS = {
+    **{pair: (0, 4, 8, 12) for pair in ((0, -317), (29, -172), (47, -91))},
+    **{pair: tuple(range(16)) for pair in (
+        (23, -200), (23, -201), (23, -202), (23, -203), (23, -204), (23, -205), (28, -183),
+        (29, -173), (29, -174), (34, -151), (34, -152), (34, -153),
+    )},
+}
+# One CI matrix holds at most 256 jobs:  core, long (generator and cached proofs), and the fixed-K
+# pairs in four:  dragon-a (windows 000..033), dragon-b (034..067), dragon-c (068..097), dragon-d (098..127).
+# The pieces of the split pairs run in two more:  dragon-e (offsets 0..7) and dragon-f (8..15).
+MATRIX_JOBS = ("core", "long", "dragon-a", "dragon-b", "dragon-c", "dragon-d", "dragon-e",
+               "dragon-f")
+
+
+def dragon_window_exponents(window):
+    """The first and last exponent of one 16-exponent Dragon scaling window."""
+    first = -1076 + 16 * window
+    return first, min(first + 15, 970)
+
+
+def dragon_fixed_k_range(window):
+    """The K values of one window:  the estimate at (2, first) through the estimate at (55, last)."""
+    first, last = dragon_window_exponents(window)
+    return range(((2 + first) * DRAGON_K_ESTIMATE) >> 32, (((55 + last) * DRAGON_K_ESTIMATE) >> 32) + 1)
+
+
+def dragon_fixed_k_pairs():
+    """Every (window, K) pair of the fixed-K proofs (windows 000..127), in (window, K) order."""
+    return [(window, k) for window in range(DRAGON_FIXED_K_WINDOWS) for k in dragon_fixed_k_range(window)]
+
+
+def dragon_fixed_k_name(window, k):
+    """The catalog name part of one pair:  `000-k324` for K = -324, `063-p000` for K = 0."""
+    return f"{window:03d}-{'k' if k < 0 else 'p'}{abs(k):03d}"
+
+
+def dragon_fixed_k_harness(window, k):
+    """The Kani harness of one pair:  module wNNN holds one module kNNN (K < 0) or pNNN (K >= 0)."""
+    return f"{DRAGON}::dragon_scale_fixed_k::w{window:03d}::{'k' if k < 0 else 'p'}{abs(k):03d}::check_scale_shortest"
+
+
+def dragon_fixed_k_piece_harness(window, k, offset):
+    """The Kani harness of one piece of a split pair:  module eNN (NN = offset) inside the pair module."""
+    pair = dragon_fixed_k_harness(window, k).removesuffix("::check_scale_shortest")
+    return f"{pair}::e{offset:02d}::check_scale_shortest"
+
+
+def dragon_matrix_job(window):
+    """Windows 000..033 run in the dragon-a matrix job, 034..067 in dragon-b, 068..097 in dragon-c
+    and 098..127 in dragon-d."""
+    return next(job for first, job in ((98, "dragon-d"), (68, "dragon-c"), (34, "dragon-b"), (0, "dragon-a"))
+                if window >= first)
 
 
 def proof_groups(pointer_width=None):
@@ -61,6 +130,18 @@ def proof_groups(pointer_width=None):
             f"{module}::f64_exp_1023::{proof}"
         ], timeout_minutes)
 
+    # Diagnostic value-range probes (branch g4-diag-s19 only):  each adds one assumption on the
+    # scaled width to a hard shortest slice.  The covers show that each assumption admits an input.
+    for probe, partition, index in [("p0", "f32_03", 4), ("p1", "f32_03", 4), ("p2", "f32_03", 4),
+                                    ("p3", "f32_03", 4), ("p5", "f32_00", 0), ("p5", "f64_00", 0)]:
+        add(f"grisu-shortest-{partition.replace('_', '-')}-slice-{index}-{probe}", f"generator-{partition[:3]}",
+            [f"{GRISU}::probe_{probe}::{partition}_s{index}::check_format_shortest_opt"], 120,
+            matrix_job="long")
+    add("grisu-shortest-probe-covers", "probe", [
+        f"{GRISU}::probe_covers::{name}"
+        for name in ("p0_f32_03_s4", "p1_f32_03_s4", "p2_f32_03_s4", "p1_f32_00_s0", "p1_f64_00_s0")
+    ], 30)
+
     # Ubuntu proved the shortest probe in 65 minutes;  macOS is about twice as slow.
     for mode in ("exact", "shortest"):
         add(f"grisu-{mode}-cached-power-39", "probe", [
@@ -88,6 +169,7 @@ def proof_groups(pointer_width=None):
         ("grisu-rounded-multiplication-contract", GRISU, "check_rounded_multiply", "contract"),
         ("grisu-normalized-multiplication-contract", GRISU, "check_normalized_multiply", "contract"),
         ("grisu-shortest-scaling-partitioning", GRISU, "check_scale_shortest_partitioning", "equivalence"),
+        ("dragon-shortest-scaling-partitioning", DRAGON, "check_dragon_scale_partitioning", "equivalence"),
         ("comparison-equivalence", DRAGON, "check_comparison_models_agree", "equivalence"),
         ("zero-fill-equivalence", DRAGON, "check_fill_zeroes_model_agrees", "equivalence"),
         ("addition-equivalence", DRAGON, "check_add_model_agrees", "equivalence"),
@@ -99,6 +181,45 @@ def proof_groups(pointer_width=None):
     for kind, harnesses in foundations.items():
         for first in range(0, len(harnesses), 8):
             add(f"foundations-{kind}-{first:02d}", kind, harnesses[first:first + 8], 30)
+
+    # Windows 000..127:  one fixed-K proof per (window, K) pair, and the estimate range the pairs cover.
+    add("dragon-shortest-scaling-k-range", "equivalence", [f"{DRAGON}::check_dragon_scale_k_range"], 30)
+
+    def add_fixed_k(pairs, timeout_minutes):
+        first, last = pairs[0], pairs[-1]
+        suffix = dragon_fixed_k_name(*first) + ("" if first == last else "-" + dragon_fixed_k_name(*last))
+        add("dragon-shortest-scaling-fixed-k-" + suffix, "contract",
+            [dragon_fixed_k_harness(window, k) for window, k in pairs], timeout_minutes,
+            matrix_job=dragon_matrix_job(first[0]))
+
+    def in_slow_band(window, k):
+        return window in (0, 1) and k in DRAGON_SLOW_BAND
+
+    # Routing (ruling s46):  the slow band runs window 000 at 180 minutes alone and window 001 at
+    # 60 minutes in fours;  every other pair runs at 30 minutes in eights, contiguous in
+    # (window, K) order within its matrix job.  The chunks form first;  then each slow pair
+    # (ruling s54 (a)) leaves its chunk, so the other group names stay, and runs alone at
+    # 180 minutes.  A split pair leaves its chunk the same way and runs one group per piece;
+    # the pieces run in two matrix jobs of their own (256 jobs over both platforms):  offsets
+    # 0..7 in dragon-e and 8..15 in dragon-f.
+    def add_fixed_k_chunks(pairs, batch_size, timeout_minutes):
+        for first in range(0, len(pairs), batch_size):
+            chunk = [pair for pair in pairs[first:first + batch_size]
+                     if pair not in DRAGON_SLOW_PAIRS and pair not in DRAGON_SPLIT_PAIRS]
+            if chunk:
+                add_fixed_k(chunk, timeout_minutes)
+
+    for window, batch_size, timeout_minutes in ((0, 1, 180), (1, 4, 60)):
+        add_fixed_k_chunks([(window, k) for k in DRAGON_SLOW_BAND], batch_size, timeout_minutes)
+    for job in ("dragon-a", "dragon-b", "dragon-c", "dragon-d"):
+        add_fixed_k_chunks([(window, k) for window, k in dragon_fixed_k_pairs()
+                            if dragon_matrix_job(window) == job and not in_slow_band(window, k)], 8, 30)
+    for pair in DRAGON_SLOW_PAIRS:
+        add_fixed_k([pair], 180)
+    for (window, k), offsets in DRAGON_SPLIT_PAIRS.items():
+        for offset in offsets:
+            add(f"dragon-shortest-scaling-fixed-k-{dragon_fixed_k_name(window, k)}-e{offset:02d}", "contract",
+                [dragon_fixed_k_piece_harness(window, k, offset)], 180, matrix_job="dragon-" + "ef"[offset >= 8])
 
     # The index 51 proof (group 29) does not finish on the whole domain, so grisu.rs proves
     # it in two pieces that split on the top bit of v and together cover every input.
@@ -112,6 +233,15 @@ def proof_groups(pointer_width=None):
             harnesses.extend(f"{GRISU}::check_fractional_encoding_{power:02d}"
                             for power in range(16))
         add(f"grisu-multiplication-contract-{first:02d}-{last:02d}", "contract", harnesses, 7, "cvc5")
+
+    # Diag only: case splits of check_multiply_shortest_29 (cached power index 51).
+    # The catalog backend stays native so the cvc5 set in T is unchanged;
+    # dispatch these groups with proof_backend=cvc5.
+    splits = (["v0", "v1"] + [f"m{top:02d}" for top in range(4, 16)]
+              + [f"g{band}" for band in range(5)])
+    for split in splits:
+        add(f"grisu-multiplication-split-29-{split}", "contract",
+            [f"{GRISU}::probe_multiply_29_{split}"], 30)
 
     # Each cached multiplication proof needs more than the 7-minute arithmetic budget,
     # so these native SAT proofs get their own 60-minute groups of four.
@@ -190,7 +320,7 @@ def proof_matrix(selected_groups=None, pointer_width=None, platform="both", gris
     groups = proof_groups(pointer_width)
     if grisu_probe != "none" and grisu_probe not in GRISU_PROBES:
         raise ValueError("Unknown Grisu probe: " + str(grisu_probe))
-    if matrix_job not in (None, "core", "long"):
+    if matrix_job not in (None, *MATRIX_JOBS):
         raise ValueError("Unknown matrix job: " + str(matrix_job))
     if grisu_probe != "none" and selected_groups is None:
         raise ValueError("Grisu probes require explicitly selected manual proof groups")
@@ -206,6 +336,12 @@ def proof_matrix(selected_groups=None, pointer_width=None, platform="both", gris
         selected = set(selected_groups)
         if len(selected) != len(selected_groups):
             raise ValueError("Selected proof group names must be distinct")
+        # `matrix-job:dragon-a` selects every catalog group of that matrix job.
+        jobs = {name[len("matrix-job:"):] for name in selected if name.startswith("matrix-job:")}
+        if not jobs <= set(MATRIX_JOBS):
+            raise ValueError("Unknown matrix jobs: " + ", ".join(sorted(jobs - set(MATRIX_JOBS))))
+        selected = {name for name in selected if not name.startswith("matrix-job:")} | {
+            group["name"] for group in groups if group["matrix_job"] in jobs}
         known = {group["name"] for group in groups}
         unknown = selected - known
         if unknown:
@@ -219,7 +355,7 @@ def proof_matrix(selected_groups=None, pointer_width=None, platform="both", gris
                     raise ValueError("Grisu probes require shortest generator groups")
                 group.update(name=f"probe-{grisu_probe}-" + group["catalog_name"],
                              probe_property=GRISU_PROBES[grisu_probe], timeout_minutes=3)
-    # A manual selection splits between the two matrix jobs;  either part can be empty.
+    # A manual selection splits between the matrix jobs;  any part can be empty.
     if matrix_job is not None:
         groups = [group for group in groups if group["matrix_job"] == matrix_job]
     return {"os": OPERATING_SYSTEMS if platform == "both" else [platform], "group": groups}
@@ -247,7 +383,7 @@ def main():
                         help="Select one backend's harnesses within a proof group")
     parser.add_argument("--matrix-grisu-probe", choices=["none", *GRISU_PROBES], default="none",
                         help="Diagnose one loop property in selected manual Grisu groups")
-    parser.add_argument("--matrix-job", choices=["core", "long"],
+    parser.add_argument("--matrix-job", choices=list(MATRIX_JOBS),
                         help="Keep only the groups of one CI matrix job")
     args = parser.parse_args()
     if args.matrix_groups is not None and not args.matrix:
