@@ -689,6 +689,14 @@ unsafe impl CloneToUninit for crate::ffi::CStr {
     // the region this function writes.
     #[cfg_attr(kani, kani::modifies(core::ptr::slice_from_raw_parts_mut(dest, self.to_bytes_with_nul().len())))]
     #[requires(ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dest, self.to_bytes_with_nul().len())))]
+    // `dest` must not overlap `self`: writing there would mutate bytes that
+    // `&self` holds as immutable (the copy is a `copy_nonoverlapping`).
+    #[requires(ub_checks::maybe_is_nonoverlapping(
+        self.as_ptr() as *const (),
+        dest as *const (),
+        1,
+        self.to_bytes_with_nul().len(),
+    ))]
     // On return, the written bytes are byte-for-byte the source's
     // nul-terminated view, so `*dest` is a valid `CStr` — the trait's
     // "leaves `*dest` a valid value of `Self`" promise.
@@ -840,32 +848,38 @@ mod verify {
 
     // unsafe impl CloneToUninit for CStr  (criterion 4)
     //
-    // `proof_for_contract` assumes the precondition (a writable `dest` of
-    // `n = to_bytes_with_nul().len()` bytes), runs the real body, and
-    // verifies the `ensures`/`modifies` plus the UB checks for the internal
-    // `copy_nonoverlapping`. Beyond the contract, the harness asserts that
-    // reconstructing a `&CStr` over the written bytes upholds the safety
-    // invariant — cloning a valid `CStr` yields a valid `CStr`.
+    // `proof_for_contract` assumes the preconditions (a writable `dest` of
+    // `n = to_bytes_with_nul().len()` bytes that does not overlap `self`),
+    // runs the real body, and verifies the `ensures`/`modifies` plus the UB
+    // checks for the internal `copy_nonoverlapping`. The source and `dest`
+    // share one buffer and `dest` may sit anywhere in it, so the overlapping
+    // placements are excluded only by the non-overlap precondition. Beyond
+    // the contract, the harness asserts that reconstructing a `&CStr` over
+    // the written bytes upholds the safety invariant — cloning a valid
+    // `CStr` yields a valid `CStr`.
     #[kani::proof_for_contract(<CStr as CloneToUninit>::clone_to_uninit)]
     #[kani::unwind(33)]
     fn check_clone_to_uninit_cstr() {
-        const MAX_SIZE: usize = 32;
-        let string: [u8; MAX_SIZE] = kani::any();
-        let slice = kani::slice::any_slice_of_array(&string);
+        const SIZE: usize = 32;
+        let mut buf: [u8; SIZE] = kani::any();
+        // Source and destination both come from this one pointer.
+        let base: *mut u8 = buf.as_mut_ptr();
+
+        // Source: any slice of `buf` that holds a valid `CStr`.
+        let src_off: usize = kani::any_where(|&o: &usize| o < SIZE);
+        let src_len: usize = kani::any_where(|&l: &usize| l >= 1 && l <= SIZE - src_off);
+        // SAFETY: `src_off + src_len <= SIZE`, so the slice lies within `buf`.
+        let slice: &[u8] = unsafe { core::slice::from_raw_parts(base.add(src_off), src_len) };
         let c_str = arbitrary_cstr(slice);
+        let n = c_str.to_bytes_with_nul().len();
 
-        // Source: the nul-terminated byte view, `n <= MAX_SIZE`.
-        let src = c_str.to_bytes_with_nul();
-        let n = src.len();
+        // Destination: anywhere in the same buffer.
+        let dst_off: usize = kani::any_where(|&o: &usize| o < SIZE);
+        // SAFETY: `dst_off < SIZE`, so `dest` points into `buf`.
+        let dest: *mut u8 = unsafe { base.add(dst_off) };
 
-        // Destination: a fresh, disjoint, deliberately *uninitialized* buffer
-        // of MAX_SIZE >= n bytes — the contract claims validity for writes
-        // only, so the proof must not rely on `dest`'s contents.
-        let mut dst_buf = [crate::mem::MaybeUninit::<u8>::uninit(); MAX_SIZE];
-        let dest: *mut u8 = dst_buf.as_mut_ptr().cast::<u8>();
-
-        // SAFETY: `dest` is valid for writes of `n` bytes (`dst_buf` has
-        // `MAX_SIZE >= n` bytes) and aligned to 1 (`align_of_val(c_str) == 1`).
+        // SAFETY: the contract's preconditions (writable, non-overlapping;
+        // alignment is 1) are assumed by `proof_for_contract`.
         unsafe {
             c_str.clone_to_uninit(dest);
         }
@@ -873,7 +887,7 @@ mod verify {
         // The destination holds the source's nul-terminated view exactly
         // (also pinned by the contract's `ensures`).
         let written = unsafe { core::slice::from_raw_parts(dest as *const u8, n) };
-        assert_eq!(written, src);
+        assert_eq!(written, c_str.to_bytes_with_nul());
 
         // Criterion 4: the written bytes reinterpreted as `&CStr` uphold the
         // safety invariant.
@@ -881,7 +895,8 @@ mod verify {
         assert!(cloned.is_safe());
 
         // Non-vacuity: neither the contract nor the invariant check is
-        // exercised only vacuously.
+        // exercised only vacuously, and `dest` on either side of the source
+        // survives the non-overlap precondition.
         kani::cover(
             n == 1,
             "non-vacuity: cloning an empty CStr (lone nul terminator) is reachable",
@@ -889,6 +904,14 @@ mod verify {
         kani::cover(
             n > 1,
             "non-vacuity: cloning a non-empty CStr (content before the nul) is reachable",
+        );
+        kani::cover(
+            dst_off + n <= src_off,
+            "non-vacuity: dest before the source in the shared buffer is reachable",
+        );
+        kani::cover(
+            dst_off >= src_off + n,
+            "non-vacuity: dest after the source in the shared buffer is reachable",
         );
     }
 }
