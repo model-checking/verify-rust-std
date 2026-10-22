@@ -40,6 +40,15 @@ DRAGON_SPLIT_PAIRS = {
         (29, -173), (29, -174), (34, -151), (34, -152), (34, -153),
     )},
 }
+# Pieces of the 16-piece split pairs that hit the 180-minute cap with CaDiCaL on ubuntu or macOS
+# (w023 K = -202 e00 also with Kissat):  pair -> the exponent offsets of those pieces.  No group
+# runs them and the general suite skips them, so CI leaves them unproved (ruling s76 (c)).
+DRAGON_UNPROVED_PIECES = {
+    (23, -200): (4, 5, 6), (23, -201): (1, 2, 3, 4, 5), (23, -202): (0, 1, 2, 3, 4),
+    (23, -203): (0, 1, 2), (23, -204): (0, 1, 2), (23, -205): (0,), (28, -183): (0, 1),
+    (29, -173): (0, 1), (29, -174): (0, 1), (34, -151): (0, 1, 2, 3, 4, 5), (34, -152): (0, 1, 2),
+    (34, -153): (0, 1, 3),
+}
 # One CI matrix holds at most 256 jobs:  core, long (generator and cached proofs), and the fixed-K
 # pairs in four:  dragon-a (windows 000..033), dragon-b (034..067), dragon-c (068..097), dragon-d (098..127).
 # The pieces of the split pairs run in two more:  dragon-e (offsets 0..7) and dragon-f (8..15).
@@ -78,6 +87,12 @@ def dragon_fixed_k_piece_harness(window, k, offset):
     """The Kani harness of one piece of a split pair:  module eNN (NN = offset) inside the pair module."""
     pair = dragon_fixed_k_harness(window, k).removesuffix("::check_scale_shortest")
     return f"{pair}::e{offset:02d}::check_scale_shortest"
+
+
+def dragon_unproved_harnesses():
+    """The Kani harnesses of the unproved pieces (DRAGON_UNPROVED_PIECES), in pair and offset order."""
+    return [dragon_fixed_k_piece_harness(window, k, offset)
+            for (window, k), offsets in DRAGON_UNPROVED_PIECES.items() for offset in offsets]
 
 
 def dragon_matrix_job(window):
@@ -201,7 +216,7 @@ def proof_groups(pointer_width=None):
     # (ruling s54 (a)) leaves its chunk, so the other group names stay, and runs alone at
     # 180 minutes.  A split pair leaves its chunk the same way and runs one group per piece;
     # the pieces run in two matrix jobs of their own (256 jobs over both platforms):  offsets
-    # 0..7 in dragon-e and 8..15 in dragon-f.
+    # 0..7 in dragon-e and 8..15 in dragon-f.  The unproved pieces (DRAGON_UNPROVED_PIECES) run no group.
     def add_fixed_k_chunks(pairs, batch_size, timeout_minutes):
         for first in range(0, len(pairs), batch_size):
             chunk = [pair for pair in pairs[first:first + batch_size]
@@ -217,7 +232,8 @@ def proof_groups(pointer_width=None):
     for pair in DRAGON_SLOW_PAIRS:
         add_fixed_k([pair], 180)
     for (window, k), offsets in DRAGON_SPLIT_PAIRS.items():
-        for offset in offsets:
+        unproved = DRAGON_UNPROVED_PIECES.get((window, k), ())
+        for offset in (offset for offset in offsets if offset not in unproved):
             add(f"dragon-shortest-scaling-fixed-k-{dragon_fixed_k_name(window, k)}-e{offset:02d}", "contract",
                 [dragon_fixed_k_piece_harness(window, k, offset)], 180, matrix_job="dragon-" + "ef"[offset >= 8])
 
@@ -306,7 +322,9 @@ def remaining_harnesses(inventory):
         for harnesses in inventory[section].values()
         for harness in harnesses
     ]
-    dedicated = {harness for group in proof_groups() for harness in group["harnesses"]}
+    # The unproved pieces (DRAGON_UNPROVED_PIECES) run in no group and not in the general suite.
+    dedicated = {harness for group in proof_groups() for harness in group["harnesses"]}.union(
+        dragon_unproved_harnesses())
     missing = dedicated.difference(listed)
     if missing:
         raise ValueError("Dedicated flt2dec harnesses missing from kani list: " + ", ".join(sorted(missing)))

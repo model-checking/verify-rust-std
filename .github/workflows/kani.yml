@@ -455,7 +455,7 @@ jobs:
     name: Verify flt2dec dragon-e (${{ matrix.group.name }}, ${{ matrix.os }})
     needs: [flt2dec_matrix, build-flat-smt-cbmc]
     if: needs.flt2dec_matrix.outputs.dragon_e_groups != '0'
-    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_dragon_e) }}
@@ -467,7 +467,7 @@ jobs:
     name: Verify flt2dec dragon-f (${{ matrix.group.name }}, ${{ matrix.os }})
     needs: [flt2dec_matrix, build-flat-smt-cbmc]
     if: needs.flt2dec_matrix.outputs.dragon_f_groups != '0'
-    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_dragon_f) }}
