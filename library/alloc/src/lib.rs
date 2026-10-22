@@ -157,6 +157,7 @@
 #![feature(panic_internals)]
 #![feature(pattern)]
 #![feature(pin_coerce_unsized_trait)]
+#![feature(proc_macro_hygiene)]
 #![feature(ptr_alignment_type)]
 #![feature(ptr_cast_slice)]
 #![feature(ptr_internals)]
