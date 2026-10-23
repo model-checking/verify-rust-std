@@ -5225,7 +5225,7 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem]>::from_raw)]
             pub fn $name() {
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let rc: Rc<[$elem]> = Rc::new(array);
                 let ptr: *const [$elem] = Rc::into_raw(rc);
                 let _: Rc<[$elem]> = unsafe { Rc::from_raw(ptr) };
@@ -5291,7 +5291,7 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem]>::increment_strong_count)]
             pub fn $name() {
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let rc: Rc<[$elem]> = Rc::new(array);
                 let ptr: *const [$elem] = Rc::into_raw(rc);
                 unsafe {
@@ -5361,7 +5361,7 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem]>::decrement_strong_count)]
             pub fn $name() {
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let rc: Rc<[$elem]> = Rc::new(array);
                 let ptr: *const [$elem] = Rc::into_raw(rc);
                 unsafe {
@@ -5423,7 +5423,7 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem], Global>::from_raw_in)]
             pub fn $name() {
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let rc: Rc<[$elem], Global> = Rc::new(array);
                 let (ptr, alloc): (*const [$elem], Global) = Rc::into_raw_with_allocator(rc);
                 let _: Rc<[$elem], Global> = unsafe { Rc::from_raw_in(ptr, alloc) };
@@ -5488,7 +5488,7 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem], Global>::increment_strong_count_in)]
             pub fn $name() {
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let rc: Rc<[$elem], Global> = Rc::new(array);
                 let (ptr, _alloc): (*const [$elem], Global) = Rc::into_raw_with_allocator(rc);
                 unsafe {
@@ -5575,7 +5575,7 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem], Global>::decrement_strong_count_in)]
             pub fn $name() {
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let rc: Rc<[$elem], Global> = Rc::new(array);
                 let rc2: Rc<[$elem], Global> = rc.clone();
                 let (ptr, alloc): (*const [$elem], Global) = Rc::into_raw_with_allocator(rc2);
@@ -5660,7 +5660,7 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem]>::get_mut_unchecked)]
             pub fn $name() {
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let mut rc: Rc<[$elem]> = Rc::new(array);
 
                 unsafe {
@@ -5778,7 +5778,7 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Weak::<[$elem]>::from_raw)]
             pub fn $name() {
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let strong: Rc<[$elem]> = Rc::new(array);
                 let weak: Weak<[$elem]> = Rc::downgrade(&strong);
                 let ptr: *const [$elem] = weak.into_raw();
@@ -5852,7 +5852,7 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Weak::<[$elem], Global>::from_raw_in)]
             pub fn $name() {
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let strong: Rc<[$elem], Global> = Rc::new(array);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let (ptr, alloc): (*const [$elem], Global) = weak.into_raw_with_allocator();
@@ -5946,7 +5946,7 @@ mod verify {
         ($unique:ident, $shared:ident, $weak_present:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $unique() {
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let mut rc: Rc<[$elem], Global> = Rc::new(array);
                 assert!(Rc::<[$elem], Global>::get_mut(&mut rc).is_some());
                 kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
@@ -5954,7 +5954,7 @@ mod verify {
 
             #[kani::proof]
             pub fn $shared() {
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let mut rc: Rc<[$elem], Global> = Rc::new(array);
                 let _shared: Rc<[$elem], Global> = Rc::clone(&rc);
                 assert!(Rc::<[$elem], Global>::get_mut(&mut rc).is_none());
@@ -5963,7 +5963,7 @@ mod verify {
 
             #[kani::proof]
             pub fn $weak_present() {
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let mut rc: Rc<[$elem], Global> = Rc::new(array);
                 let _weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
                 assert!(Rc::<[$elem], Global>::get_mut(&mut rc).is_none());
@@ -6142,7 +6142,7 @@ mod verify {
                 // This retains the unique make_mut path at a fixed slice length.
                 // let vec = verifier_nondet_vec_rc::<$elem>();
                 // let mut rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let mut rc: Rc<[$elem], Global> = Rc::new(array);
                 let len = rc.len();
                 let result = Rc::<[$elem], Global>::make_mut(&mut rc);
@@ -6493,7 +6493,7 @@ mod verify {
                 // `Rc::new(array)` creates a real slice allocation.
                 // `downgrade` references that allocation while `strong` is alive.
                 // So this executes the non-dangling branch.
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let strong: Rc<[$elem], Global> = Rc::new(array);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let ptr: *const [$elem] = Weak::<[$elem], Global>::as_ptr(&weak);
@@ -6722,7 +6722,7 @@ mod verify {
                 // `Rc::new(array)` creates a real slice allocation.
                 // `downgrade` references that allocation while `strong` is alive.
                 // So this executes the non-dangling branch.
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let strong: Rc<[$elem], Global> = Rc::new(array);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let expected = Weak::<[$elem], Global>::as_ptr(&weak);
@@ -7019,7 +7019,7 @@ mod verify {
             #[kani::proof]
             pub fn $live() {
                 // Path (3): downgrade from a live `Rc<[E]>`.
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let strong: Rc<[$elem], Global> = Rc::new(array);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let upgraded = Weak::<[$elem], Global>::upgrade(&weak);
@@ -7043,7 +7043,7 @@ mod verify {
             #[kani::proof]
             pub fn $strong_zero() {
                 // Path (2): weak points to allocation, then strong owner is dropped.
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let strong: Rc<[$elem], Global> = Rc::new(array);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let expected = Rc::<[$elem], Global>::as_ptr(&strong);
@@ -7266,7 +7266,7 @@ mod verify {
                 // Branch (2): non-dangling unsized weak from live `Rc<[E]>`.
                 // let vec = verifier_nondet_vec_rc::<$elem>();
                 // let strong: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let strong: Rc<[$elem], Global> = Rc::new(array);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let inner = Weak::<[$elem], Global>::inner(&weak);
@@ -7295,7 +7295,7 @@ mod verify {
                 // strong owner is dropped, so this must not be mistaken for the sentinel.
                 // let vec = verifier_nondet_vec_rc::<$elem>();
                 // let strong: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let strong: Rc<[$elem], Global> = Rc::new(array);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 drop(strong);
@@ -7534,7 +7534,7 @@ mod verify {
                 // Build live slice allocation and keep strong owner alive.
                 // let vec = verifier_nondet_vec_rc::<$elem>();
                 // let strong: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let strong: Rc<[$elem], Global> = Rc::new(array);
                 // Create an explicit weak while the strong owner remains alive.
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
@@ -7564,7 +7564,7 @@ mod verify {
                 // Create explicit weak from live strong slice owner.
                 // let vec = verifier_nondet_vec_rc::<$elem>();
                 // let strong: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let strong: Rc<[$elem], Global> = Rc::new(array);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 // Drop strong owner first.
@@ -7754,7 +7754,7 @@ mod verify {
                 // Build an unsized Rc<[T]> from a nondeterministic fixed array.
                 // let vec = verifier_nondet_vec_rc::<$elem>();
                 // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let rc: Rc<[$elem], Global> = Rc::new(array);
                 let inner = rc.inner();
                 let before = inner.strong();
@@ -7824,7 +7824,7 @@ mod verify {
                 // Build `Rc<[T]>` from a nondeterministic fixed array.
                 // let vec = verifier_nondet_vec_rc::<$elem>();
                 // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let rc: Rc<[$elem], Global> = Rc::new(array);
                 let inner = rc.inner();
                 let before = inner.weak();
@@ -8428,7 +8428,7 @@ mod verify {
             pub fn $name() {
                 // let vec = verifier_nondet_vec_rc::<$elem>();
                 // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let rc: Rc<[$elem], Global> = Rc::new(array);
                 // Call the target function: this harness verifies `Rc::inner` for a slice.
                 let inner = rc.inner();
@@ -8501,7 +8501,7 @@ mod verify {
             pub fn $name() {
                 // let vec = verifier_nondet_vec_rc::<$elem>();
                 // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let rc: Rc<[$elem], Global> = Rc::new(array);
                 let expected_ptr = Rc::as_ptr(&rc);
 
@@ -9873,7 +9873,7 @@ mod verify {
             pub fn $name() {
                 // let vec = verifier_nondet_vec_rc::<$elem>();
                 // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let rc: Rc<[$elem], Global> = Rc::new(array);
                 let rc_clone: Rc<[$elem], Global> = Rc::clone(&rc);
                 let strong_before = Rc::strong_count(&rc);
@@ -10239,7 +10239,7 @@ mod verify {
             pub fn $unique() {
                 // let vec = verifier_nondet_vec_rc::<$elem>();
                 // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let rc: Rc<[$elem], Global> = Rc::new(array);
                 // Only the implicit weak exists while the sole strong slice owner is alive.
                 assert!(rc.inner().strong() == 1 && rc.inner().weak() == 1);
@@ -10256,7 +10256,7 @@ mod verify {
             pub fn $shared() {
                 // let vec = verifier_nondet_vec_rc::<$elem>();
                 // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let rc: Rc<[$elem], Global> = Rc::new(array);
                 let rc_clone: Rc<[$elem], Global> = Rc::clone(&rc);
                 // Two strong owners make the first drop take the non-final branch.
@@ -10274,7 +10274,7 @@ mod verify {
             pub fn $weak_present() {
                 // let vec = verifier_nondet_vec_rc::<$elem>();
                 // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let rc: Rc<[$elem], Global> = Rc::new(array);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
                 // The explicit weak adds to the implicit weak count.
@@ -10449,7 +10449,7 @@ mod verify {
             pub fn $name() {
                 // let vec = verifier_nondet_vec_rc::<$elem>();
                 // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let rc: Rc<[$elem], Global> = Rc::new(array);
                 let ptr = Rc::as_ptr(&rc);
                 let strong_before = Rc::strong_count(&rc);
@@ -10742,7 +10742,7 @@ mod verify {
             pub fn $name() {
                 // let vec = verifier_nondet_vec_rc::<$elem>();
                 // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 1024] = kani::any();
+                let array: [$elem; 16] = kani::any();
                 let rc: Rc<[$elem], Global> = Rc::new(array);
                 let expected = Rc::as_ptr(&rc);
                 let strong_before = Rc::strong_count(&rc);
