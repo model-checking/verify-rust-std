@@ -67,6 +67,10 @@ jobs:
    
   kani_autoharness:
     name: Verify std library using autoharness
+    # Autoharness, Metrics, List, Analyzer and Build JSON run only in the merge queue or on
+    # request (#730): they cost about 5 runner-hours per run and decide how long a PR waits.
+    # A job skipped by its `if:` counts as successful, so PRs are not blocked during review.
+    if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -229,6 +233,7 @@ jobs:
 
   run_kani_metrics:
     name: Kani Metrics
+    if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -299,6 +304,7 @@ jobs:
 
   run-log-analysis:
     name: Build JSON from logs
+    if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
     needs: [run_kani_metrics, kani_autoharness]
     runs-on: ${{ matrix.os }}
     strategy:
@@ -351,6 +357,7 @@ jobs:
 
   run-kani-list:
     name: Kani List
+    if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Remove unnecessary software to free up disk space
@@ -396,6 +403,7 @@ jobs:
 
   run-autoharness-analyzer:
     name: Kani Autoharness Analyzer
+    if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       # Step 1: Check out the repository
