@@ -69,8 +69,9 @@ jobs:
     name: Verify std library using autoharness
     # Autoharness, Metrics, List, Analyzer and Build JSON run only in the merge queue or on
     # request (#730): they cost about 5 runner-hours per run and decide how long a PR waits.
-    # A job skipped by its `if:` counts as successful, so PRs are not blocked during review.
-    if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
+    # This job is a required check under its matrix name, and a job skipped by a job-level
+    # `if:` reports without the "(os)" suffix, which would leave PRs pending. So the gate is
+    # on each step instead: on a PR the job starts, skips every step and passes in seconds.
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -84,7 +85,7 @@ jobs:
 
     steps:
       - name: Remove unnecessary software to free up disk space
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch')
         run: |
           # inspired by https://github.com/easimon/maximize-build-space/blob/master/action.yml
           df -h
@@ -93,6 +94,7 @@ jobs:
 
       # Step 1: Check out the repository
       - name: Checkout Repository
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
         uses: actions/checkout@v4
         with:
           submodules: true
@@ -111,6 +113,7 @@ jobs:
       #   Unicode tables were regenerated (nightly-2026-09-25) they exceed the 10m
       #   timeout on macOS and the ubuntu runner died while verifying them.
       - name: Run Kani Verification
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
         run: |
           scripts/run-kani.sh --run autoharness --kani-args \
             --include-pattern "<(.+)[[:space:]]as[[:space:]](.+)>::disjoint_bitor" \
@@ -223,6 +226,7 @@ jobs:
           gzip autoharness-verification.log
 
       - name: Upload Autoharness Verification Log
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-autoharness-verification.log.gz
