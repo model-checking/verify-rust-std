@@ -81,13 +81,9 @@ use crate::{fmt, hash, intrinsics, mem, ptr};
 #[repr(transparent)]
 #[rustc_nonnull_optimization_guaranteed]
 #[lang = "non_null"]
-<<<<<<< HEAD
 // Flux cannot lower the pattern-type field; treat the struct as opaque.
 #[cfg_attr(flux, flux::opaque)]
-pub struct NonNull<T: PointeeSized> {
-=======
 pub struct NonNull<#[rustc_assert_variance(covariant)] T: PointeeSized> {
->>>>>>> subtree/library
     pointer: crate::pattern_type!(*const T is !null),
 }
 
