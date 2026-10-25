@@ -424,7 +424,6 @@ fn generate_shortest<'a>(d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> Shortes
                 || remainder.wrapping_sub(threshold)
                     << ((64 - (e - 16 + fractional_digits)) as u8) != 0)
             && grisu_verify::initialized_digits(buf, i)
-            && (!grisu_verify::probe_l4_hint() || delta1frac < 1u64 << 38 || fractional_digits <= 6)
     ))]
     #[cfg_attr(kani, kani::loop_modifies(
         &i, &remainder, &threshold, &ulp, &fractional_digits,
@@ -1691,64 +1690,6 @@ pub mod grisu_verify {
         }
     }
 
-    // Diagnostic value-range probes (branch g4-diag-s19 only, not part of the
-    // required verification). The rounding contract puts the scaled width in
-    // (Gn * c / 2^64 - 1, Gn * c / 2^64 + 1), with Gn = (minus + plus) << shift
-    // and c the cached power that the exponent selects. Each probe stub assumes
-    // one bound on that width. The probe covers show that each assumption
-    // admits an input.
-    fn probe_width(d: &Decoded, scaled: &ShortestScaled) -> (u128, u128, u128) {
-        let shift = d.mant.wrapping_add(d.plus).leading_zeros();
-        let gn = (d.minus as u128).wrapping_add(d.plus as u128).wrapping_shl(shift);
-        let normalized_exp = i32::from(d.exp).wrapping_sub(shift as i32);
-        let index = i32::from(GAMMA)
-            .wrapping_sub(normalized_exp)
-            .wrapping_sub(64)
-            .wrapping_sub(i32::from(CACHED_POW10_FIRST_E))
-            .wrapping_mul(CACHED_POW10.len() as i32 - 1)
-            .wrapping_div(i32::from(CACHED_POW10_LAST_E - CACHED_POW10_FIRST_E));
-        let cached = CACHED_POW10.get(index as usize).map_or(0, |entry| entry.0);
-        let product = gn.wrapping_mul(cached as u128);
-        let width = scaled.plus.f.wrapping_sub(scaled.minus.f) as u128;
-        (width, gn, product)
-    }
-
-    // P0: the width is the truncated product.
-    fn stub_scale_shortest_p0(d: &Decoded) -> ShortestScaled {
-        let scaled = stub_scale_shortest(d);
-        let (width, _, product) = probe_width(d, &scaled);
-        kani::assume(width == product.wrapping_shr(64));
-        scaled
-    }
-
-    // P1: the width is within one of the product.
-    fn stub_scale_shortest_p1(d: &Decoded) -> ShortestScaled {
-        let scaled = stub_scale_shortest(d);
-        let (width, _, product) = probe_width(d, &scaled);
-        kani::assume(
-            width.wrapping_add(1).wrapping_shl(64) > product
-                && width.wrapping_shl(64) < product.wrapping_add(1u128 << 64),
-        );
-        scaled
-    }
-
-    // P2: the width is at least half of Gn.
-    fn stub_scale_shortest_p2(d: &Decoded) -> ShortestScaled {
-        let scaled = stub_scale_shortest(d);
-        let (width, gn, _) = probe_width(d, &scaled);
-        kani::assume(width.wrapping_mul(2).wrapping_add(1) >= gn);
-        scaled
-    }
-
-    // Probe P3 sets this hint to add the candidate conjunct L4 to the
-    // fractional loop invariant. Every other harness leaves it false.
-    static PROBE_L4_HINT: crate::sync::atomic::AtomicBool =
-        crate::sync::atomic::AtomicBool::new(false);
-
-    pub(super) fn probe_l4_hint() -> bool {
-        PROBE_L4_HINT.load(crate::sync::atomic::Ordering::Relaxed)
-    }
-
     // The contract bounds mant + plus by [3, 2^54 + 2], so normalization
     // shifts by 9 through 62 bits. Together with exp in [-1076, 970], every
     // normalized exponent lies in [-1138, 961]. The cached power partitions
@@ -2389,46 +2330,6 @@ pub mod grisu_verify {
                     });
                 }
         };
-        // Diagnostic probes (branch g4-diag-s19 only): the shortest harness with
-        // one more assumption on the scaled width from the probe stub.
-        (@probe $decoded:expr, $probe_stub:path, $l4_hint:literal) => {
-                #[kani::proof]
-                #[kani::unwind(19)]
-                #[kani::stub(
-                    u64::leading_zeros,
-                    crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u64
-                )]
-                #[kani::stub(
-                    u32::leading_zeros,
-                    crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u32
-                )]
-                #[kani::stub(round_and_weed, stub_round_and_weed)]
-                #[kani::stub(div_rem_pow10, div_rem_pow10_model)]
-                #[kani::stub_verified(round_shortest_contract)]
-                #[kani::stub_verified(advance_fraction_threshold)]
-                #[kani::stub(scale_shortest, $probe_stub)]
-                #[kani::stub_verified(scale_shortest_contract)]
-                #[kani::solver(minisat)]
-                fn check_format_shortest_opt() {
-                    if $l4_hint {
-                        PROBE_L4_HINT.store(true, crate::sync::atomic::Ordering::Relaxed);
-                    }
-                    let d = $decoded;
-                    let len = usize::from(kani::any::<u8>());
-                    kani::assume(len >= MAX_SIG_DIGITS && len <= PROOF_BUFLEN);
-                    let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
-                    let start = buf.as_ptr().cast::<u8>();
-                    kani::cover(len == MAX_SIG_DIGITS, "shortest uses the minimum buffer");
-                    kani::cover(len == PROOF_BUFLEN, "shortest uses the largest proof buffer");
-                    let result = format_shortest_opt(&d, &mut buf[..len]);
-                    let _ = result.map(|(digits, _)| {
-                        kani::cover(digits.len() > 1, "shortest produces multiple digits");
-                        assert!(!digits.is_empty());
-                        assert!(digits.len() <= len);
-                        assert_eq!(digits.as_ptr(), start);
-                    });
-                }
-        };
         (@exact $decoded:expr, $cover_fallback:literal $(, $cached_index:path)?) => {
                 // Integral extraction takes at most ten iterations. Fractional
                 // extraction stops once err = 10^18 >= 2^59: the cached power
@@ -2484,112 +2385,6 @@ pub mod grisu_verify {
         false,
         checked_cached_power_39
     );
-
-    // Diagnostic value-range probes (branch g4-diag-s19 only). Each probe runs a
-    // hard shortest slice with one probe stub. P3 also sets the L4 hint.
-    mod probe_p0 {
-        use super::*;
-
-        mod f32_03_s4 {
-            use super::*;
-            use crate::num::imp::flt2dec::flt2dec_verify::arbitrary_finite_f32_slice;
-
-            check_partition!(@probe arbitrary_finite_f32_slice::<3, 4>(), stub_scale_shortest_p0, false);
-        }
-    }
-
-    mod probe_p1 {
-        use super::*;
-
-        mod f32_03_s4 {
-            use super::*;
-            use crate::num::imp::flt2dec::flt2dec_verify::arbitrary_finite_f32_slice;
-
-            check_partition!(@probe arbitrary_finite_f32_slice::<3, 4>(), stub_scale_shortest_p1, false);
-        }
-    }
-
-    mod probe_p2 {
-        use super::*;
-
-        mod f32_03_s4 {
-            use super::*;
-            use crate::num::imp::flt2dec::flt2dec_verify::arbitrary_finite_f32_slice;
-
-            check_partition!(@probe arbitrary_finite_f32_slice::<3, 4>(), stub_scale_shortest_p2, false);
-        }
-    }
-
-    mod probe_p3 {
-        use super::*;
-
-        mod f32_03_s4 {
-            use super::*;
-            use crate::num::imp::flt2dec::flt2dec_verify::arbitrary_finite_f32_slice;
-
-            check_partition!(@probe arbitrary_finite_f32_slice::<3, 4>(), stub_scale_shortest_p2, true);
-        }
-    }
-
-    mod probe_p5 {
-        use super::*;
-
-        mod f32_00_s0 {
-            use super::*;
-            use crate::num::imp::flt2dec::flt2dec_verify::arbitrary_finite_f32_slice;
-
-            check_partition!(@probe arbitrary_finite_f32_slice::<0, 0>(), stub_scale_shortest_p1, false);
-        }
-
-        mod f64_00_s0 {
-            use super::*;
-            use crate::num::imp::flt2dec::flt2dec_verify::arbitrary_finite_f64_slice;
-
-            check_partition!(@probe arbitrary_finite_f64_slice::<0, 0>(), stub_scale_shortest_p1, false);
-        }
-    }
-
-    // Vacuity covers for the probe stubs: each assumption admits an input.
-    mod probe_covers {
-        use super::*;
-        use crate::num::imp::flt2dec::flt2dec_verify::{
-            arbitrary_finite_f32_slice, arbitrary_finite_f64_slice,
-        };
-
-        macro_rules! probe_cover {
-            ($($name:ident: $decoded:expr => $probe_stub:ident, $message:literal;)+) => {
-                $(
-                    #[kani::proof]
-                    #[kani::stub(
-                        u64::leading_zeros,
-                        crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u64
-                    )]
-                    #[kani::stub(
-                        u32::leading_zeros,
-                        crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u32
-                    )]
-                    #[kani::stub_verified(scale_shortest_contract)]
-                    fn $name() {
-                        let _ = $probe_stub(&$decoded);
-                        kani::cover(true, $message);
-                    }
-                )+
-            };
-        }
-
-        probe_cover! {
-            p0_f32_03_s4: arbitrary_finite_f32_slice::<3, 4>() => stub_scale_shortest_p0,
-                "P0 admits an input of f32 group 3 slice 4";
-            p1_f32_03_s4: arbitrary_finite_f32_slice::<3, 4>() => stub_scale_shortest_p1,
-                "P1 admits an input of f32 group 3 slice 4";
-            p2_f32_03_s4: arbitrary_finite_f32_slice::<3, 4>() => stub_scale_shortest_p2,
-                "P2 admits an input of f32 group 3 slice 4";
-            p1_f32_00_s0: arbitrary_finite_f32_slice::<0, 0>() => stub_scale_shortest_p1,
-                "P1 admits an input of f32 group 0 slice 0";
-            p1_f64_00_s0: arbitrary_finite_f64_slice::<0, 0>() => stub_scale_shortest_p1,
-                "P1 admits an input of f64 group 0 slice 0";
-        }
-    }
 
     // Wholesale havoc stub for the dragon fallback (modelled as an opaque op that
     // writes a digit and returns an in-bounds slice of `buf`).

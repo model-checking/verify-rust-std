@@ -145,18 +145,6 @@ def proof_groups(pointer_width=None):
             f"{module}::f64_exp_1023::{proof}"
         ], timeout_minutes)
 
-    # Diagnostic value-range probes (branch g4-diag-s19 only):  each adds one assumption on the
-    # scaled width to a hard shortest slice.  The covers show that each assumption admits an input.
-    for probe, partition, index in [("p0", "f32_03", 4), ("p1", "f32_03", 4), ("p2", "f32_03", 4),
-                                    ("p3", "f32_03", 4), ("p5", "f32_00", 0), ("p5", "f64_00", 0)]:
-        add(f"grisu-shortest-{partition.replace('_', '-')}-slice-{index}-{probe}", f"generator-{partition[:3]}",
-            [f"{GRISU}::probe_{probe}::{partition}_s{index}::check_format_shortest_opt"], 120,
-            matrix_job="long")
-    add("grisu-shortest-probe-covers", "probe", [
-        f"{GRISU}::probe_covers::{name}"
-        for name in ("p0_f32_03_s4", "p1_f32_03_s4", "p2_f32_03_s4", "p1_f32_00_s0", "p1_f64_00_s0")
-    ], 30)
-
     # Ubuntu proved the shortest probe in 65 minutes;  macOS is about twice as slow.
     for mode in ("exact", "shortest"):
         add(f"grisu-{mode}-cached-power-39", "probe", [
