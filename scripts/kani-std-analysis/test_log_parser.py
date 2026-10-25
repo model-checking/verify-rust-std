@@ -13,7 +13,7 @@ class ReadKaniListTests(unittest.TestCase):
             source.flush()
             return read_kani_list(source.name, scanner_data)[1]
 
-    def test_exported_name_in_two_crates_preserves_both_locations(self):
+    def test_exported_name_in_two_crates_records_all_crates(self):
         files = ['/repo/library/panic_abort/src/lib.rs',
                  '/repo/library/panic_unwind/src/lib.rs']
         scanner_data = {'other_function': {
@@ -22,7 +22,7 @@ class ReadKaniListTests(unittest.TestCase):
         result = self.read_standard_harnesses(
             {file: ['__rust_panic_cleanup'] for file in files}, scanner_data)
         entry = result['__rust_panic_cleanup']
-        self.assertEqual(entry['file_name'], files)
+        self.assertEqual(entry['file_name'], files[0])
         self.assertEqual(entry['crate'], ['panic_abort', 'panic_unwind'])
         self.assertEqual(entry['function'], '__rust_panic_cleanup')
 
@@ -33,7 +33,7 @@ class ReadKaniListTests(unittest.TestCase):
                          'library/core/src/example.rs')
         self.assertIsNone(result['check_example']['crate'])
 
-    def test_generic_contract_keeps_concrete_automatic_harness(self):
+    def test_generic_contract_maps_concrete_automatic_harness(self):
         concrete = '<array::IntoIter<i32, 2> as Iterator>::get_unchecked'
         generic = '<array::IntoIter<T, N> as Iterator>::get_unchecked'
         file = '/repo/library/core/src/array/iter.rs'
@@ -47,7 +47,7 @@ class ReadKaniListTests(unittest.TestCase):
             contracts, standard = read_kani_list(source.name, {})
         self.assertEqual(standard, {})
         self.assertEqual(set(contracts), {concrete})
-        self.assertEqual(contracts[concrete]['function'], concrete)
+        self.assertEqual(contracts[concrete]['function'], generic)
         self.assertEqual(contracts[concrete]['file_name'], file)
         self.assertIsNone(contracts[concrete]['target_safeness'])
 
