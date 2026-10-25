@@ -1333,22 +1333,6 @@ pub mod grisu_verify {
                 kani::cover(exp == 1000, "multiplication includes its largest exponent");
             }
         };
-        // Diag only: the same proof on the inputs whose `$key` value is in `$low..$high`.
-        ($name:ident, $index:literal, $key:ident, $low:expr, $high:expr) => {
-            #[kani::proof_for_contract(multiply_shortest_contract)]
-            #[kani::stub_verified(rounded_multiply_contract)]
-            #[kani::stub(Fp::mul, stub_rounded_multiply)]
-            #[kani::solver(kissat)]
-            fn $name() {
-                let (plus, minus, v, _) = arbitrary_normalized_interval();
-                kani::assume(($low..$high).contains(&$key(plus, minus, v)));
-                let exp = kani::any::<i16>();
-                kani::assume((-1200..=1000).contains(&exp));
-                multiply_shortest_contract(plus, minus, v, exp, $index);
-                kani::cover(exp == -1200, "multiplication includes its smallest exponent");
-                kani::cover(exp == 1000, "multiplication includes its largest exponent");
-            }
-        };
         // The same proof on the inputs with `$low <= v < $high`. Index 51 does not finish in
         // two hours on the whole domain, so it is proved in two pieces that split on the top
         // bit of `v`. The asymmetric intervals all have `v == 1 << 63`, so only the upper
@@ -1459,41 +1443,6 @@ pub mod grisu_verify {
     verify_multiply_shortest!(check_multiply_shortest_77, 3);
     verify_multiply_shortest!(check_multiply_shortest_78, 2);
     verify_multiply_shortest!(check_multiply_shortest_79, 1);
-
-    // Diag only: three case splits of check_multiply_shortest_29 (cached power index 51).
-    // In each family the ranges are disjoint and cover every input of
-    // `arbitrary_normalized_interval` (v < 2^64, 2^62 <= minus < 2^64, plus - minus < 2^64).
-    fn split_key_v(_: u64, _: u64, v: u64) -> u128 {
-        v as u128
-    }
-
-    fn split_key_minus_top(_: u64, minus: u64, _: u64) -> u128 {
-        (minus >> 60) as u128
-    }
-
-    fn split_key_gap(plus: u64, minus: u64, _: u64) -> u128 {
-        plus.wrapping_sub(minus) as u128
-    }
-
-    verify_multiply_shortest!(probe_multiply_29_v0, 51, split_key_v, 0, 1 << 63);
-    verify_multiply_shortest!(probe_multiply_29_v1, 51, split_key_v, 1 << 63, 1 << 64);
-    verify_multiply_shortest!(probe_multiply_29_m04, 51, split_key_minus_top, 4, 5);
-    verify_multiply_shortest!(probe_multiply_29_m05, 51, split_key_minus_top, 5, 6);
-    verify_multiply_shortest!(probe_multiply_29_m06, 51, split_key_minus_top, 6, 7);
-    verify_multiply_shortest!(probe_multiply_29_m07, 51, split_key_minus_top, 7, 8);
-    verify_multiply_shortest!(probe_multiply_29_m08, 51, split_key_minus_top, 8, 9);
-    verify_multiply_shortest!(probe_multiply_29_m09, 51, split_key_minus_top, 9, 10);
-    verify_multiply_shortest!(probe_multiply_29_m10, 51, split_key_minus_top, 10, 11);
-    verify_multiply_shortest!(probe_multiply_29_m11, 51, split_key_minus_top, 11, 12);
-    verify_multiply_shortest!(probe_multiply_29_m12, 51, split_key_minus_top, 12, 13);
-    verify_multiply_shortest!(probe_multiply_29_m13, 51, split_key_minus_top, 13, 14);
-    verify_multiply_shortest!(probe_multiply_29_m14, 51, split_key_minus_top, 14, 15);
-    verify_multiply_shortest!(probe_multiply_29_m15, 51, split_key_minus_top, 15, 16);
-    verify_multiply_shortest!(probe_multiply_29_g0, 51, split_key_gap, 0, 1 << 20);
-    verify_multiply_shortest!(probe_multiply_29_g1, 51, split_key_gap, 1 << 20, 1 << 31);
-    verify_multiply_shortest!(probe_multiply_29_g2, 51, split_key_gap, 1 << 31, 1 << 42);
-    verify_multiply_shortest!(probe_multiply_29_g3, 51, split_key_gap, 1 << 42, 1 << 53);
-    verify_multiply_shortest!(probe_multiply_29_g4, 51, split_key_gap, 1 << 53, 1 << 64);
 
     fn rounded_product_wide(f: u64, coefficient: u64) -> u128 {
         (f as u128).wrapping_mul(coefficient as u128).wrapping_add(1 << 63)

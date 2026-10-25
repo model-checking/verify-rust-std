@@ -250,15 +250,6 @@ def proof_groups(pointer_width=None):
                             for power in range(16))
         add(f"grisu-multiplication-contract-{first:02d}-{last:02d}", "contract", harnesses, 7, "cvc5")
 
-    # Diag only: case splits of check_multiply_shortest_29 (cached power index 51).
-    # The catalog backend stays native so the cvc5 set in T is unchanged;
-    # dispatch these groups with proof_backend=cvc5.
-    splits = (["v0", "v1"] + [f"m{top:02d}" for top in range(4, 16)]
-              + [f"g{band}" for band in range(5)])
-    for split in splits:
-        add(f"grisu-multiplication-split-29-{split}", "contract",
-            [f"{GRISU}::probe_multiply_29_{split}"], 30)
-
     # Each cached multiplication proof needs more than the 7-minute arithmetic budget,
     # so these native SAT proofs get their own 60-minute groups of four.
     cached_lengths = ((16, 1), (32, 2), (64, 3), (128, 5), (256, 10)) if pointer_width == 64 else (
