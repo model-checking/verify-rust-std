@@ -4763,6 +4763,66 @@ mod verify {
         }
     }
 
+    // RawVec's `min_non_zero_cap` chooses the first non-zero capacity from the
+    // element size (8 for size 1, 4 for <= 1024, 1 for > 1024). The builders
+    // above reach it only at size 1 (`Vec<u8>`); `with_capacity` bypasses it.
+    // These grow from an empty Vec at a larger element size so the other two
+    // arms run. Element content is not asserted — tracking it through the
+    // realloc/shift is costly and size-dependent; the capacity covers witness
+    // the arm, the ops run under Kani's memory-safety checks, and the length
+    // assertions bite on grow/shrink. Shift-content correctness is size-
+    // independent and is covered by `verify_insert`.
+
+    // 64-byte element: the `<= 1024` arm, plus a reallocation.
+    #[kani::proof]
+    fn verify_grow_mid_cap_arm() {
+        let mut v: Vec<[u8; 64]> = Vec::new();
+        v.push([0u8; 64]);
+        kani::cover(v.capacity() == 4, "min_non_zero_cap <= 1024 arm (size 64) reached");
+        v.push([0u8; 64]);
+        v.push([0u8; 64]);
+        v.push([0u8; 64]);
+        v.push([0u8; 64]); // len 5 > cap 4 -> reallocation
+        kani::cover(v.capacity() > 4, "reallocation exercised");
+
+        let n = v.len();
+        let i: usize = kani::any_where(|&k: &usize| k <= n);
+        kani::cover(i < n, "interior insert exercised");
+        v.insert(i, [0u8; 64]);
+        assert!(v.len() == n + 1);
+
+        let m = v.len();
+        let j: usize = kani::any_where(|&k: &usize| k < m);
+        kani::cover(j < m - 1, "interior remove exercised");
+        v.remove(j);
+        assert!(v.len() == m - 1);
+    }
+
+    // 1025-byte element (smallest that exceeds 1024): the `> 1024` arm. Element
+    // content is not asserted here — tracking a >1 KiB element through the
+    // realloc/shift exhausts CBMC. The arm is witnessed by the capacity cover,
+    // the insert/remove run under Kani's memory-safety checks, and the length
+    // assertions bite on the grow/shrink. Shift-content correctness is size-
+    // independent and is covered by `verify_insert`.
+    #[kani::proof]
+    fn verify_grow_large_cap_arm() {
+        let mut v: Vec<[u8; 1025]> = Vec::new();
+        v.push([0u8; 1025]);
+        kani::cover(v.capacity() == 1, "min_non_zero_cap > 1024 arm (size 1025) reached");
+
+        let n = v.len();
+        let i: usize = kani::any_where(|&k: &usize| k <= n);
+        kani::cover(i < n, "interior insert exercised");
+        v.insert(i, [0u8; 1025]); // reallocs 1 -> 2 and shifts
+        assert!(v.len() == n + 1);
+
+        let m = v.len();
+        let j: usize = kani::any_where(|&k: &usize| k < m);
+        kani::cover(j < m - 1, "interior remove exercised");
+        v.remove(j);
+        assert!(v.len() == m - 1);
+    }
+
     // Symbolic length 0..=N over a bounded backing array (loop-free build).
     fn any_vec_u8<const N: usize>() -> Vec<u8> {
         let arr: [u8; N] = kani::any();
