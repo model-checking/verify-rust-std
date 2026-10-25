@@ -455,7 +455,7 @@ jobs:
     name: Verify flt2dec dragon-e (${{ matrix.group.name }}, ${{ matrix.os }})
     needs: [flt2dec_matrix, build-flat-smt-cbmc]
     if: needs.flt2dec_matrix.outputs.dragon_e_groups != '0'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_dragon_e) }}
@@ -467,7 +467,7 @@ jobs:
     name: Verify flt2dec dragon-f (${{ matrix.group.name }}, ${{ matrix.os }})
     needs: [flt2dec_matrix, build-flat-smt-cbmc]
     if: needs.flt2dec_matrix.outputs.dragon_f_groups != '0'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix_dragon_f) }}
@@ -785,7 +785,7 @@ jobs:
   run-kani-list:
     name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Kani List
     if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Remove unnecessary software to free up disk space
         run: |
@@ -831,7 +831,7 @@ jobs:
   run-autoharness-analyzer:
     name: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && 'Manual ' || '' }}Kani Autoharness Analyzer
     if: github.event_name != 'workflow_dispatch' || inputs.proof_groups == ''
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # Step 1: Check out the repository
       - name: Checkout Repository
