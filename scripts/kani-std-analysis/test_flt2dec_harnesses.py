@@ -85,9 +85,9 @@ class Flt2decHarnessesTests(unittest.TestCase):
 
     def test_complete_disjoint_batches_on_both_platforms(self):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
-        self.assertEqual(len(self.groups), 723)
+        self.assertEqual(len(self.groups), 707)
         self.assertEqual(len({group["name"] for group in self.groups}), len(self.groups))
-        self.assertEqual(sum(len(group["harnesses"]) for group in self.groups), 3712)
+        self.assertEqual(sum(len(group["harnesses"]) for group in self.groups), 3696)
         self.assertEqual(len(set(self.dedicated)), len(self.dedicated))
         for part in MATRIX_JOBS:
             parts = proof_matrix(matrix_job=part)["group"]
@@ -203,10 +203,10 @@ class Flt2decHarnessesTests(unittest.TestCase):
                 self.assertEqual(group["timeout_minutes"], minutes)
                 self.assertLessEqual(len(group["harnesses"]), batch_size)
         self.assertEqual(len(DRAGON_SLOW_PAIRS), 16)
-        self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 180), 211)
+        self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 180), 195)
         self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 60), 3)
         self.assertEqual(tuple(len(proof_matrix(matrix_job=job)["group"])
-                               for job in MATRIX_JOBS[2:]), (108, 100, 81, 81, 85, 102))
+                               for job in MATRIX_JOBS[2:]), (108, 100, 81, 81, 69, 102))
 
     def test_all_float_partitions_and_equivalence_cases_remain(self):
         self.assertIn(
@@ -406,7 +406,7 @@ class Flt2decHarnessesTests(unittest.TestCase):
                          f"{DRAGON}::dragon_scale_fixed_k::w000::k317::e00::check_scale_shortest")
 
     def test_dragon_mantissa_splits_run_one_group_per_sub_piece(self):
-        self.assertEqual(DRAGON_MANTISSA_SPLITS, {(23, -200, 1): 8, (23, -200, 2): 8, (34, -153, 2): 8})
+        self.assertEqual(DRAGON_MANTISSA_SPLITS, {(34, -153, 2): 8})
         names = {group["name"]: group for group in self.groups}
         for (window, k, offset), count in DRAGON_MANTISSA_SPLITS.items():
             piece = (f"dragon-shortest-scaling-fixed-k-{window:03d}-{'k' if k < 0 else 'p'}{abs(k):03d}"
@@ -424,13 +424,13 @@ class Flt2decHarnessesTests(unittest.TestCase):
                                      [dragon_fixed_k_piece_harness(window, k, offset, top)])
                     self.assertEqual(group["timeout_minutes"], 180)
                     self.assertEqual(group["matrix_job"], "dragon-" + "ef"[offset >= 8])
-        self.assertEqual(dragon_fixed_k_piece_harness(23, -200, 1, 0),
-                         f"{DRAGON}::dragon_scale_fixed_k::w023::k200::e01::m0::check_scale_shortest")
+        self.assertEqual(dragon_fixed_k_piece_harness(34, -153, 2, 0),
+                         f"{DRAGON}::dragon_scale_fixed_k::w034::k153::e02::m0::check_scale_shortest")
 
     def test_dragon_unproved_pieces_run_nowhere(self):
-        # Ruling s76 (c):  38 pieces in 12 pairs, one list for both platforms.
+        # Rulings s76 (c) and s85:  40 pieces in 12 pairs, one list for both platforms.
         self.assertEqual(len(DRAGON_UNPROVED_PIECES), 12)
-        self.assertEqual(sum(len(offsets) for offsets in DRAGON_UNPROVED_PIECES.values()), 38)
+        self.assertEqual(sum(len(offsets) for offsets in DRAGON_UNPROVED_PIECES.values()), 40)
         for pair, offsets in DRAGON_UNPROVED_PIECES.items():
             with self.subTest(pair=pair):
                 self.assertEqual(DRAGON_SPLIT_PAIRS[pair], tuple(range(16)))
@@ -438,9 +438,9 @@ class Flt2decHarnessesTests(unittest.TestCase):
                 # Each pair keeps at least one piece that CI proves.
                 self.assertLess(len(offsets), 16)
         unproved = dragon_unproved_harnesses()
-        self.assertEqual(len(set(unproved)), 38)
+        self.assertEqual(len(set(unproved)), 40)
         self.assertEqual(set(unproved) & set(self.dedicated), set())
-        self.assertEqual(unproved[0], f"{DRAGON}::dragon_scale_fixed_k::w023::k200::e04::check_scale_shortest")
+        self.assertEqual(unproved[0], f"{DRAGON}::dragon_scale_fixed_k::w023::k200::e01::check_scale_shortest")
         # The general suite skips them too, and the kani list must still hold them.
         self.inventory["contract-harnesses"]["retained"] = ["unrelated::proof"]
         self.assertEqual(remaining_harnesses(self.inventory), ["unrelated::proof"])

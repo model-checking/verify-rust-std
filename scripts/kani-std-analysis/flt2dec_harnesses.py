@@ -42,18 +42,19 @@ DRAGON_SPLIT_PAIRS = {
 }
 # Pieces of the 16-piece split pairs that hit the 180-minute cap with CaDiCaL on ubuntu or macOS
 # (w023 K = -202 e00 also with Kissat):  pair -> the exponent offsets of those pieces.  No group
-# runs them and the general suite skips them, so CI leaves them unproved (ruling s76 (c)).
+# runs them and the general suite skips them, so CI leaves them unproved (ruling s76 (c);
+# w023 K = -200 e01 and e02 by ruling s85:  they hit the cap again in 4 and in 8 mantissa
+# sub-pieces).
 DRAGON_UNPROVED_PIECES = {
-    (23, -200): (4, 5, 6), (23, -201): (1, 2, 3, 4, 5), (23, -202): (0, 1, 2, 3, 4),
+    (23, -200): (1, 2, 4, 5, 6), (23, -201): (1, 2, 3, 4, 5), (23, -202): (0, 1, 2, 3, 4),
     (23, -203): (0, 1, 2), (23, -204): (0, 1, 2), (23, -205): (0,), (28, -183): (0, 1),
     (29, -173): (0, 1), (29, -174): (0, 1), (34, -151): (0, 1, 2, 3, 4, 5), (34, -152): (0, 1, 2),
     (34, -153): (0, 1, 3),
 }
 # Pieces whose proof splits again on the mantissa (dragon.rs `eNN => offset => [mN => top]`):
-# (window, K, piece offset) -> the sub-piece count.  The one-exponent pieces e01 and e02 of
-# (23, -200) and e02 of (34, -153) hit the 180-minute cap;  their 8 sub-pieces fix the top 3
-# mantissa bits, each alone at 180 minutes (4 sub-pieces of (23, -200) still hit the cap).
-DRAGON_MANTISSA_SPLITS = {(23, -200, 1): 8, (23, -200, 2): 8, (34, -153, 2): 8}
+# (window, K, piece offset) -> the sub-piece count.  Piece e02 of (34, -153) hit the 180-minute
+# cap;  its 8 sub-pieces fix the top 3 mantissa bits, each alone at 180 minutes.
+DRAGON_MANTISSA_SPLITS = {(34, -153, 2): 8}
 # One CI matrix holds at most 256 jobs:  core, long (generator and cached proofs), and the fixed-K
 # pairs in four:  dragon-a (windows 000..033), dragon-b (034..067), dragon-c (068..097), dragon-d (098..127).
 # The pieces of the split pairs run in two more:  dragon-e (offsets 0..7) and dragon-f (8..15).
