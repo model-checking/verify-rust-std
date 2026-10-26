@@ -2370,6 +2370,27 @@ pub mod dragon_verify {
         }
     }
 
+    // True if `tops` lists the sub-piece indices next, next + 1, ..., n - 1 once, in
+    // increasing order, for n = 2, 4 or 8:  the sub-pieces of a piece then take each value of
+    // the top mantissa bit (2 sub-pieces), the top 2 bits (4) or the top 3 bits (8) once.
+    const fn fixed_k_tops_cover(tops: &[u8], next: u8) -> bool {
+        match tops {
+            [] => next == 2 || next == 4 || next == 8,
+            [top, rest @ ..] => *top == next && fixed_k_tops_cover(rest, next + 1),
+        }
+    }
+
+    // The shift of the top mantissa bits that pick the sub-piece of a piece at exponent
+    // `exp` (1, 2 or 3 bits for 2, 4 or 8 sub-pieces). The mantissa is below 2^bits, with bits
+    // as in fixed_k_limb_bound. The masked bits take each value once for any shift, so the
+    // sub-pieces cover the piece;  this shift splits the largest mantissas.
+    const fn fixed_k_mant_shift(exp: i16, k: i16, pieces: u64) -> u32 {
+        let s_max = (k as i64 + 1) * (1 << 32) / 1292913986 - 1;
+        let window_bits = s_max - exp as i64;
+        let bits = if window_bits < 55 { window_bits } else { 55 };
+        (bits - pieces.trailing_zeros() as i64) as u32
+    }
+
     // The power-of-5 tables of mul_pow10 as (power, length in 64-bit limbs).
     #[cfg(target_pointer_width = "64")]
     const FIXED_K_POW5_TABLES: [(usize, usize); 5] =
@@ -2427,9 +2448,37 @@ pub mod dragon_verify {
     }
 
     // The proof of one fixed-K pair over the exponents FIRST + $exp_lo + (0..=$exp_mask) of its
-    // window: (0, 15) is the whole window, a piece of a split pair takes 4 exponents.
+    // window: (0, 15) is the whole window, a piece of a split pair takes 4 exponents or 1. A
+    // sub-piece (the tail $mant_top, $mant_pieces) also fixes the top mantissa bits: the bits
+    // of mant from MANT_SHIFT up, masked to $mant_pieces - 1, equal $mant_top.
     macro_rules! check_dragon_scale_fixed_k_harness {
-        ($window:literal, $k:expr, $exp_lo:literal, $exp_mask:expr) => {
+        // A piece split on the top mantissa bits: one module per sub-piece. The list must be
+        // 0..n - 1 in increasing order for n = 2, 4 or 8, or the build fails.
+        (
+            $window:literal,
+            $k:expr,
+            $exp_lo:literal,
+            $exp_mask:expr,
+            [$($m:ident => $top:literal),* $(,)?]
+        ) => {
+            use super::*;
+
+            const MANT_TOPS: &[u8] = &[$($top),*];
+            const _: () = assert!(fixed_k_tops_cover(MANT_TOPS, 0));
+
+            $(mod $m {
+                check_dragon_scale_fixed_k_harness!(
+                    $window, $k, $exp_lo, $exp_mask, $top, MANT_TOPS.len() as u64
+                );
+            })*
+        };
+        (
+            $window:literal,
+            $k:expr,
+            $exp_lo:literal,
+            $exp_mask:expr
+            $(, $mant_top:literal, $mant_pieces:expr)?
+        ) => {
             use super::*;
 
             const FIRST: i16 = -1076 + 16 * $window;
@@ -2502,6 +2551,11 @@ pub mod dragon_verify {
                 kani::assume(mant as u128 + plus as u128 <= ((minus as u128 + plus as u128) << 53));
                 let exp = FIRST + $exp_lo + i16::from(kani::any::<u8>() & $exp_mask);
                 kani::assume(exp <= LAST);
+                $({
+                    const MANT_SHIFT: u32 = fixed_k_mant_shift(FIRST + $exp_lo, K, $mant_pieces);
+                    const _: () = assert!(MANT_SHIFT <= 53);
+                    kani::assume((mant >> MANT_SHIFT) & ($mant_pieces - 1) == $mant_top);
+                })?
                 kani::assume(
                     crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor(mant + plus, exp)
                         == K
@@ -2527,7 +2581,12 @@ pub mod dragon_verify {
         // A split pair: one module per piece, each piece a proof over PIECE_WIDTH exponents
         // (4 pieces of 4 or 16 pieces of 1). The offsets must step by PIECE_WIDTH from 0 to
         // 16 - PIECE_WIDTH in increasing order, or the build fails.
-        ($name:ident, $window:literal, $k:expr, [$($piece:ident => $lo:literal),* $(,)?]) => {
+        (
+            $name:ident,
+            $window:literal,
+            $k:expr,
+            [$($piece:ident => $lo:literal $(=> [$($m:ident => $top:literal),* $(,)?])?),* $(,)?]
+        ) => {
             mod $name {
                 use super::*;
 
@@ -2537,7 +2596,9 @@ pub mod dragon_verify {
                 const _: () = assert!(fixed_k_pieces_cover(PIECE_LOS, 0, PIECE_WIDTH));
 
                 $(mod $piece {
-                    check_dragon_scale_fixed_k_harness!($window, $k, $lo, PIECE_MASK);
+                    check_dragon_scale_fixed_k_harness!(
+                        $window, $k, $lo, PIECE_MASK $(, [$($m => $top),*])?
+                    );
                 })*
             }
         };
@@ -2547,11 +2608,16 @@ pub mod dragon_verify {
     // fixed_k_min(FIRST)..=fixed_k_max(FIRST) once, in increasing order, or the build fails.
     // With check_dragon_scale_k_range the proofs cover every input of the window.
     // An entry `kNNN => K => [eNN => offset, ...]` splits the proof of K into pieces.
+    // A piece `eNN => offset => [mN => top, ...]` splits again on the top mantissa bits.
     macro_rules! check_dragon_scale_fixed_k_window {
         (
             $name:ident,
             $window:literal,
-            [$($k_name:ident => $k:expr $(=> [$($piece:ident => $lo:literal),* $(,)?])?),* $(,)?]
+            [$(
+                $k_name:ident => $k:expr $(=> [$(
+                    $piece:ident => $lo:literal $(=> [$($m:ident => $top:literal),* $(,)?])?
+                ),* $(,)?])?
+            ),* $(,)?]
         ) => {
             mod $name {
                 use super::*;
@@ -2562,7 +2628,7 @@ pub mod dragon_verify {
                 };
 
                 $(check_dragon_scale_fixed_k_pair!(
-                    $k_name, $window, $k $(, [$($piece => $lo),*])?
+                    $k_name, $window, $k $(, [$($piece => $lo $(=> [$($m => $top),*])?),*])?
                 );)*
             }
         };
@@ -2747,7 +2813,10 @@ pub mod dragon_verify {
                 e12 => 12, e13 => 13, e14 => 14, e15 => 15,
             ],
             k200 => -200 => [
-                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e00 => 0,
+                e01 => 1 => [m0 => 0, m1 => 1, m2 => 2, m3 => 3],
+                e02 => 2 => [m0 => 0, m1 => 1, m2 => 2, m3 => 3],
+                e03 => 3,
                 e04 => 4, e05 => 5, e06 => 6, e07 => 7,
                 e08 => 8, e09 => 9, e10 => 10, e11 => 11,
                 e12 => 12, e13 => 13, e14 => 14, e15 => 15,
@@ -2838,7 +2907,11 @@ pub mod dragon_verify {
             k160 => -160, k159 => -159, k158 => -158, k157 => -157, k156 => -156, k155 => -155,
             k154 => -154,
             k153 => -153 => [
-                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e00 => 0, e01 => 1,
+                e02 => 2 => [
+                    m0 => 0, m1 => 1, m2 => 2, m3 => 3, m4 => 4, m5 => 5, m6 => 6, m7 => 7,
+                ],
+                e03 => 3,
                 e04 => 4, e05 => 5, e06 => 6, e07 => 7,
                 e08 => 8, e09 => 9, e10 => 10, e11 => 11,
                 e12 => 12, e13 => 13, e14 => 14, e15 => 15,

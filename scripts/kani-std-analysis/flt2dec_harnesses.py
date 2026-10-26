@@ -49,6 +49,11 @@ DRAGON_UNPROVED_PIECES = {
     (29, -173): (0, 1), (29, -174): (0, 1), (34, -151): (0, 1, 2, 3, 4, 5), (34, -152): (0, 1, 2),
     (34, -153): (0, 1, 3),
 }
+# Pieces whose proof splits again on the mantissa (dragon.rs `eNN => offset => [mN => top]`):
+# (window, K, piece offset) -> the sub-piece count.  The one-exponent pieces e01 and e02 of
+# (23, -200) and e02 of (34, -153) hit the 180-minute cap;  their 4 or 8 sub-pieces fix the top
+# 2 or 3 mantissa bits, each alone at 180 minutes.
+DRAGON_MANTISSA_SPLITS = {(23, -200, 1): 4, (23, -200, 2): 4, (34, -153, 2): 8}
 # One CI matrix holds at most 256 jobs:  core, long (generator and cached proofs), and the fixed-K
 # pairs in four:  dragon-a (windows 000..033), dragon-b (034..067), dragon-c (068..097), dragon-d (098..127).
 # The pieces of the split pairs run in two more:  dragon-e (offsets 0..7) and dragon-f (8..15).
@@ -83,10 +88,12 @@ def dragon_fixed_k_harness(window, k):
     return f"{DRAGON}::dragon_scale_fixed_k::w{window:03d}::{'k' if k < 0 else 'p'}{abs(k):03d}::check_scale_shortest"
 
 
-def dragon_fixed_k_piece_harness(window, k, offset):
-    """The Kani harness of one piece of a split pair:  module eNN (NN = offset) inside the pair module."""
+def dragon_fixed_k_piece_harness(window, k, offset, top=None):
+    """The Kani harness of one piece of a split pair:  module eNN (NN = offset) inside the pair module;
+    a sub-piece of a piece split on the mantissa adds module mN (N = top) inside that."""
     pair = dragon_fixed_k_harness(window, k).removesuffix("::check_scale_shortest")
-    return f"{pair}::e{offset:02d}::check_scale_shortest"
+    sub = "" if top is None else f"::m{top}"
+    return f"{pair}::e{offset:02d}{sub}::check_scale_shortest"
 
 
 def dragon_unproved_harnesses():
@@ -219,11 +226,15 @@ def proof_groups(pointer_width=None):
                             if dragon_matrix_job(window) == job and not in_slow_band(window, k)], 8, 30)
     for pair in DRAGON_SLOW_PAIRS:
         add_fixed_k([pair], 180)
+    # A piece split on the mantissa runs one group per sub-piece (name suffix -mN) in place of its group.
     for (window, k), offsets in DRAGON_SPLIT_PAIRS.items():
         unproved = DRAGON_UNPROVED_PIECES.get((window, k), ())
         for offset in (offset for offset in offsets if offset not in unproved):
-            add(f"dragon-shortest-scaling-fixed-k-{dragon_fixed_k_name(window, k)}-e{offset:02d}", "contract",
-                [dragon_fixed_k_piece_harness(window, k, offset)], 180, matrix_job="dragon-" + "ef"[offset >= 8])
+            piece_name = f"dragon-shortest-scaling-fixed-k-{dragon_fixed_k_name(window, k)}-e{offset:02d}"
+            for top in range(DRAGON_MANTISSA_SPLITS.get((window, k, offset), 0)) or (None,):
+                add(piece_name if top is None else f"{piece_name}-m{top}", "contract",
+                    [dragon_fixed_k_piece_harness(window, k, offset, top)], 180,
+                    matrix_job="dragon-" + "ef"[offset >= 8])
 
     # The index 51 proof (group 29) does not finish on the whole domain, so grisu.rs proves
     # it in two pieces that split on the top bit of v and together cover every input.
