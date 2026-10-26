@@ -8,7 +8,11 @@ use flt2dec::estimator::estimate_scaling_factor;
 use flt2dec::{Decoded, MAX_SIG_DIGITS, round_up};
 
 use crate::cmp::Ordering;
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::MaybeUninit;
+#[cfg(kani)]
+use crate::num::imp::bignum::KaniInvariantOrdering;
 use crate::num::imp::bignum::{Big, Digit};
 use crate::num::imp::flt2dec;
 
@@ -62,6 +66,8 @@ static POW5TO256: [Digit; 10] = [
 
 #[doc(hidden)]
 pub fn mul_pow10(x: &mut Big, n: usize) -> &mut Big {
+    #[cfg(kani)]
+    let n = dragon_verify::proof_pow10_exponent(n);
     debug_assert!(n < 512);
     // Save ourself the left shift for the smallest cases.
     if n < 8 {
@@ -132,30 +138,19 @@ fn div_rem_upto_16<'a>(
     (d, x)
 }
 
-/// The shortest mode implementation for Dragon.
-pub fn format_shortest<'a>(
-    d: &Decoded,
-    buf: &'a mut [MaybeUninit<u8>],
-) -> (/*digits*/ &'a [u8], /*exp*/ i16) {
-    // the number `v` to format is known to be:
-    // - equal to `mant * 2^exp`;
-    // - preceded by `(mant - 2 * minus) * 2^exp` in the original type; and
-    // - followed by `(mant + 2 * plus) * 2^exp` in the original type.
-    //
-    // obviously, `minus` and `plus` cannot be zero. (for infinities, we use out-of-range values.)
-    // also we assume that at least one digit is generated, i.e., `mant` cannot be zero too.
-    //
-    // this also means that any number between `low = (mant - minus) * 2^exp` and
-    // `high = (mant + plus) * 2^exp` will map to this exact floating point number,
-    // with bounds included when the original mantissa was even (i.e., `!mant_was_odd`).
+/// The scaled state of `format_shortest` before digit generation.
+struct ShortestScaled {
+    k: i16,
+    mant: Big,
+    minus: Big,
+    plus: Big,
+    scale: Big,
+}
 
-    assert!(d.mant > 0);
-    assert!(d.minus > 0);
-    assert!(d.plus > 0);
-    assert!(d.mant.checked_add(d.plus).is_some());
-    assert!(d.mant.checked_sub(d.minus).is_some());
-    assert!(buf.len() >= MAX_SIG_DIGITS);
-
+/// Converts `{mant, minus, plus} * 2^exp` into the fractional form `{mant, minus, plus} / scale`
+/// and finds `k` such that `scale < mant + plus <= scale * 10` (`<=` on the left when inclusive).
+#[inline]
+fn scale_shortest(d: &Decoded) -> ShortestScaled {
     // `a.cmp(&b) < rounding` is `if d.inclusive {a <= b} else {a < b}`
     let rounding = if d.inclusive { Ordering::Greater } else { Ordering::Equal };
 
@@ -203,6 +198,39 @@ pub fn format_shortest<'a>(
         plus.mul_small(10);
     }
 
+    ShortestScaled { k, mant, minus, plus, scale }
+}
+
+/// The shortest mode implementation for Dragon.
+pub fn format_shortest<'a>(
+    d: &Decoded,
+    buf: &'a mut [MaybeUninit<u8>],
+) -> (/*digits*/ &'a [u8], /*exp*/ i16) {
+    // the number `v` to format is known to be:
+    // - equal to `mant * 2^exp`;
+    // - preceded by `(mant - 2 * minus) * 2^exp` in the original type; and
+    // - followed by `(mant + 2 * plus) * 2^exp` in the original type.
+    //
+    // obviously, `minus` and `plus` cannot be zero. (for infinities, we use out-of-range values.)
+    // also we assume that at least one digit is generated, i.e., `mant` cannot be zero too.
+    //
+    // this also means that any number between `low = (mant - minus) * 2^exp` and
+    // `high = (mant + plus) * 2^exp` will map to this exact floating point number,
+    // with bounds included when the original mantissa was even (i.e., `!mant_was_odd`).
+
+    assert!(d.mant > 0);
+    assert!(d.minus > 0);
+    assert!(d.plus > 0);
+    assert!(d.mant.checked_add(d.plus).is_some());
+    assert!(d.mant.checked_sub(d.minus).is_some());
+    assert!(buf.len() >= MAX_SIG_DIGITS);
+
+    // `a.cmp(&b) < rounding` is `if d.inclusive {a <= b} else {a < b}`
+    let rounding = if d.inclusive { Ordering::Greater } else { Ordering::Equal };
+
+    // scale the inputs so that `scale < mant + plus <= scale * 10` (see `scale_shortest`).
+    let ShortestScaled { mut k, mut mant, mut minus, mut plus, scale } = scale_shortest(d);
+
     // cache `(2, 4, 8) * scale` for digit generation.
     let mut scale2 = scale.clone();
     scale2.mul_pow2(1);
@@ -211,9 +239,57 @@ pub fn format_shortest<'a>(
     let mut scale8 = scale.clone();
     scale8.mul_pow2(3);
 
+    #[cfg(kani)]
+    let mut down = false;
+    #[cfg(not(kani))]
     let mut down;
+    #[cfg(kani)]
+    let mut up = false;
+    #[cfg(not(kani))]
     let mut up;
+    #[cfg(kani)]
+    let mut d = 0;
+    #[cfg(not(kani))]
+    let mut d;
+    #[cfg(kani)]
+    let mut up_candidate = Big::from_small(0);
+    #[cfg(not(kani))]
+    let mut up_candidate;
     let mut i = 0;
+    #[cfg(kani)]
+    let proof_zero = Big::from_small(0);
+    #[cfg(kani)]
+    let proof_scale10 = scale.clone().mul_small(10).clone();
+    #[cfg(kani)]
+    let proof_max_limbs = crate::cmp::max(mant.kani_size(), proof_scale10.kani_size());
+    #[cfg_attr(kani, kani::loop_modifies(&i, &d, &mant, &minus, &plus, &up_candidate, &down, &up, &buf[..]))]
+    #[cfg_attr(kani, kani::loop_invariant(
+        i < MAX_SIG_DIGITS
+            && mant.kani_invariant_size() > 0
+            && minus.kani_invariant_size() > 0 && plus.kani_invariant_size() > 0
+            && mant.kani_invariant_valid_storage()
+            && minus.kani_invariant_valid_storage() && plus.kani_invariant_valid_storage()
+            && mant.kani_invariant_size() <= proof_max_limbs
+            && minus.kani_invariant_size() <= proof_max_limbs
+            && plus.kani_invariant_size() <= proof_max_limbs
+            && mant.kani_invariant_less_than(&proof_scale10)
+            && minus.kani_invariant_less_than(&proof_scale10)
+            && plus.kani_invariant_less_than(&proof_scale10)
+            && proof_zero.kani_invariant_less_than(&minus)
+            && proof_zero.kani_invariant_less_than(&plus)
+            && (i == 0 || match proof_scale10.kani_invariant_cmp_scaled_sum(&mant, &plus, 0) {
+                KaniInvariantOrdering::Less => (Ordering::Less as i8) >= rounding as i8,
+                KaniInvariantOrdering::Equal => (Ordering::Equal as i8) >= rounding as i8,
+                KaniInvariantOrdering::Greater => true,
+                KaniInvariantOrdering::Unrepresentable => false,
+            })
+            && match scale.kani_invariant_cmp_scaled_sum(&minus, &plus, MAX_SIG_DIGITS - 1 - i) {
+                KaniInvariantOrdering::Less => true,
+                KaniInvariantOrdering::Equal | KaniInvariantOrdering::Greater
+                    | KaniInvariantOrdering::Unrepresentable => false,
+            }
+            && initialized_digit_prefix(buf, i)
+    ))]
     loop {
         // invariants, where `d[0..n-1]` are digits generated so far:
         // - `v = mant / scale * 10^(k-n-1) + d[0..n-1] * 10^(k-n)`
@@ -223,7 +299,7 @@ pub fn format_shortest<'a>(
         // where `d[i..j]` is a shorthand for `d[i] * 10^(j-i) + ... + d[j-1] * 10 + d[j]`.
 
         // generate one digit: `d[n] = floor(mant / scale) < 10`.
-        let (d, _) = div_rem_upto_16(&mut mant, &scale, &scale2, &scale4, &scale8);
+        (d, _) = div_rem_upto_16(&mut mant, &scale, &scale2, &scale4, &scale8);
         debug_assert!(d < 10);
         buf[i] = MaybeUninit::new(b'0' + d);
         i += 1;
@@ -260,7 +336,8 @@ pub fn format_shortest<'a>(
         // - stop and round `up` (increase the last digit) when `scale < mant + plus` (or `<=`).
         // - keep generating otherwise.
         down = mant.cmp(&minus) < rounding;
-        up = scale.cmp(mant.clone().add(&plus)) < rounding;
+        up_candidate = mant.clone();
+        up = scale.cmp(up_candidate.add(&plus)) < rounding;
         if down || up {
             break;
         } // we have the shortest representation, proceed to the rounding
@@ -290,6 +367,92 @@ pub fn format_shortest<'a>(
 
     // SAFETY: we initialized that memory above.
     (unsafe { buf[..i].assume_init_ref() }, k)
+}
+
+fn fill_zeroes(buf: &mut [MaybeUninit<u8>]) {
+    buf.fill(MaybeUninit::new(b'0'));
+}
+
+fn generate_exact_digits(
+    mant: &mut Big,
+    scale: &Big,
+    scale2: &Big,
+    scale4: &Big,
+    scale8: &Big,
+    buf: &mut [MaybeUninit<u8>],
+) -> bool {
+    let len = buf.len();
+    #[cfg(kani)]
+    let proof_scale10 = scale.clone().mul_small(10).clone();
+    #[cfg(kani)]
+    let proof_max_limbs = crate::cmp::max(mant.kani_size(), proof_scale10.kani_size());
+    #[cfg(kani)]
+    let mut d = 0;
+    #[cfg(not(kani))]
+    let mut d;
+    #[cfg_attr(kani, kani::loop_modifies(&*mant, &buf[..], &d))]
+    #[cfg_attr(kani, kani::loop_invariant(
+        kani::index <= len
+            && len <= dragon_verify::PROOF_BUFLEN
+            && mant.kani_invariant_size() <= proof_max_limbs
+            && mant.kani_invariant_valid_storage()
+            && mant.kani_invariant_less_than(&proof_scale10)
+            && initialized_digit_prefix(buf, kani::index)
+    ))]
+    for i in 0..len {
+        if mant.is_zero() {
+            // following digits are all zeroes, we stop here
+            // do *not* try to perform rounding! rather, fill remaining digits.
+            fill_zeroes(&mut buf[i..len]);
+            return true;
+        }
+
+        d = 0;
+        if *mant >= *scale8 {
+            mant.sub(scale8);
+            d += 8;
+        }
+        if *mant >= *scale4 {
+            mant.sub(scale4);
+            d += 4;
+        }
+        if *mant >= *scale2 {
+            mant.sub(scale2);
+            d += 2;
+        }
+        if *mant >= *scale {
+            mant.sub(scale);
+            d += 1;
+        }
+        debug_assert!(*mant < *scale);
+        debug_assert!(d < 10);
+        buf[i] = MaybeUninit::new(b'0' + d);
+        mant.mul_small(10);
+    }
+    false
+}
+
+#[cfg(kani)]
+fn initialized_digit_prefix(buf: &[MaybeUninit<u8>], len: usize) -> bool {
+    // Each byte keeps its own initialization guard. Combine the independent
+    // checks eagerly to avoid nested short-circuit paths during instrumentation.
+    macro_rules! check_digit {
+        ($($index:literal),+ $(,)?) => {
+            true $(& (buf.len() <= $index || len <= $index || (
+                kani::mem::can_dereference(crate::ptr::addr_of!(buf[$index]) as *const u8)
+                    && unsafe {
+                        let digit = *(crate::ptr::addr_of!(buf[$index]) as *const u8);
+                        digit >= b'0' && digit <= b'9'
+                    }
+            )))+
+        };
+    }
+    len <= buf.len()
+        && len <= dragon_verify::PROOF_BUFLEN
+        && check_digit!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31
+        )
 }
 
 /// The exact and fixed mode implementation for Dragon.
@@ -349,7 +512,7 @@ pub fn format_exact<'a>(
         buf.len()
     };
 
-    if len > 0 {
+    let exhausted = if len > 0 {
         // cache `(2, 4, 8) * scale` for digit generation.
         // (this can be expensive, so do not calculate them when the buffer is empty.)
         let mut scale2 = scale.clone();
@@ -359,65 +522,3312 @@ pub fn format_exact<'a>(
         let mut scale8 = scale.clone();
         scale8.mul_pow2(3);
 
-        for i in 0..len {
-            if mant.is_zero() {
-                // following digits are all zeroes, we stop here
-                // do *not* try to perform rounding! rather, fill remaining digits.
-                for c in &mut buf[i..len] {
-                    *c = MaybeUninit::new(b'0');
+        generate_exact_digits(&mut mant, &scale, &scale2, &scale4, &scale8, &mut buf[..len])
+    } else {
+        false
+    };
+
+    if exhausted {
+        // SAFETY: digit generation initialized the requested prefix.
+        (unsafe { buf[..len].assume_init_ref() }, k)
+    } else {
+        // rounding up if we stop in the middle of digits
+        // if the following digits are exactly 5000..., check the prior digit and try to
+        // round to even (i.e., avoid rounding up when the prior digit is even).
+        let order = mant.cmp(scale.mul_small(5));
+        if order == Ordering::Greater
+            || (order == Ordering::Equal
+                // SAFETY: `buf[len-1]` is initialized.
+                && len > 0 && unsafe { buf[len - 1].assume_init() } & 1 == 1)
+        {
+            // if rounding up changes the length, the exponent should also change.
+            // but we've been requested a fixed number of digits, so do not alter the buffer...
+            // SAFETY: we initialized that memory above.
+            if let Some(c) = round_up(unsafe { buf[..len].assume_init_mut() }) {
+                // ...unless we've been requested the fixed precision instead.
+                // we also need to check that, if the original buffer was empty,
+                // the additional digit can only be added when `k == limit` (edge case).
+                k += 1;
+                if k > limit && len < buf.len() {
+                    buf[len] = MaybeUninit::new(c);
+                    len += 1;
                 }
-                // SAFETY: we initialized that memory above.
-                return (unsafe { buf[..len].assume_init_ref() }, k);
             }
-
-            let mut d = 0;
-            if mant >= scale8 {
-                mant.sub(&scale8);
-                d += 8;
-            }
-            if mant >= scale4 {
-                mant.sub(&scale4);
-                d += 4;
-            }
-            if mant >= scale2 {
-                mant.sub(&scale2);
-                d += 2;
-            }
-            if mant >= scale {
-                mant.sub(&scale);
-                d += 1;
-            }
-            debug_assert!(mant < scale);
-            debug_assert!(d < 10);
-            buf[i] = MaybeUninit::new(b'0' + d);
-            mant.mul_small(10);
         }
-    }
 
-    // rounding up if we stop in the middle of digits
-    // if the following digits are exactly 5000..., check the prior digit and try to
-    // round to even (i.e., avoid rounding up when the prior digit is even).
-    let order = mant.cmp(scale.mul_small(5));
-    if order == Ordering::Greater
-        || (order == Ordering::Equal
-            // SAFETY: `buf[len-1]` is initialized.
-            && len > 0 && unsafe { buf[len - 1].assume_init() } & 1 == 1)
-    {
-        // if rounding up changes the length, the exponent should also change.
-        // but we've been requested a fixed number of digits, so do not alter the buffer...
         // SAFETY: we initialized that memory above.
-        if let Some(c) = round_up(unsafe { buf[..len].assume_init_mut() }) {
-            // ...unless we've been requested the fixed precision instead.
-            // we also need to check that, if the original buffer was empty,
-            // the additional digit can only be added when `k == limit` (edge case).
-            k += 1;
-            if k > limit && len < buf.len() {
-                buf[len] = MaybeUninit::new(c);
-                len += 1;
+        (unsafe { buf[..len].assume_init_ref() }, k)
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod dragon_verify {
+    use super::*;
+    use crate::kani;
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    use crate::num::imp::bignum::Big32x40 as Big;
+    #[cfg(target_pointer_width = "64")]
+    use crate::num::imp::bignum::Big64x20 as Big;
+    use crate::num::imp::bignum::KANI_LIMBS;
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    use crate::primitive::u32 as Digit;
+    #[cfg(target_pointer_width = "64")]
+    use crate::primitive::u64 as Digit;
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    type WideDigit = u64;
+    #[cfg(target_pointer_width = "64")]
+    type WideDigit = u128;
+    use crate::num::imp::flt2dec::flt2dec_verify::{
+        arbitrary_finite_f32, arbitrary_finite_f64, arbitrary_finite_f64_exponent,
+        for_each_finite_partition,
+    };
+
+    // Keep exact comparison semantics and the generator's digit writes. The
+    // comparison models have a separate equivalence proof; exact mode also
+    // uses the division contract below for initial fixup. Neither termination
+    // nor the buffer index is assumed. Bigint unwind assertions remain enabled.
+    // Lengths above 32 require a separate proof; these harnesses are bounded.
+    pub(super) const PROOF_BUFLEN: usize = 32;
+    const _: () = assert!(PROOF_BUFLEN <= u8::MAX as usize);
+
+    #[kani::proof]
+    #[kani::unwind(41)]
+    #[kani::stub(crate::num::imp::bignum::kani_loop_size, counter_frame_limb_count)]
+    #[kani::stub(Big::sub, Big::kani_sub_model)]
+    #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
+    #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
+    #[kani::stub(Big::is_zero, stub_is_zero)]
+    #[kani::solver(kissat)]
+    fn check_exact_digit_loop_frame() {
+        let mut mant = Big::from_u64(5);
+        let scale = Big::from_small(1);
+        let scale2 = Big::from_small(2);
+        let scale4 = Big::from_small(4);
+        let scale8 = Big::from_small(8);
+        let mut buf = [MaybeUninit::uninit(); 1];
+        let _ = generate_exact_digits(&mut mant, &scale, &scale2, &scale4, &scale8, &mut buf);
+        let digit = unsafe { buf[0].assume_init() };
+        assert!(digit >= b'0' && digit <= b'9');
+        kani::cover(digit == b'5', "the counter frame permits a generated digit");
+    }
+    fn counter_frame_limb_count(size: usize) -> usize {
+        LimbCountMask(1).check(size)
+    }
+
+    // The models assert the size bounds checked by the independent equivalence
+    // proof, then compute exact results with constant limb indices.
+    fn stub_cmp(left: &Big, right: &Big) -> Ordering {
+        left.kani_cmp_model(right)
+    }
+
+    fn stub_is_zero(value: &Big) -> bool {
+        value.kani_is_zero_model()
+    }
+
+    #[kani::proof]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_comparison_models_agree() {
+        // These methods only need size bounds. Inactive limbs may be arbitrary;
+        // unlike arithmetic contracts, this proof needs no zero-tail invariant.
+        // Six symbolic bits represent every permitted storage size, while
+        // keeping unused upper index bits concrete during symbolic execution.
+        let left = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        let right = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        // This is exactly the domain asserted by both models at their call sites.
+        kani::assume(left.kani_size() <= KANI_LIMBS && right.kani_size() <= KANI_LIMBS);
+        assert!(left.cmp(&right) == left.kani_cmp_model(&right));
+        assert!(left.is_zero() == left.kani_is_zero_model());
+        let ordering = left.kani_cmp_model(&right);
+        assert!(left.kani_invariant_size() == left.kani_size());
+        assert!(left.kani_invariant_valid_storage() == left.kani_valid_storage());
+        assert!(left.kani_invariant_less_than(&right) == (ordering == Ordering::Less));
+        kani::cover(ordering == Ordering::Less, "comparison can be less");
+        kani::cover(ordering == Ordering::Equal, "comparison can be equal");
+        kani::cover(ordering == Ordering::Greater, "comparison can be greater");
+        kani::cover(left.kani_is_zero_model(), "zero testing accepts zero");
+        kani::cover(!left.kani_is_zero_model(), "zero testing accepts nonzero limbs");
+        kani::cover(left.kani_size() == 0, "comparison accepts empty zero storage");
+        kani::cover(left.kani_size() == KANI_LIMBS, "comparison accepts all bigint limbs");
+        kani::cover(
+            left.kani_size() == 0 && !left.kani_valid_storage(),
+            "comparison models accept arbitrary inactive limbs",
+        );
+    }
+
+    #[kani::proof]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_add_model_agrees() {
+        let source = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        let other = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        kani::assume(source.kani_size() < KANI_LIMBS && other.kani_size() < KANI_LIMBS);
+        kani::cover(source.kani_size() == 0, "addition accepts empty storage");
+        kani::cover(
+            source.kani_size() == KANI_LIMBS - 1,
+            "addition accepts the largest model input",
+        );
+        let mut actual = source.clone();
+        let mut modeled = source;
+        let actual_start = &mut actual as *mut Big;
+        let modeled_start = &mut modeled as *mut Big;
+        assert!(actual.add(&other) as *mut Big == actual_start);
+        assert!(modeled.kani_add_model(&other) as *mut Big == modeled_start);
+        assert!(actual.kani_same_storage(&modeled));
+        kani::cover(actual.kani_size() == KANI_LIMBS, "addition can append a carry limb");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_sub_model_agrees() {
+        let source = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        let other = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        kani::assume(source.kani_size() <= KANI_LIMBS && other.kani_size() <= KANI_LIMBS);
+        kani::assume(source.kani_cmp_model(&other) != Ordering::Less);
+        kani::cover(source.kani_size() == 0, "subtraction accepts empty storage");
+        kani::cover(source.kani_size() == KANI_LIMBS, "subtraction accepts all limbs");
+        let mut actual = source.clone();
+        let mut modeled = source;
+        let actual_start = &mut actual as *mut Big;
+        let modeled_start = &mut modeled as *mut Big;
+        assert!(actual.sub(&other) as *mut Big == actual_start);
+        assert!(modeled.kani_sub_model(&other) as *mut Big == modeled_start);
+        assert!(actual.kani_same_storage(&modeled));
+    }
+
+    fn fill_zeroes_model(buf: &mut [MaybeUninit<u8>]) {
+        assert!(buf.len() <= PROOF_BUFLEN);
+        // SAFETY: MaybeUninit<u8> has byte size and alignment. The mutable
+        // slice covers exactly buf.len() writable bytes, including an empty slice.
+        unsafe { crate::ptr::write_bytes(buf.as_mut_ptr(), b'0', buf.len()) };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(33)]
+    #[kani::solver(kissat)]
+    fn check_fill_zeroes_model_agrees() {
+        let initial = kani::any::<[u8; PROOF_BUFLEN]>();
+        let mut actual = initial.map(MaybeUninit::new);
+        let mut modeled = initial.map(MaybeUninit::new);
+        let start = usize::from(kani::any::<u8>());
+        let end = usize::from(kani::any::<u8>());
+        kani::assume(start <= end && end <= PROOF_BUFLEN);
+        fill_zeroes(&mut actual[start..end]);
+        fill_zeroes_model(&mut modeled[start..end]);
+        macro_rules! compare_bytes {
+            ($($index:literal),+ $(,)?) => {
+                $(
+                    // SAFETY: Both arrays began initialized, and zero filling
+                    // preserves initialization of every byte.
+                    assert_eq!(unsafe { actual[$index].assume_init() }, unsafe {
+                        modeled[$index].assume_init()
+                    });
+                )+
+            };
+        }
+        compare_bytes!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31
+        );
+        kani::cover(start == end, "zero filling accepts an empty slice");
+        kani::cover(start == 0 && end == PROOF_BUFLEN, "zero filling reaches every byte");
+        kani::cover(
+            start > 0 && end < PROOF_BUFLEN && start < end,
+            "zero filling preserves both edges",
+        );
+    }
+
+    fn check_mul_pow2_model_agrees<const SIZE: usize, const DIGITS: usize>() {
+        let mut value = Big::kani_valid_with_size(SIZE);
+        let shift = usize::from(kani::any::<u8>()) & (Digit::BITS as usize - 1);
+        let bits = (DIGITS * Digit::BITS as usize) | shift;
+        let digits = DIGITS;
+        let size = value.kani_size();
+        // Use the real method's safe shift domain for valid bigint storage.
+        kani::assume(digits < KANI_LIMBS && size + digits <= KANI_LIMBS);
+        kani::assume(shift == 0 || size + digits > 0);
+        kani::assume(
+            shift == 0
+                || (value.kani_limbs_mut()[KANI_LIMBS - digits - 1]
+                    >> (Digit::BITS as usize - shift))
+                    == 0,
+        );
+        let mut expected = value.clone();
+        let mut actual = value;
+        expected.mul_pow2(bits);
+        actual.kani_mul_pow2_model(bits);
+        assert!(actual.kani_same_storage(&expected));
+        kani::cover(shift == 0, "shift preserves whole limbs");
+        kani::cover(shift == Digit::BITS as usize - 1, "shift uses the largest partial limb");
+        kani::cover(digits == KANI_LIMBS - 1, "shift reaches the last stored limb");
+    }
+
+    // A case fixes the active size and whole-limb shift, leaving every
+    // partial-limb shift symbolic. Each real loop visits at most max(SIZE,
+    // DIGITS) limbs. Unwinding assertions verify the bound for every case.
+    macro_rules! check_shift_width {
+        ($module:ident, $($(#[$cfg:meta])* ($name:ident, $guide:ident, $size:literal, $digits:literal, $unwind:literal)),+ $(,)?) => {
+            mod $module {
+                use crate::kani;
+
+                $(
+                    $(#[$cfg])*
+                    fn $guide(size: usize) -> usize {
+                        assert_eq!(size, $size);
+                        $size
+                    }
+
+                    $(#[$cfg])*
+                    #[kani::proof]
+                    #[kani::unwind($unwind)]
+                    #[kani::solver(kissat)]
+                    #[kani::stub(crate::num::imp::bignum::kani_loop_size, $guide)]
+                    fn $name() {
+                        super::check_mul_pow2_model_agrees::<$size, $digits>();
+                    }
+                )+
+            }
+        };
+    }
+
+    check_shift_width!(shift_width_00, (size_00, guide_size_00, 0, 0, 1),);
+    check_shift_width!(
+        shift_width_01,
+        (size_00, guide_size_00, 0, 1, 2),
+        (size_01, guide_size_01, 1, 0, 2),
+    );
+    check_shift_width!(
+        shift_width_02,
+        (size_00, guide_size_00, 0, 2, 3),
+        (size_01, guide_size_01, 1, 1, 2),
+        (size_02, guide_size_02, 2, 0, 3),
+    );
+    check_shift_width!(
+        shift_width_03,
+        (size_00, guide_size_00, 0, 3, 4),
+        (size_01, guide_size_01, 1, 2, 3),
+        (size_02, guide_size_02, 2, 1, 3),
+        (size_03, guide_size_03, 3, 0, 4),
+    );
+    check_shift_width!(
+        shift_width_04,
+        (size_00, guide_size_00, 0, 4, 5),
+        (size_01, guide_size_01, 1, 3, 4),
+        (size_02, guide_size_02, 2, 2, 3),
+        (size_03, guide_size_03, 3, 1, 4),
+        (size_04, guide_size_04, 4, 0, 5),
+    );
+    check_shift_width!(
+        shift_width_05,
+        (size_00, guide_size_00, 0, 5, 6),
+        (size_01, guide_size_01, 1, 4, 5),
+        (size_02, guide_size_02, 2, 3, 4),
+        (size_03, guide_size_03, 3, 2, 4),
+        (size_04, guide_size_04, 4, 1, 5),
+        (size_05, guide_size_05, 5, 0, 6),
+    );
+    check_shift_width!(
+        shift_width_06,
+        (size_00, guide_size_00, 0, 6, 7),
+        (size_01, guide_size_01, 1, 5, 6),
+        (size_02, guide_size_02, 2, 4, 5),
+        (size_03, guide_size_03, 3, 3, 4),
+        (size_04, guide_size_04, 4, 2, 5),
+        (size_05, guide_size_05, 5, 1, 6),
+        (size_06, guide_size_06, 6, 0, 7),
+    );
+    check_shift_width!(
+        shift_width_07,
+        (size_00, guide_size_00, 0, 7, 8),
+        (size_01, guide_size_01, 1, 6, 7),
+        (size_02, guide_size_02, 2, 5, 6),
+        (size_03, guide_size_03, 3, 4, 5),
+        (size_04, guide_size_04, 4, 3, 5),
+        (size_05, guide_size_05, 5, 2, 6),
+        (size_06, guide_size_06, 6, 1, 7),
+        (size_07, guide_size_07, 7, 0, 8),
+    );
+    check_shift_width!(
+        shift_width_08,
+        (size_00, guide_size_00, 0, 8, 9),
+        (size_01, guide_size_01, 1, 7, 8),
+        (size_02, guide_size_02, 2, 6, 7),
+        (size_03, guide_size_03, 3, 5, 6),
+        (size_04, guide_size_04, 4, 4, 5),
+        (size_05, guide_size_05, 5, 3, 6),
+        (size_06, guide_size_06, 6, 2, 7),
+        (size_07, guide_size_07, 7, 1, 8),
+        (size_08, guide_size_08, 8, 0, 9),
+    );
+    check_shift_width!(
+        shift_width_09,
+        (size_00, guide_size_00, 0, 9, 10),
+        (size_01, guide_size_01, 1, 8, 9),
+        (size_02, guide_size_02, 2, 7, 8),
+        (size_03, guide_size_03, 3, 6, 7),
+        (size_04, guide_size_04, 4, 5, 6),
+        (size_05, guide_size_05, 5, 4, 6),
+        (size_06, guide_size_06, 6, 3, 7),
+        (size_07, guide_size_07, 7, 2, 8),
+        (size_08, guide_size_08, 8, 1, 9),
+        (size_09, guide_size_09, 9, 0, 10),
+    );
+    check_shift_width!(
+        shift_width_10,
+        (size_00, guide_size_00, 0, 10, 11),
+        (size_01, guide_size_01, 1, 9, 10),
+        (size_02, guide_size_02, 2, 8, 9),
+        (size_03, guide_size_03, 3, 7, 8),
+        (size_04, guide_size_04, 4, 6, 7),
+        (size_05, guide_size_05, 5, 5, 6),
+        (size_06, guide_size_06, 6, 4, 7),
+        (size_07, guide_size_07, 7, 3, 8),
+        (size_08, guide_size_08, 8, 2, 9),
+        (size_09, guide_size_09, 9, 1, 10),
+        (size_10, guide_size_10, 10, 0, 11),
+    );
+    check_shift_width!(
+        shift_width_11,
+        (size_00, guide_size_00, 0, 11, 12),
+        (size_01, guide_size_01, 1, 10, 11),
+        (size_02, guide_size_02, 2, 9, 10),
+        (size_03, guide_size_03, 3, 8, 9),
+        (size_04, guide_size_04, 4, 7, 8),
+        (size_05, guide_size_05, 5, 6, 7),
+        (size_06, guide_size_06, 6, 5, 7),
+        (size_07, guide_size_07, 7, 4, 8),
+        (size_08, guide_size_08, 8, 3, 9),
+        (size_09, guide_size_09, 9, 2, 10),
+        (size_10, guide_size_10, 10, 1, 11),
+        (size_11, guide_size_11, 11, 0, 12),
+    );
+    check_shift_width!(
+        shift_width_12,
+        (size_00, guide_size_00, 0, 12, 13),
+        (size_01, guide_size_01, 1, 11, 12),
+        (size_02, guide_size_02, 2, 10, 11),
+        (size_03, guide_size_03, 3, 9, 10),
+        (size_04, guide_size_04, 4, 8, 9),
+        (size_05, guide_size_05, 5, 7, 8),
+        (size_06, guide_size_06, 6, 6, 7),
+        (size_07, guide_size_07, 7, 5, 8),
+        (size_08, guide_size_08, 8, 4, 9),
+        (size_09, guide_size_09, 9, 3, 10),
+        (size_10, guide_size_10, 10, 2, 11),
+        (size_11, guide_size_11, 11, 1, 12),
+        (size_12, guide_size_12, 12, 0, 13),
+    );
+    check_shift_width!(
+        shift_width_13,
+        (size_00, guide_size_00, 0, 13, 14),
+        (size_01, guide_size_01, 1, 12, 13),
+        (size_02, guide_size_02, 2, 11, 12),
+        (size_03, guide_size_03, 3, 10, 11),
+        (size_04, guide_size_04, 4, 9, 10),
+        (size_05, guide_size_05, 5, 8, 9),
+        (size_06, guide_size_06, 6, 7, 8),
+        (size_07, guide_size_07, 7, 6, 8),
+        (size_08, guide_size_08, 8, 5, 9),
+        (size_09, guide_size_09, 9, 4, 10),
+        (size_10, guide_size_10, 10, 3, 11),
+        (size_11, guide_size_11, 11, 2, 12),
+        (size_12, guide_size_12, 12, 1, 13),
+        (size_13, guide_size_13, 13, 0, 14),
+    );
+    check_shift_width!(
+        shift_width_14,
+        (size_00, guide_size_00, 0, 14, 15),
+        (size_01, guide_size_01, 1, 13, 14),
+        (size_02, guide_size_02, 2, 12, 13),
+        (size_03, guide_size_03, 3, 11, 12),
+        (size_04, guide_size_04, 4, 10, 11),
+        (size_05, guide_size_05, 5, 9, 10),
+        (size_06, guide_size_06, 6, 8, 9),
+        (size_07, guide_size_07, 7, 7, 8),
+        (size_08, guide_size_08, 8, 6, 9),
+        (size_09, guide_size_09, 9, 5, 10),
+        (size_10, guide_size_10, 10, 4, 11),
+        (size_11, guide_size_11, 11, 3, 12),
+        (size_12, guide_size_12, 12, 2, 13),
+        (size_13, guide_size_13, 13, 1, 14),
+        (size_14, guide_size_14, 14, 0, 15),
+    );
+    check_shift_width!(
+        shift_width_15,
+        (size_00, guide_size_00, 0, 15, 16),
+        (size_01, guide_size_01, 1, 14, 15),
+        (size_02, guide_size_02, 2, 13, 14),
+        (size_03, guide_size_03, 3, 12, 13),
+        (size_04, guide_size_04, 4, 11, 12),
+        (size_05, guide_size_05, 5, 10, 11),
+        (size_06, guide_size_06, 6, 9, 10),
+        (size_07, guide_size_07, 7, 8, 9),
+        (size_08, guide_size_08, 8, 7, 9),
+        (size_09, guide_size_09, 9, 6, 10),
+        (size_10, guide_size_10, 10, 5, 11),
+        (size_11, guide_size_11, 11, 4, 12),
+        (size_12, guide_size_12, 12, 3, 13),
+        (size_13, guide_size_13, 13, 2, 14),
+        (size_14, guide_size_14, 14, 1, 15),
+        (size_15, guide_size_15, 15, 0, 16),
+    );
+    check_shift_width!(
+        shift_width_16,
+        (size_00, guide_size_00, 0, 16, 17),
+        (size_01, guide_size_01, 1, 15, 16),
+        (size_02, guide_size_02, 2, 14, 15),
+        (size_03, guide_size_03, 3, 13, 14),
+        (size_04, guide_size_04, 4, 12, 13),
+        (size_05, guide_size_05, 5, 11, 12),
+        (size_06, guide_size_06, 6, 10, 11),
+        (size_07, guide_size_07, 7, 9, 10),
+        (size_08, guide_size_08, 8, 8, 9),
+        (size_09, guide_size_09, 9, 7, 10),
+        (size_10, guide_size_10, 10, 6, 11),
+        (size_11, guide_size_11, 11, 5, 12),
+        (size_12, guide_size_12, 12, 4, 13),
+        (size_13, guide_size_13, 13, 3, 14),
+        (size_14, guide_size_14, 14, 2, 15),
+        (size_15, guide_size_15, 15, 1, 16),
+        (size_16, guide_size_16, 16, 0, 17),
+    );
+    check_shift_width!(
+        shift_width_17,
+        (size_00, guide_size_00, 0, 17, 18),
+        (size_01, guide_size_01, 1, 16, 17),
+        (size_02, guide_size_02, 2, 15, 16),
+        (size_03, guide_size_03, 3, 14, 15),
+        (size_04, guide_size_04, 4, 13, 14),
+        (size_05, guide_size_05, 5, 12, 13),
+        (size_06, guide_size_06, 6, 11, 12),
+        (size_07, guide_size_07, 7, 10, 11),
+        (size_08, guide_size_08, 8, 9, 10),
+        (size_09, guide_size_09, 9, 8, 10),
+        (size_10, guide_size_10, 10, 7, 11),
+        (size_11, guide_size_11, 11, 6, 12),
+        (size_12, guide_size_12, 12, 5, 13),
+        (size_13, guide_size_13, 13, 4, 14),
+        (size_14, guide_size_14, 14, 3, 15),
+        (size_15, guide_size_15, 15, 2, 16),
+        (size_16, guide_size_16, 16, 1, 17),
+        (size_17, guide_size_17, 17, 0, 18),
+    );
+    check_shift_width!(
+        shift_width_18,
+        (size_00, guide_size_00, 0, 18, 19),
+        (size_01, guide_size_01, 1, 17, 18),
+        (size_02, guide_size_02, 2, 16, 17),
+        (size_03, guide_size_03, 3, 15, 16),
+        (size_04, guide_size_04, 4, 14, 15),
+        (size_05, guide_size_05, 5, 13, 14),
+        (size_06, guide_size_06, 6, 12, 13),
+        (size_07, guide_size_07, 7, 11, 12),
+        (size_08, guide_size_08, 8, 10, 11),
+        (size_09, guide_size_09, 9, 9, 10),
+        (size_10, guide_size_10, 10, 8, 11),
+        (size_11, guide_size_11, 11, 7, 12),
+        (size_12, guide_size_12, 12, 6, 13),
+        (size_13, guide_size_13, 13, 5, 14),
+        (size_14, guide_size_14, 14, 4, 15),
+        (size_15, guide_size_15, 15, 3, 16),
+        (size_16, guide_size_16, 16, 2, 17),
+        (size_17, guide_size_17, 17, 1, 18),
+        (size_18, guide_size_18, 18, 0, 19),
+    );
+    check_shift_width!(
+        shift_width_19,
+        (size_00, guide_size_00, 0, 19, 20),
+        (size_01, guide_size_01, 1, 18, 19),
+        (size_02, guide_size_02, 2, 17, 18),
+        (size_03, guide_size_03, 3, 16, 17),
+        (size_04, guide_size_04, 4, 15, 16),
+        (size_05, guide_size_05, 5, 14, 15),
+        (size_06, guide_size_06, 6, 13, 14),
+        (size_07, guide_size_07, 7, 12, 13),
+        (size_08, guide_size_08, 8, 11, 12),
+        (size_09, guide_size_09, 9, 10, 11),
+        (size_10, guide_size_10, 10, 9, 11),
+        (size_11, guide_size_11, 11, 8, 12),
+        (size_12, guide_size_12, 12, 7, 13),
+        (size_13, guide_size_13, 13, 6, 14),
+        (size_14, guide_size_14, 14, 5, 15),
+        (size_15, guide_size_15, 15, 4, 16),
+        (size_16, guide_size_16, 16, 3, 17),
+        (size_17, guide_size_17, 17, 2, 18),
+        (size_18, guide_size_18, 18, 1, 19),
+        (size_19, guide_size_19, 19, 0, 20),
+    );
+    check_shift_width!(
+        shift_width_20,
+        #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+        (size_00, guide_size_00, 0, 20, 21),
+        (size_01, guide_size_01, 1, 19, 20),
+        (size_02, guide_size_02, 2, 18, 19),
+        (size_03, guide_size_03, 3, 17, 18),
+        (size_04, guide_size_04, 4, 16, 17),
+        (size_05, guide_size_05, 5, 15, 16),
+        (size_06, guide_size_06, 6, 14, 15),
+        (size_07, guide_size_07, 7, 13, 14),
+        (size_08, guide_size_08, 8, 12, 13),
+        (size_09, guide_size_09, 9, 11, 12),
+        (size_10, guide_size_10, 10, 10, 11),
+        (size_11, guide_size_11, 11, 9, 12),
+        (size_12, guide_size_12, 12, 8, 13),
+        (size_13, guide_size_13, 13, 7, 14),
+        (size_14, guide_size_14, 14, 6, 15),
+        (size_15, guide_size_15, 15, 5, 16),
+        (size_16, guide_size_16, 16, 4, 17),
+        (size_17, guide_size_17, 17, 3, 18),
+        (size_18, guide_size_18, 18, 2, 19),
+        (size_19, guide_size_19, 19, 1, 20),
+        (size_20, guide_size_20, 20, 0, 21),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_21,
+        (size_00, guide_size_00, 0, 21, 22),
+        (size_01, guide_size_01, 1, 20, 21),
+        (size_02, guide_size_02, 2, 19, 20),
+        (size_03, guide_size_03, 3, 18, 19),
+        (size_04, guide_size_04, 4, 17, 18),
+        (size_05, guide_size_05, 5, 16, 17),
+        (size_06, guide_size_06, 6, 15, 16),
+        (size_07, guide_size_07, 7, 14, 15),
+        (size_08, guide_size_08, 8, 13, 14),
+        (size_09, guide_size_09, 9, 12, 13),
+        (size_10, guide_size_10, 10, 11, 12),
+        (size_11, guide_size_11, 11, 10, 12),
+        (size_12, guide_size_12, 12, 9, 13),
+        (size_13, guide_size_13, 13, 8, 14),
+        (size_14, guide_size_14, 14, 7, 15),
+        (size_15, guide_size_15, 15, 6, 16),
+        (size_16, guide_size_16, 16, 5, 17),
+        (size_17, guide_size_17, 17, 4, 18),
+        (size_18, guide_size_18, 18, 3, 19),
+        (size_19, guide_size_19, 19, 2, 20),
+        (size_20, guide_size_20, 20, 1, 21),
+        (size_21, guide_size_21, 21, 0, 22),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_22,
+        (size_00, guide_size_00, 0, 22, 23),
+        (size_01, guide_size_01, 1, 21, 22),
+        (size_02, guide_size_02, 2, 20, 21),
+        (size_03, guide_size_03, 3, 19, 20),
+        (size_04, guide_size_04, 4, 18, 19),
+        (size_05, guide_size_05, 5, 17, 18),
+        (size_06, guide_size_06, 6, 16, 17),
+        (size_07, guide_size_07, 7, 15, 16),
+        (size_08, guide_size_08, 8, 14, 15),
+        (size_09, guide_size_09, 9, 13, 14),
+        (size_10, guide_size_10, 10, 12, 13),
+        (size_11, guide_size_11, 11, 11, 12),
+        (size_12, guide_size_12, 12, 10, 13),
+        (size_13, guide_size_13, 13, 9, 14),
+        (size_14, guide_size_14, 14, 8, 15),
+        (size_15, guide_size_15, 15, 7, 16),
+        (size_16, guide_size_16, 16, 6, 17),
+        (size_17, guide_size_17, 17, 5, 18),
+        (size_18, guide_size_18, 18, 4, 19),
+        (size_19, guide_size_19, 19, 3, 20),
+        (size_20, guide_size_20, 20, 2, 21),
+        (size_21, guide_size_21, 21, 1, 22),
+        (size_22, guide_size_22, 22, 0, 23),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_23,
+        (size_00, guide_size_00, 0, 23, 24),
+        (size_01, guide_size_01, 1, 22, 23),
+        (size_02, guide_size_02, 2, 21, 22),
+        (size_03, guide_size_03, 3, 20, 21),
+        (size_04, guide_size_04, 4, 19, 20),
+        (size_05, guide_size_05, 5, 18, 19),
+        (size_06, guide_size_06, 6, 17, 18),
+        (size_07, guide_size_07, 7, 16, 17),
+        (size_08, guide_size_08, 8, 15, 16),
+        (size_09, guide_size_09, 9, 14, 15),
+        (size_10, guide_size_10, 10, 13, 14),
+        (size_11, guide_size_11, 11, 12, 13),
+        (size_12, guide_size_12, 12, 11, 13),
+        (size_13, guide_size_13, 13, 10, 14),
+        (size_14, guide_size_14, 14, 9, 15),
+        (size_15, guide_size_15, 15, 8, 16),
+        (size_16, guide_size_16, 16, 7, 17),
+        (size_17, guide_size_17, 17, 6, 18),
+        (size_18, guide_size_18, 18, 5, 19),
+        (size_19, guide_size_19, 19, 4, 20),
+        (size_20, guide_size_20, 20, 3, 21),
+        (size_21, guide_size_21, 21, 2, 22),
+        (size_22, guide_size_22, 22, 1, 23),
+        (size_23, guide_size_23, 23, 0, 24),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_24,
+        (size_00, guide_size_00, 0, 24, 25),
+        (size_01, guide_size_01, 1, 23, 24),
+        (size_02, guide_size_02, 2, 22, 23),
+        (size_03, guide_size_03, 3, 21, 22),
+        (size_04, guide_size_04, 4, 20, 21),
+        (size_05, guide_size_05, 5, 19, 20),
+        (size_06, guide_size_06, 6, 18, 19),
+        (size_07, guide_size_07, 7, 17, 18),
+        (size_08, guide_size_08, 8, 16, 17),
+        (size_09, guide_size_09, 9, 15, 16),
+        (size_10, guide_size_10, 10, 14, 15),
+        (size_11, guide_size_11, 11, 13, 14),
+        (size_12, guide_size_12, 12, 12, 13),
+        (size_13, guide_size_13, 13, 11, 14),
+        (size_14, guide_size_14, 14, 10, 15),
+        (size_15, guide_size_15, 15, 9, 16),
+        (size_16, guide_size_16, 16, 8, 17),
+        (size_17, guide_size_17, 17, 7, 18),
+        (size_18, guide_size_18, 18, 6, 19),
+        (size_19, guide_size_19, 19, 5, 20),
+        (size_20, guide_size_20, 20, 4, 21),
+        (size_21, guide_size_21, 21, 3, 22),
+        (size_22, guide_size_22, 22, 2, 23),
+        (size_23, guide_size_23, 23, 1, 24),
+        (size_24, guide_size_24, 24, 0, 25),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_25,
+        (size_00, guide_size_00, 0, 25, 26),
+        (size_01, guide_size_01, 1, 24, 25),
+        (size_02, guide_size_02, 2, 23, 24),
+        (size_03, guide_size_03, 3, 22, 23),
+        (size_04, guide_size_04, 4, 21, 22),
+        (size_05, guide_size_05, 5, 20, 21),
+        (size_06, guide_size_06, 6, 19, 20),
+        (size_07, guide_size_07, 7, 18, 19),
+        (size_08, guide_size_08, 8, 17, 18),
+        (size_09, guide_size_09, 9, 16, 17),
+        (size_10, guide_size_10, 10, 15, 16),
+        (size_11, guide_size_11, 11, 14, 15),
+        (size_12, guide_size_12, 12, 13, 14),
+        (size_13, guide_size_13, 13, 12, 14),
+        (size_14, guide_size_14, 14, 11, 15),
+        (size_15, guide_size_15, 15, 10, 16),
+        (size_16, guide_size_16, 16, 9, 17),
+        (size_17, guide_size_17, 17, 8, 18),
+        (size_18, guide_size_18, 18, 7, 19),
+        (size_19, guide_size_19, 19, 6, 20),
+        (size_20, guide_size_20, 20, 5, 21),
+        (size_21, guide_size_21, 21, 4, 22),
+        (size_22, guide_size_22, 22, 3, 23),
+        (size_23, guide_size_23, 23, 2, 24),
+        (size_24, guide_size_24, 24, 1, 25),
+        (size_25, guide_size_25, 25, 0, 26),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_26,
+        (size_00, guide_size_00, 0, 26, 27),
+        (size_01, guide_size_01, 1, 25, 26),
+        (size_02, guide_size_02, 2, 24, 25),
+        (size_03, guide_size_03, 3, 23, 24),
+        (size_04, guide_size_04, 4, 22, 23),
+        (size_05, guide_size_05, 5, 21, 22),
+        (size_06, guide_size_06, 6, 20, 21),
+        (size_07, guide_size_07, 7, 19, 20),
+        (size_08, guide_size_08, 8, 18, 19),
+        (size_09, guide_size_09, 9, 17, 18),
+        (size_10, guide_size_10, 10, 16, 17),
+        (size_11, guide_size_11, 11, 15, 16),
+        (size_12, guide_size_12, 12, 14, 15),
+        (size_13, guide_size_13, 13, 13, 14),
+        (size_14, guide_size_14, 14, 12, 15),
+        (size_15, guide_size_15, 15, 11, 16),
+        (size_16, guide_size_16, 16, 10, 17),
+        (size_17, guide_size_17, 17, 9, 18),
+        (size_18, guide_size_18, 18, 8, 19),
+        (size_19, guide_size_19, 19, 7, 20),
+        (size_20, guide_size_20, 20, 6, 21),
+        (size_21, guide_size_21, 21, 5, 22),
+        (size_22, guide_size_22, 22, 4, 23),
+        (size_23, guide_size_23, 23, 3, 24),
+        (size_24, guide_size_24, 24, 2, 25),
+        (size_25, guide_size_25, 25, 1, 26),
+        (size_26, guide_size_26, 26, 0, 27),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_27,
+        (size_00, guide_size_00, 0, 27, 28),
+        (size_01, guide_size_01, 1, 26, 27),
+        (size_02, guide_size_02, 2, 25, 26),
+        (size_03, guide_size_03, 3, 24, 25),
+        (size_04, guide_size_04, 4, 23, 24),
+        (size_05, guide_size_05, 5, 22, 23),
+        (size_06, guide_size_06, 6, 21, 22),
+        (size_07, guide_size_07, 7, 20, 21),
+        (size_08, guide_size_08, 8, 19, 20),
+        (size_09, guide_size_09, 9, 18, 19),
+        (size_10, guide_size_10, 10, 17, 18),
+        (size_11, guide_size_11, 11, 16, 17),
+        (size_12, guide_size_12, 12, 15, 16),
+        (size_13, guide_size_13, 13, 14, 15),
+        (size_14, guide_size_14, 14, 13, 15),
+        (size_15, guide_size_15, 15, 12, 16),
+        (size_16, guide_size_16, 16, 11, 17),
+        (size_17, guide_size_17, 17, 10, 18),
+        (size_18, guide_size_18, 18, 9, 19),
+        (size_19, guide_size_19, 19, 8, 20),
+        (size_20, guide_size_20, 20, 7, 21),
+        (size_21, guide_size_21, 21, 6, 22),
+        (size_22, guide_size_22, 22, 5, 23),
+        (size_23, guide_size_23, 23, 4, 24),
+        (size_24, guide_size_24, 24, 3, 25),
+        (size_25, guide_size_25, 25, 2, 26),
+        (size_26, guide_size_26, 26, 1, 27),
+        (size_27, guide_size_27, 27, 0, 28),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_28,
+        (size_00, guide_size_00, 0, 28, 29),
+        (size_01, guide_size_01, 1, 27, 28),
+        (size_02, guide_size_02, 2, 26, 27),
+        (size_03, guide_size_03, 3, 25, 26),
+        (size_04, guide_size_04, 4, 24, 25),
+        (size_05, guide_size_05, 5, 23, 24),
+        (size_06, guide_size_06, 6, 22, 23),
+        (size_07, guide_size_07, 7, 21, 22),
+        (size_08, guide_size_08, 8, 20, 21),
+        (size_09, guide_size_09, 9, 19, 20),
+        (size_10, guide_size_10, 10, 18, 19),
+        (size_11, guide_size_11, 11, 17, 18),
+        (size_12, guide_size_12, 12, 16, 17),
+        (size_13, guide_size_13, 13, 15, 16),
+        (size_14, guide_size_14, 14, 14, 15),
+        (size_15, guide_size_15, 15, 13, 16),
+        (size_16, guide_size_16, 16, 12, 17),
+        (size_17, guide_size_17, 17, 11, 18),
+        (size_18, guide_size_18, 18, 10, 19),
+        (size_19, guide_size_19, 19, 9, 20),
+        (size_20, guide_size_20, 20, 8, 21),
+        (size_21, guide_size_21, 21, 7, 22),
+        (size_22, guide_size_22, 22, 6, 23),
+        (size_23, guide_size_23, 23, 5, 24),
+        (size_24, guide_size_24, 24, 4, 25),
+        (size_25, guide_size_25, 25, 3, 26),
+        (size_26, guide_size_26, 26, 2, 27),
+        (size_27, guide_size_27, 27, 1, 28),
+        (size_28, guide_size_28, 28, 0, 29),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_29,
+        (size_00, guide_size_00, 0, 29, 30),
+        (size_01, guide_size_01, 1, 28, 29),
+        (size_02, guide_size_02, 2, 27, 28),
+        (size_03, guide_size_03, 3, 26, 27),
+        (size_04, guide_size_04, 4, 25, 26),
+        (size_05, guide_size_05, 5, 24, 25),
+        (size_06, guide_size_06, 6, 23, 24),
+        (size_07, guide_size_07, 7, 22, 23),
+        (size_08, guide_size_08, 8, 21, 22),
+        (size_09, guide_size_09, 9, 20, 21),
+        (size_10, guide_size_10, 10, 19, 20),
+        (size_11, guide_size_11, 11, 18, 19),
+        (size_12, guide_size_12, 12, 17, 18),
+        (size_13, guide_size_13, 13, 16, 17),
+        (size_14, guide_size_14, 14, 15, 16),
+        (size_15, guide_size_15, 15, 14, 16),
+        (size_16, guide_size_16, 16, 13, 17),
+        (size_17, guide_size_17, 17, 12, 18),
+        (size_18, guide_size_18, 18, 11, 19),
+        (size_19, guide_size_19, 19, 10, 20),
+        (size_20, guide_size_20, 20, 9, 21),
+        (size_21, guide_size_21, 21, 8, 22),
+        (size_22, guide_size_22, 22, 7, 23),
+        (size_23, guide_size_23, 23, 6, 24),
+        (size_24, guide_size_24, 24, 5, 25),
+        (size_25, guide_size_25, 25, 4, 26),
+        (size_26, guide_size_26, 26, 3, 27),
+        (size_27, guide_size_27, 27, 2, 28),
+        (size_28, guide_size_28, 28, 1, 29),
+        (size_29, guide_size_29, 29, 0, 30),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_30,
+        (size_00, guide_size_00, 0, 30, 31),
+        (size_01, guide_size_01, 1, 29, 30),
+        (size_02, guide_size_02, 2, 28, 29),
+        (size_03, guide_size_03, 3, 27, 28),
+        (size_04, guide_size_04, 4, 26, 27),
+        (size_05, guide_size_05, 5, 25, 26),
+        (size_06, guide_size_06, 6, 24, 25),
+        (size_07, guide_size_07, 7, 23, 24),
+        (size_08, guide_size_08, 8, 22, 23),
+        (size_09, guide_size_09, 9, 21, 22),
+        (size_10, guide_size_10, 10, 20, 21),
+        (size_11, guide_size_11, 11, 19, 20),
+        (size_12, guide_size_12, 12, 18, 19),
+        (size_13, guide_size_13, 13, 17, 18),
+        (size_14, guide_size_14, 14, 16, 17),
+        (size_15, guide_size_15, 15, 15, 16),
+        (size_16, guide_size_16, 16, 14, 17),
+        (size_17, guide_size_17, 17, 13, 18),
+        (size_18, guide_size_18, 18, 12, 19),
+        (size_19, guide_size_19, 19, 11, 20),
+        (size_20, guide_size_20, 20, 10, 21),
+        (size_21, guide_size_21, 21, 9, 22),
+        (size_22, guide_size_22, 22, 8, 23),
+        (size_23, guide_size_23, 23, 7, 24),
+        (size_24, guide_size_24, 24, 6, 25),
+        (size_25, guide_size_25, 25, 5, 26),
+        (size_26, guide_size_26, 26, 4, 27),
+        (size_27, guide_size_27, 27, 3, 28),
+        (size_28, guide_size_28, 28, 2, 29),
+        (size_29, guide_size_29, 29, 1, 30),
+        (size_30, guide_size_30, 30, 0, 31),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_31,
+        (size_00, guide_size_00, 0, 31, 32),
+        (size_01, guide_size_01, 1, 30, 31),
+        (size_02, guide_size_02, 2, 29, 30),
+        (size_03, guide_size_03, 3, 28, 29),
+        (size_04, guide_size_04, 4, 27, 28),
+        (size_05, guide_size_05, 5, 26, 27),
+        (size_06, guide_size_06, 6, 25, 26),
+        (size_07, guide_size_07, 7, 24, 25),
+        (size_08, guide_size_08, 8, 23, 24),
+        (size_09, guide_size_09, 9, 22, 23),
+        (size_10, guide_size_10, 10, 21, 22),
+        (size_11, guide_size_11, 11, 20, 21),
+        (size_12, guide_size_12, 12, 19, 20),
+        (size_13, guide_size_13, 13, 18, 19),
+        (size_14, guide_size_14, 14, 17, 18),
+        (size_15, guide_size_15, 15, 16, 17),
+        (size_16, guide_size_16, 16, 15, 17),
+        (size_17, guide_size_17, 17, 14, 18),
+        (size_18, guide_size_18, 18, 13, 19),
+        (size_19, guide_size_19, 19, 12, 20),
+        (size_20, guide_size_20, 20, 11, 21),
+        (size_21, guide_size_21, 21, 10, 22),
+        (size_22, guide_size_22, 22, 9, 23),
+        (size_23, guide_size_23, 23, 8, 24),
+        (size_24, guide_size_24, 24, 7, 25),
+        (size_25, guide_size_25, 25, 6, 26),
+        (size_26, guide_size_26, 26, 5, 27),
+        (size_27, guide_size_27, 27, 4, 28),
+        (size_28, guide_size_28, 28, 3, 29),
+        (size_29, guide_size_29, 29, 2, 30),
+        (size_30, guide_size_30, 30, 1, 31),
+        (size_31, guide_size_31, 31, 0, 32),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_32,
+        (size_00, guide_size_00, 0, 32, 33),
+        (size_01, guide_size_01, 1, 31, 32),
+        (size_02, guide_size_02, 2, 30, 31),
+        (size_03, guide_size_03, 3, 29, 30),
+        (size_04, guide_size_04, 4, 28, 29),
+        (size_05, guide_size_05, 5, 27, 28),
+        (size_06, guide_size_06, 6, 26, 27),
+        (size_07, guide_size_07, 7, 25, 26),
+        (size_08, guide_size_08, 8, 24, 25),
+        (size_09, guide_size_09, 9, 23, 24),
+        (size_10, guide_size_10, 10, 22, 23),
+        (size_11, guide_size_11, 11, 21, 22),
+        (size_12, guide_size_12, 12, 20, 21),
+        (size_13, guide_size_13, 13, 19, 20),
+        (size_14, guide_size_14, 14, 18, 19),
+        (size_15, guide_size_15, 15, 17, 18),
+        (size_16, guide_size_16, 16, 16, 17),
+        (size_17, guide_size_17, 17, 15, 18),
+        (size_18, guide_size_18, 18, 14, 19),
+        (size_19, guide_size_19, 19, 13, 20),
+        (size_20, guide_size_20, 20, 12, 21),
+        (size_21, guide_size_21, 21, 11, 22),
+        (size_22, guide_size_22, 22, 10, 23),
+        (size_23, guide_size_23, 23, 9, 24),
+        (size_24, guide_size_24, 24, 8, 25),
+        (size_25, guide_size_25, 25, 7, 26),
+        (size_26, guide_size_26, 26, 6, 27),
+        (size_27, guide_size_27, 27, 5, 28),
+        (size_28, guide_size_28, 28, 4, 29),
+        (size_29, guide_size_29, 29, 3, 30),
+        (size_30, guide_size_30, 30, 2, 31),
+        (size_31, guide_size_31, 31, 1, 32),
+        (size_32, guide_size_32, 32, 0, 33),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_33,
+        (size_00, guide_size_00, 0, 33, 34),
+        (size_01, guide_size_01, 1, 32, 33),
+        (size_02, guide_size_02, 2, 31, 32),
+        (size_03, guide_size_03, 3, 30, 31),
+        (size_04, guide_size_04, 4, 29, 30),
+        (size_05, guide_size_05, 5, 28, 29),
+        (size_06, guide_size_06, 6, 27, 28),
+        (size_07, guide_size_07, 7, 26, 27),
+        (size_08, guide_size_08, 8, 25, 26),
+        (size_09, guide_size_09, 9, 24, 25),
+        (size_10, guide_size_10, 10, 23, 24),
+        (size_11, guide_size_11, 11, 22, 23),
+        (size_12, guide_size_12, 12, 21, 22),
+        (size_13, guide_size_13, 13, 20, 21),
+        (size_14, guide_size_14, 14, 19, 20),
+        (size_15, guide_size_15, 15, 18, 19),
+        (size_16, guide_size_16, 16, 17, 18),
+        (size_17, guide_size_17, 17, 16, 18),
+        (size_18, guide_size_18, 18, 15, 19),
+        (size_19, guide_size_19, 19, 14, 20),
+        (size_20, guide_size_20, 20, 13, 21),
+        (size_21, guide_size_21, 21, 12, 22),
+        (size_22, guide_size_22, 22, 11, 23),
+        (size_23, guide_size_23, 23, 10, 24),
+        (size_24, guide_size_24, 24, 9, 25),
+        (size_25, guide_size_25, 25, 8, 26),
+        (size_26, guide_size_26, 26, 7, 27),
+        (size_27, guide_size_27, 27, 6, 28),
+        (size_28, guide_size_28, 28, 5, 29),
+        (size_29, guide_size_29, 29, 4, 30),
+        (size_30, guide_size_30, 30, 3, 31),
+        (size_31, guide_size_31, 31, 2, 32),
+        (size_32, guide_size_32, 32, 1, 33),
+        (size_33, guide_size_33, 33, 0, 34),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_34,
+        (size_00, guide_size_00, 0, 34, 35),
+        (size_01, guide_size_01, 1, 33, 34),
+        (size_02, guide_size_02, 2, 32, 33),
+        (size_03, guide_size_03, 3, 31, 32),
+        (size_04, guide_size_04, 4, 30, 31),
+        (size_05, guide_size_05, 5, 29, 30),
+        (size_06, guide_size_06, 6, 28, 29),
+        (size_07, guide_size_07, 7, 27, 28),
+        (size_08, guide_size_08, 8, 26, 27),
+        (size_09, guide_size_09, 9, 25, 26),
+        (size_10, guide_size_10, 10, 24, 25),
+        (size_11, guide_size_11, 11, 23, 24),
+        (size_12, guide_size_12, 12, 22, 23),
+        (size_13, guide_size_13, 13, 21, 22),
+        (size_14, guide_size_14, 14, 20, 21),
+        (size_15, guide_size_15, 15, 19, 20),
+        (size_16, guide_size_16, 16, 18, 19),
+        (size_17, guide_size_17, 17, 17, 18),
+        (size_18, guide_size_18, 18, 16, 19),
+        (size_19, guide_size_19, 19, 15, 20),
+        (size_20, guide_size_20, 20, 14, 21),
+        (size_21, guide_size_21, 21, 13, 22),
+        (size_22, guide_size_22, 22, 12, 23),
+        (size_23, guide_size_23, 23, 11, 24),
+        (size_24, guide_size_24, 24, 10, 25),
+        (size_25, guide_size_25, 25, 9, 26),
+        (size_26, guide_size_26, 26, 8, 27),
+        (size_27, guide_size_27, 27, 7, 28),
+        (size_28, guide_size_28, 28, 6, 29),
+        (size_29, guide_size_29, 29, 5, 30),
+        (size_30, guide_size_30, 30, 4, 31),
+        (size_31, guide_size_31, 31, 3, 32),
+        (size_32, guide_size_32, 32, 2, 33),
+        (size_33, guide_size_33, 33, 1, 34),
+        (size_34, guide_size_34, 34, 0, 35),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_35,
+        (size_00, guide_size_00, 0, 35, 36),
+        (size_01, guide_size_01, 1, 34, 35),
+        (size_02, guide_size_02, 2, 33, 34),
+        (size_03, guide_size_03, 3, 32, 33),
+        (size_04, guide_size_04, 4, 31, 32),
+        (size_05, guide_size_05, 5, 30, 31),
+        (size_06, guide_size_06, 6, 29, 30),
+        (size_07, guide_size_07, 7, 28, 29),
+        (size_08, guide_size_08, 8, 27, 28),
+        (size_09, guide_size_09, 9, 26, 27),
+        (size_10, guide_size_10, 10, 25, 26),
+        (size_11, guide_size_11, 11, 24, 25),
+        (size_12, guide_size_12, 12, 23, 24),
+        (size_13, guide_size_13, 13, 22, 23),
+        (size_14, guide_size_14, 14, 21, 22),
+        (size_15, guide_size_15, 15, 20, 21),
+        (size_16, guide_size_16, 16, 19, 20),
+        (size_17, guide_size_17, 17, 18, 19),
+        (size_18, guide_size_18, 18, 17, 19),
+        (size_19, guide_size_19, 19, 16, 20),
+        (size_20, guide_size_20, 20, 15, 21),
+        (size_21, guide_size_21, 21, 14, 22),
+        (size_22, guide_size_22, 22, 13, 23),
+        (size_23, guide_size_23, 23, 12, 24),
+        (size_24, guide_size_24, 24, 11, 25),
+        (size_25, guide_size_25, 25, 10, 26),
+        (size_26, guide_size_26, 26, 9, 27),
+        (size_27, guide_size_27, 27, 8, 28),
+        (size_28, guide_size_28, 28, 7, 29),
+        (size_29, guide_size_29, 29, 6, 30),
+        (size_30, guide_size_30, 30, 5, 31),
+        (size_31, guide_size_31, 31, 4, 32),
+        (size_32, guide_size_32, 32, 3, 33),
+        (size_33, guide_size_33, 33, 2, 34),
+        (size_34, guide_size_34, 34, 1, 35),
+        (size_35, guide_size_35, 35, 0, 36),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_36,
+        (size_00, guide_size_00, 0, 36, 37),
+        (size_01, guide_size_01, 1, 35, 36),
+        (size_02, guide_size_02, 2, 34, 35),
+        (size_03, guide_size_03, 3, 33, 34),
+        (size_04, guide_size_04, 4, 32, 33),
+        (size_05, guide_size_05, 5, 31, 32),
+        (size_06, guide_size_06, 6, 30, 31),
+        (size_07, guide_size_07, 7, 29, 30),
+        (size_08, guide_size_08, 8, 28, 29),
+        (size_09, guide_size_09, 9, 27, 28),
+        (size_10, guide_size_10, 10, 26, 27),
+        (size_11, guide_size_11, 11, 25, 26),
+        (size_12, guide_size_12, 12, 24, 25),
+        (size_13, guide_size_13, 13, 23, 24),
+        (size_14, guide_size_14, 14, 22, 23),
+        (size_15, guide_size_15, 15, 21, 22),
+        (size_16, guide_size_16, 16, 20, 21),
+        (size_17, guide_size_17, 17, 19, 20),
+        (size_18, guide_size_18, 18, 18, 19),
+        (size_19, guide_size_19, 19, 17, 20),
+        (size_20, guide_size_20, 20, 16, 21),
+        (size_21, guide_size_21, 21, 15, 22),
+        (size_22, guide_size_22, 22, 14, 23),
+        (size_23, guide_size_23, 23, 13, 24),
+        (size_24, guide_size_24, 24, 12, 25),
+        (size_25, guide_size_25, 25, 11, 26),
+        (size_26, guide_size_26, 26, 10, 27),
+        (size_27, guide_size_27, 27, 9, 28),
+        (size_28, guide_size_28, 28, 8, 29),
+        (size_29, guide_size_29, 29, 7, 30),
+        (size_30, guide_size_30, 30, 6, 31),
+        (size_31, guide_size_31, 31, 5, 32),
+        (size_32, guide_size_32, 32, 4, 33),
+        (size_33, guide_size_33, 33, 3, 34),
+        (size_34, guide_size_34, 34, 2, 35),
+        (size_35, guide_size_35, 35, 1, 36),
+        (size_36, guide_size_36, 36, 0, 37),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_37,
+        (size_00, guide_size_00, 0, 37, 38),
+        (size_01, guide_size_01, 1, 36, 37),
+        (size_02, guide_size_02, 2, 35, 36),
+        (size_03, guide_size_03, 3, 34, 35),
+        (size_04, guide_size_04, 4, 33, 34),
+        (size_05, guide_size_05, 5, 32, 33),
+        (size_06, guide_size_06, 6, 31, 32),
+        (size_07, guide_size_07, 7, 30, 31),
+        (size_08, guide_size_08, 8, 29, 30),
+        (size_09, guide_size_09, 9, 28, 29),
+        (size_10, guide_size_10, 10, 27, 28),
+        (size_11, guide_size_11, 11, 26, 27),
+        (size_12, guide_size_12, 12, 25, 26),
+        (size_13, guide_size_13, 13, 24, 25),
+        (size_14, guide_size_14, 14, 23, 24),
+        (size_15, guide_size_15, 15, 22, 23),
+        (size_16, guide_size_16, 16, 21, 22),
+        (size_17, guide_size_17, 17, 20, 21),
+        (size_18, guide_size_18, 18, 19, 20),
+        (size_19, guide_size_19, 19, 18, 20),
+        (size_20, guide_size_20, 20, 17, 21),
+        (size_21, guide_size_21, 21, 16, 22),
+        (size_22, guide_size_22, 22, 15, 23),
+        (size_23, guide_size_23, 23, 14, 24),
+        (size_24, guide_size_24, 24, 13, 25),
+        (size_25, guide_size_25, 25, 12, 26),
+        (size_26, guide_size_26, 26, 11, 27),
+        (size_27, guide_size_27, 27, 10, 28),
+        (size_28, guide_size_28, 28, 9, 29),
+        (size_29, guide_size_29, 29, 8, 30),
+        (size_30, guide_size_30, 30, 7, 31),
+        (size_31, guide_size_31, 31, 6, 32),
+        (size_32, guide_size_32, 32, 5, 33),
+        (size_33, guide_size_33, 33, 4, 34),
+        (size_34, guide_size_34, 34, 3, 35),
+        (size_35, guide_size_35, 35, 2, 36),
+        (size_36, guide_size_36, 36, 1, 37),
+        (size_37, guide_size_37, 37, 0, 38),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_38,
+        (size_00, guide_size_00, 0, 38, 39),
+        (size_01, guide_size_01, 1, 37, 38),
+        (size_02, guide_size_02, 2, 36, 37),
+        (size_03, guide_size_03, 3, 35, 36),
+        (size_04, guide_size_04, 4, 34, 35),
+        (size_05, guide_size_05, 5, 33, 34),
+        (size_06, guide_size_06, 6, 32, 33),
+        (size_07, guide_size_07, 7, 31, 32),
+        (size_08, guide_size_08, 8, 30, 31),
+        (size_09, guide_size_09, 9, 29, 30),
+        (size_10, guide_size_10, 10, 28, 29),
+        (size_11, guide_size_11, 11, 27, 28),
+        (size_12, guide_size_12, 12, 26, 27),
+        (size_13, guide_size_13, 13, 25, 26),
+        (size_14, guide_size_14, 14, 24, 25),
+        (size_15, guide_size_15, 15, 23, 24),
+        (size_16, guide_size_16, 16, 22, 23),
+        (size_17, guide_size_17, 17, 21, 22),
+        (size_18, guide_size_18, 18, 20, 21),
+        (size_19, guide_size_19, 19, 19, 20),
+        (size_20, guide_size_20, 20, 18, 21),
+        (size_21, guide_size_21, 21, 17, 22),
+        (size_22, guide_size_22, 22, 16, 23),
+        (size_23, guide_size_23, 23, 15, 24),
+        (size_24, guide_size_24, 24, 14, 25),
+        (size_25, guide_size_25, 25, 13, 26),
+        (size_26, guide_size_26, 26, 12, 27),
+        (size_27, guide_size_27, 27, 11, 28),
+        (size_28, guide_size_28, 28, 10, 29),
+        (size_29, guide_size_29, 29, 9, 30),
+        (size_30, guide_size_30, 30, 8, 31),
+        (size_31, guide_size_31, 31, 7, 32),
+        (size_32, guide_size_32, 32, 6, 33),
+        (size_33, guide_size_33, 33, 5, 34),
+        (size_34, guide_size_34, 34, 4, 35),
+        (size_35, guide_size_35, 35, 3, 36),
+        (size_36, guide_size_36, 36, 2, 37),
+        (size_37, guide_size_37, 37, 1, 38),
+        (size_38, guide_size_38, 38, 0, 39),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_39,
+        (size_00, guide_size_00, 0, 39, 40),
+        (size_01, guide_size_01, 1, 38, 39),
+        (size_02, guide_size_02, 2, 37, 38),
+        (size_03, guide_size_03, 3, 36, 37),
+        (size_04, guide_size_04, 4, 35, 36),
+        (size_05, guide_size_05, 5, 34, 35),
+        (size_06, guide_size_06, 6, 33, 34),
+        (size_07, guide_size_07, 7, 32, 33),
+        (size_08, guide_size_08, 8, 31, 32),
+        (size_09, guide_size_09, 9, 30, 31),
+        (size_10, guide_size_10, 10, 29, 30),
+        (size_11, guide_size_11, 11, 28, 29),
+        (size_12, guide_size_12, 12, 27, 28),
+        (size_13, guide_size_13, 13, 26, 27),
+        (size_14, guide_size_14, 14, 25, 26),
+        (size_15, guide_size_15, 15, 24, 25),
+        (size_16, guide_size_16, 16, 23, 24),
+        (size_17, guide_size_17, 17, 22, 23),
+        (size_18, guide_size_18, 18, 21, 22),
+        (size_19, guide_size_19, 19, 20, 21),
+        (size_20, guide_size_20, 20, 19, 21),
+        (size_21, guide_size_21, 21, 18, 22),
+        (size_22, guide_size_22, 22, 17, 23),
+        (size_23, guide_size_23, 23, 16, 24),
+        (size_24, guide_size_24, 24, 15, 25),
+        (size_25, guide_size_25, 25, 14, 26),
+        (size_26, guide_size_26, 26, 13, 27),
+        (size_27, guide_size_27, 27, 12, 28),
+        (size_28, guide_size_28, 28, 11, 29),
+        (size_29, guide_size_29, 29, 10, 30),
+        (size_30, guide_size_30, 30, 9, 31),
+        (size_31, guide_size_31, 31, 8, 32),
+        (size_32, guide_size_32, 32, 7, 33),
+        (size_33, guide_size_33, 33, 6, 34),
+        (size_34, guide_size_34, 34, 5, 35),
+        (size_35, guide_size_35, 35, 4, 36),
+        (size_36, guide_size_36, 36, 3, 37),
+        (size_37, guide_size_37, 37, 2, 38),
+        (size_38, guide_size_38, 38, 1, 39),
+        (size_39, guide_size_39, 39, 0, 40),
+    );
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_shift_width!(
+        shift_width_40,
+        (size_01, guide_size_01, 1, 39, 40),
+        (size_02, guide_size_02, 2, 38, 39),
+        (size_03, guide_size_03, 3, 37, 38),
+        (size_04, guide_size_04, 4, 36, 37),
+        (size_05, guide_size_05, 5, 35, 36),
+        (size_06, guide_size_06, 6, 34, 35),
+        (size_07, guide_size_07, 7, 33, 34),
+        (size_08, guide_size_08, 8, 32, 33),
+        (size_09, guide_size_09, 9, 31, 32),
+        (size_10, guide_size_10, 10, 30, 31),
+        (size_11, guide_size_11, 11, 29, 30),
+        (size_12, guide_size_12, 12, 28, 29),
+        (size_13, guide_size_13, 13, 27, 28),
+        (size_14, guide_size_14, 14, 26, 27),
+        (size_15, guide_size_15, 15, 25, 26),
+        (size_16, guide_size_16, 16, 24, 25),
+        (size_17, guide_size_17, 17, 23, 24),
+        (size_18, guide_size_18, 18, 22, 23),
+        (size_19, guide_size_19, 19, 21, 22),
+        (size_20, guide_size_20, 20, 20, 21),
+        (size_21, guide_size_21, 21, 19, 22),
+        (size_22, guide_size_22, 22, 18, 23),
+        (size_23, guide_size_23, 23, 17, 24),
+        (size_24, guide_size_24, 24, 16, 25),
+        (size_25, guide_size_25, 25, 15, 26),
+        (size_26, guide_size_26, 26, 14, 27),
+        (size_27, guide_size_27, 27, 13, 28),
+        (size_28, guide_size_28, 28, 12, 29),
+        (size_29, guide_size_29, 29, 11, 30),
+        (size_30, guide_size_30, 30, 10, 31),
+        (size_31, guide_size_31, 31, 9, 32),
+        (size_32, guide_size_32, 32, 8, 33),
+        (size_33, guide_size_33, 33, 7, 34),
+        (size_34, guide_size_34, 34, 6, 35),
+        (size_35, guide_size_35, 35, 5, 36),
+        (size_36, guide_size_36, 36, 4, 37),
+        (size_37, guide_size_37, 37, 3, 38),
+        (size_38, guide_size_38, 38, 2, 39),
+        (size_39, guide_size_39, 39, 1, 40),
+        (size_40, guide_size_40, 40, 0, 41),
+    );
+
+    // The cached products run the real multiplication and the model in
+    // lockstep at each `mul_digits_step`. A step multiplies digit `i` of the
+    // first factor by digit `j` of the second factor, and the log keeps one
+    // entry for each position `(i, j)`. The positions are constants in each
+    // unrolled loop, so no log index is symbolic, also when a zero digit
+    // skips a row. The real product runs first: its step at `(i, j)` records
+    // the arguments and returns arbitrary outputs. The model runs second: its
+    // step at `(i, j)` must pass the arguments of the real step at `(i, j)`,
+    // and it returns the outputs of that step. Thus the proof holds for every
+    // function in place of `mul_digits_step`, and the real one is one of them.
+    // Each position is recorded once and replayed once, and the model replays
+    // only recorded positions, so equal counts mean the same set of steps.
+    // The log replaces a comparison of two multiplier circuits.
+    struct Lockstep {
+        replay: bool,
+        recorded: usize,
+        replayed: usize,
+        recorded_at: [[bool; KANI_LIMBS]; KANI_LIMBS],
+        replayed_at: [[bool; KANI_LIMBS]; KANI_LIMBS],
+        arguments: [[(Digit, Digit, Digit, Digit); KANI_LIMBS]; KANI_LIMBS],
+        outputs: [[(Digit, Digit); KANI_LIMBS]; KANI_LIMBS],
+    }
+
+    static mut LOCKSTEP: Lockstep = Lockstep {
+        replay: false,
+        recorded: 0,
+        replayed: 0,
+        recorded_at: [[false; KANI_LIMBS]; KANI_LIMBS],
+        replayed_at: [[false; KANI_LIMBS]; KANI_LIMBS],
+        arguments: [[(0, 0, 0, 0); KANI_LIMBS]; KANI_LIMBS],
+        outputs: [[(0, 0); KANI_LIMBS]; KANI_LIMBS],
+    };
+
+    fn lockstep() -> &'static mut Lockstep {
+        // SAFETY: a harness runs on one thread, and each caller stops using
+        // the reference before the next call to this function.
+        unsafe { &mut *(&raw mut LOCKSTEP) }
+    }
+
+    fn mul_digits_step_lockstep(
+        i: usize,
+        j: usize,
+        a: Digit,
+        b: Digit,
+        c: Digit,
+        carry: Digit,
+    ) -> (Digit, Digit) {
+        assert!(i < KANI_LIMBS && j < KANI_LIMBS);
+        let state = lockstep();
+        let arguments = (a, b, c, carry);
+        if state.replay {
+            assert!(state.recorded_at[i][j] && !state.replayed_at[i][j]);
+            assert!(state.arguments[i][j] == arguments);
+            state.replayed_at[i][j] = true;
+            state.replayed += 1;
+            state.outputs[i][j]
+        } else {
+            assert!(!state.recorded_at[i][j]);
+            let outputs: (Digit, Digit) = (kani::any(), kani::any());
+            state.arguments[i][j] = arguments;
+            state.outputs[i][j] = outputs;
+            state.recorded_at[i][j] = true;
+            state.recorded += 1;
+            outputs
+        }
+    }
+
+    fn check_cached_mul_digits_model_agrees<const SIZE: usize>(digits: &[Digit]) {
+        assert!(SIZE + digits.len() <= KANI_LIMBS);
+        let mut source = Big::kani_with_arbitrary_limbs(SIZE);
+        *source.kani_limbs_mut() = kani::any();
+        let mut actual = source.clone();
+        let mut modeled = source;
+        let actual_start = &mut actual as *mut Big;
+        let modeled_start = &mut modeled as *mut Big;
+        assert!(actual.mul_digits(digits) as *mut Big == actual_start);
+        lockstep().replay = true;
+        assert!(modeled.kani_mul_digits_model(digits) as *mut Big == modeled_start);
+        let state = lockstep();
+        assert!(state.replayed == state.recorded);
+        assert!(actual.kani_same_storage(&modeled));
+        if SIZE == 0 {
+            kani::cover(true, "cached multiplication accepts empty storage");
+        }
+        if SIZE + digits.len() == KANI_LIMBS {
+            kani::cover(true, "cached multiplication accepts the largest model input");
+            kani::cover(actual.kani_size() == KANI_LIMBS, "cached multiplication appends a carry");
+        }
+    }
+
+    macro_rules! check_cached_mul_sizes {
+        ($digits:ident; $($name:ident => $size:literal),+ $(,)?) => {$(
+            #[kani::proof]
+            #[kani::unwind(41)]
+            // The patched CBMC does not link CaDiCaL, and MiniSAT times out on these products.
+            #[kani::solver(kissat)]
+            #[kani::stub(Big::mul_digits_step, mul_digits_step_lockstep)]
+            fn $name() {
+                check_cached_mul_digits_model_agrees::<$size>(&$digits);
+            }
+        )+};
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    macro_rules! check_cached_mul_extra_sizes {
+        (POW5TO16) => { check_cached_mul_sizes!(POW5TO16; size_11 => 11, size_12 => 12, size_13 => 13, size_14 => 14, size_15 => 15, size_16 => 16, size_17 => 17, size_18 => 18, size_19 => 19); };
+        (POW5TO32) => { check_cached_mul_sizes!(POW5TO32; size_11 => 11, size_12 => 12, size_13 => 13, size_14 => 14, size_15 => 15, size_16 => 16, size_17 => 17, size_18 => 18); };
+        (POW5TO64) => { check_cached_mul_sizes!(POW5TO64; size_11 => 11, size_12 => 12, size_13 => 13, size_14 => 14, size_15 => 15, size_16 => 16, size_17 => 17); };
+        (POW5TO128) => { check_cached_mul_sizes!(POW5TO128; size_11 => 11, size_12 => 12, size_13 => 13, size_14 => 14, size_15 => 15); };
+        (POW5TO256) => {  };
+    }
+
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    macro_rules! check_cached_mul_extra_sizes {
+        (POW5TO16) => { check_cached_mul_sizes!(POW5TO16; size_22 => 22, size_23 => 23, size_24 => 24, size_25 => 25, size_26 => 26, size_27 => 27, size_28 => 28, size_29 => 29, size_30 => 30, size_31 => 31, size_32 => 32, size_33 => 33, size_34 => 34, size_35 => 35, size_36 => 36, size_37 => 37, size_38 => 38); };
+        (POW5TO32) => { check_cached_mul_sizes!(POW5TO32; size_22 => 22, size_23 => 23, size_24 => 24, size_25 => 25, size_26 => 26, size_27 => 27, size_28 => 28, size_29 => 29, size_30 => 30, size_31 => 31, size_32 => 32, size_33 => 33, size_34 => 34, size_35 => 35, size_36 => 36, size_37 => 37); };
+        (POW5TO64) => { check_cached_mul_sizes!(POW5TO64; size_22 => 22, size_23 => 23, size_24 => 24, size_25 => 25, size_26 => 26, size_27 => 27, size_28 => 28, size_29 => 29, size_30 => 30, size_31 => 31, size_32 => 32, size_33 => 33, size_34 => 34, size_35 => 35); };
+        (POW5TO128) => { check_cached_mul_sizes!(POW5TO128; size_22 => 22, size_23 => 23, size_24 => 24, size_25 => 25, size_26 => 26, size_27 => 27, size_28 => 28, size_29 => 29, size_30 => 30); };
+        (POW5TO256) => {  };
+    }
+
+    macro_rules! check_cached_mul_digits {
+        ($($group:ident => $digits:ident),+ $(,)?) => {$(
+            mod $group {
+                use super::*;
+
+                check_cached_mul_sizes!($digits; size_00 => 0, size_01 => 1, size_02 => 2, size_03 => 3, size_04 => 4, size_05 => 5, size_06 => 6, size_07 => 7, size_08 => 8, size_09 => 9, size_10 => 10);
+                #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+                check_cached_mul_sizes!($digits; size_11 => 11, size_12 => 12, size_13 => 13, size_14 => 14, size_15 => 15, size_16 => 16, size_17 => 17, size_18 => 18, size_19 => 19, size_20 => 20, size_21 => 21);
+                check_cached_mul_extra_sizes!($digits);
+            }
+        )+};
+    }
+
+    check_cached_mul_digits!(
+        cached_mul_pow5_16 => POW5TO16,
+        cached_mul_pow5_32 => POW5TO32,
+        cached_mul_pow5_64 => POW5TO64,
+        cached_mul_pow5_128 => POW5TO128,
+        cached_mul_pow5_256 => POW5TO256,
+    );
+
+    fn check_mul_small_model_agrees<const SIZE: usize>() {
+        assert!(SIZE < KANI_LIMBS);
+        let source = Big::kani_with_arbitrary_limbs(SIZE);
+        let multiplier: Digit = kani::any();
+        kani::cover(source.kani_size() == 0, "multiplication accepts empty storage");
+        kani::cover(
+            source.kani_size() == KANI_LIMBS - 1,
+            "multiplication accepts the largest model input",
+        );
+        kani::cover(multiplier == 0, "multiplication accepts zero");
+        kani::cover(multiplier == Digit::MAX, "multiplication accepts the largest digit");
+        let mut actual = source.clone();
+        let mut modeled = source;
+        let actual_start = &mut actual as *mut Big;
+        let modeled_start = &mut modeled as *mut Big;
+        assert!(actual.mul_small(multiplier) as *mut Big == actual_start);
+        assert!(modeled.kani_mul_small_model(multiplier) as *mut Big == modeled_start);
+        assert!(actual.kani_same_storage(&modeled));
+        kani::cover(actual.kani_size() == KANI_LIMBS, "multiplication can append a carry limb");
+    }
+
+    macro_rules! check_mul_size {
+        ($name:ident, $size:literal) => {
+            #[kani::proof]
+            #[kani::unwind(41)]
+            #[cfg_attr(
+                target_pointer_width = "64",
+                kani::stub(u64::carrying_mul, carrying_mul_model)
+            )]
+            #[cfg_attr(
+                target_pointer_width = "64",
+                kani::stub(u64::carrying_mul_add, carrying_mul_add_model)
+            )]
+            #[cfg_attr(
+                any(target_pointer_width = "16", target_pointer_width = "32"),
+                kani::stub(u32::carrying_mul, carrying_mul_model)
+            )]
+            #[cfg_attr(
+                any(target_pointer_width = "16", target_pointer_width = "32"),
+                kani::stub(u32::carrying_mul_add, carrying_mul_add_model)
+            )]
+            #[kani::solver(z3)]
+            fn $name() {
+                check_mul_small_model_agrees::<$size>();
+            }
+        };
+    }
+
+    // Together these cases retain every storage size accepted by the model.
+    check_mul_size!(check_mul_small_model_agrees_00, 0);
+    check_mul_size!(check_mul_small_model_agrees_01, 1);
+    check_mul_size!(check_mul_small_model_agrees_02, 2);
+    check_mul_size!(check_mul_small_model_agrees_03, 3);
+    check_mul_size!(check_mul_small_model_agrees_04, 4);
+    check_mul_size!(check_mul_small_model_agrees_05, 5);
+    check_mul_size!(check_mul_small_model_agrees_06, 6);
+    check_mul_size!(check_mul_small_model_agrees_07, 7);
+    check_mul_size!(check_mul_small_model_agrees_08, 8);
+    check_mul_size!(check_mul_small_model_agrees_09, 9);
+    check_mul_size!(check_mul_small_model_agrees_10, 10);
+    check_mul_size!(check_mul_small_model_agrees_11, 11);
+    check_mul_size!(check_mul_small_model_agrees_12, 12);
+    check_mul_size!(check_mul_small_model_agrees_13, 13);
+    check_mul_size!(check_mul_small_model_agrees_14, 14);
+    check_mul_size!(check_mul_small_model_agrees_15, 15);
+    check_mul_size!(check_mul_small_model_agrees_16, 16);
+    check_mul_size!(check_mul_small_model_agrees_17, 17);
+    check_mul_size!(check_mul_small_model_agrees_18, 18);
+    check_mul_size!(check_mul_small_model_agrees_19, 19);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_20, 20);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_21, 21);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_22, 22);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_23, 23);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_24, 24);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_25, 25);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_26, 26);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_27, 27);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_28, 28);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_29, 29);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_30, 30);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_31, 31);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_32, 32);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_33, 33);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_34, 34);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_35, 35);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_36, 36);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_37, 37);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_38, 38);
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    check_mul_size!(check_mul_small_model_agrees_39, 39);
+
+    // Prove the exact two-limb result once before composing longer carry chains.
+    #[kani::ensures(|result| {
+        (((result.1 as WideDigit) << Digit::BITS) | result.0 as WideDigit)
+            == (digit as WideDigit)
+                .wrapping_mul(multiplier as WideDigit)
+                .wrapping_add(carry as WideDigit)
+                .wrapping_add(addend as WideDigit)
+    })]
+    fn carrying_mul_add_contract(
+        digit: Digit,
+        multiplier: Digit,
+        carry: Digit,
+        addend: Digit,
+    ) -> (Digit, Digit) {
+        digit.carrying_mul_add(multiplier, carry, addend)
+    }
+
+    // The standalone contract harness also proves this deterministic model
+    // equal to the real primitive for all four digit inputs. Sharing its
+    // expression on both sides preserves equal carry prefixes syntactically.
+    // The largest product plus two maximum digits fills exactly two limbs.
+    fn carrying_mul_add_model(
+        digit: Digit,
+        multiplier: Digit,
+        carry: Digit,
+        addend: Digit,
+    ) -> (Digit, Digit) {
+        let sum = (digit as WideDigit)
+            .wrapping_mul(multiplier as WideDigit)
+            .wrapping_add(carry as WideDigit)
+            .wrapping_add(addend as WideDigit);
+        (sum as Digit, (sum >> Digit::BITS) as Digit)
+    }
+
+    pub(crate) fn carrying_mul_model(
+        digit: Digit,
+        multiplier: Digit,
+        carry: Digit,
+    ) -> (Digit, Digit) {
+        carrying_mul_add_model(digit, multiplier, carry, 0)
+    }
+
+    #[kani::proof_for_contract(carrying_mul_add_contract)]
+    #[kani::solver(z3)]
+    fn check_carrying_mul_add_contract() {
+        let digit: Digit = kani::any();
+        let multiplier: Digit = kani::any();
+        let carry: Digit = kani::any();
+        let addend: Digit = kani::any();
+        let result = carrying_mul_add_contract(digit, multiplier, carry, addend);
+        let modeled = carrying_mul_add_model(digit, multiplier, carry, addend);
+        // First check the complete wide value. Packing two digit limbs is
+        // injective, so the subsequent limb comparison follows directly.
+        let result_bits = ((result.1 as WideDigit) << Digit::BITS) | result.0 as WideDigit;
+        let modeled_bits = ((modeled.1 as WideDigit) << Digit::BITS) | modeled.0 as WideDigit;
+        assert_eq!(result_bits, modeled_bits);
+        assert_eq!(result, modeled);
+        kani::cover(
+            digit == 0 && multiplier == 0 && addend == 0 && carry == 0,
+            "limb multiplication accepts all zero inputs",
+        );
+        kani::cover(
+            digit == Digit::MAX
+                && multiplier == Digit::MAX
+                && addend == Digit::MAX
+                && carry == Digit::MAX,
+            "limb multiplication accepts all maximum inputs",
+        );
+        kani::cover(
+            result == (Digit::MAX, Digit::MAX),
+            "limb multiplication reaches the full two-limb result",
+        );
+    }
+
+    // Bigint division needs the remainder bound to justify the next limb's
+    // division. Prove that scalar obligation separately; the storage contract
+    // below does not depend on the quotient's numeric value.
+    #[kani::requires(borrow < divisor)]
+    #[kani::ensures(|result| result.1 < divisor)]
+    fn div_rem_digit_contract(digit: Digit, divisor: Digit, borrow: Digit) -> (Digit, Digit) {
+        <Digit as crate::num::imp::bignum::FullOps>::full_div_rem(digit, divisor, borrow)
+    }
+
+    // Keep ordinary stub substitution separate from verified contract dispatch.
+    fn stub_div_rem_digit(digit: Digit, divisor: Digit, borrow: Digit) -> (Digit, Digit) {
+        div_rem_digit_contract(digit, divisor, borrow)
+    }
+
+    #[kani::proof_for_contract(div_rem_digit_contract)]
+    #[kani::solver(kissat)]
+    fn check_div_rem_digit_contract() {
+        let digit: Digit = kani::any();
+        let divisor: Digit = kani::any();
+        let borrow: Digit = kani::any();
+        let (_, remainder) = div_rem_digit_contract(digit, divisor, borrow);
+        kani::cover(divisor == 1, "limb division accepts the unit divisor");
+        kani::cover(divisor == Digit::MAX, "limb division accepts the largest divisor");
+        kani::cover(borrow == divisor - 1, "limb division accepts the largest borrow");
+        kani::cover(remainder == 0, "limb division can have no remainder");
+    }
+
+    // Verify the limb loop separately from the outer power-of-ten loop.
+    // Only limbs are writable, so stubs retain the caller's size expression.
+    #[kani::requires(divisor > 0 && value.kani_valid_storage())]
+    #[kani::ensures(|result| {
+        value.kani_valid_storage()
+            && value.kani_size() == old(value.kani_size())
+            && *result < divisor
+    })]
+    #[kani::modifies(value.kani_limbs_mut())]
+    fn div_rem_small_contract(value: &mut Big, divisor: Digit) -> Digit {
+        value.div_rem_small(divisor).1
+    }
+
+    fn stub_div_rem_small(value: &mut Big, divisor: Digit) -> (&mut Big, Digit) {
+        let remainder = div_rem_small_contract(value, divisor);
+        (value, remainder)
+    }
+
+    #[kani::proof_for_contract(div_rem_small_contract)]
+    #[cfg_attr(target_pointer_width = "64", kani::stub(
+        <u64 as crate::num::imp::bignum::FullOps>::full_div_rem,
+        stub_div_rem_digit
+    ))]
+    #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(
+        <u32 as crate::num::imp::bignum::FullOps>::full_div_rem,
+        stub_div_rem_digit
+    ))]
+    #[kani::stub_verified(div_rem_digit_contract)]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_div_rem_small_contract() {
+        let mut value = Big::kani_any_valid();
+        let divisor: Digit = kani::any();
+        let _ = div_rem_small_contract(&mut value, divisor);
+        kani::cover(divisor == 1, "bigint division accepts the unit divisor");
+        kani::cover(divisor == Digit::MAX, "bigint division accepts the largest divisor");
+        kani::cover(value.kani_size() == 0, "bigint division accepts empty zero storage");
+        kani::cover(value.kani_size() == KANI_LIMBS, "bigint division accepts all limbs");
+    }
+
+    // Division preserves the bigint's allocated prefix and unused zero limbs.
+    // Its numeric result is overapproximated; the generator still performs the
+    // real addition, exact comparison semantics, and subsequent digit extraction.
+    // Read size without constructing a slice: old expressions must not panic.
+    #[kani::requires(n <= PROOF_BUFLEN && value.kani_valid_storage())]
+    #[kani::ensures(|_| {
+        value.kani_valid_storage() && value.kani_size() == old(value.kani_size())
+    })]
+    #[kani::modifies(value.kani_limbs_mut())]
+    fn div_2pow10_contract(value: &mut Big, n: usize) {
+        let _ = div_2pow10(value, n);
+    }
+
+    fn stub_div_2pow10(value: &mut Big, n: usize) -> &mut Big {
+        div_2pow10_contract(value, n);
+        value
+    }
+
+    #[kani::proof_for_contract(div_2pow10_contract)]
+    #[kani::stub(Big::div_rem_small, stub_div_rem_small)]
+    #[kani::stub_verified(div_rem_small_contract)]
+    #[kani::unwind(5)]
+    #[kani::solver(kissat)]
+    fn check_div_2pow10_contract() {
+        let mut value = Big::kani_any_valid();
+        let n: usize = kani::any();
+        div_2pow10_contract(&mut value, n);
+        kani::cover(n == 0, "division accepts the minimum power");
+        kani::cover(n == PROOF_BUFLEN, "division accepts the maximum proof power");
+        kani::cover(value.kani_size() == 0, "division accepts empty zero storage");
+        kani::cover(value.kani_size() == KANI_LIMBS, "division accepts all bigint limbs");
+    }
+
+    // Dragon decodes every finite value with `-1076 <= exp <= 970`. This is the
+    // bound of `checked_f64_limb_count` for one exponent: the value bits,
+    // sixteen bits for decimal scaling, and one carry limb.
+    fn dragon_limb_bound(exp: i16) -> usize {
+        let exp = i32::from(exp);
+        let value_bits = (-exp).max(exp + 55).max(64) as usize;
+        (value_bits + 16).div_ceil(Digit::BITS as usize) + 1
+    }
+
+    // The size checks come before any limb access, so the limb predicates
+    // never read a limb at a havocked size.
+    fn dragon_scaled_storage_valid(value: &Big, limb_bound: usize) -> bool {
+        value.kani_contract_size() > 0
+            && value.kani_contract_size() <= limb_bound
+            && value.kani_contract_valid_storage()
+    }
+
+    // `value < scale * 10`.
+    fn dragon_scaled_below_scale10(value: &Big, scale: &Big, zero: &Big) -> bool {
+        value.kani_contract_cmp_scaled_sum(scale, zero, 1) == KaniInvariantOrdering::Less
+    }
+
+    // `0 < value`.
+    fn dragon_scaled_nonzero(value: &Big, zero: &Big) -> bool {
+        zero.kani_contract_cmp_scaled_sum(value, zero, 0) == KaniInvariantOrdering::Less
+    }
+
+    // The facts that the digit loop of `format_shortest` needs at `i == 0`,
+    // with each limb count bounded by `exp`.
+    fn dragon_shortest_scaling_valid(exp: i16, result: &(i16, Big, Big, Big, Big)) -> bool {
+        let (k, mant, minus, plus, scale) = result;
+        let limb_bound = dragon_limb_bound(exp);
+        let zero = Big::kani_contract_zero();
+        -400 <= *k
+            && *k <= 400
+            && dragon_scaled_storage_valid(mant, limb_bound)
+            && dragon_scaled_storage_valid(minus, limb_bound)
+            && dragon_scaled_storage_valid(plus, limb_bound)
+            && dragon_scaled_storage_valid(scale, limb_bound)
+            && (minus.kani_contract_size() <= mant.kani_contract_size()
+                || minus.kani_contract_size() <= scale.kani_contract_size())
+            && (plus.kani_contract_size() <= mant.kani_contract_size()
+                || plus.kani_contract_size() <= scale.kani_contract_size())
+            && dragon_scaled_below_scale10(mant, scale, &zero)
+            && dragon_scaled_below_scale10(minus, scale, &zero)
+            && dragon_scaled_below_scale10(plus, scale, &zero)
+            && dragon_scaled_nonzero(minus, &zero)
+            && dragon_scaled_nonzero(plus, &zero)
+            && scale.kani_contract_cmp_scaled_sum(minus, plus, MAX_SIG_DIGITS - 1)
+                == KaniInvariantOrdering::Less
+    }
+
+    #[kani::requires(
+        mant >= 2 && minus == 1
+            && (plus == 1 || (plus == 2 && (mant == 1 << 25 || mant == 1 << 54)))
+            && exp >= -1076 && exp <= 970
+            && mant as u128 + plus as u128 <= ((minus as u128 + plus as u128) << 53)
+    )]
+    #[kani::ensures(|result| dragon_shortest_scaling_valid(exp, result))]
+    fn scale_shortest_contract(
+        mant: u64,
+        minus: u64,
+        plus: u64,
+        exp: i16,
+        inclusive: bool,
+    ) -> (i16, Big, Big, Big, Big) {
+        let d = Decoded { mant, minus, plus, exp, inclusive };
+        let ShortestScaled { k, mant, minus, plus, scale } = scale_shortest(&d);
+        // Establish the size bounds in separate checked steps, so the value
+        // properties of the postcondition can use the bounds already established.
+        let limb_bound = dragon_limb_bound(exp);
+        assert!(-400 <= k && k <= 400);
+        assert!(mant.kani_size() > 0 && mant.kani_size() <= limb_bound);
+        assert!(minus.kani_size() > 0 && minus.kani_size() <= limb_bound);
+        assert!(plus.kani_size() > 0 && plus.kani_size() <= limb_bound);
+        assert!(scale.kani_size() > 0 && scale.kani_size() <= limb_bound);
+        (k, mant, minus, plus, scale)
+    }
+
+    fn stub_scale_shortest(d: &Decoded) -> ShortestScaled {
+        let (k, mant, minus, plus, scale) =
+            scale_shortest_contract(d.mant, d.minus, d.plus, d.exp, d.inclusive);
+        ShortestScaled { k, mant, minus, plus, scale }
+    }
+
+    // Each window of 16 exponents has its own contract proof. Together the
+    // windows cover every Dragon exponent, and each limb bound fits the storage.
+    #[kani::proof]
+    fn check_dragon_scale_partitioning() {
+        let exp = kani::any::<i16>();
+        kani::assume((-1076..=970).contains(&exp));
+        let index = (i32::from(exp) + 1076) / 16;
+        assert!((0..128).contains(&index));
+        let first = -1076 + 16 * index;
+        let last = (first + 15).min(970);
+        assert!(first <= i32::from(exp) && i32::from(exp) <= last);
+        assert!(last - first < 16);
+        assert!(dragon_limb_bound(exp) < KANI_LIMBS);
+        kani::cover(exp == -1076, "partitions include the lowest Dragon exponent");
+        kani::cover(exp == 970, "partitions include the highest Dragon exponent");
+    }
+
+    // The estimate of estimate_scaling_factor for a contract input with exponent `exp`, where
+    // `nbits` is the bit count of mant + plus - 1.
+    const fn fixed_k_estimate(nbits: i16, exp: i16) -> i16 {
+        (((nbits as i64 + exp as i64) * 1292913986) >> 32) as i16
+    }
+
+    const fn fixed_k_last(first: i16) -> i16 {
+        if first + 15 < 970 { first + 15 } else { 970 }
+    }
+
+    // Every contract input has mant + plus in [3, 2^54 + 2], so nbits is in 2..=55, and the
+    // estimate of each input of the window that starts at `first` is in
+    // fixed_k_min(first)..=fixed_k_max(first) (check_dragon_scale_k_range).
+    const fn fixed_k_min(first: i16) -> i16 {
+        fixed_k_estimate(2, first)
+    }
+
+    const fn fixed_k_max(first: i16) -> i16 {
+        fixed_k_estimate(55, fixed_k_last(first))
+    }
+
+    // True if `ks` lists each K of next..=last once, in increasing order.
+    const fn fixed_k_list_covers(ks: &[i16], next: i16, last: i16) -> bool {
+        match ks {
+            [] => next == last + 1,
+            [k, rest @ ..] => *k == next && fixed_k_list_covers(rest, next + 1, last),
+        }
+    }
+
+    // True if `los` lists the piece offsets next, next + width, ..., 16 - width once, in
+    // increasing order:  the pieces of a split pair, width exponents each, then cover the 16
+    // exponents of its window.
+    const fn fixed_k_pieces_cover(los: &[u8], next: u8, width: u8) -> bool {
+        match los {
+            [] => next == 16,
+            [lo, rest @ ..] => *lo == next && fixed_k_pieces_cover(rest, next + width, width),
+        }
+    }
+
+    // The exponents in each piece of a split pair:  16 less the last offset, so 4 for the
+    // offsets 0, 4, 8, 12 and 1 for the offsets 0 to 15.
+    const fn fixed_k_piece_width(los: &[u8]) -> u8 {
+        match los {
+            [.., last] => 16 - *last,
+            [] => 0,
+        }
+    }
+
+    // True if `tops` lists the sub-piece indices next, next + 1, ..., n - 1 once, in
+    // increasing order, for n = 2, 4 or 8:  the sub-pieces of a piece then take each value of
+    // the top mantissa bit (2 sub-pieces), the top 2 bits (4) or the top 3 bits (8) once.
+    const fn fixed_k_tops_cover(tops: &[u8], next: u8) -> bool {
+        match tops {
+            [] => next == 2 || next == 4 || next == 8,
+            [top, rest @ ..] => *top == next && fixed_k_tops_cover(rest, next + 1),
+        }
+    }
+
+    // The shift of the top mantissa bits that pick the sub-piece of a piece at exponent
+    // `exp` (1, 2 or 3 bits for 2, 4 or 8 sub-pieces). The mantissa is below 2^bits, with bits
+    // as in fixed_k_limb_bound. The masked bits take each value once for any shift, so the
+    // sub-pieces cover the piece;  this shift splits the largest mantissas.
+    const fn fixed_k_mant_shift(exp: i16, k: i16, pieces: u64) -> u32 {
+        let s_max = (k as i64 + 1) * (1 << 32) / 1292913986 - 1;
+        let window_bits = s_max - exp as i64;
+        let bits = if window_bits < 55 { window_bits } else { 55 };
+        (bits - pieces.trailing_zeros() as i64) as u32
+    }
+
+    // The power-of-5 tables of mul_pow10 as (power, length in 64-bit limbs).
+    #[cfg(target_pointer_width = "64")]
+    const FIXED_K_POW5_TABLES: [(usize, usize); 5] =
+        [(16, 1), (32, 2), (64, 3), (128, 5), (256, 10)];
+
+    // Walks the power-of-5 tables that mul_pow10(x, n) multiplies in, in order. The operand
+    // is below 2^(millibits / 1000) before each table, and each power of 5 adds at most
+    // 2.322 bits (log2 5 < 2.322).
+    #[cfg(target_pointer_width = "64")]
+    const fn fixed_k_pow5_limbs(
+        tables: &[(usize, usize)],
+        n: usize,
+        millibits: usize,
+        other_len: usize,
+    ) -> usize {
+        match tables {
+            [] => KANI_LIMBS,
+            [(power, len), rest @ ..] => {
+                if n & *power == 0 {
+                    fixed_k_pow5_limbs(rest, n, millibits, other_len)
+                } else if *len == other_len {
+                    millibits.div_ceil(1000).div_ceil(64)
+                } else {
+                    fixed_k_pow5_limbs(rest, n, millibits + 2322 * *power, other_len)
+                }
             }
         }
     }
 
-    // SAFETY: we initialized that memory above.
-    (unsafe { buf[..len].assume_init_ref() }, k)
+    // A bound on the limb count of the bigint operand of the cached product of mul_pow10
+    // with the power table of `other_len` limbs, for each input of the window that starts at
+    // `first` with the estimate fixed to K. For K < 0, mant, minus and plus are below
+    // 2^bits before mul_pow10(-K), where bits = min(55, s_max - first) and s_max is the
+    // largest nbits + exp with an estimate of K. The stub of kani_mul_limb_bound asserts the
+    // actual count, so a wrong bound fails the proof; only the cost depends on it.
+    #[cfg(target_pointer_width = "64")]
+    const fn fixed_k_limb_bound(first: i16, k: i16, other_len: usize) -> usize {
+        if k >= 0 {
+            KANI_LIMBS
+        } else {
+            let n = k.unsigned_abs() as usize;
+            // Division truncates toward zero, so for K < 0 this is
+            // ceil((K + 1) * 2^32 / 1292913986) - 1.
+            let s_max = (k as i64 + 1) * (1 << 32) / 1292913986 - 1;
+            let window_bits = s_max - first as i64;
+            let bits = if window_bits < 55 { window_bits as usize } else { 55 };
+            fixed_k_pow5_limbs(&FIXED_K_POW5_TABLES, n, 1000 * bits + 2322 * (n & 15), other_len)
+        }
+    }
+
+    // 16- and 32-bit targets keep the storage bound.
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    const fn fixed_k_limb_bound(_first: i16, _k: i16, _other_len: usize) -> usize {
+        KANI_LIMBS
+    }
+
+    // The proof of one fixed-K pair over the exponents FIRST + $exp_lo + (0..=$exp_mask) of its
+    // window: (0, 15) is the whole window, a piece of a split pair takes 4 exponents or 1. A
+    // sub-piece (the tail $mant_top, $mant_pieces) also fixes the top mantissa bits: the bits
+    // of mant from MANT_SHIFT up, masked to $mant_pieces - 1, equal $mant_top.
+    macro_rules! check_dragon_scale_fixed_k_harness {
+        // A piece split on the top mantissa bits: one module per sub-piece. The list must be
+        // 0..n - 1 in increasing order for n = 2, 4 or 8, or the build fails.
+        (
+            $window:literal,
+            $k:expr,
+            $exp_lo:literal,
+            $exp_mask:expr,
+            [$($m:ident => $top:literal),* $(,)?]
+        ) => {
+            use super::*;
+
+            const MANT_TOPS: &[u8] = &[$($top),*];
+            const _: () = assert!(fixed_k_tops_cover(MANT_TOPS, 0));
+
+            $(mod $m {
+                check_dragon_scale_fixed_k_harness!(
+                    $window, $k, $exp_lo, $exp_mask, $top, MANT_TOPS.len() as u64
+                );
+            })*
+        };
+        (
+            $window:literal,
+            $k:expr,
+            $exp_lo:literal,
+            $exp_mask:expr
+            $(, $mant_top:literal, $mant_pieces:expr)?
+        ) => {
+            use super::*;
+
+            const FIRST: i16 = -1076 + 16 * $window;
+            const LAST: i16 = fixed_k_last(FIRST);
+            const K: i16 = $k;
+
+            fn window_limb_count(size: usize) -> usize {
+                let limb_bound = dragon_limb_bound(FIRST).max(dragon_limb_bound(LAST));
+                LimbCountMask((limb_bound + 1).next_power_of_two() - 1).check(size)
+            }
+
+            fn stub_pow10_exponent(n: usize) -> usize {
+                let magnitude = usize::from(K.unsigned_abs());
+                Pow10Prefix::for_range(magnitude..=magnitude).check(n)
+            }
+
+            fn stub_pow2_bits(bits: usize) -> usize {
+                let encoded = bits & 2047;
+                assert_eq!(encoded, bits);
+                encoded
+            }
+
+            fn stub_estimate(mant: u64, exp: i16) -> i16 {
+                assert_eq!(
+                    crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor(mant, exp),
+                    K
+                );
+                K
+            }
+
+            fn stub_mul_limb_bound(size: usize, other_len: usize) -> usize {
+                let bound = fixed_k_limb_bound(FIRST, K, other_len);
+                assert!(size <= bound);
+                bound
+            }
+
+            #[kani::proof_for_contract(scale_shortest_contract)]
+            #[kani::unwind(41)]
+            #[kani::stub(crate::num::imp::bignum::kani_loop_size, window_limb_count)]
+            #[kani::stub(Big::add, Big::kani_add_model)]
+            #[kani::stub(Big::sub, Big::kani_sub_model)]
+            #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
+            #[kani::stub(Big::mul_pow2, Big::kani_mul_pow2_model)]
+            #[kani::stub(Big::mul_digits, Big::kani_mul_digits_model)]
+            #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
+            #[kani::stub(crate::num::imp::bignum::kani_pow2_bits, stub_pow2_bits)]
+            #[kani::stub(crate::num::imp::bignum::kani_mul_limb_bound, stub_mul_limb_bound)]
+            #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul, carrying_mul_model))]
+            #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
+            #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul, carrying_mul_model))]
+            #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul_add, carrying_mul_add_model))]
+            #[kani::stub(crate::num::imp::flt2dec::estimator::estimate_scaling_factor, stub_estimate)]
+            #[kani::stub(
+                u64::leading_zeros,
+                crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u64
+            )]
+            #[kani::stub(
+                u32::leading_zeros,
+                crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u32
+            )]
+            #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
+            #[kani::stub(Big::is_zero, stub_is_zero)]
+            #[kani::solver(cadical)]
+            fn check_scale_shortest() {
+                let mant = kani::any::<u64>() & ((1u64 << 55) - 1);
+                let minus = 1;
+                let plus = if kani::any::<bool>() { 1 } else { 2 };
+                kani::assume(mant >= 2);
+                kani::assume(plus == 1 || mant == 1 << 25 || mant == 1 << 54);
+                kani::assume(mant as u128 + plus as u128 <= ((minus as u128 + plus as u128) << 53));
+                let exp = FIRST + $exp_lo + i16::from(kani::any::<u8>() & $exp_mask);
+                kani::assume(exp <= LAST);
+                $({
+                    const MANT_SHIFT: u32 = fixed_k_mant_shift(FIRST + $exp_lo, K, $mant_pieces);
+                    const _: () = assert!(MANT_SHIFT <= 53);
+                    kani::assume((mant >> MANT_SHIFT) & ($mant_pieces - 1) == $mant_top);
+                })?
+                kani::assume(
+                    crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor(mant + plus, exp)
+                        == K
+                );
+                let inclusive = kani::any::<bool>();
+                scale_shortest_contract(mant, minus, plus, exp, inclusive);
+                kani::cover(inclusive, "fixed-K scaling includes inclusive intervals");
+                kani::cover(!inclusive, "fixed-K scaling includes exclusive intervals");
+            }
+        };
+    }
+
+    // One proof per (window, K) pair, with the estimate fixed to K. The proof assumes that
+    // the estimate is K, and the estimator stub checks the same value. The stub of
+    // kani_mul_limb_bound asserts that each bigint operand of a cached product of mul_pow10
+    // fits fixed_k_limb_bound.
+    macro_rules! check_dragon_scale_fixed_k_pair {
+        ($name:ident, $window:literal, $k:expr) => {
+            mod $name {
+                check_dragon_scale_fixed_k_harness!($window, $k, 0, 15);
+            }
+        };
+        // A split pair: one module per piece, each piece a proof over PIECE_WIDTH exponents
+        // (4 pieces of 4 or 16 pieces of 1). The offsets must step by PIECE_WIDTH from 0 to
+        // 16 - PIECE_WIDTH in increasing order, or the build fails.
+        (
+            $name:ident,
+            $window:literal,
+            $k:expr,
+            [$($piece:ident => $lo:literal $(=> [$($m:ident => $top:literal),* $(,)?])?),* $(,)?]
+        ) => {
+            mod $name {
+                use super::*;
+
+                const PIECE_LOS: &[u8] = &[$($lo),*];
+                const PIECE_WIDTH: u8 = fixed_k_piece_width(PIECE_LOS);
+                const PIECE_MASK: u8 = PIECE_WIDTH - 1;
+                const _: () = assert!(fixed_k_pieces_cover(PIECE_LOS, 0, PIECE_WIDTH));
+
+                $(mod $piece {
+                    check_dragon_scale_fixed_k_harness!(
+                        $window, $k, $lo, PIECE_MASK $(, [$($m => $top),*])?
+                    );
+                })*
+            }
+        };
+    }
+
+    // The fixed-K proofs of one window. The list must name each K of
+    // fixed_k_min(FIRST)..=fixed_k_max(FIRST) once, in increasing order, or the build fails.
+    // With check_dragon_scale_k_range the proofs cover every input of the window.
+    // An entry `kNNN => K => [eNN => offset, ...]` splits the proof of K into pieces.
+    // A piece `eNN => offset => [mN => top, ...]` splits again on the top mantissa bits.
+    macro_rules! check_dragon_scale_fixed_k_window {
+        (
+            $name:ident,
+            $window:literal,
+            [$(
+                $k_name:ident => $k:expr $(=> [$(
+                    $piece:ident => $lo:literal $(=> [$($m:ident => $top:literal),* $(,)?])?
+                ),* $(,)?])?
+            ),* $(,)?]
+        ) => {
+            mod $name {
+                use super::*;
+
+                const _: () = {
+                    let first: i16 = -1076 + 16 * $window;
+                    assert!(fixed_k_list_covers(&[$($k),*], fixed_k_min(first), fixed_k_max(first)));
+                };
+
+                $(check_dragon_scale_fixed_k_pair!(
+                    $k_name, $window, $k $(, [$($piece => $lo $(=> [$($m => $top),*])?),*])?
+                );)*
+            }
+        };
+    }
+
+    // Windows 000 to 127: one module per window, one fixed-K proof per K. Windows 000 to 062
+    // have K < 0, windows 063 to 067 have both signs, windows 068 to 127 have K >= 0. A K < 0
+    // name is k and |K|, a K >= 0 name is p and K.
+    mod dragon_scale_fixed_k {
+        use super::*;
+
+        check_dragon_scale_fixed_k_window!(w000, 0, [
+            k324 => -324, k323 => -323, k322 => -322, k321 => -321, k320 => -320, k319 => -319,
+            k318 => -318, k317 => -317 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
+            k316 => -316, k315 => -315, k314 => -314, k313 => -313,
+            k312 => -312, k311 => -311, k310 => -310, k309 => -309, k308 => -308, k307 => -307,
+            k306 => -306, k305 => -305, k304 => -304, k303 => -303,
+        ]);
+        check_dragon_scale_fixed_k_window!(w001, 1, [
+            k319 => -319, k318 => -318, k317 => -317, k316 => -316, k315 => -315, k314 => -314,
+            k313 => -313, k312 => -312, k311 => -311, k310 => -310, k309 => -309, k308 => -308,
+            k307 => -307, k306 => -306, k305 => -305, k304 => -304, k303 => -303, k302 => -302,
+            k301 => -301, k300 => -300, k299 => -299,
+        ]);
+        check_dragon_scale_fixed_k_window!(w002, 2, [
+            k314 => -314, k313 => -313, k312 => -312, k311 => -311, k310 => -310, k309 => -309,
+            k308 => -308, k307 => -307, k306 => -306, k305 => -305, k304 => -304, k303 => -303,
+            k302 => -302, k301 => -301, k300 => -300, k299 => -299, k298 => -298, k297 => -297,
+            k296 => -296, k295 => -295, k294 => -294,
+        ]);
+        check_dragon_scale_fixed_k_window!(w003, 3, [
+            k309 => -309, k308 => -308, k307 => -307, k306 => -306, k305 => -305, k304 => -304,
+            k303 => -303, k302 => -302, k301 => -301, k300 => -300, k299 => -299, k298 => -298,
+            k297 => -297, k296 => -296, k295 => -295, k294 => -294, k293 => -293, k292 => -292,
+            k291 => -291, k290 => -290, k289 => -289,
+        ]);
+        check_dragon_scale_fixed_k_window!(w004, 4, [
+            k305 => -305, k304 => -304, k303 => -303, k302 => -302, k301 => -301, k300 => -300,
+            k299 => -299, k298 => -298, k297 => -297, k296 => -296, k295 => -295, k294 => -294,
+            k293 => -293, k292 => -292, k291 => -291, k290 => -290, k289 => -289, k288 => -288,
+            k287 => -287, k286 => -286, k285 => -285, k284 => -284,
+        ]);
+        check_dragon_scale_fixed_k_window!(w005, 5, [
+            k300 => -300, k299 => -299, k298 => -298, k297 => -297, k296 => -296, k295 => -295,
+            k294 => -294, k293 => -293, k292 => -292, k291 => -291, k290 => -290, k289 => -289,
+            k288 => -288, k287 => -287, k286 => -286, k285 => -285, k284 => -284, k283 => -283,
+            k282 => -282, k281 => -281, k280 => -280, k279 => -279,
+        ]);
+        check_dragon_scale_fixed_k_window!(w006, 6, [
+            k295 => -295, k294 => -294, k293 => -293, k292 => -292, k291 => -291, k290 => -290,
+            k289 => -289, k288 => -288, k287 => -287, k286 => -286, k285 => -285, k284 => -284,
+            k283 => -283, k282 => -282, k281 => -281, k280 => -280, k279 => -279, k278 => -278,
+            k277 => -277, k276 => -276, k275 => -275, k274 => -274,
+        ]);
+        check_dragon_scale_fixed_k_window!(w007, 7, [
+            k290 => -290, k289 => -289, k288 => -288, k287 => -287, k286 => -286, k285 => -285,
+            k284 => -284, k283 => -283, k282 => -282, k281 => -281, k280 => -280, k279 => -279,
+            k278 => -278, k277 => -277, k276 => -276, k275 => -275, k274 => -274, k273 => -273,
+            k272 => -272, k271 => -271, k270 => -270,
+        ]);
+        check_dragon_scale_fixed_k_window!(w008, 8, [
+            k285 => -285, k284 => -284, k283 => -283, k282 => -282, k281 => -281, k280 => -280,
+            k279 => -279, k278 => -278, k277 => -277, k276 => -276, k275 => -275, k274 => -274,
+            k273 => -273, k272 => -272, k271 => -271, k270 => -270, k269 => -269, k268 => -268,
+            k267 => -267, k266 => -266, k265 => -265,
+        ]);
+        check_dragon_scale_fixed_k_window!(w009, 9, [
+            k280 => -280, k279 => -279, k278 => -278, k277 => -277, k276 => -276, k275 => -275,
+            k274 => -274, k273 => -273, k272 => -272, k271 => -271, k270 => -270, k269 => -269,
+            k268 => -268, k267 => -267, k266 => -266, k265 => -265, k264 => -264, k263 => -263,
+            k262 => -262, k261 => -261, k260 => -260,
+        ]);
+        check_dragon_scale_fixed_k_window!(w010, 10, [
+            k276 => -276, k275 => -275, k274 => -274, k273 => -273, k272 => -272, k271 => -271,
+            k270 => -270, k269 => -269, k268 => -268, k267 => -267, k266 => -266, k265 => -265,
+            k264 => -264, k263 => -263, k262 => -262, k261 => -261, k260 => -260, k259 => -259,
+            k258 => -258, k257 => -257, k256 => -256, k255 => -255,
+        ]);
+        check_dragon_scale_fixed_k_window!(w011, 11, [
+            k271 => -271, k270 => -270, k269 => -269, k268 => -268, k267 => -267, k266 => -266,
+            k265 => -265, k264 => -264, k263 => -263, k262 => -262, k261 => -261, k260 => -260,
+            k259 => -259, k258 => -258, k257 => -257, k256 => -256, k255 => -255, k254 => -254,
+            k253 => -253, k252 => -252, k251 => -251, k250 => -250,
+        ]);
+        check_dragon_scale_fixed_k_window!(w012, 12, [
+            k266 => -266, k265 => -265, k264 => -264, k263 => -263, k262 => -262, k261 => -261,
+            k260 => -260, k259 => -259, k258 => -258, k257 => -257, k256 => -256, k255 => -255,
+            k254 => -254, k253 => -253, k252 => -252, k251 => -251, k250 => -250, k249 => -249,
+            k248 => -248, k247 => -247, k246 => -246,
+        ]);
+        check_dragon_scale_fixed_k_window!(w013, 13, [
+            k261 => -261, k260 => -260, k259 => -259, k258 => -258, k257 => -257, k256 => -256,
+            k255 => -255, k254 => -254, k253 => -253, k252 => -252, k251 => -251, k250 => -250,
+            k249 => -249, k248 => -248, k247 => -247, k246 => -246, k245 => -245, k244 => -244,
+            k243 => -243, k242 => -242, k241 => -241,
+        ]);
+        check_dragon_scale_fixed_k_window!(w014, 14, [
+            k256 => -256, k255 => -255, k254 => -254, k253 => -253, k252 => -252, k251 => -251,
+            k250 => -250, k249 => -249, k248 => -248, k247 => -247, k246 => -246, k245 => -245,
+            k244 => -244, k243 => -243, k242 => -242, k241 => -241, k240 => -240, k239 => -239,
+            k238 => -238, k237 => -237, k236 => -236,
+        ]);
+        check_dragon_scale_fixed_k_window!(w015, 15, [
+            k252 => -252, k251 => -251, k250 => -250, k249 => -249, k248 => -248, k247 => -247,
+            k246 => -246, k245 => -245, k244 => -244, k243 => -243, k242 => -242, k241 => -241,
+            k240 => -240, k239 => -239, k238 => -238, k237 => -237, k236 => -236, k235 => -235,
+            k234 => -234, k233 => -233, k232 => -232, k231 => -231,
+        ]);
+        check_dragon_scale_fixed_k_window!(w016, 16, [
+            k247 => -247, k246 => -246, k245 => -245, k244 => -244, k243 => -243, k242 => -242,
+            k241 => -241, k240 => -240, k239 => -239, k238 => -238, k237 => -237, k236 => -236,
+            k235 => -235, k234 => -234, k233 => -233, k232 => -232, k231 => -231, k230 => -230,
+            k229 => -229, k228 => -228, k227 => -227, k226 => -226,
+        ]);
+        check_dragon_scale_fixed_k_window!(w017, 17, [
+            k242 => -242, k241 => -241, k240 => -240, k239 => -239, k238 => -238, k237 => -237,
+            k236 => -236, k235 => -235, k234 => -234, k233 => -233, k232 => -232, k231 => -231,
+            k230 => -230, k229 => -229, k228 => -228, k227 => -227, k226 => -226, k225 => -225,
+            k224 => -224, k223 => -223, k222 => -222, k221 => -221,
+        ]);
+        check_dragon_scale_fixed_k_window!(w018, 18, [
+            k237 => -237, k236 => -236, k235 => -235, k234 => -234, k233 => -233, k232 => -232,
+            k231 => -231, k230 => -230, k229 => -229, k228 => -228, k227 => -227, k226 => -226,
+            k225 => -225, k224 => -224, k223 => -223, k222 => -222, k221 => -221, k220 => -220,
+            k219 => -219, k218 => -218, k217 => -217,
+        ]);
+        check_dragon_scale_fixed_k_window!(w019, 19, [
+            k232 => -232, k231 => -231, k230 => -230, k229 => -229, k228 => -228, k227 => -227,
+            k226 => -226, k225 => -225, k224 => -224, k223 => -223, k222 => -222, k221 => -221,
+            k220 => -220, k219 => -219, k218 => -218, k217 => -217, k216 => -216, k215 => -215,
+            k214 => -214, k213 => -213, k212 => -212,
+        ]);
+        check_dragon_scale_fixed_k_window!(w020, 20, [
+            k227 => -227, k226 => -226, k225 => -225, k224 => -224, k223 => -223, k222 => -222,
+            k221 => -221, k220 => -220, k219 => -219, k218 => -218, k217 => -217, k216 => -216,
+            k215 => -215, k214 => -214, k213 => -213, k212 => -212, k211 => -211, k210 => -210,
+            k209 => -209, k208 => -208, k207 => -207,
+        ]);
+        check_dragon_scale_fixed_k_window!(w021, 21, [
+            k223 => -223, k222 => -222, k221 => -221, k220 => -220, k219 => -219, k218 => -218,
+            k217 => -217, k216 => -216, k215 => -215, k214 => -214, k213 => -213, k212 => -212,
+            k211 => -211, k210 => -210, k209 => -209, k208 => -208, k207 => -207, k206 => -206,
+            k205 => -205, k204 => -204, k203 => -203, k202 => -202,
+        ]);
+        check_dragon_scale_fixed_k_window!(w022, 22, [
+            k218 => -218, k217 => -217, k216 => -216, k215 => -215, k214 => -214, k213 => -213,
+            k212 => -212, k211 => -211, k210 => -210, k209 => -209, k208 => -208, k207 => -207,
+            k206 => -206, k205 => -205, k204 => -204, k203 => -203, k202 => -202, k201 => -201,
+            k200 => -200, k199 => -199, k198 => -198, k197 => -197,
+        ]);
+        check_dragon_scale_fixed_k_window!(w023, 23, [
+            k213 => -213, k212 => -212, k211 => -211, k210 => -210, k209 => -209, k208 => -208,
+            k207 => -207, k206 => -206,
+            k205 => -205 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k204 => -204 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k203 => -203 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k202 => -202 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k201 => -201 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k200 => -200 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k199 => -199, k198 => -198, k197 => -197, k196 => -196, k195 => -195, k194 => -194,
+            k193 => -193,
+        ]);
+        check_dragon_scale_fixed_k_window!(w024, 24, [
+            k208 => -208, k207 => -207, k206 => -206, k205 => -205, k204 => -204, k203 => -203,
+            k202 => -202, k201 => -201, k200 => -200, k199 => -199, k198 => -198, k197 => -197,
+            k196 => -196, k195 => -195, k194 => -194, k193 => -193, k192 => -192, k191 => -191,
+            k190 => -190, k189 => -189, k188 => -188,
+        ]);
+        check_dragon_scale_fixed_k_window!(w025, 25, [
+            k203 => -203, k202 => -202, k201 => -201, k200 => -200, k199 => -199, k198 => -198,
+            k197 => -197, k196 => -196, k195 => -195, k194 => -194, k193 => -193, k192 => -192,
+            k191 => -191, k190 => -190, k189 => -189, k188 => -188, k187 => -187, k186 => -186,
+            k185 => -185, k184 => -184, k183 => -183,
+        ]);
+        check_dragon_scale_fixed_k_window!(w026, 26, [
+            k199 => -199, k198 => -198, k197 => -197, k196 => -196, k195 => -195, k194 => -194,
+            k193 => -193, k192 => -192, k191 => -191, k190 => -190, k189 => -189, k188 => -188,
+            k187 => -187, k186 => -186, k185 => -185, k184 => -184, k183 => -183, k182 => -182,
+            k181 => -181, k180 => -180, k179 => -179, k178 => -178,
+        ]);
+        check_dragon_scale_fixed_k_window!(w027, 27, [
+            k194 => -194, k193 => -193, k192 => -192, k191 => -191, k190 => -190, k189 => -189,
+            k188 => -188, k187 => -187, k186 => -186, k185 => -185, k184 => -184, k183 => -183,
+            k182 => -182, k181 => -181, k180 => -180, k179 => -179, k178 => -178, k177 => -177,
+            k176 => -176, k175 => -175, k174 => -174, k173 => -173,
+        ]);
+        check_dragon_scale_fixed_k_window!(w028, 28, [
+            k189 => -189, k188 => -188, k187 => -187, k186 => -186, k185 => -185, k184 => -184,
+            k183 => -183 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k182 => -182, k181 => -181, k180 => -180, k179 => -179, k178 => -178, k177 => -177,
+            k176 => -176, k175 => -175, k174 => -174, k173 => -173, k172 => -172, k171 => -171,
+            k170 => -170, k169 => -169, k168 => -168,
+        ]);
+        check_dragon_scale_fixed_k_window!(w029, 29, [
+            k184 => -184, k183 => -183, k182 => -182, k181 => -181, k180 => -180, k179 => -179,
+            k178 => -178, k177 => -177, k176 => -176, k175 => -175,
+            k174 => -174 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k173 => -173 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k172 => -172 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
+            k171 => -171, k170 => -170, k169 => -169, k168 => -168, k167 => -167, k166 => -166,
+            k165 => -165, k164 => -164,
+        ]);
+        check_dragon_scale_fixed_k_window!(w030, 30, [
+            k179 => -179, k178 => -178, k177 => -177, k176 => -176, k175 => -175, k174 => -174,
+            k173 => -173, k172 => -172, k171 => -171, k170 => -170, k169 => -169, k168 => -168,
+            k167 => -167, k166 => -166, k165 => -165, k164 => -164, k163 => -163, k162 => -162,
+            k161 => -161, k160 => -160, k159 => -159,
+        ]);
+        check_dragon_scale_fixed_k_window!(w031, 31, [
+            k174 => -174, k173 => -173, k172 => -172, k171 => -171, k170 => -170, k169 => -169,
+            k168 => -168, k167 => -167, k166 => -166, k165 => -165, k164 => -164, k163 => -163,
+            k162 => -162, k161 => -161, k160 => -160, k159 => -159, k158 => -158, k157 => -157,
+            k156 => -156, k155 => -155, k154 => -154,
+        ]);
+        check_dragon_scale_fixed_k_window!(w032, 32, [
+            k170 => -170, k169 => -169, k168 => -168, k167 => -167, k166 => -166, k165 => -165,
+            k164 => -164, k163 => -163, k162 => -162, k161 => -161, k160 => -160, k159 => -159,
+            k158 => -158, k157 => -157, k156 => -156, k155 => -155, k154 => -154, k153 => -153,
+            k152 => -152, k151 => -151, k150 => -150, k149 => -149,
+        ]);
+        check_dragon_scale_fixed_k_window!(w033, 33, [
+            k165 => -165, k164 => -164, k163 => -163, k162 => -162, k161 => -161, k160 => -160,
+            k159 => -159, k158 => -158, k157 => -157, k156 => -156, k155 => -155, k154 => -154,
+            k153 => -153, k152 => -152, k151 => -151, k150 => -150, k149 => -149, k148 => -148,
+            k147 => -147, k146 => -146, k145 => -145, k144 => -144,
+        ]);
+        check_dragon_scale_fixed_k_window!(w034, 34, [
+            k160 => -160, k159 => -159, k158 => -158, k157 => -157, k156 => -156, k155 => -155,
+            k154 => -154,
+            k153 => -153 => [
+                e00 => 0, e01 => 1,
+                e02 => 2 => [
+                    m0 => 0, m1 => 1, m2 => 2, m3 => 3, m4 => 4, m5 => 5, m6 => 6, m7 => 7,
+                ],
+                e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k152 => -152 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k151 => -151 => [
+                e00 => 0, e01 => 1, e02 => 2, e03 => 3,
+                e04 => 4, e05 => 5, e06 => 6, e07 => 7,
+                e08 => 8, e09 => 9, e10 => 10, e11 => 11,
+                e12 => 12, e13 => 13, e14 => 14, e15 => 15,
+            ],
+            k150 => -150, k149 => -149, k148 => -148, k147 => -147, k146 => -146, k145 => -145,
+            k144 => -144, k143 => -143, k142 => -142, k141 => -141, k140 => -140,
+        ]);
+        check_dragon_scale_fixed_k_window!(w035, 35, [
+            k155 => -155, k154 => -154, k153 => -153, k152 => -152, k151 => -151, k150 => -150,
+            k149 => -149, k148 => -148, k147 => -147, k146 => -146, k145 => -145, k144 => -144,
+            k143 => -143, k142 => -142, k141 => -141, k140 => -140, k139 => -139, k138 => -138,
+            k137 => -137, k136 => -136, k135 => -135,
+        ]);
+        check_dragon_scale_fixed_k_window!(w036, 36, [
+            k150 => -150, k149 => -149, k148 => -148, k147 => -147, k146 => -146, k145 => -145,
+            k144 => -144, k143 => -143, k142 => -142, k141 => -141, k140 => -140, k139 => -139,
+            k138 => -138, k137 => -137, k136 => -136, k135 => -135, k134 => -134, k133 => -133,
+            k132 => -132, k131 => -131, k130 => -130,
+        ]);
+        check_dragon_scale_fixed_k_window!(w037, 37, [
+            k146 => -146, k145 => -145, k144 => -144, k143 => -143, k142 => -142, k141 => -141,
+            k140 => -140, k139 => -139, k138 => -138, k137 => -137, k136 => -136, k135 => -135,
+            k134 => -134, k133 => -133, k132 => -132, k131 => -131, k130 => -130, k129 => -129,
+            k128 => -128, k127 => -127, k126 => -126, k125 => -125,
+        ]);
+        check_dragon_scale_fixed_k_window!(w038, 38, [
+            k141 => -141, k140 => -140, k139 => -139, k138 => -138, k137 => -137, k136 => -136,
+            k135 => -135, k134 => -134, k133 => -133, k132 => -132, k131 => -131, k130 => -130,
+            k129 => -129, k128 => -128, k127 => -127, k126 => -126, k125 => -125, k124 => -124,
+            k123 => -123, k122 => -122, k121 => -121, k120 => -120,
+        ]);
+        check_dragon_scale_fixed_k_window!(w039, 39, [
+            k136 => -136, k135 => -135, k134 => -134, k133 => -133, k132 => -132, k131 => -131,
+            k130 => -130, k129 => -129, k128 => -128, k127 => -127, k126 => -126, k125 => -125,
+            k124 => -124, k123 => -123, k122 => -122, k121 => -121, k120 => -120, k119 => -119,
+            k118 => -118, k117 => -117, k116 => -116, k115 => -115,
+        ]);
+        check_dragon_scale_fixed_k_window!(w040, 40, [
+            k131 => -131, k130 => -130, k129 => -129, k128 => -128, k127 => -127, k126 => -126,
+            k125 => -125, k124 => -124, k123 => -123, k122 => -122, k121 => -121, k120 => -120,
+            k119 => -119, k118 => -118, k117 => -117, k116 => -116, k115 => -115, k114 => -114,
+            k113 => -113, k112 => -112, k111 => -111,
+        ]);
+        check_dragon_scale_fixed_k_window!(w041, 41, [
+            k126 => -126, k125 => -125, k124 => -124, k123 => -123, k122 => -122, k121 => -121,
+            k120 => -120, k119 => -119, k118 => -118, k117 => -117, k116 => -116, k115 => -115,
+            k114 => -114, k113 => -113, k112 => -112, k111 => -111, k110 => -110, k109 => -109,
+            k108 => -108, k107 => -107, k106 => -106,
+        ]);
+        check_dragon_scale_fixed_k_window!(w042, 42, [
+            k122 => -122, k121 => -121, k120 => -120, k119 => -119, k118 => -118, k117 => -117,
+            k116 => -116, k115 => -115, k114 => -114, k113 => -113, k112 => -112, k111 => -111,
+            k110 => -110, k109 => -109, k108 => -108, k107 => -107, k106 => -106, k105 => -105,
+            k104 => -104, k103 => -103, k102 => -102, k101 => -101,
+        ]);
+        check_dragon_scale_fixed_k_window!(w043, 43, [
+            k117 => -117, k116 => -116, k115 => -115, k114 => -114, k113 => -113, k112 => -112,
+            k111 => -111, k110 => -110, k109 => -109, k108 => -108, k107 => -107, k106 => -106,
+            k105 => -105, k104 => -104, k103 => -103, k102 => -102, k101 => -101, k100 => -100,
+            k099 => -99, k098 => -98, k097 => -97, k096 => -96,
+        ]);
+        check_dragon_scale_fixed_k_window!(w044, 44, [
+            k112 => -112, k111 => -111, k110 => -110, k109 => -109, k108 => -108, k107 => -107,
+            k106 => -106, k105 => -105, k104 => -104, k103 => -103, k102 => -102, k101 => -101,
+            k100 => -100, k099 => -99, k098 => -98, k097 => -97, k096 => -96, k095 => -95,
+            k094 => -94, k093 => -93, k092 => -92, k091 => -91,
+        ]);
+        check_dragon_scale_fixed_k_window!(w045, 45, [
+            k107 => -107, k106 => -106, k105 => -105, k104 => -104, k103 => -103, k102 => -102,
+            k101 => -101, k100 => -100, k099 => -99, k098 => -98, k097 => -97, k096 => -96,
+            k095 => -95, k094 => -94, k093 => -93, k092 => -92, k091 => -91, k090 => -90,
+            k089 => -89, k088 => -88, k087 => -87,
+        ]);
+        check_dragon_scale_fixed_k_window!(w046, 46, [
+            k102 => -102, k101 => -101, k100 => -100, k099 => -99, k098 => -98, k097 => -97,
+            k096 => -96, k095 => -95, k094 => -94, k093 => -93, k092 => -92, k091 => -91,
+            k090 => -90, k089 => -89, k088 => -88, k087 => -87, k086 => -86, k085 => -85,
+            k084 => -84, k083 => -83, k082 => -82,
+        ]);
+        check_dragon_scale_fixed_k_window!(w047, 47, [
+            k097 => -97, k096 => -96, k095 => -95, k094 => -94, k093 => -93, k092 => -92,
+            k091 => -91 => [e00 => 0, e04 => 4, e08 => 8, e12 => 12],
+            k090 => -90, k089 => -89, k088 => -88, k087 => -87, k086 => -86, k085 => -85,
+            k084 => -84, k083 => -83, k082 => -82, k081 => -81, k080 => -80, k079 => -79,
+            k078 => -78, k077 => -77,
+        ]);
+        check_dragon_scale_fixed_k_window!(w048, 48, [
+            k093 => -93, k092 => -92, k091 => -91, k090 => -90, k089 => -89, k088 => -88,
+            k087 => -87, k086 => -86, k085 => -85, k084 => -84, k083 => -83, k082 => -82,
+            k081 => -81, k080 => -80, k079 => -79, k078 => -78, k077 => -77, k076 => -76,
+            k075 => -75, k074 => -74, k073 => -73, k072 => -72,
+        ]);
+        check_dragon_scale_fixed_k_window!(w049, 49, [
+            k088 => -88, k087 => -87, k086 => -86, k085 => -85, k084 => -84, k083 => -83,
+            k082 => -82, k081 => -81, k080 => -80, k079 => -79, k078 => -78, k077 => -77,
+            k076 => -76, k075 => -75, k074 => -74, k073 => -73, k072 => -72, k071 => -71,
+            k070 => -70, k069 => -69, k068 => -68, k067 => -67,
+        ]);
+        check_dragon_scale_fixed_k_window!(w050, 50, [
+            k083 => -83, k082 => -82, k081 => -81, k080 => -80, k079 => -79, k078 => -78,
+            k077 => -77, k076 => -76, k075 => -75, k074 => -74, k073 => -73, k072 => -72,
+            k071 => -71, k070 => -70, k069 => -69, k068 => -68, k067 => -67, k066 => -66,
+            k065 => -65, k064 => -64, k063 => -63,
+        ]);
+        check_dragon_scale_fixed_k_window!(w051, 51, [
+            k078 => -78, k077 => -77, k076 => -76, k075 => -75, k074 => -74, k073 => -73,
+            k072 => -72, k071 => -71, k070 => -70, k069 => -69, k068 => -68, k067 => -67,
+            k066 => -66, k065 => -65, k064 => -64, k063 => -63, k062 => -62, k061 => -61,
+            k060 => -60, k059 => -59, k058 => -58,
+        ]);
+        check_dragon_scale_fixed_k_window!(w052, 52, [
+            k073 => -73, k072 => -72, k071 => -71, k070 => -70, k069 => -69, k068 => -68,
+            k067 => -67, k066 => -66, k065 => -65, k064 => -64, k063 => -63, k062 => -62,
+            k061 => -61, k060 => -60, k059 => -59, k058 => -58, k057 => -57, k056 => -56,
+            k055 => -55, k054 => -54, k053 => -53,
+        ]);
+        check_dragon_scale_fixed_k_window!(w053, 53, [
+            k069 => -69, k068 => -68, k067 => -67, k066 => -66, k065 => -65, k064 => -64,
+            k063 => -63, k062 => -62, k061 => -61, k060 => -60, k059 => -59, k058 => -58,
+            k057 => -57, k056 => -56, k055 => -55, k054 => -54, k053 => -53, k052 => -52,
+            k051 => -51, k050 => -50, k049 => -49, k048 => -48,
+        ]);
+        check_dragon_scale_fixed_k_window!(w054, 54, [
+            k064 => -64, k063 => -63, k062 => -62, k061 => -61, k060 => -60, k059 => -59,
+            k058 => -58, k057 => -57, k056 => -56, k055 => -55, k054 => -54, k053 => -53,
+            k052 => -52, k051 => -51, k050 => -50, k049 => -49, k048 => -48, k047 => -47,
+            k046 => -46, k045 => -45, k044 => -44, k043 => -43,
+        ]);
+        check_dragon_scale_fixed_k_window!(w055, 55, [
+            k059 => -59, k058 => -58, k057 => -57, k056 => -56, k055 => -55, k054 => -54,
+            k053 => -53, k052 => -52, k051 => -51, k050 => -50, k049 => -49, k048 => -48,
+            k047 => -47, k046 => -46, k045 => -45, k044 => -44, k043 => -43, k042 => -42,
+            k041 => -41, k040 => -40, k039 => -39, k038 => -38,
+        ]);
+        check_dragon_scale_fixed_k_window!(w056, 56, [
+            k054 => -54, k053 => -53, k052 => -52, k051 => -51, k050 => -50, k049 => -49,
+            k048 => -48, k047 => -47, k046 => -46, k045 => -45, k044 => -44, k043 => -43,
+            k042 => -42, k041 => -41, k040 => -40, k039 => -39, k038 => -38, k037 => -37,
+            k036 => -36, k035 => -35, k034 => -34,
+        ]);
+        check_dragon_scale_fixed_k_window!(w057, 57, [
+            k049 => -49, k048 => -48, k047 => -47, k046 => -46, k045 => -45, k044 => -44,
+            k043 => -43, k042 => -42, k041 => -41, k040 => -40, k039 => -39, k038 => -38,
+            k037 => -37, k036 => -36, k035 => -35, k034 => -34, k033 => -33, k032 => -32,
+            k031 => -31, k030 => -30, k029 => -29,
+        ]);
+        check_dragon_scale_fixed_k_window!(w058, 58, [
+            k044 => -44, k043 => -43, k042 => -42, k041 => -41, k040 => -40, k039 => -39,
+            k038 => -38, k037 => -37, k036 => -36, k035 => -35, k034 => -34, k033 => -33,
+            k032 => -32, k031 => -31, k030 => -30, k029 => -29, k028 => -28, k027 => -27,
+            k026 => -26, k025 => -25, k024 => -24,
+        ]);
+        check_dragon_scale_fixed_k_window!(w059, 59, [
+            k040 => -40, k039 => -39, k038 => -38, k037 => -37, k036 => -36, k035 => -35,
+            k034 => -34, k033 => -33, k032 => -32, k031 => -31, k030 => -30, k029 => -29,
+            k028 => -28, k027 => -27, k026 => -26, k025 => -25, k024 => -24, k023 => -23,
+            k022 => -22, k021 => -21, k020 => -20, k019 => -19,
+        ]);
+        check_dragon_scale_fixed_k_window!(w060, 60, [
+            k035 => -35, k034 => -34, k033 => -33, k032 => -32, k031 => -31, k030 => -30,
+            k029 => -29, k028 => -28, k027 => -27, k026 => -26, k025 => -25, k024 => -24,
+            k023 => -23, k022 => -22, k021 => -21, k020 => -20, k019 => -19, k018 => -18,
+            k017 => -17, k016 => -16, k015 => -15, k014 => -14,
+        ]);
+        check_dragon_scale_fixed_k_window!(w061, 61, [
+            k030 => -30, k029 => -29, k028 => -28, k027 => -27, k026 => -26, k025 => -25,
+            k024 => -24, k023 => -23, k022 => -22, k021 => -21, k020 => -20, k019 => -19,
+            k018 => -18, k017 => -17, k016 => -16, k015 => -15, k014 => -14, k013 => -13,
+            k012 => -12, k011 => -11, k010 => -10,
+        ]);
+        check_dragon_scale_fixed_k_window!(w062, 62, [
+            k025 => -25, k024 => -24, k023 => -23, k022 => -22, k021 => -21, k020 => -20,
+            k019 => -19, k018 => -18, k017 => -17, k016 => -16, k015 => -15, k014 => -14,
+            k013 => -13, k012 => -12, k011 => -11, k010 => -10, k009 => -9, k008 => -8,
+            k007 => -7, k006 => -6, k005 => -5,
+        ]);
+        check_dragon_scale_fixed_k_window!(w063, 63, [
+            k020 => -20, k019 => -19, k018 => -18, k017 => -17, k016 => -16, k015 => -15,
+            k014 => -14, k013 => -13, k012 => -12, k011 => -11, k010 => -10, k009 => -9,
+            k008 => -8, k007 => -7, k006 => -6, k005 => -5, k004 => -4, k003 => -3,
+            k002 => -2, k001 => -1, p000 => 0,
+        ]);
+        check_dragon_scale_fixed_k_window!(w064, 64, [
+            k016 => -16, k015 => -15, k014 => -14, k013 => -13, k012 => -12, k011 => -11,
+            k010 => -10, k009 => -9, k008 => -8, k007 => -7, k006 => -6, k005 => -5,
+            k004 => -4, k003 => -3, k002 => -2, k001 => -1, p000 => 0, p001 => 1,
+            p002 => 2, p003 => 3, p004 => 4, p005 => 5,
+        ]);
+        check_dragon_scale_fixed_k_window!(w065, 65, [
+            k011 => -11, k010 => -10, k009 => -9, k008 => -8, k007 => -7, k006 => -6,
+            k005 => -5, k004 => -4, k003 => -3, k002 => -2, k001 => -1, p000 => 0,
+            p001 => 1, p002 => 2, p003 => 3, p004 => 4, p005 => 5, p006 => 6,
+            p007 => 7, p008 => 8, p009 => 9, p010 => 10,
+        ]);
+        check_dragon_scale_fixed_k_window!(w066, 66, [
+            k006 => -6, k005 => -5, k004 => -4, k003 => -3, k002 => -2, k001 => -1,
+            p000 => 0, p001 => 1, p002 => 2, p003 => 3, p004 => 4, p005 => 5,
+            p006 => 6, p007 => 7, p008 => 8, p009 => 9, p010 => 10, p011 => 11,
+            p012 => 12, p013 => 13, p014 => 14, p015 => 15,
+        ]);
+        check_dragon_scale_fixed_k_window!(w067, 67, [
+            k001 => -1, p000 => 0, p001 => 1, p002 => 2, p003 => 3, p004 => 4,
+            p005 => 5, p006 => 6, p007 => 7, p008 => 8, p009 => 9, p010 => 10,
+            p011 => 11, p012 => 12, p013 => 13, p014 => 14, p015 => 15, p016 => 16,
+            p017 => 17, p018 => 18, p019 => 19,
+        ]);
+        check_dragon_scale_fixed_k_window!(w068, 68, [
+            p004 => 4, p005 => 5, p006 => 6, p007 => 7, p008 => 8, p009 => 9,
+            p010 => 10, p011 => 11, p012 => 12, p013 => 13, p014 => 14, p015 => 15,
+            p016 => 16, p017 => 17, p018 => 18, p019 => 19, p020 => 20, p021 => 21,
+            p022 => 22, p023 => 23, p024 => 24,
+        ]);
+        check_dragon_scale_fixed_k_window!(w069, 69, [
+            p009 => 9, p010 => 10, p011 => 11, p012 => 12, p013 => 13, p014 => 14,
+            p015 => 15, p016 => 16, p017 => 17, p018 => 18, p019 => 19, p020 => 20,
+            p021 => 21, p022 => 22, p023 => 23, p024 => 24, p025 => 25, p026 => 26,
+            p027 => 27, p028 => 28, p029 => 29,
+        ]);
+        check_dragon_scale_fixed_k_window!(w070, 70, [
+            p013 => 13, p014 => 14, p015 => 15, p016 => 16, p017 => 17, p018 => 18,
+            p019 => 19, p020 => 20, p021 => 21, p022 => 22, p023 => 23, p024 => 24,
+            p025 => 25, p026 => 26, p027 => 27, p028 => 28, p029 => 29, p030 => 30,
+            p031 => 31, p032 => 32, p033 => 33, p034 => 34,
+        ]);
+        check_dragon_scale_fixed_k_window!(w071, 71, [
+            p018 => 18, p019 => 19, p020 => 20, p021 => 21, p022 => 22, p023 => 23,
+            p024 => 24, p025 => 25, p026 => 26, p027 => 27, p028 => 28, p029 => 29,
+            p030 => 30, p031 => 31, p032 => 32, p033 => 33, p034 => 34, p035 => 35,
+            p036 => 36, p037 => 37, p038 => 38, p039 => 39,
+        ]);
+        check_dragon_scale_fixed_k_window!(w072, 72, [
+            p023 => 23, p024 => 24, p025 => 25, p026 => 26, p027 => 27, p028 => 28,
+            p029 => 29, p030 => 30, p031 => 31, p032 => 32, p033 => 33, p034 => 34,
+            p035 => 35, p036 => 36, p037 => 37, p038 => 38, p039 => 39, p040 => 40,
+            p041 => 41, p042 => 42, p043 => 43,
+        ]);
+        check_dragon_scale_fixed_k_window!(w073, 73, [
+            p028 => 28, p029 => 29, p030 => 30, p031 => 31, p032 => 32, p033 => 33,
+            p034 => 34, p035 => 35, p036 => 36, p037 => 37, p038 => 38, p039 => 39,
+            p040 => 40, p041 => 41, p042 => 42, p043 => 43, p044 => 44, p045 => 45,
+            p046 => 46, p047 => 47, p048 => 48,
+        ]);
+        check_dragon_scale_fixed_k_window!(w074, 74, [
+            p033 => 33, p034 => 34, p035 => 35, p036 => 36, p037 => 37, p038 => 38,
+            p039 => 39, p040 => 40, p041 => 41, p042 => 42, p043 => 43, p044 => 44,
+            p045 => 45, p046 => 46, p047 => 47, p048 => 48, p049 => 49, p050 => 50,
+            p051 => 51, p052 => 52, p053 => 53,
+        ]);
+        check_dragon_scale_fixed_k_window!(w075, 75, [
+            p037 => 37, p038 => 38, p039 => 39, p040 => 40, p041 => 41, p042 => 42,
+            p043 => 43, p044 => 44, p045 => 45, p046 => 46, p047 => 47, p048 => 48,
+            p049 => 49, p050 => 50, p051 => 51, p052 => 52, p053 => 53, p054 => 54,
+            p055 => 55, p056 => 56, p057 => 57, p058 => 58,
+        ]);
+        check_dragon_scale_fixed_k_window!(w076, 76, [
+            p042 => 42, p043 => 43, p044 => 44, p045 => 45, p046 => 46, p047 => 47,
+            p048 => 48, p049 => 49, p050 => 50, p051 => 51, p052 => 52, p053 => 53,
+            p054 => 54, p055 => 55, p056 => 56, p057 => 57, p058 => 58, p059 => 59,
+            p060 => 60, p061 => 61, p062 => 62, p063 => 63,
+        ]);
+        check_dragon_scale_fixed_k_window!(w077, 77, [
+            p047 => 47, p048 => 48, p049 => 49, p050 => 50, p051 => 51, p052 => 52,
+            p053 => 53, p054 => 54, p055 => 55, p056 => 56, p057 => 57, p058 => 58,
+            p059 => 59, p060 => 60, p061 => 61, p062 => 62, p063 => 63, p064 => 64,
+            p065 => 65, p066 => 66, p067 => 67, p068 => 68,
+        ]);
+        check_dragon_scale_fixed_k_window!(w078, 78, [
+            p052 => 52, p053 => 53, p054 => 54, p055 => 55, p056 => 56, p057 => 57,
+            p058 => 58, p059 => 59, p060 => 60, p061 => 61, p062 => 62, p063 => 63,
+            p064 => 64, p065 => 65, p066 => 66, p067 => 67, p068 => 68, p069 => 69,
+            p070 => 70, p071 => 71, p072 => 72,
+        ]);
+        check_dragon_scale_fixed_k_window!(w079, 79, [
+            p057 => 57, p058 => 58, p059 => 59, p060 => 60, p061 => 61, p062 => 62,
+            p063 => 63, p064 => 64, p065 => 65, p066 => 66, p067 => 67, p068 => 68,
+            p069 => 69, p070 => 70, p071 => 71, p072 => 72, p073 => 73, p074 => 74,
+            p075 => 75, p076 => 76, p077 => 77,
+        ]);
+        check_dragon_scale_fixed_k_window!(w080, 80, [
+            p062 => 62, p063 => 63, p064 => 64, p065 => 65, p066 => 66, p067 => 67,
+            p068 => 68, p069 => 69, p070 => 70, p071 => 71, p072 => 72, p073 => 73,
+            p074 => 74, p075 => 75, p076 => 76, p077 => 77, p078 => 78, p079 => 79,
+            p080 => 80, p081 => 81, p082 => 82,
+        ]);
+        check_dragon_scale_fixed_k_window!(w081, 81, [
+            p066 => 66, p067 => 67, p068 => 68, p069 => 69, p070 => 70, p071 => 71,
+            p072 => 72, p073 => 73, p074 => 74, p075 => 75, p076 => 76, p077 => 77,
+            p078 => 78, p079 => 79, p080 => 80, p081 => 81, p082 => 82, p083 => 83,
+            p084 => 84, p085 => 85, p086 => 86, p087 => 87,
+        ]);
+        check_dragon_scale_fixed_k_window!(w082, 82, [
+            p071 => 71, p072 => 72, p073 => 73, p074 => 74, p075 => 75, p076 => 76,
+            p077 => 77, p078 => 78, p079 => 79, p080 => 80, p081 => 81, p082 => 82,
+            p083 => 83, p084 => 84, p085 => 85, p086 => 86, p087 => 87, p088 => 88,
+            p089 => 89, p090 => 90, p091 => 91, p092 => 92,
+        ]);
+        check_dragon_scale_fixed_k_window!(w083, 83, [
+            p076 => 76, p077 => 77, p078 => 78, p079 => 79, p080 => 80, p081 => 81,
+            p082 => 82, p083 => 83, p084 => 84, p085 => 85, p086 => 86, p087 => 87,
+            p088 => 88, p089 => 89, p090 => 90, p091 => 91, p092 => 92, p093 => 93,
+            p094 => 94, p095 => 95, p096 => 96,
+        ]);
+        check_dragon_scale_fixed_k_window!(w084, 84, [
+            p081 => 81, p082 => 82, p083 => 83, p084 => 84, p085 => 85, p086 => 86,
+            p087 => 87, p088 => 88, p089 => 89, p090 => 90, p091 => 91, p092 => 92,
+            p093 => 93, p094 => 94, p095 => 95, p096 => 96, p097 => 97, p098 => 98,
+            p099 => 99, p100 => 100, p101 => 101,
+        ]);
+        check_dragon_scale_fixed_k_window!(w085, 85, [
+            p086 => 86, p087 => 87, p088 => 88, p089 => 89, p090 => 90, p091 => 91,
+            p092 => 92, p093 => 93, p094 => 94, p095 => 95, p096 => 96, p097 => 97,
+            p098 => 98, p099 => 99, p100 => 100, p101 => 101, p102 => 102, p103 => 103,
+            p104 => 104, p105 => 105, p106 => 106,
+        ]);
+        check_dragon_scale_fixed_k_window!(w086, 86, [
+            p090 => 90, p091 => 91, p092 => 92, p093 => 93, p094 => 94, p095 => 95,
+            p096 => 96, p097 => 97, p098 => 98, p099 => 99, p100 => 100, p101 => 101,
+            p102 => 102, p103 => 103, p104 => 104, p105 => 105, p106 => 106, p107 => 107,
+            p108 => 108, p109 => 109, p110 => 110, p111 => 111,
+        ]);
+        check_dragon_scale_fixed_k_window!(w087, 87, [
+            p095 => 95, p096 => 96, p097 => 97, p098 => 98, p099 => 99, p100 => 100,
+            p101 => 101, p102 => 102, p103 => 103, p104 => 104, p105 => 105, p106 => 106,
+            p107 => 107, p108 => 108, p109 => 109, p110 => 110, p111 => 111, p112 => 112,
+            p113 => 113, p114 => 114, p115 => 115, p116 => 116,
+        ]);
+        check_dragon_scale_fixed_k_window!(w088, 88, [
+            p100 => 100, p101 => 101, p102 => 102, p103 => 103, p104 => 104, p105 => 105,
+            p106 => 106, p107 => 107, p108 => 108, p109 => 109, p110 => 110, p111 => 111,
+            p112 => 112, p113 => 113, p114 => 114, p115 => 115, p116 => 116, p117 => 117,
+            p118 => 118, p119 => 119, p120 => 120, p121 => 121,
+        ]);
+        check_dragon_scale_fixed_k_window!(w089, 89, [
+            p105 => 105, p106 => 106, p107 => 107, p108 => 108, p109 => 109, p110 => 110,
+            p111 => 111, p112 => 112, p113 => 113, p114 => 114, p115 => 115, p116 => 116,
+            p117 => 117, p118 => 118, p119 => 119, p120 => 120, p121 => 121, p122 => 122,
+            p123 => 123, p124 => 124, p125 => 125,
+        ]);
+        check_dragon_scale_fixed_k_window!(w090, 90, [
+            p110 => 110, p111 => 111, p112 => 112, p113 => 113, p114 => 114, p115 => 115,
+            p116 => 116, p117 => 117, p118 => 118, p119 => 119, p120 => 120, p121 => 121,
+            p122 => 122, p123 => 123, p124 => 124, p125 => 125, p126 => 126, p127 => 127,
+            p128 => 128, p129 => 129, p130 => 130,
+        ]);
+        check_dragon_scale_fixed_k_window!(w091, 91, [
+            p114 => 114, p115 => 115, p116 => 116, p117 => 117, p118 => 118, p119 => 119,
+            p120 => 120, p121 => 121, p122 => 122, p123 => 123, p124 => 124, p125 => 125,
+            p126 => 126, p127 => 127, p128 => 128, p129 => 129, p130 => 130, p131 => 131,
+            p132 => 132, p133 => 133, p134 => 134, p135 => 135,
+        ]);
+        check_dragon_scale_fixed_k_window!(w092, 92, [
+            p119 => 119, p120 => 120, p121 => 121, p122 => 122, p123 => 123, p124 => 124,
+            p125 => 125, p126 => 126, p127 => 127, p128 => 128, p129 => 129, p130 => 130,
+            p131 => 131, p132 => 132, p133 => 133, p134 => 134, p135 => 135, p136 => 136,
+            p137 => 137, p138 => 138, p139 => 139, p140 => 140,
+        ]);
+        check_dragon_scale_fixed_k_window!(w093, 93, [
+            p124 => 124, p125 => 125, p126 => 126, p127 => 127, p128 => 128, p129 => 129,
+            p130 => 130, p131 => 131, p132 => 132, p133 => 133, p134 => 134, p135 => 135,
+            p136 => 136, p137 => 137, p138 => 138, p139 => 139, p140 => 140, p141 => 141,
+            p142 => 142, p143 => 143, p144 => 144, p145 => 145,
+        ]);
+        check_dragon_scale_fixed_k_window!(w094, 94, [
+            p129 => 129, p130 => 130, p131 => 131, p132 => 132, p133 => 133, p134 => 134,
+            p135 => 135, p136 => 136, p137 => 137, p138 => 138, p139 => 139, p140 => 140,
+            p141 => 141, p142 => 142, p143 => 143, p144 => 144, p145 => 145, p146 => 146,
+            p147 => 147, p148 => 148, p149 => 149,
+        ]);
+        check_dragon_scale_fixed_k_window!(w095, 95, [
+            p134 => 134, p135 => 135, p136 => 136, p137 => 137, p138 => 138, p139 => 139,
+            p140 => 140, p141 => 141, p142 => 142, p143 => 143, p144 => 144, p145 => 145,
+            p146 => 146, p147 => 147, p148 => 148, p149 => 149, p150 => 150, p151 => 151,
+            p152 => 152, p153 => 153, p154 => 154,
+        ]);
+        check_dragon_scale_fixed_k_window!(w096, 96, [
+            p139 => 139, p140 => 140, p141 => 141, p142 => 142, p143 => 143, p144 => 144,
+            p145 => 145, p146 => 146, p147 => 147, p148 => 148, p149 => 149, p150 => 150,
+            p151 => 151, p152 => 152, p153 => 153, p154 => 154, p155 => 155, p156 => 156,
+            p157 => 157, p158 => 158, p159 => 159,
+        ]);
+        check_dragon_scale_fixed_k_window!(w097, 97, [
+            p143 => 143, p144 => 144, p145 => 145, p146 => 146, p147 => 147, p148 => 148,
+            p149 => 149, p150 => 150, p151 => 151, p152 => 152, p153 => 153, p154 => 154,
+            p155 => 155, p156 => 156, p157 => 157, p158 => 158, p159 => 159, p160 => 160,
+            p161 => 161, p162 => 162, p163 => 163, p164 => 164,
+        ]);
+        check_dragon_scale_fixed_k_window!(w098, 98, [
+            p148 => 148, p149 => 149, p150 => 150, p151 => 151, p152 => 152, p153 => 153,
+            p154 => 154, p155 => 155, p156 => 156, p157 => 157, p158 => 158, p159 => 159,
+            p160 => 160, p161 => 161, p162 => 162, p163 => 163, p164 => 164, p165 => 165,
+            p166 => 166, p167 => 167, p168 => 168, p169 => 169,
+        ]);
+        check_dragon_scale_fixed_k_window!(w099, 99, [
+            p153 => 153, p154 => 154, p155 => 155, p156 => 156, p157 => 157, p158 => 158,
+            p159 => 159, p160 => 160, p161 => 161, p162 => 162, p163 => 163, p164 => 164,
+            p165 => 165, p166 => 166, p167 => 167, p168 => 168, p169 => 169, p170 => 170,
+            p171 => 171, p172 => 172, p173 => 173,
+        ]);
+        check_dragon_scale_fixed_k_window!(w100, 100, [
+            p158 => 158, p159 => 159, p160 => 160, p161 => 161, p162 => 162, p163 => 163,
+            p164 => 164, p165 => 165, p166 => 166, p167 => 167, p168 => 168, p169 => 169,
+            p170 => 170, p171 => 171, p172 => 172, p173 => 173, p174 => 174, p175 => 175,
+            p176 => 176, p177 => 177, p178 => 178,
+        ]);
+        check_dragon_scale_fixed_k_window!(w101, 101, [
+            p163 => 163, p164 => 164, p165 => 165, p166 => 166, p167 => 167, p168 => 168,
+            p169 => 169, p170 => 170, p171 => 171, p172 => 172, p173 => 173, p174 => 174,
+            p175 => 175, p176 => 176, p177 => 177, p178 => 178, p179 => 179, p180 => 180,
+            p181 => 181, p182 => 182, p183 => 183,
+        ]);
+        check_dragon_scale_fixed_k_window!(w102, 102, [
+            p167 => 167, p168 => 168, p169 => 169, p170 => 170, p171 => 171, p172 => 172,
+            p173 => 173, p174 => 174, p175 => 175, p176 => 176, p177 => 177, p178 => 178,
+            p179 => 179, p180 => 180, p181 => 181, p182 => 182, p183 => 183, p184 => 184,
+            p185 => 185, p186 => 186, p187 => 187, p188 => 188,
+        ]);
+        check_dragon_scale_fixed_k_window!(w103, 103, [
+            p172 => 172, p173 => 173, p174 => 174, p175 => 175, p176 => 176, p177 => 177,
+            p178 => 178, p179 => 179, p180 => 180, p181 => 181, p182 => 182, p183 => 183,
+            p184 => 184, p185 => 185, p186 => 186, p187 => 187, p188 => 188, p189 => 189,
+            p190 => 190, p191 => 191, p192 => 192, p193 => 193,
+        ]);
+        check_dragon_scale_fixed_k_window!(w104, 104, [
+            p177 => 177, p178 => 178, p179 => 179, p180 => 180, p181 => 181, p182 => 182,
+            p183 => 183, p184 => 184, p185 => 185, p186 => 186, p187 => 187, p188 => 188,
+            p189 => 189, p190 => 190, p191 => 191, p192 => 192, p193 => 193, p194 => 194,
+            p195 => 195, p196 => 196, p197 => 197, p198 => 198,
+        ]);
+        check_dragon_scale_fixed_k_window!(w105, 105, [
+            p182 => 182, p183 => 183, p184 => 184, p185 => 185, p186 => 186, p187 => 187,
+            p188 => 188, p189 => 189, p190 => 190, p191 => 191, p192 => 192, p193 => 193,
+            p194 => 194, p195 => 195, p196 => 196, p197 => 197, p198 => 198, p199 => 199,
+            p200 => 200, p201 => 201, p202 => 202,
+        ]);
+        check_dragon_scale_fixed_k_window!(w106, 106, [
+            p187 => 187, p188 => 188, p189 => 189, p190 => 190, p191 => 191, p192 => 192,
+            p193 => 193, p194 => 194, p195 => 195, p196 => 196, p197 => 197, p198 => 198,
+            p199 => 199, p200 => 200, p201 => 201, p202 => 202, p203 => 203, p204 => 204,
+            p205 => 205, p206 => 206, p207 => 207,
+        ]);
+        check_dragon_scale_fixed_k_window!(w107, 107, [
+            p192 => 192, p193 => 193, p194 => 194, p195 => 195, p196 => 196, p197 => 197,
+            p198 => 198, p199 => 199, p200 => 200, p201 => 201, p202 => 202, p203 => 203,
+            p204 => 204, p205 => 205, p206 => 206, p207 => 207, p208 => 208, p209 => 209,
+            p210 => 210, p211 => 211, p212 => 212,
+        ]);
+        check_dragon_scale_fixed_k_window!(w108, 108, [
+            p196 => 196, p197 => 197, p198 => 198, p199 => 199, p200 => 200, p201 => 201,
+            p202 => 202, p203 => 203, p204 => 204, p205 => 205, p206 => 206, p207 => 207,
+            p208 => 208, p209 => 209, p210 => 210, p211 => 211, p212 => 212, p213 => 213,
+            p214 => 214, p215 => 215, p216 => 216, p217 => 217,
+        ]);
+        check_dragon_scale_fixed_k_window!(w109, 109, [
+            p201 => 201, p202 => 202, p203 => 203, p204 => 204, p205 => 205, p206 => 206,
+            p207 => 207, p208 => 208, p209 => 209, p210 => 210, p211 => 211, p212 => 212,
+            p213 => 213, p214 => 214, p215 => 215, p216 => 216, p217 => 217, p218 => 218,
+            p219 => 219, p220 => 220, p221 => 221, p222 => 222,
+        ]);
+        check_dragon_scale_fixed_k_window!(w110, 110, [
+            p206 => 206, p207 => 207, p208 => 208, p209 => 209, p210 => 210, p211 => 211,
+            p212 => 212, p213 => 213, p214 => 214, p215 => 215, p216 => 216, p217 => 217,
+            p218 => 218, p219 => 219, p220 => 220, p221 => 221, p222 => 222, p223 => 223,
+            p224 => 224, p225 => 225, p226 => 226,
+        ]);
+        check_dragon_scale_fixed_k_window!(w111, 111, [
+            p211 => 211, p212 => 212, p213 => 213, p214 => 214, p215 => 215, p216 => 216,
+            p217 => 217, p218 => 218, p219 => 219, p220 => 220, p221 => 221, p222 => 222,
+            p223 => 223, p224 => 224, p225 => 225, p226 => 226, p227 => 227, p228 => 228,
+            p229 => 229, p230 => 230, p231 => 231,
+        ]);
+        check_dragon_scale_fixed_k_window!(w112, 112, [
+            p216 => 216, p217 => 217, p218 => 218, p219 => 219, p220 => 220, p221 => 221,
+            p222 => 222, p223 => 223, p224 => 224, p225 => 225, p226 => 226, p227 => 227,
+            p228 => 228, p229 => 229, p230 => 230, p231 => 231, p232 => 232, p233 => 233,
+            p234 => 234, p235 => 235, p236 => 236,
+        ]);
+        check_dragon_scale_fixed_k_window!(w113, 113, [
+            p220 => 220, p221 => 221, p222 => 222, p223 => 223, p224 => 224, p225 => 225,
+            p226 => 226, p227 => 227, p228 => 228, p229 => 229, p230 => 230, p231 => 231,
+            p232 => 232, p233 => 233, p234 => 234, p235 => 235, p236 => 236, p237 => 237,
+            p238 => 238, p239 => 239, p240 => 240, p241 => 241,
+        ]);
+        check_dragon_scale_fixed_k_window!(w114, 114, [
+            p225 => 225, p226 => 226, p227 => 227, p228 => 228, p229 => 229, p230 => 230,
+            p231 => 231, p232 => 232, p233 => 233, p234 => 234, p235 => 235, p236 => 236,
+            p237 => 237, p238 => 238, p239 => 239, p240 => 240, p241 => 241, p242 => 242,
+            p243 => 243, p244 => 244, p245 => 245, p246 => 246,
+        ]);
+        check_dragon_scale_fixed_k_window!(w115, 115, [
+            p230 => 230, p231 => 231, p232 => 232, p233 => 233, p234 => 234, p235 => 235,
+            p236 => 236, p237 => 237, p238 => 238, p239 => 239, p240 => 240, p241 => 241,
+            p242 => 242, p243 => 243, p244 => 244, p245 => 245, p246 => 246, p247 => 247,
+            p248 => 248, p249 => 249, p250 => 250, p251 => 251,
+        ]);
+        check_dragon_scale_fixed_k_window!(w116, 116, [
+            p235 => 235, p236 => 236, p237 => 237, p238 => 238, p239 => 239, p240 => 240,
+            p241 => 241, p242 => 242, p243 => 243, p244 => 244, p245 => 245, p246 => 246,
+            p247 => 247, p248 => 248, p249 => 249, p250 => 250, p251 => 251, p252 => 252,
+            p253 => 253, p254 => 254, p255 => 255,
+        ]);
+        check_dragon_scale_fixed_k_window!(w117, 117, [
+            p240 => 240, p241 => 241, p242 => 242, p243 => 243, p244 => 244, p245 => 245,
+            p246 => 246, p247 => 247, p248 => 248, p249 => 249, p250 => 250, p251 => 251,
+            p252 => 252, p253 => 253, p254 => 254, p255 => 255, p256 => 256, p257 => 257,
+            p258 => 258, p259 => 259, p260 => 260,
+        ]);
+        check_dragon_scale_fixed_k_window!(w118, 118, [
+            p245 => 245, p246 => 246, p247 => 247, p248 => 248, p249 => 249, p250 => 250,
+            p251 => 251, p252 => 252, p253 => 253, p254 => 254, p255 => 255, p256 => 256,
+            p257 => 257, p258 => 258, p259 => 259, p260 => 260, p261 => 261, p262 => 262,
+            p263 => 263, p264 => 264, p265 => 265,
+        ]);
+        check_dragon_scale_fixed_k_window!(w119, 119, [
+            p249 => 249, p250 => 250, p251 => 251, p252 => 252, p253 => 253, p254 => 254,
+            p255 => 255, p256 => 256, p257 => 257, p258 => 258, p259 => 259, p260 => 260,
+            p261 => 261, p262 => 262, p263 => 263, p264 => 264, p265 => 265, p266 => 266,
+            p267 => 267, p268 => 268, p269 => 269, p270 => 270,
+        ]);
+        check_dragon_scale_fixed_k_window!(w120, 120, [
+            p254 => 254, p255 => 255, p256 => 256, p257 => 257, p258 => 258, p259 => 259,
+            p260 => 260, p261 => 261, p262 => 262, p263 => 263, p264 => 264, p265 => 265,
+            p266 => 266, p267 => 267, p268 => 268, p269 => 269, p270 => 270, p271 => 271,
+            p272 => 272, p273 => 273, p274 => 274, p275 => 275,
+        ]);
+        check_dragon_scale_fixed_k_window!(w121, 121, [
+            p259 => 259, p260 => 260, p261 => 261, p262 => 262, p263 => 263, p264 => 264,
+            p265 => 265, p266 => 266, p267 => 267, p268 => 268, p269 => 269, p270 => 270,
+            p271 => 271, p272 => 272, p273 => 273, p274 => 274, p275 => 275, p276 => 276,
+            p277 => 277, p278 => 278, p279 => 279,
+        ]);
+        check_dragon_scale_fixed_k_window!(w122, 122, [
+            p264 => 264, p265 => 265, p266 => 266, p267 => 267, p268 => 268, p269 => 269,
+            p270 => 270, p271 => 271, p272 => 272, p273 => 273, p274 => 274, p275 => 275,
+            p276 => 276, p277 => 277, p278 => 278, p279 => 279, p280 => 280, p281 => 281,
+            p282 => 282, p283 => 283, p284 => 284,
+        ]);
+        check_dragon_scale_fixed_k_window!(w123, 123, [
+            p269 => 269, p270 => 270, p271 => 271, p272 => 272, p273 => 273, p274 => 274,
+            p275 => 275, p276 => 276, p277 => 277, p278 => 278, p279 => 279, p280 => 280,
+            p281 => 281, p282 => 282, p283 => 283, p284 => 284, p285 => 285, p286 => 286,
+            p287 => 287, p288 => 288, p289 => 289,
+        ]);
+        check_dragon_scale_fixed_k_window!(w124, 124, [
+            p273 => 273, p274 => 274, p275 => 275, p276 => 276, p277 => 277, p278 => 278,
+            p279 => 279, p280 => 280, p281 => 281, p282 => 282, p283 => 283, p284 => 284,
+            p285 => 285, p286 => 286, p287 => 287, p288 => 288, p289 => 289, p290 => 290,
+            p291 => 291, p292 => 292, p293 => 293, p294 => 294,
+        ]);
+        check_dragon_scale_fixed_k_window!(w125, 125, [
+            p278 => 278, p279 => 279, p280 => 280, p281 => 281, p282 => 282, p283 => 283,
+            p284 => 284, p285 => 285, p286 => 286, p287 => 287, p288 => 288, p289 => 289,
+            p290 => 290, p291 => 291, p292 => 292, p293 => 293, p294 => 294, p295 => 295,
+            p296 => 296, p297 => 297, p298 => 298, p299 => 299,
+        ]);
+        check_dragon_scale_fixed_k_window!(w126, 126, [
+            p283 => 283, p284 => 284, p285 => 285, p286 => 286, p287 => 287, p288 => 288,
+            p289 => 289, p290 => 290, p291 => 291, p292 => 292, p293 => 293, p294 => 294,
+            p295 => 295, p296 => 296, p297 => 297, p298 => 298, p299 => 299, p300 => 300,
+            p301 => 301, p302 => 302, p303 => 303, p304 => 304,
+        ]);
+        check_dragon_scale_fixed_k_window!(w127, 127, [
+            p288 => 288, p289 => 289, p290 => 290, p291 => 291, p292 => 292, p293 => 293,
+            p294 => 294, p295 => 295, p296 => 296, p297 => 297, p298 => 298, p299 => 299,
+            p300 => 300, p301 => 301, p302 => 302, p303 => 303, p304 => 304, p305 => 305,
+            p306 => 306, p307 => 307, p308 => 308,
+        ]);
+    }
+
+    // Every contract input of windows 000 to 127 has its estimate in the window range, so
+    // the fixed-K proofs of each K in that range cover the window.
+    #[kani::proof]
+    fn check_dragon_scale_k_range() {
+        let mant = kani::any::<u64>() & ((1u64 << 55) - 1);
+        let plus: u64 = if kani::any::<bool>() { 1 } else { 2 };
+        kani::assume(mant >= 2);
+        kani::assume(plus == 1 || mant == 1 << 25 || mant == 1 << 54);
+        kani::assume(mant as u128 + plus as u128 <= ((1 + plus as u128) << 53));
+        let window = kani::any::<u8>();
+        kani::assume(window <= 127);
+        let first = -1076 + 16 * i16::from(window);
+        let exp = first + i16::from(kani::any::<u8>() & 15);
+        kani::assume(exp <= fixed_k_last(first));
+        let k =
+            crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor(mant + plus, exp);
+        assert!(fixed_k_min(first) <= k && k <= fixed_k_max(first));
+        kani::cover(window == 0, "the K range includes the lowest window");
+        kani::cover(window == 127, "the K range includes the last fixed-K window");
+    }
+
+    // Only the additional [1, 2) probes use this adapter. Check the scaling
+    // value against the independently proved model for the actual arguments,
+    // then expose the literal zero before expanding bigint multiplication.
+    // A nonzero estimate fails the proof; it is never assumed away.
+    fn estimate_unit_scale(mant: u64, exp: i16) -> i16 {
+        assert_eq!(
+            crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor(mant, exp),
+            0
+        );
+        0
+    }
+
+    // Identity instrumentation lets each proof expose constant exponent bits
+    // before expanding the original multiplication body. The replacement
+    // checks equality on every call, so an invalid prefix fails verification.
+    pub(super) fn proof_pow10_exponent(n: usize) -> usize {
+        n
+    }
+
+    struct FixedExponentBits(usize);
+    struct VariableExponentBits(usize);
+
+    struct Pow10Prefix {
+        fixed: FixedExponentBits,
+        variable: VariableExponentBits,
+    }
+
+    impl Pow10Prefix {
+        const fn for_range(range: crate::ops::RangeInclusive<usize>) -> Self {
+            let lower = *range.start();
+            let upper = *range.end();
+            assert!(lower <= upper);
+            let different = lower ^ upper;
+            let variable = if different == 0 { 0 } else { usize::MAX >> different.leading_zeros() };
+            Self {
+                fixed: FixedExponentBits(lower & !variable),
+                variable: VariableExponentBits(variable),
+            }
+        }
+
+        fn check(&self, n: usize) -> usize {
+            let encoded = self.fixed.0 | (n & self.variable.0);
+            assert_eq!(encoded, n);
+            encoded
+        }
+    }
+
+    // For normal inputs with exponent field e, the estimator uses a binary
+    // exponent sum between e - bias and e - bias + 1. Group zero also includes
+    // subnormals, down to -149 for f32 and -1074 for f64. Applying the original
+    // integer scaling formula to those endpoints gives these magnitude ranges.
+    // They only choose an encoding; check() proves it equals the actual value.
+    const F32_POW10_PREFIXES: [Pow10Prefix; 4] = [
+        Pow10Prefix::for_range(19..=45),
+        Pow10Prefix::for_range(0..=19),
+        Pow10Prefix::for_range(0..=19),
+        Pow10Prefix::for_range(19..=38),
+    ];
+
+    const F64_POW10_PREFIXES: [Pow10Prefix; 32] = [
+        Pow10Prefix::for_range(289..=324),
+        Pow10Prefix::for_range(270..=289),
+        Pow10Prefix::for_range(251..=270),
+        Pow10Prefix::for_range(231..=251),
+        Pow10Prefix::for_range(212..=231),
+        Pow10Prefix::for_range(193..=212),
+        Pow10Prefix::for_range(174..=193),
+        Pow10Prefix::for_range(154..=174),
+        Pow10Prefix::for_range(135..=154),
+        Pow10Prefix::for_range(116..=135),
+        Pow10Prefix::for_range(97..=116),
+        Pow10Prefix::for_range(77..=97),
+        Pow10Prefix::for_range(58..=77),
+        Pow10Prefix::for_range(39..=58),
+        Pow10Prefix::for_range(19..=39),
+        Pow10Prefix::for_range(0..=19),
+        Pow10Prefix::for_range(0..=19),
+        Pow10Prefix::for_range(19..=38),
+        Pow10Prefix::for_range(38..=58),
+        Pow10Prefix::for_range(58..=77),
+        Pow10Prefix::for_range(77..=96),
+        Pow10Prefix::for_range(96..=115),
+        Pow10Prefix::for_range(115..=135),
+        Pow10Prefix::for_range(135..=154),
+        Pow10Prefix::for_range(154..=173),
+        Pow10Prefix::for_range(173..=192),
+        Pow10Prefix::for_range(192..=212),
+        Pow10Prefix::for_range(212..=231),
+        Pow10Prefix::for_range(231..=250),
+        Pow10Prefix::for_range(250..=270),
+        Pow10Prefix::for_range(270..=289),
+        Pow10Prefix::for_range(289..=308),
+    ];
+
+    fn checked_pow10_f32<const GROUP: usize>(n: usize) -> usize {
+        F32_POW10_PREFIXES[GROUP].check(n)
+    }
+
+    fn checked_pow10_f64<const GROUP: usize>(n: usize) -> usize {
+        F64_POW10_PREFIXES[GROUP].check(n)
+    }
+
+    fn checked_pow10_unit<const EXPONENT: usize>(n: usize) -> usize {
+        assert_eq!(EXPONENT, 1023);
+        Pow10Prefix::for_range(0..=0).check(n)
+    }
+
+    struct LimbCountMask(usize);
+
+    impl LimbCountMask {
+        fn check(&self, size: usize) -> usize {
+            let encoded = size & self.0;
+            assert_eq!(encoded, size);
+            encoded
+        }
+    }
+
+    fn checked_f32_limb_count(size: usize) -> usize {
+        // Scaled f32 values fit in five 32-bit limbs. The division abstraction
+        // can also add a carry limb when its result is added to the mantissa.
+        LimbCountMask(7).check(size)
+    }
+
+    fn checked_f64_limb_count<const GROUP: usize>(size: usize) -> usize {
+        let first_exponent = 64 * GROUP as i32;
+        let last_exponent = first_exponent + 63;
+        let value_bits = (1076 - first_exponent).max(last_exponent - 1021).max(64) as usize;
+        // Reserve sixteen bits for decimal scaling and digit extraction,
+        // and a full carry limb for the division abstraction's addition.
+        let limb_bound = (value_bits + 16).div_ceil(Digit::BITS as usize) + 1;
+        LimbCountMask((limb_bound + 1).next_power_of_two() - 1).check(size)
+    }
+
+    // Only the two unit-exponent diagnostics use these checked count encodings.
+    // A count outside the mask fails an assertion, without excluding any input.
+    fn unit_shortest_limb_count(size: usize) -> usize {
+        LimbCountMask(if Digit::BITS == 64 { 1 } else { 3 }).check(size)
+    }
+
+    fn unit_exact_limb_count(size: usize) -> usize {
+        LimbCountMask(if Digit::BITS == 64 { 3 } else { 7 }).check(size)
+    }
+
+    macro_rules! check_partition {
+        ($name:ident, arbitrary_finite_f32, $group:literal, $cover_fallback:literal) => {
+            check_partition!(
+                $name,
+                arbitrary_finite_f32,
+                $group,
+                $cover_fallback,
+                19,
+                33,
+                crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor,
+                checked_pow10_f32,
+                255,
+                checked_f32_limb_count,
+                checked_f32_limb_count
+            );
+        };
+        ($name:ident, $decode:ident, $group:literal, $cover_fallback:literal) => {
+            check_partition!($name, $decode, $group, $cover_fallback, 41, 41);
+        };
+        (
+            $name:ident, $decode:ident, $group:literal, $cover_fallback:literal,
+            $shortest_unwind:literal, $exact_unwind:literal
+        ) => {
+            check_partition!(
+                $name,
+                $decode,
+                $group,
+                $cover_fallback,
+                $shortest_unwind,
+                $exact_unwind,
+                crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor,
+                checked_pow10_f64,
+                2047,
+                partition_limb_count,
+                partition_limb_count
+            );
+        };
+        (
+            $name:ident, $decode:ident, $group:literal, $cover_fallback:literal,
+            $shortest_unwind:literal, $exact_unwind:literal, $estimate:path, $pow10:ident,
+            $pow2_mask:literal
+            $(, $shortest_limbs:path, $exact_limbs:path)?
+        ) => {
+            mod $name {
+                use super::*;
+
+                fn partition_limb_count(size: usize) -> usize {
+                    checked_f64_limb_count::<$group>(size)
+                }
+
+                fn stub_pow10_exponent(n: usize) -> usize {
+                    $pow10::<$group>(n)
+                }
+
+                fn stub_pow2_bits(bits: usize) -> usize {
+                    let encoded = bits & $pow2_mask;
+                    assert_eq!(encoded, bits);
+                    encoded
+                }
+
+                #[kani::proof]
+                #[kani::unwind($shortest_unwind)]
+                $(
+                    #[kani::stub(crate::num::imp::bignum::kani_loop_size, $shortest_limbs)]
+                    #[kani::stub(Big::add, Big::kani_add_model)]
+                    #[kani::stub(Big::sub, Big::kani_sub_model)]
+                    #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
+                    #[kani::stub(Big::mul_pow2, Big::kani_mul_pow2_model)]
+                )?
+                #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
+                #[kani::stub(crate::num::imp::bignum::kani_pow2_bits, stub_pow2_bits)]
+                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul, carrying_mul_model))]
+                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
+                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul, carrying_mul_model))]
+                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul_add, carrying_mul_add_model))]
+                #[kani::stub(crate::num::imp::flt2dec::estimator::estimate_scaling_factor, $estimate)]
+                #[kani::stub(
+                    u64::leading_zeros,
+                    crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u64
+                )]
+                #[kani::stub(
+                    u32::leading_zeros,
+                    crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u32
+                )]
+                #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
+                #[kani::stub(Big::is_zero, stub_is_zero)]
+                #[kani::stub(
+                    crate::num::imp::flt2dec::round_up,
+                    crate::num::imp::flt2dec::rounding_verify::stub_round_up
+                )]
+                #[kani::stub_verified(crate::num::imp::flt2dec::rounding_verify::round_up_contract)]
+                #[kani::solver(kissat)]
+                fn check_format_shortest() {
+                    let d = $decode::<$group>();
+                    let len = usize::from(kani::any::<u8>());
+                    kani::assume(len >= MAX_SIG_DIGITS && len <= PROOF_BUFLEN);
+                    let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+                    let start = buf.as_ptr().cast::<u8>();
+                    kani::cover(len == MAX_SIG_DIGITS, "shortest uses the minimum buffer");
+                    kani::cover(len == PROOF_BUFLEN, "shortest uses the largest proof buffer");
+                    let (digits, _) = format_shortest(&d, &mut buf[..len]);
+                    kani::cover(digits.len() > 1, "shortest produces multiple digits");
+                    assert!(!digits.is_empty());
+                    assert!(digits.len() <= len);
+                    assert_eq!(digits.as_ptr(), start);
+                }
+
+                #[kani::proof]
+                #[kani::unwind($exact_unwind)]
+                $(
+                    #[kani::stub(crate::num::imp::bignum::kani_loop_size, $exact_limbs)]
+                    #[kani::stub(Big::add, Big::kani_add_model)]
+                    #[kani::stub(Big::sub, Big::kani_sub_model)]
+                    #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
+                    #[kani::stub(Big::mul_pow2, Big::kani_mul_pow2_model)]
+                )?
+                #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
+                #[kani::stub(crate::num::imp::bignum::kani_pow2_bits, stub_pow2_bits)]
+                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul, carrying_mul_model))]
+                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
+                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul, carrying_mul_model))]
+                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul_add, carrying_mul_add_model))]
+                #[kani::stub(crate::num::imp::flt2dec::estimator::estimate_scaling_factor, $estimate)]
+                #[kani::stub(
+                    u64::leading_zeros,
+                    crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u64
+                )]
+                #[kani::stub(
+                    u32::leading_zeros,
+                    crate::num::imp::flt2dec::bit_scan_verify::leading_zeros_u32
+                )]
+                #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
+                #[kani::stub(Big::is_zero, stub_is_zero)]
+                #[kani::stub(
+                    crate::num::imp::flt2dec::round_up,
+                    crate::num::imp::flt2dec::rounding_verify::stub_round_up
+                )]
+                #[kani::stub_verified(crate::num::imp::flt2dec::rounding_verify::round_up_contract)]
+                #[kani::stub(fill_zeroes, fill_zeroes_model)]
+                #[kani::stub(div_2pow10, stub_div_2pow10)]
+                #[kani::stub_verified(div_2pow10_contract)]
+                #[kani::solver(kissat)]
+                fn check_format_exact() {
+                    let d = $decode::<$group>();
+                    let limit: i16 = kani::any();
+                    let len = usize::from(kani::any::<u8>());
+                    kani::assume(len <= PROOF_BUFLEN);
+                    let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+                    let start = buf.as_ptr().cast::<u8>();
+                    kani::cover(len == 0, "exact accepts an empty buffer");
+                    kani::cover(len == PROOF_BUFLEN, "exact uses the largest proof buffer");
+                    let (digits, _) = format_exact(&d, &mut buf[..len], limit);
+                    kani::cover(digits.is_empty(), "exact can return an empty prefix");
+                    kani::cover(digits.len() > 1, "exact produces multiple digits");
+                    assert!(digits.len() <= len);
+                    assert_eq!(digits.as_ptr(), start);
+                }
+            }
+        };
+    }
+
+    for_each_finite_partition!(check_partition);
+    // These inputs need fewer bigint limbs. Keep enough iterations for the
+    // digit and rounding loops; unwinding assertions check every loop bound.
+    check_partition!(
+        f64_exp_1023,
+        arbitrary_finite_f64_exponent,
+        1023,
+        false,
+        19,
+        33,
+        estimate_unit_scale,
+        checked_pow10_unit,
+        63,
+        unit_shortest_limb_count,
+        unit_exact_limb_count
+    );
 }

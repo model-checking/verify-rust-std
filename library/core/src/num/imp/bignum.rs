@@ -147,6 +147,10 @@ macro_rules! define_bignum {
                 use crate::{cmp, iter};
 
                 let mut sz = cmp::max(self.size, other.size);
+                #[cfg(kani)]
+                {
+                    sz = crate::num::imp::bignum::kani_loop_size(sz);
+                }
                 let mut carry = false;
                 for (a, b) in iter::zip(&mut self.base[..sz], &other.base[..sz]) {
                     let (v, c) = (*a).carrying_add(*b, carry);
@@ -182,6 +186,8 @@ macro_rules! define_bignum {
                 use crate::{cmp, iter};
 
                 let sz = cmp::max(self.size, other.size);
+                #[cfg(kani)]
+                let sz = crate::num::imp::bignum::kani_loop_size(sz);
                 let mut noborrow = true;
                 for (a, b) in iter::zip(&mut self.base[..sz], &other.base[..sz]) {
                     let (v, c) = (*a).carrying_add(!*b, noborrow);
@@ -197,6 +203,10 @@ macro_rules! define_bignum {
             /// mutable reference.
             pub fn mul_small(&mut self, other: $ty) -> &mut $name {
                 let mut sz = self.size;
+                #[cfg(kani)]
+                {
+                    sz = crate::num::imp::bignum::kani_loop_size(sz);
+                }
                 let mut carry = 0;
                 for a in &mut self.base[..sz] {
                     let (v, c) = (*a).carrying_mul(other, carry);
@@ -213,6 +223,12 @@ macro_rules! define_bignum {
 
             /// Multiplies itself by `2^bits` and returns its own mutable reference.
             pub fn mul_pow2(&mut self, bits: usize) -> &mut $name {
+                #[cfg(kani)]
+                let bits = crate::num::imp::bignum::kani_pow2_bits(bits);
+                #[cfg(kani)]
+                let size = crate::num::imp::bignum::kani_loop_size(self.size);
+                #[cfg(not(kani))]
+                let size = self.size;
                 let digitbits = <$ty>::BITS as usize;
                 let digits = bits / digitbits;
                 let bits = bits % digitbits;
@@ -222,7 +238,7 @@ macro_rules! define_bignum {
                 debug_assert!(bits == 0 || (self.base[$n - digits - 1] >> (digitbits - bits)) == 0);
 
                 // shift by `digits * digitbits` bits
-                for i in (0..self.size).rev() {
+                for i in (0..size).rev() {
                     self.base[i + digits] = self.base[i];
                 }
                 for i in 0..digits {
@@ -230,7 +246,7 @@ macro_rules! define_bignum {
                 }
 
                 // shift by `bits` bits
-                let mut sz = self.size + digits;
+                let mut sz = size + digits;
                 if bits > 0 {
                     let last = sz;
                     let overflow = self.base[last - 1] >> (digitbits - bits);
@@ -276,14 +292,30 @@ macro_rules! define_bignum {
                 self
             }
 
+            /// One step of `mul_digits`: returns `(carry', v)` such that
+            /// `carry' * 2^W + v = a * b + c + carry`, where `a` is digit `i` of the
+            /// first factor and `b` is digit `j` of the second factor. The positions do
+            /// not change the result. The Kani proofs of the cached products use them.
+            #[inline]
+            pub(crate) fn mul_digits_step(
+                _i: usize,
+                _j: usize,
+                a: $ty,
+                b: $ty,
+                c: $ty,
+                carry: $ty,
+            ) -> ($ty, $ty) {
+                use crate::num::imp::bignum::FullOps;
+
+                a.full_mul_add(b, c, carry)
+            }
+
             /// Multiplies itself by a number described by `other[0] + other[1] * 2^W +
             /// other[2] * 2^(2W) + ...` (where `W` is the number of bits in the digit type)
             /// and returns its own mutable reference.
             pub fn mul_digits<'a>(&'a mut self, other: &[$ty]) -> &'a mut $name {
                 // the internal routine. works best when aa.len() <= bb.len().
                 fn mul_inner(ret: &mut [$ty; $n], aa: &[$ty], bb: &[$ty]) -> usize {
-                    use crate::num::imp::bignum::FullOps;
-
                     let mut retsz = 0;
                     for (i, &a) in aa.iter().enumerate() {
                         if a == 0 {
@@ -292,7 +324,7 @@ macro_rules! define_bignum {
                         let mut sz = bb.len();
                         let mut carry = 0;
                         for (j, &b) in bb.iter().enumerate() {
-                            let (c, v) = a.full_mul_add(b, ret[i + j], carry);
+                            let (c, v) = $name::mul_digits_step(i, j, a, b, ret[i + j], carry);
                             ret[i + j] = v;
                             carry = c;
                         }
@@ -404,6 +436,541 @@ pub type Big = Big64x20;
 pub type Digit = Digit32;
 #[cfg(target_pointer_width = "64")]
 pub type Digit = Digit64;
+
+#[cfg(kani)]
+pub(crate) const KANI_LIMBS: usize = 1280 / Digit::BITS as usize;
+
+#[cfg(kani)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum KaniInvariantOrdering {
+    Less,
+    Equal,
+    Greater,
+    Unrepresentable,
+}
+
+#[cfg(all(kani, target_pointer_width = "64"))]
+macro_rules! kani_for_each_limb {
+    ($model:ident) => {
+        $model!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19)
+    };
+}
+
+#[cfg(all(kani, any(target_pointer_width = "16", target_pointer_width = "32")))]
+macro_rules! kani_for_each_limb {
+    ($model:ident) => {
+        $model!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39
+        )
+    };
+}
+
+// Proofs can expose fixed count bits while asserting equality with this identity.
+// The arithmetic loops still run, and normal builds contain no instrumentation.
+#[cfg(kani)]
+pub(crate) fn kani_loop_size(size: usize) -> usize {
+    size
+}
+
+#[cfg(kani)]
+pub(crate) fn kani_pow2_bits(bits: usize) -> usize {
+    bits
+}
+
+// Proofs can bound the limb count of the bigint operand of a cached product.
+// A replacement asserts the actual size against its constant bound.
+#[cfg(kani)]
+pub(crate) fn kani_mul_limb_bound(_size: usize, _other_len: usize) -> usize {
+    KANI_LIMBS
+}
+
+#[cfg(kani)]
+impl crate::kani::Arbitrary for Big {
+    fn any() -> Self {
+        Self { size: crate::kani::any(), base: crate::kani::any() }
+    }
+}
+
+#[cfg(kani)]
+impl Big {
+    pub(crate) fn kani_with_arbitrary_limbs(size: usize) -> Self {
+        Self { size, base: crate::kani::any() }
+    }
+
+    pub(crate) fn kani_valid_with_size(size: usize) -> Self {
+        assert!(size <= KANI_LIMBS);
+        let mut value = Self { size, base: [0; KANI_LIMBS] };
+        macro_rules! initialize_limbs {
+            ($($index:literal),+ $(,)?) => {{
+                $(
+                    value.base[$index] = if $index < size { crate::kani::any() } else { 0 };
+                )+
+            }};
+        }
+        kani_for_each_limb!(initialize_limbs);
+        value
+    }
+
+    pub(crate) fn kani_size(&self) -> usize {
+        self.size
+    }
+
+    // Keep these helpers exclusive to loop invariants. Shared callees can
+    // receive a mismatched DFCC parameter: model-checking/kani#4796.
+    pub(crate) fn kani_invariant_size(&self) -> usize {
+        self.size
+    }
+
+    pub(crate) fn kani_invariant_valid_storage(&self) -> bool {
+        macro_rules! inactive_limbs_are_zero {
+            ($($index:literal),+ $(,)?) => {
+                true $(& ((self.size > $index) | (self.base[$index] == 0)))+
+            };
+        }
+        self.size <= KANI_LIMBS && kani_for_each_limb!(inactive_limbs_are_zero)
+    }
+
+    pub(crate) fn kani_invariant_less_than(&self, other: &Self) -> bool {
+        macro_rules! compare_limbs {
+            ($($index:literal),+ $(,)?) => {{
+                let less = false;
+                $(
+                    let active = (self.size > $index) | (other.size > $index);
+                    let equal = self.base[$index] == other.base[$index];
+                    let less = (active & (self.base[$index] < other.base[$index]))
+                        | ((!active | equal) & less);
+                )+
+                less
+            }};
+        }
+        self.size <= KANI_LIMBS && other.size <= KANI_LIMBS && kani_for_each_limb!(compare_limbs)
+    }
+
+    // Invariant-only arithmetic avoids shared callees and their DFCC parameters.
+    pub(crate) fn kani_invariant_cmp_scaled_sum(
+        &self,
+        left: &Self,
+        right: &Self,
+        decimal_digits: usize,
+    ) -> KaniInvariantOrdering {
+        if self.size <= KANI_LIMBS
+            && left.size <= KANI_LIMBS
+            && right.size <= KANI_LIMBS
+            && decimal_digits <= 16
+        {
+            let factor: u128 = match decimal_digits {
+                0 => 1,
+                1 => 10,
+                2 => 100,
+                3 => 1_000,
+                4 => 10_000,
+                5 => 100_000,
+                6 => 1_000_000,
+                7 => 10_000_000,
+                8 => 100_000_000,
+                9 => 1_000_000_000,
+                10 => 10_000_000_000,
+                11 => 100_000_000_000,
+                12 => 1_000_000_000_000,
+                13 => 10_000_000_000_000,
+                14 => 100_000_000_000_000,
+                15 => 1_000_000_000_000_000,
+                16 => 10_000_000_000_000_000,
+                _ => 0,
+            };
+            macro_rules! compare_scaled_sum {
+                ($($index:literal),+ $(,)?) => {{
+                    let carry = 0u128;
+                    let ordering = KaniInvariantOrdering::Equal;
+                    $(
+                        let a = if left.size > $index { left.base[$index] as u128 } else { 0 };
+                        let b = if right.size > $index { right.base[$index] as u128 } else { 0 };
+                        let product = (a + b) * factor + carry;
+                        let digit = product as Digit;
+                        let own = if self.size > $index { self.base[$index] } else { 0 };
+                        let ordering = if own < digit {
+                            KaniInvariantOrdering::Less
+                        } else if own > digit {
+                            KaniInvariantOrdering::Greater
+                        } else {
+                            ordering
+                        };
+                        let carry = product >> Digit::BITS;
+                    )+
+                    if carry == 0 { ordering } else { KaniInvariantOrdering::Unrepresentable }
+                }};
+            }
+            kani_for_each_limb!(compare_scaled_sum)
+        } else {
+            KaniInvariantOrdering::Unrepresentable
+        }
+    }
+
+    // Contract-only twins of the invariant helpers above. A postcondition that
+    // shares the loop-invariant helpers can receive a mismatched DFCC parameter:
+    // model-checking/kani#4796. Each twin checks the sizes before any limb access.
+    pub(crate) fn kani_contract_zero() -> Self {
+        Self { size: 0, base: [0; KANI_LIMBS] }
+    }
+
+    pub(crate) fn kani_contract_size(&self) -> usize {
+        self.size
+    }
+
+    pub(crate) fn kani_contract_valid_storage(&self) -> bool {
+        macro_rules! inactive_limbs_are_zero {
+            ($($index:literal),+ $(,)?) => {
+                true $(& ((self.size > $index) | (self.base[$index] == 0)))+
+            };
+        }
+        self.size <= KANI_LIMBS && kani_for_each_limb!(inactive_limbs_are_zero)
+    }
+
+    pub(crate) fn kani_contract_cmp_scaled_sum(
+        &self,
+        left: &Self,
+        right: &Self,
+        decimal_digits: usize,
+    ) -> KaniInvariantOrdering {
+        if self.size <= KANI_LIMBS
+            && left.size <= KANI_LIMBS
+            && right.size <= KANI_LIMBS
+            && decimal_digits <= 16
+        {
+            let factor: u128 = match decimal_digits {
+                0 => 1,
+                1 => 10,
+                2 => 100,
+                3 => 1_000,
+                4 => 10_000,
+                5 => 100_000,
+                6 => 1_000_000,
+                7 => 10_000_000,
+                8 => 100_000_000,
+                9 => 1_000_000_000,
+                10 => 10_000_000_000,
+                11 => 100_000_000_000,
+                12 => 1_000_000_000_000,
+                13 => 10_000_000_000_000,
+                14 => 100_000_000_000_000,
+                15 => 1_000_000_000_000_000,
+                16 => 10_000_000_000_000_000,
+                _ => 0,
+            };
+            macro_rules! compare_scaled_sum {
+                ($($index:literal),+ $(,)?) => {{
+                    let carry = 0u128;
+                    let ordering = KaniInvariantOrdering::Equal;
+                    $(
+                        let a = if left.size > $index { left.base[$index] as u128 } else { 0 };
+                        let b = if right.size > $index { right.base[$index] as u128 } else { 0 };
+                        let product = (a + b) * factor + carry;
+                        let digit = product as Digit;
+                        let own = if self.size > $index { self.base[$index] } else { 0 };
+                        let ordering = if own < digit {
+                            KaniInvariantOrdering::Less
+                        } else if own > digit {
+                            KaniInvariantOrdering::Greater
+                        } else {
+                            ordering
+                        };
+                        let carry = product >> Digit::BITS;
+                    )+
+                    if carry == 0 { ordering } else { KaniInvariantOrdering::Unrepresentable }
+                }};
+            }
+            kani_for_each_limb!(compare_scaled_sum)
+        } else {
+            KaniInvariantOrdering::Unrepresentable
+        }
+    }
+
+    pub(crate) fn kani_limbs_mut(&mut self) -> &mut [Digit; KANI_LIMBS] {
+        &mut self.base
+    }
+
+    pub(crate) fn kani_valid_storage(&self) -> bool {
+        let size = kani_loop_size(self.size);
+        // Constant indices avoid unfolding a symbolic slice iterator in every
+        // contract invocation. Eager Boolean operations preserve the predicate.
+        macro_rules! inactive_limbs_are_zero {
+            ($($index:literal),+ $(,)?) => {
+                true $(& ((size > $index) | (self.base[$index] == 0)))+
+            };
+        }
+
+        size <= self.base.len() && kani_for_each_limb!(inactive_limbs_are_zero)
+    }
+
+    // The equivalence proof in dragon_verify checks these constant-index
+    // models for every in-bounds storage size and arbitrary limb contents.
+    pub(crate) fn kani_cmp_model(&self, other: &Self) -> crate::cmp::Ordering {
+        use crate::cmp::Ordering::{Equal, Greater, Less};
+
+        assert!(self.size <= self.base.len() && other.size <= other.base.len());
+        let size = kani_loop_size(self.size);
+        let other_size = kani_loop_size(other.size);
+
+        macro_rules! compare_limbs {
+            ($($index:literal),+ $(,)?) => {{
+                let less = false;
+                let greater = false;
+                $(
+                    let active = (size > $index) | (other_size > $index);
+                    let equal = self.base[$index] == other.base[$index];
+                    let preserve = !active | equal;
+                    let less = (active & (self.base[$index] < other.base[$index]))
+                        | (preserve & less);
+                    let greater = (active & (self.base[$index] > other.base[$index]))
+                        | (preserve & greater);
+                )+
+                if less { Less } else if greater { Greater } else { Equal }
+            }};
+        }
+
+        // Like Ord::cmp, inspect both arrays through the larger active size.
+        // A differing higher limb supersedes every lower limb's ordering.
+        // Eager Boolean operations avoid a branch at each constant limb index.
+        kani_for_each_limb!(compare_limbs)
+    }
+
+    pub(crate) fn kani_is_zero_model(&self) -> bool {
+        assert!(self.size <= self.base.len());
+        let size = kani_loop_size(self.size);
+
+        macro_rules! limbs_are_zero {
+            ($($index:literal),+ $(,)?) => {
+                true $(& ((size <= $index) | (self.base[$index] == 0)))+
+            };
+        }
+
+        kani_for_each_limb!(limbs_are_zero)
+    }
+
+    pub(crate) fn kani_same_storage(&self, other: &Self) -> bool {
+        macro_rules! equal_limbs {
+            ($($index:literal),+ $(,)?) => {
+                true $(& (self.base[$index] == other.base[$index]))+
+            };
+        }
+
+        (self.size == other.size) & kani_for_each_limb!(equal_limbs)
+    }
+
+    // Independent equivalence proofs compare every stored limb and the size.
+    // Addition and multiplication reserve one limb for a possible carry.
+    // Their size bounds are asserted here, including at generator call sites.
+    pub(crate) fn kani_add_model<'a>(&'a mut self, other: &Self) -> &'a mut Self {
+        assert!(self.size < self.base.len() && other.size < other.base.len());
+        let mut sz = kani_loop_size(crate::cmp::max(self.size, other.size));
+
+        macro_rules! add_limbs {
+            ($($index:literal),+ $(,)?) => {{
+                let carry = false;
+                $(
+                    let carry = if $index < sz {
+                        let (value, next) = self.base[$index].carrying_add(other.base[$index], carry);
+                        self.base[$index] = value;
+                        next
+                    } else {
+                        carry
+                    };
+                )+
+                carry
+            }};
+        }
+
+        let carry = kani_for_each_limb!(add_limbs);
+        if carry {
+            self.base[sz] = 1;
+            sz += 1;
+        }
+        self.size = sz;
+        self
+    }
+
+    pub(crate) fn kani_sub_model<'a>(&'a mut self, other: &Self) -> &'a mut Self {
+        assert!(self.size <= self.base.len() && other.size <= other.base.len());
+        assert!(self.kani_cmp_model(other) != crate::cmp::Ordering::Less);
+        let sz = kani_loop_size(crate::cmp::max(self.size, other.size));
+
+        macro_rules! subtract_limbs {
+            ($($index:literal),+ $(,)?) => {{
+                let noborrow = true;
+                $(
+                    let noborrow = if $index < sz {
+                        let (value, next) = self.base[$index].carrying_add(!other.base[$index], noborrow);
+                        self.base[$index] = value;
+                        next
+                    } else {
+                        noborrow
+                    };
+                )+
+                noborrow
+            }};
+        }
+
+        let noborrow = kani_for_each_limb!(subtract_limbs);
+        assert!(noborrow);
+        self.size = sz;
+        self
+    }
+
+    pub(crate) fn kani_mul_digits_model<'a>(&'a mut self, other: &[Digit]) -> &'a mut Self {
+        let size = kani_loop_size(self.size);
+        assert!(size <= KANI_LIMBS && other.len() <= KANI_LIMBS);
+        assert!(size + other.len() <= KANI_LIMBS);
+        let bound = kani_mul_limb_bound(size, other.len());
+        let mut ret = [0; KANI_LIMBS];
+        let retsz = if bound < other.len() || size < other.len() {
+            Self::kani_mul_digits_product(&mut ret, &self.base[..size], other, bound, KANI_LIMBS)
+        } else {
+            Self::kani_mul_digits_product(&mut ret, other, &self.base[..size], KANI_LIMBS, bound)
+        };
+        self.base = ret;
+        self.size = retsz;
+        self
+    }
+
+    fn kani_mul_digits_product(
+        ret: &mut [Digit; KANI_LIMBS],
+        aa: &[Digit],
+        bb: &[Digit],
+        aa_bound: usize,
+        bb_bound: usize,
+    ) -> usize {
+        // The caller gives the shorter operand as `aa`, so the bound `bb.len()` removes no
+        // row, but a constant `bb` (a power table) bounds the rows before the solver starts.
+        // The caller checks that each operand length is at most its limb bound, so the
+        // limb bounds remove no row or column either.
+        assert!(aa.len() <= bb.len());
+        let mut retsz = 0;
+        macro_rules! multiply_rows {
+            ($($index:literal),+ $(,)?) => {$(
+                if $index < aa_bound && $index < aa.len() && $index < bb.len() {
+                    let a = aa[$index];
+                    if a != 0 {
+                        let sz = Self::kani_mul_digits_row(ret, a, bb, $index, bb_bound);
+                        if retsz < $index + sz {
+                            retsz = $index + sz;
+                        }
+                    }
+                }
+            )+};
+        }
+        kani_for_each_limb!(multiply_rows);
+        retsz
+    }
+
+    fn kani_mul_digits_row(
+        ret: &mut [Digit; KANI_LIMBS],
+        a: Digit,
+        bb: &[Digit],
+        index: usize,
+        bb_bound: usize,
+    ) -> usize {
+        let mut carry = 0;
+        macro_rules! multiply_columns {
+            ($($column:literal),+ $(,)?) => {$(
+                if $column < bb_bound && $column < bb.len() {
+                    let output = index + $column;
+                    assert!(output < KANI_LIMBS);
+                    let (c, v) =
+                        Self::mul_digits_step(index, $column, a, bb[$column], ret[output], carry);
+                    ret[output] = v;
+                    carry = c;
+                }
+            )+};
+        }
+        kani_for_each_limb!(multiply_columns);
+        if carry > 0 {
+            ret[index + bb.len()] = carry;
+            bb.len() + 1
+        } else {
+            bb.len()
+        }
+    }
+
+    pub(crate) fn kani_mul_small_model(&mut self, other: Digit) -> &mut Self {
+        assert!(self.size < self.base.len());
+        let mut sz = kani_loop_size(self.size);
+
+        macro_rules! multiply_limbs {
+            ($($index:literal),+ $(,)?) => {{
+                let carry = 0;
+                $(
+                    let carry = if $index < sz {
+                        let (value, next) = self.base[$index].carrying_mul(other, carry);
+                        self.base[$index] = value;
+                        next
+                    } else {
+                        carry
+                    };
+                )+
+                carry
+            }};
+        }
+
+        let carry = kani_for_each_limb!(multiply_limbs);
+        if carry > 0 {
+            self.base[sz] = carry;
+            sz += 1;
+        }
+        self.size = sz;
+        self
+    }
+
+    // Contract proofs include every storage size, including the empty zero
+    // representation. Leading zero limbs within the active prefix are valid.
+    pub(crate) fn kani_mul_pow2_model(&mut self, bits: usize) -> &mut Self {
+        assert!(self.kani_valid_storage());
+        let size = kani_loop_size(self.size);
+        let bits = kani_pow2_bits(bits);
+        let digit_bits = Digit::BITS as usize;
+        let digits = bits / digit_bits;
+        let bits = bits % digit_bits;
+        assert!(digits < KANI_LIMBS);
+        assert!(size + digits <= KANI_LIMBS);
+        assert!(bits == 0 || size + digits > 0);
+        assert!(bits == 0 || (self.base[KANI_LIMBS - digits - 1] >> (digit_bits - bits)) == 0);
+
+        let old = self.base;
+        let overflow = if bits > 0 && size > 0 { old[size - 1] >> (digit_bits - bits) } else { 0 };
+        let new_size = size + digits + usize::from(overflow > 0);
+        assert!(new_size <= KANI_LIMBS);
+
+        macro_rules! shift_limbs {
+            ($($index:literal),+ $(,)?) => {{
+                $(
+                    self.base[$index] = if $index < digits {
+                        0
+                    } else if bits == 0 {
+                        old[$index - digits]
+                    } else {
+                        let high = old[$index - digits] << bits;
+                        let low = if $index > digits {
+                            old[$index - digits - 1] >> (digit_bits - bits)
+                        } else {
+                            0
+                        };
+                        high | low
+                    };
+                )+
+            }};
+        }
+
+        kani_for_each_limb!(shift_limbs);
+        self.size = new_size;
+        self
+    }
+
+    pub(crate) fn kani_any_valid() -> Self {
+        let value: Self = crate::kani::any();
+        crate::kani::assume(value.kani_valid_storage());
+        value
+    }
+}
 
 // this one is used for testing only.
 #[doc(hidden)]
