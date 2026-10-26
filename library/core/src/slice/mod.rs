@@ -6293,10 +6293,10 @@ mod verify {
         let _ = s.partition_dedup_by(|_, _| kani::any::<bool>());
     }
 
-    // ===== Ch17 · rotate_left/right → ptr_rotate (bounded). ptr_rotate dispatches by size:
-    // memmove (min(l,r) <= 256/size_of::<T>), gcd (size_of::<T> > 32B), swap (small T + min > 256).
-    // BufType = [usize;32] = 256B. memmove + gcd verified here; the swap path needs 500+ u8 elements
-    // (min > 256) → intractable bounded → disclosed residual (dispatch-identified, not attempted). =====
+    // ===== Ch17 · rotate_left/right → ptr_rotate. Dispatches by size: memmove
+    // (min(l,r) <= 256/size_of::<T>), gcd (l+r < 24 || size_of::<T> > 32B), else swap.
+    // All arms covered: memmove (u8), gcd ([usize;5]=40B), swap ([usize;4]=32B · 24 elems · min=12>8),
+    // plus the ZST and no-op early returns. =====
     #[kani::proof]
     fn check_rotate_memmove_u8() {
         // left=2, right=6, min=2 <= 256 → memmove (copy_nonoverlapping, no loop).
@@ -6333,6 +6333,23 @@ mod verify {
         let mut arr: [u8; 8] = kani::any();
         kani::cover(arr[0] != arr[7], "non-uniform contents rotated");
         arr.rotate_right(2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(64)]
+    fn check_rotate_swap_big_t() {
+        // [usize;4] = 32B (== 32, so NOT the >32B gcd arm). len=24, mid=12 → left=right=12:
+        // min=12 > 256/32=8 → not memmove; left+right=24 >= 24 and size 32 <= 32 → swap (Algorithm 3).
+        // Reaches the swap arm at the minimum count it allows (replaces the u8 residual that needed
+        // 500+ elements). The dispatch dims (12/12/32B) are CONCRETE, so CBMC takes exactly the swap
+        // path — reached by construction, not via a symbolic branch that could dodge it.
+        // unwind(64) must cover BOTH kani::any over the 24-elem array (~25, cf. the [usize;5]×14 gcd
+        // harness @ unwind(20)) AND swap_nonoverlapping over 12×32B (~48); tune down if the canary slacks.
+        let mut arr: [[usize; 4]; 24] = kani::any();
+        // scalar sub-element compare: a whole-[usize;4] `!=` lowers to memcmp (6.11 builtin-loop
+        // artifact) — same reason check_rotate_gcd_big_t compares arr[0][0].
+        kani::cover(arr[0][0] != arr[23][0], "non-uniform contents rotated through the swap arm");
+        arr.rotate_left(12);
     }
 
     // ===== Ch17 · panic-path pairs (should_panic): safe fns that panic on a precondition
