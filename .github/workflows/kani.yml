@@ -20,17 +20,12 @@ on:
       native_solver:
         description: Optional SAT solver for the native pass of explicitly selected proof groups
         type: choice
-        options: [default, kissat, cadical, minisat]
+        options: [default, kissat]
         default: default
       harness_timeout:
         description: Optional per-harness timeout in minutes for explicitly selected proof groups (empty keeps the catalog value)
         type: string
         default: ''
-      assertion_reach_checks:
-        description: Optional diagnostic switch for Kani assertion reachability checks in explicitly selected proof groups (disabled passes --no-assertion-reach-checks)
-        type: choice
-        options: [enabled, disabled]
-        default: enabled
       proof_backend:
         description: Optional backend for every harness of explicitly selected proof groups
         type: choice
@@ -271,7 +266,6 @@ jobs:
       KANI_MEMORY_DIAGNOSTICS: ${{ contains(join(matrix.group.harnesses, ' '), '::cached_mul_pow5_') || startsWith(matrix.group.catalog_name || matrix.group.name, 'dragon-') }}
       # Manual runs can compare SAT solvers.  Other runs keep the default solver.
       KANI_NATIVE_SOLVER: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && inputs.native_solver || 'default' }}
-      KANI_ASSERTION_REACH_CHECKS: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && inputs.assertion_reach_checks || 'enabled' }}
       KANI_MANUAL_PROBE: ${{ github.event_name == 'workflow_dispatch' && inputs.proof_groups != '' && matrix.group.probe_property != '' }}
       KANI_PROBE_PROPERTY: ${{ matrix.group.probe_property || '' }}
       KANI_OBJECT_BITS: ${{ contains(join(matrix.group.harnesses, ' '), '::cached_mul_pow5_') && '16' || ((matrix.group.catalog_name || matrix.group.name) == 'dragon-exact-loop-frame' || startsWith(matrix.group.catalog_name || matrix.group.name, 'grisu-shortest-')) && '10' || (matrix.group.kind == 'contract' || matrix.group.kind == 'equivalence') && '12' || '14' }}
@@ -369,13 +363,9 @@ jobs:
               export KANI_FLAT_SMT_CVC5=true
               solver_args=(--solver minisat)
             fi
-            reach_args=()
-            if [[ "$KANI_ASSERTION_REACH_CHECKS" == disabled ]]; then
-              reach_args=(--no-assertion-reach-checks)
-            fi
             head/scripts/run-kani.sh --path "${GITHUB_WORKSPACE}/head" \
               --kani-args --jobs 1 --harness-timeout "$KANI_HARNESS_TIMEOUT" --fail-fast --output-format="$output_format" \
-              "${solver_args[@]}" "${reach_args[@]}" "${temporary_args[@]}" --exact "${harness_args[@]}"
+              "${solver_args[@]}" "${temporary_args[@]}" --exact "${harness_args[@]}"
           done
       - name: Retain selected proof models
         if: always() && github.event_name == 'workflow_dispatch' && inputs.proof_groups != ''
