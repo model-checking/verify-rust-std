@@ -85,9 +85,9 @@ class Flt2decHarnessesTests(unittest.TestCase):
 
     def test_complete_disjoint_batches_on_both_platforms(self):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
-        self.assertEqual(len(self.groups), 715)
+        self.assertEqual(len(self.groups), 723)
         self.assertEqual(len({group["name"] for group in self.groups}), len(self.groups))
-        self.assertEqual(sum(len(group["harnesses"]) for group in self.groups), 3704)
+        self.assertEqual(sum(len(group["harnesses"]) for group in self.groups), 3712)
         self.assertEqual(len(set(self.dedicated)), len(self.dedicated))
         for part in MATRIX_JOBS:
             parts = proof_matrix(matrix_job=part)["group"]
@@ -203,10 +203,10 @@ class Flt2decHarnessesTests(unittest.TestCase):
                 self.assertEqual(group["timeout_minutes"], minutes)
                 self.assertLessEqual(len(group["harnesses"]), batch_size)
         self.assertEqual(len(DRAGON_SLOW_PAIRS), 16)
-        self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 180), 203)
+        self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 180), 211)
         self.assertEqual(sum(1 for group in groups if group["timeout_minutes"] == 60), 3)
         self.assertEqual(tuple(len(proof_matrix(matrix_job=job)["group"])
-                               for job in MATRIX_JOBS[2:]), (108, 100, 81, 81, 77, 102))
+                               for job in MATRIX_JOBS[2:]), (108, 100, 81, 81, 85, 102))
 
     def test_all_float_partitions_and_equivalence_cases_remain(self):
         self.assertIn(
@@ -406,7 +406,7 @@ class Flt2decHarnessesTests(unittest.TestCase):
                          f"{DRAGON}::dragon_scale_fixed_k::w000::k317::e00::check_scale_shortest")
 
     def test_dragon_mantissa_splits_run_one_group_per_sub_piece(self):
-        self.assertEqual(DRAGON_MANTISSA_SPLITS, {(23, -200, 1): 4, (23, -200, 2): 4, (34, -153, 2): 8})
+        self.assertEqual(DRAGON_MANTISSA_SPLITS, {(23, -200, 1): 8, (23, -200, 2): 8, (34, -153, 2): 8})
         names = {group["name"]: group for group in self.groups}
         for (window, k, offset), count in DRAGON_MANTISSA_SPLITS.items():
             piece = (f"dragon-shortest-scaling-fixed-k-{window:03d}-{'k' if k < 0 else 'p'}{abs(k):03d}"

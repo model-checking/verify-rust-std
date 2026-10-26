@@ -51,9 +51,9 @@ DRAGON_UNPROVED_PIECES = {
 }
 # Pieces whose proof splits again on the mantissa (dragon.rs `eNN => offset => [mN => top]`):
 # (window, K, piece offset) -> the sub-piece count.  The one-exponent pieces e01 and e02 of
-# (23, -200) and e02 of (34, -153) hit the 180-minute cap;  their 4 or 8 sub-pieces fix the top
-# 2 or 3 mantissa bits, each alone at 180 minutes.
-DRAGON_MANTISSA_SPLITS = {(23, -200, 1): 4, (23, -200, 2): 4, (34, -153, 2): 8}
+# (23, -200) and e02 of (34, -153) hit the 180-minute cap;  their 8 sub-pieces fix the top 3
+# mantissa bits, each alone at 180 minutes (4 sub-pieces of (23, -200) still hit the cap).
+DRAGON_MANTISSA_SPLITS = {(23, -200, 1): 8, (23, -200, 2): 8, (34, -153, 2): 8}
 # One CI matrix holds at most 256 jobs:  core, long (generator and cached proofs), and the fixed-K
 # pairs in four:  dragon-a (windows 000..033), dragon-b (034..067), dragon-c (068..097), dragon-d (098..127).
 # The pieces of the split pairs run in two more:  dragon-e (offsets 0..7) and dragon-f (8..15).
