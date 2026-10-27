@@ -1,6 +1,5 @@
 // tidy-alphabetical-start
 #![feature(clone_to_uninit)]
-#![feature(maybe_uninit_slice)]
 #![feature(normalize_lexically)]
 #![feature(path_trailing_sep)]
 // tidy-alphabetical-end
@@ -990,14 +989,14 @@ pub fn test_decompositions_windows() {
     );
 
     t!("\\\\?\\C:/foo/bar",
-    iter: ["\\\\?\\C:", "\\", "foo/bar"],
+    iter: ["\\\\?\\C:/foo/bar"],
     has_root: true,
     is_absolute: true,
-    parent: Some("\\\\?\\C:/"),
-    file_name: Some("foo/bar"),
-    file_stem: Some("foo/bar"),
+    parent: None,
+    file_name: None,
+    file_stem: None,
     extension: None,
-    file_prefix: Some("foo/bar")
+    file_prefix: None
     );
 
     t!("\\\\.\\foo\\bar",
@@ -2293,6 +2292,26 @@ fn display_format_flags() {
 }
 
 #[test]
+fn display_path_with_padding_no_align() {
+    assert_eq!(format!("{:10}", Path::new("/foo/bar").display()), "/foo/bar  ");
+}
+
+#[test]
+fn display_path_with_padding_align_left() {
+    assert_eq!(format!("{:<10}", Path::new("/foo/bar").display()), "/foo/bar  ");
+}
+
+#[test]
+fn display_path_with_padding_align_right() {
+    assert_eq!(format!("{:>10}", Path::new("/foo/bar").display()), "  /foo/bar");
+}
+
+#[test]
+fn display_path_with_padding_align_center() {
+    assert_eq!(format!("{:^10}", Path::new("/foo/bar").display()), " /foo/bar ");
+}
+
+#[test]
 fn into_rc() {
     let orig = "hello/world";
     let path = Path::new(orig);
@@ -2577,4 +2596,21 @@ fn test_trim_trailing_sep() {
         assert_eq!(Path::new("c:..\\").trim_trailing_sep().as_os_str(), OsStr::new("c:.."));
         assert_eq!(Path::new("c:..\\\\").trim_trailing_sep().as_os_str(), OsStr::new("c:.."));
     }
+}
+
+#[cfg(windows)]
+#[test]
+fn trailing_sep_verbatim() {
+    assert_eq!(Path::new(r"\\?\C:\path").has_trailing_sep(), false);
+    assert_eq!(Path::new(r"\\?\C:\path/").has_trailing_sep(), false);
+    assert_eq!(Path::new(r"\\?\C:\path\").has_trailing_sep(), true);
+    assert_eq!(Path::new(r"\\?\C:\").has_trailing_sep(), true);
+    assert_eq!(Path::new(r"\\?\C:/").has_trailing_sep(), false);
+
+    assert_eq!(Path::new(r"\\?\C:\path").trim_trailing_sep(), Path::new(r"\\?\C:\path"));
+    assert_eq!(Path::new(r"\\?\C:\path/").trim_trailing_sep(), Path::new(r"\\?\C:\path/"));
+    assert_eq!(Path::new(r"\\?\C:\path\").trim_trailing_sep(), Path::new(r"\\?\C:\path"));
+    assert_eq!(Path::new(r"\\?\C:\path/\\\").trim_trailing_sep(), Path::new(r"\\?\C:\path/"));
+    assert_eq!(Path::new(r"\\?\C:\").trim_trailing_sep(), Path::new(r"\\?\C:\"));
+    assert_eq!(Path::new(r"\\?\C:/").trim_trailing_sep(), Path::new(r"\\?\C:/"));
 }

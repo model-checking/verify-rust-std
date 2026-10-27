@@ -1,14 +1,23 @@
 [package]
 name = "libm"
-version = "0.2.15"
-authors = ["Jorge Aparicio <jorge@japaric.io>"]
+version = "0.2.16"
+authors = [
+    "Alex Crichton <alex@alexcrichton.com>",
+    "Amanieu d'Antras <amanieu@gmail.com>",
+    "Jorge Aparicio <japaricious@gmail.com>",
+    "Trevor Gross <tg@trevorgross.com>",
+]
 description = "libm in pure Rust"
 categories = ["no-std"]
 keywords = ["libm", "math"]
 repository = "https://github.com/rust-lang/compiler-builtins"
 license = "MIT"
 edition = "2021"
-rust-version = "1.63"
+rust-version = "1.67"
+
+[dev-dependencies]
+# FIXME(msrv>=1.85): switch to `no-panic.workspace`
+no-panic = "0.1.36"
 
 [features]
 default = ["arch"]
@@ -29,19 +38,17 @@ unstable-public-internals = []
 # Enable the nightly-only `f16` and `f128`.
 unstable-float = []
 
-# Used to prevent using any intrinsics or arch-specific code.
-#
-# HACK: this is a negative feature which is generally a bad idea in Cargo, but
-# we need it to be able to forbid other features when this crate is used in
-# Rust dependencies. Setting this overrides all features that may enable
-# hard float operations.
+# DEPRECATED: This feature is kept around for compatibility reasons but
+# does not do anything.
+# FIXME(1.0): remove this feature.
 force-soft-floats = []
-
-[dev-dependencies]
-no-panic = "0.1.35"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
-  # compiler-builtins sets this feature, but we use it in `libm`
+  # compiler-builtins sets these features, but we use them in `libm`
   'cfg(feature, values("compiler-builtins"))',
+  'cfg(feature, values("unmangled-names"))',
 ] }
+
+[package.metadata.docs.rs]
+features = ["unstable-float"]

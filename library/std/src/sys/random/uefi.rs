@@ -57,13 +57,15 @@ mod rng_protocol {
 mod rdrand {
     cfg_select! {
         target_arch = "x86_64" => {
-            use crate::arch::x86_64 as arch;
             use arch::_rdrand64_step as rdrand_step;
+
+            use crate::arch::x86_64 as arch;
             type Word = u64;
         }
         target_arch = "x86" => {
-            use crate::arch::x86 as arch;
             use arch::_rdrand32_step as rdrand_step;
+
+            use crate::arch::x86 as arch;
             type Word = u32;
         }
     }
@@ -107,11 +109,11 @@ mod rdrand {
         {
             // SAFETY: All Rust x86 targets are new enough to have CPUID, and we
             // check that leaf 1 is supported before using it.
-            let cpuid0 = unsafe { arch::__cpuid(0) };
+            let cpuid0 = arch::__cpuid(0);
             if cpuid0.eax < 1 {
                 return false;
             }
-            let cpuid1 = unsafe { arch::__cpuid(1) };
+            let cpuid1 = arch::__cpuid(1);
 
             let vendor_id =
                 [cpuid0.ebx.to_le_bytes(), cpuid0.edx.to_le_bytes(), cpuid0.ecx.to_le_bytes()];

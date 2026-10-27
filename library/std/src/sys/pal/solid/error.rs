@@ -1,7 +1,15 @@
 pub use self::itron::error::{ItronError as SolidError, expect_success};
 use super::{abi, itron};
-use crate::io::ErrorKind;
+use crate::io;
 use crate::sys::net;
+
+// SOLID directly maps `errno`s to μITRON error codes.
+impl SolidError {
+    #[inline]
+    pub(crate) fn as_io_error(self) -> crate::io::Error {
+        crate::io::Error::from_raw_os_error(self.as_raw())
+    }
+}
 
 /// Describe the specified SOLID error code. Returns `None` if it's an
 /// undefined error code.
@@ -31,23 +39,23 @@ pub fn error_name(er: abi::ER) -> Option<&'static str> {
     }
 }
 
-pub fn decode_error_kind(er: abi::ER) -> ErrorKind {
+pub fn decode_error_kind(er: abi::ER) -> io::ErrorKind {
     match er {
         // Success
-        er if er >= 0 => ErrorKind::Uncategorized,
+        er if er >= 0 => io::ErrorKind::Uncategorized,
         er if er < abi::sockets::SOLID_NET_ERR_BASE => net::decode_error_kind(er),
 
-        abi::SOLID_ERR_NOTFOUND => ErrorKind::NotFound,
-        abi::SOLID_ERR_NOTSUPPORTED => ErrorKind::Unsupported,
-        abi::SOLID_ERR_EBADF => ErrorKind::InvalidInput,
-        abi::SOLID_ERR_INVALIDCONTENT => ErrorKind::InvalidData,
+        abi::SOLID_ERR_NOTFOUND => io::ErrorKind::NotFound,
+        abi::SOLID_ERR_NOTSUPPORTED => io::ErrorKind::Unsupported,
+        abi::SOLID_ERR_EBADF => io::ErrorKind::InvalidInput,
+        abi::SOLID_ERR_INVALIDCONTENT => io::ErrorKind::InvalidData,
         // abi::SOLID_ERR_NOTUSED
         // abi::SOLID_ERR_ALREADYUSED
-        abi::SOLID_ERR_OUTOFBOUND => ErrorKind::InvalidInput,
+        abi::SOLID_ERR_OUTOFBOUND => io::ErrorKind::InvalidInput,
         // abi::SOLID_ERR_BADSEQUENCE
-        abi::SOLID_ERR_UNKNOWNDEVICE => ErrorKind::NotFound,
+        abi::SOLID_ERR_UNKNOWNDEVICE => io::ErrorKind::NotFound,
         // abi::SOLID_ERR_BUSY
-        abi::SOLID_ERR_TIMEOUT => ErrorKind::TimedOut,
+        abi::SOLID_ERR_TIMEOUT => io::ErrorKind::TimedOut,
         // abi::SOLID_ERR_INVALIDACCESS
         // abi::SOLID_ERR_NOTREADY
         _ => itron::error::decode_error_kind(er),

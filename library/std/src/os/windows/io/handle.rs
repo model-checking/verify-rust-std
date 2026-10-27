@@ -3,10 +3,10 @@
 #![stable(feature = "io_safety", since = "1.63.0")]
 
 use super::raw::{AsRawHandle, FromRawHandle, IntoRawHandle, RawHandle};
+use crate::alloc::Allocator;
 use crate::marker::PhantomData;
 use crate::mem::ManuallyDrop;
-use crate::sys::cvt;
-use crate::sys_common::{AsInner, FromInner, IntoInner};
+use crate::sys::{AsInner, FromInner, IntoInner, cvt};
 use crate::{fmt, fs, io, ptr, sys};
 
 /// A borrowed handle.
@@ -185,7 +185,7 @@ impl OwnedHandle {
     /// Creates a new `OwnedHandle` instance that shares the same underlying
     /// object as the existing `OwnedHandle` instance.
     #[stable(feature = "io_safety", since = "1.63.0")]
-    pub fn try_clone(&self) -> crate::io::Result<Self> {
+    pub fn try_clone(&self) -> io::Result<Self> {
         self.as_handle().try_clone_to_owned()
     }
 }
@@ -194,7 +194,7 @@ impl BorrowedHandle<'_> {
     /// Creates a new `OwnedHandle` instance that shares the same underlying
     /// object as the existing `BorrowedHandle` instance.
     #[stable(feature = "io_safety", since = "1.63.0")]
-    pub fn try_clone_to_owned(&self) -> crate::io::Result<OwnedHandle> {
+    pub fn try_clone_to_owned(&self) -> io::Result<OwnedHandle> {
         self.duplicate(0, false, sys::c::DUPLICATE_SAME_ACCESS)
     }
 
@@ -406,11 +406,8 @@ impl fmt::Debug for OwnedHandle {
 
 macro_rules! impl_is_terminal {
     ($($t:ty),*$(,)?) => {$(
-        #[unstable(feature = "sealed", issue = "none")]
-        impl crate::sealed::Sealed for $t {}
-
         #[stable(feature = "is_terminal", since = "1.70.0")]
-        impl crate::io::IsTerminal for $t {
+        impl io::IsTerminal for $t {
             #[inline]
             fn is_terminal(&self) -> bool {
                 crate::sys::io::is_terminal(self)
@@ -428,7 +425,8 @@ pub trait AsHandle {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    #[cfg_attr(windows, doc = "```no_run")]
+    #[cfg_attr(not(windows), doc = "```ignore (needs windows)")]
     /// use std::fs::File;
     /// # use std::io;
     /// use std::os::windows::io::{AsHandle, BorrowedHandle};
@@ -494,7 +492,7 @@ impl<T: AsHandle + ?Sized> AsHandle for crate::rc::UniqueRc<T> {
 }
 
 #[stable(feature = "as_windows_ptrs", since = "1.71.0")]
-impl<T: AsHandle + ?Sized> AsHandle for Box<T> {
+impl<T: AsHandle + ?Sized, A: Allocator> AsHandle for Box<T, A> {
     #[inline]
     fn as_handle(&self) -> BorrowedHandle<'_> {
         (**self).as_handle()
@@ -547,7 +545,7 @@ impl From<OwnedHandle> for fs::File {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-impl AsHandle for crate::io::Stdin {
+impl AsHandle for io::Stdin {
     #[inline]
     fn as_handle(&self) -> BorrowedHandle<'_> {
         unsafe { BorrowedHandle::borrow_raw(self.as_raw_handle()) }
@@ -555,7 +553,7 @@ impl AsHandle for crate::io::Stdin {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-impl<'a> AsHandle for crate::io::StdinLock<'a> {
+impl<'a> AsHandle for io::StdinLock<'a> {
     #[inline]
     fn as_handle(&self) -> BorrowedHandle<'_> {
         unsafe { BorrowedHandle::borrow_raw(self.as_raw_handle()) }
@@ -563,7 +561,7 @@ impl<'a> AsHandle for crate::io::StdinLock<'a> {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-impl AsHandle for crate::io::Stdout {
+impl AsHandle for io::Stdout {
     #[inline]
     fn as_handle(&self) -> BorrowedHandle<'_> {
         unsafe { BorrowedHandle::borrow_raw(self.as_raw_handle()) }
@@ -571,7 +569,7 @@ impl AsHandle for crate::io::Stdout {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-impl<'a> AsHandle for crate::io::StdoutLock<'a> {
+impl<'a> AsHandle for io::StdoutLock<'a> {
     #[inline]
     fn as_handle(&self) -> BorrowedHandle<'_> {
         unsafe { BorrowedHandle::borrow_raw(self.as_raw_handle()) }
@@ -579,7 +577,7 @@ impl<'a> AsHandle for crate::io::StdoutLock<'a> {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-impl AsHandle for crate::io::Stderr {
+impl AsHandle for io::Stderr {
     #[inline]
     fn as_handle(&self) -> BorrowedHandle<'_> {
         unsafe { BorrowedHandle::borrow_raw(self.as_raw_handle()) }
@@ -587,7 +585,7 @@ impl AsHandle for crate::io::Stderr {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-impl<'a> AsHandle for crate::io::StderrLock<'a> {
+impl<'a> AsHandle for io::StderrLock<'a> {
     #[inline]
     fn as_handle(&self) -> BorrowedHandle<'_> {
         unsafe { BorrowedHandle::borrow_raw(self.as_raw_handle()) }

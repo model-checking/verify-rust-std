@@ -5,8 +5,7 @@ use crate::net::SocketAddr::{V4, V6};
 use crate::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, ToSocketAddrs};
 use crate::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, RawFd};
 use crate::sys::fd::FileDesc;
-use crate::sys::map_motor_error;
-use crate::sys_common::{AsInner, FromInner, IntoInner};
+use crate::sys::{AsInner, FromInner, IntoInner, map_motor_error, unsupported};
 use crate::time::Duration;
 
 // We want to re-use as much of Rust's stdlib code as possible,
@@ -66,7 +65,7 @@ impl TcpStream {
         moto_rt::fs::read(self.inner.as_raw_fd(), buf).map_err(map_motor_error)
     }
 
-    pub fn read_buf(&self, cursor: BorrowedCursor<'_>) -> io::Result<()> {
+    pub fn read_buf(&self, cursor: BorrowedCursor<'_, u8>) -> io::Result<()> {
         crate::io::default_read_buf(|buf| self.read(buf), cursor)
     }
 
@@ -128,6 +127,14 @@ impl TcpStream {
         moto_rt::net::linger(self.inner.as_raw_fd()).map_err(map_motor_error)
     }
 
+    pub fn set_keepalive(&self, _: bool) -> io::Result<()> {
+        unsupported()
+    }
+
+    pub fn keepalive(&self) -> io::Result<bool> {
+        unsupported()
+    }
+
     pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
         moto_rt::net::set_nodelay(self.inner.as_raw_fd(), nodelay).map_err(map_motor_error)
     }
@@ -145,8 +152,9 @@ impl TcpStream {
     }
 
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
-        let e = moto_rt::net::take_error(self.inner.as_raw_fd()).map_err(map_motor_error)?;
-        if e == moto_rt::E_OK { Ok(None) } else { Ok(Some(map_motor_error(e))) }
+        moto_rt::net::take_error(self.inner.as_raw_fd())
+            .map(|e| e.map(map_motor_error))
+            .map_err(map_motor_error)
     }
 
     pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
@@ -213,8 +221,9 @@ impl TcpListener {
     }
 
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
-        let e = moto_rt::net::take_error(self.inner.as_raw_fd()).map_err(map_motor_error)?;
-        if e == moto_rt::E_OK { Ok(None) } else { Ok(Some(map_motor_error(e))) }
+        moto_rt::net::take_error(self.inner.as_raw_fd())
+            .map(|e| e.map(map_motor_error))
+            .map_err(map_motor_error)
     }
 
     pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
@@ -364,10 +373,7 @@ impl UdpSocket {
 
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
         moto_rt::net::take_error(self.inner.as_raw_fd())
-            .map(|e| match e {
-                moto_rt::E_OK => None,
-                e => Some(map_motor_error(e)),
-            })
+            .map(|e| e.map(map_motor_error))
             .map_err(map_motor_error)
     }
 
@@ -415,10 +421,12 @@ impl TryFrom<&str> for LookupHost {
     fn try_from(host_port: &str) -> io::Result<LookupHost> {
         let (host, port_str) = host_port
             .rsplit_once(':')
-            .ok_or(moto_rt::E_INVALID_ARGUMENT)
+            .ok_or(moto_rt::Error::InvalidArgument)
             .map_err(map_motor_error)?;
-        let port: u16 =
-            port_str.parse().map_err(|_| moto_rt::E_INVALID_ARGUMENT).map_err(map_motor_error)?;
+        let port: u16 = port_str
+            .parse()
+            .map_err(|_| moto_rt::Error::InvalidArgument)
+            .map_err(map_motor_error)?;
         (host, port).try_into()
     }
 }

@@ -91,7 +91,6 @@ features! {
     /// * `"amx-avx512"`
     /// * `"amx-fp8"`
     /// * `"amx-movrs"`
-    /// * `"amx-tf32"`
     /// * `"f16c"`
     /// * `"fma"`
     /// * `"bmi1"`
@@ -106,11 +105,14 @@ features! {
     /// * `"xsaves"`
     /// * `"xsavec"`
     /// * `"cmpxchg16b"`
+    /// * `"clflushopt"`
     /// * `"kl"`
     /// * `"widekl"`
     /// * `"adx"`
     /// * `"rtm"`
     /// * `"movbe"`
+    /// * `"movdir64b"`
+    /// * `"movdiri"`
     /// * `"ermsb"`
     /// * `"movrs"`
     /// * `"xop"`
@@ -227,8 +229,6 @@ features! {
     /// AMX-FP8 (Float8 Operations)
     @FEATURE: #[unstable(feature = "x86_amx_intrinsics", issue = "126622")] amx_movrs: "amx-movrs";
     /// AMX-MOVRS (Matrix MOVERS operations)
-    @FEATURE: #[unstable(feature = "x86_amx_intrinsics", issue = "126622")] amx_tf32: "amx-tf32";
-    /// AMX-TF32 (TensorFloat32 Operations)
     @FEATURE: #[unstable(feature = "apx_target_feature", issue = "139284")] apxf: "apxf";
     /// APX-F (Advanced Performance Extensions - Foundation)
     @FEATURE: #[unstable(feature = "avx10_target_feature", issue = "138843")] avx10_1: "avx10.1";
@@ -261,6 +261,8 @@ features! {
     /// XSAVEC (Save Processor Extended States Compacted)
     @FEATURE: #[stable(feature = "simd_x86", since = "1.27.0")] cmpxchg16b: "cmpxchg16b";
     /// CMPXCH16B (16-byte compare-and-swap instruction)
+    @FEATURE: #[unstable(feature = "clflushopt_target_feature", issue = "157096")] clflushopt: "clflushopt";
+    /// CLFLUSHOPT (Cache Line Flush Optimized)
     @FEATURE: #[stable(feature = "keylocker_x86", since = "1.89.0")] kl: "kl";
     /// Intel Key Locker
     @FEATURE: #[stable(feature = "keylocker_x86", since = "1.89.0")] widekl: "widekl";
@@ -271,6 +273,10 @@ features! {
     /// RTM, Intel (Restricted Transactional Memory)
     @FEATURE: #[stable(feature = "movbe_target_feature", since = "1.67.0")] movbe: "movbe";
     /// MOVBE (Move Data After Swapping Bytes)
+    @FEATURE: #[unstable(feature = "movdir64b_target_feature", issue = "163741")] movdir64b: "movdir64b";
+    /// MOVDIR64B (Move 64 Bytes as Direct Store)
+    @FEATURE: #[unstable(feature = "movdiri_target_feature", issue = "163741")] movdiri: "movdiri";
+    /// MOVDIRI (Move Doubleword as Direct Store)
     @FEATURE: #[unstable(feature = "movrs_target_feature", issue = "137976")] movrs: "movrs";
     /// MOVRS (Move data with the read-shared hint)
     @FEATURE: #[stable(feature = "simd_x86", since = "1.27.0")] ermsb: "ermsb";

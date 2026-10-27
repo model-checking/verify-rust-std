@@ -1,7 +1,3 @@
-#![allow(unused_imports)]
-
-use core::intrinsics;
-
 // NOTE These functions are implemented using assembly because they use a custom
 // calling convention which can't be implemented using a normal Rust function
 
@@ -12,24 +8,23 @@ intrinsics! {
     #[cfg(any(all(windows, target_env = "gnu"), target_os = "cygwin", target_os = "uefi"))]
     pub unsafe extern "custom" fn ___chkstk_ms() {
         core::arch::naked_asm!(
-            "push   %rcx",
-            "push   %rax",
-            "cmp    $0x1000,%rax",
-            "lea    24(%rsp),%rcx",
-            "jb     1f",
+            "push   rcx",
+            "push   rax",
+            "cmp    rax, 0x1000",
+            "lea    rcx, [rsp + 24]",
+            "jb     3f",
             "2:",
-            "sub    $0x1000,%rcx",
-            "test   %rcx,(%rcx)",
-            "sub    $0x1000,%rax",
-            "cmp    $0x1000,%rax",
+            "sub    rcx, 0x1000",
+            "test   [rcx], rcx",
+            "sub    rax, 0x1000",
+            "cmp    rax, 0x1000",
             "ja     2b",
-            "1:",
-            "sub    %rax,%rcx",
-            "test   %rcx,(%rcx)",
-            "pop    %rax",
-            "pop    %rcx",
+            "3:",
+            "sub    rcx, rax",
+            "test   [rcx], rcx",
+            "pop    rax",
+            "pop    rcx",
             "ret",
-            options(att_syntax)
         );
     }
 }

@@ -10,6 +10,30 @@
 //! and <https://github.com/rust-lang/rust/blob/HEAD/compiler/rustc_codegen_llvm/src/intrinsic.rs>,
 //! and for const evaluation in <https://github.com/rust-lang/rust/blob/HEAD/compiler/rustc_const_eval/src/interpret/intrinsics.rs>.
 //!
+//! Intrinsics don't need a body. However, they optionally can have a body, which we call the
+//! "fallback body". This will be used by codegen backends that do not have a dedicated
+//! implementation of the intrinsic, making it easier to add new intrinsics for specific operations
+//! without having to implement them in each codegen backend. The fallback body obviously has to be
+//! a valid implementation of the documented specification of the intrinsic. In some cases, the
+//! fallback body will be *equivalent* to the specification. Note that this is a strong requirement:
+//! if the spec says "UB if input `x` is even", then a valid implementation can just ignore this and
+//! do whatever it wants in that case; an *equivalent* implementation needs to actually check this
+//! condition and trigger UB in that case (e.g. by using `hint::assert_unchecked()`). Similar, if
+//! the spec says "returns `x` or `y` non-deterministically", then an *equivalent* implementation
+//! must actually do non-deterministic choice and return either value (e.g. by invoking some other
+//! language operation that has the same non-determinism). Intrinsics with such a fallback body that
+//! is equivalent to the spec may be marked with `#[miri::intrinsic_fallback_is_spec]`; the fallback
+//! body will then also be used by Miri for UB checking. When in doubt, do not use this attribute or
+//! ask the Miri maintainers for advice.
+//!
+//! Intrinsics are, in general, language extensions. Therefore, t-lang should be involved whenever a
+//! new intrinsic is exposed to stable code. However, if an intrinsic is marked
+//! `#[miri::intrinsic_fallback_is_spec]` with a fallback body that only uses stable features (or if
+//! such a fallback body could be written, but for one reason or another the actual fallback body is
+//! different), and if it also does not make other promises that go beyond observable program
+//! behavior (such as steering the optimizer in a particular direction), then an intrinsic may be
+//! used without t-lang involvement.
+//!
 //! # Const intrinsics
 //!
 //! In order to make an intrinsic unstable usable at compile-time, copy the implementation from
@@ -19,9 +43,10 @@
 //! wg-const-eval.
 //!
 //! If an intrinsic is supposed to be used from a `const fn` with a `rustc_const_stable` attribute,
-//! `#[rustc_intrinsic_const_stable_indirect]` needs to be added to the intrinsic. Such a change requires
-//! T-lang approval, because it may bake a feature into the language that cannot be replicated in
-//! user code without compiler support.
+//! `#[rustc_intrinsic_const_stable_indirect]` needs to be added to the intrinsic. Such a change
+//! requires T-lang approval, because it may bake a feature into the language that cannot be
+//! replicated in user code without compiler support. The same exception as above applies for
+//! `#[miri::intrinsic_fallback_is_spec]` intrinsics.
 //!
 //! # Volatiles
 //!
@@ -52,31 +77,39 @@
                       in the rest of the standard library",
     issue = "none"
 )]
-#![allow(missing_docs)]
 
 use safety::{ensures, requires};
 
-use crate::ffi::va_list::{VaArgSafe, VaListImpl};
+use crate::ffi::{VaArgSafe, VaList};
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::{ConstParamTy, Destruct, DiscriminantKind, PointeeSized, Tuple};
+use crate::marker::{ConstParamTy, DiscriminantKind, PointeeSized, Tuple};
+use crate::num::imp::libm;
 #[cfg(kani)]
 use crate::ub_checks;
 use crate::{mem, ptr};
 
 mod bounds;
 pub mod fallback;
+pub mod gpu;
+mod macros;
 pub mod mir;
+pub mod reflection;
 pub mod simd;
+
+use macros::intrinsic_dispatch_on_type;
 
 // These imports are used for simplifying intra-doc links
 #[allow(unused_imports)]
 #[cfg(all(target_has_atomic = "8", target_has_atomic = "32", target_has_atomic = "ptr"))]
-use crate::sync::atomic::{self, AtomicBool, AtomicI32, AtomicIsize, AtomicU32, Ordering};
+use crate::sync::atomic::{
+    self, AtomicBool, AtomicI32, AtomicIsize, AtomicPtr, AtomicU32, Ordering,
+};
 
 /// A type for atomic ordering parameters for intrinsics. This is a separate type from
 /// `atomic::Ordering` so that we can make it `ConstParamTy` and fix the values used here without a
 /// risk of leaking that to stable code.
+#[allow(missing_docs)]
 #[derive(Debug, ConstParamTy, PartialEq, Eq)]
 pub enum AtomicOrdering {
     // These values must match the compiler's `AtomicOrdering` defined in
@@ -91,15 +124,31 @@ pub enum AtomicOrdering {
 // N.B., these intrinsics take raw pointers because they mutate aliased
 // memory, which is not valid for either `&` or `&mut`.
 
-/// Stores a value if the current value is the same as the `old` value.
+/// Stores a value if the current value is the same as the `old` value,
+/// with the returned `T` being the previous value and the returned `bool` being
+/// whether the exchange was successful.
 /// `T` must be an integer or pointer type.
+///
+/// # Safety
+///
+/// * If `T` is an integer type, this is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::compare_exchange`].
+///   Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
+/// * If `T` is a pointer type, this is equivalent to [`AtomicPtr<P>::from_ptr`] followed by [`AtomicPtr<P>::compare_exchange`],
+///   where `P` is the pointee type of the pointer.
+///   Refer to the documentation of [`AtomicPtr<P>::from_ptr`] for safety requirements.
 ///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `compare_exchange` method.
 /// For example, [`AtomicBool::compare_exchange`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::compare_exchange`]: AtomicI32::compare_exchange
+/// [`AtomicPtr<P>::from_ptr`]: AtomicPtr::from_ptr
+/// [`AtomicPtr<P>::compare_exchange`]: AtomicPtr::compare_exchange
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn atomic_cxchg<
+pub const unsafe fn atomic_cxchg<
     T: Copy,
     const ORD_SUCC: AtomicOrdering,
     const ORD_FAIL: AtomicOrdering,
@@ -109,15 +158,31 @@ pub unsafe fn atomic_cxchg<
     src: T,
 ) -> (T, bool);
 
-/// Stores a value if the current value is the same as the `old` value.
+/// Stores a value if the current value is the same as the `old` value,
+/// with the returned `T` being the previous value and the returned `bool` being
+/// whether the exchange was successful.
 /// `T` must be an integer or pointer type. The comparison may spuriously fail.
+///
+/// # Safety
+///
+/// * If `T` is an integer type, this is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::compare_exchange_weak`].
+///   Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
+/// * If `T` is a pointer type, this is equivalent to [`AtomicPtr<P>::from_ptr`] followed by [`AtomicPtr<P>::compare_exchange_weak`],
+///   where `P` is the pointee type of the pointer.
+///   Refer to the documentation of [`AtomicPtr<P>::from_ptr`] for safety requirements.
 ///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `compare_exchange_weak` method.
 /// For example, [`AtomicBool::compare_exchange_weak`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::compare_exchange_weak`]: AtomicI32::compare_exchange_weak
+/// [`AtomicPtr<P>::from_ptr`]: AtomicPtr::from_ptr
+/// [`AtomicPtr<P>::compare_exchange_weak`]: AtomicPtr::compare_exchange_weak
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn atomic_cxchgweak<
+pub const unsafe fn atomic_cxchgweak<
     T: Copy,
     const ORD_SUCC: AtomicOrdering,
     const ORD_FAIL: AtomicOrdering,
@@ -130,125 +195,296 @@ pub unsafe fn atomic_cxchgweak<
 /// Loads the current value of the pointer.
 /// `T` must be an integer or pointer type.
 ///
+/// # Safety
+///
+/// * If `VOLATILE` is `true`, this is equivalent to [`Atomic<T>::load_volatile`].
+///   Refer to the documentation of that method for safety requirements.
+///
+/// * If `VOLATILE` is `false`, this is equivalent to [`Atomic<T>::from_ptr`] followed
+///   by [`Atomic<T>::load`]. Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `load` method. For example, [`AtomicBool::load`].
+///
+/// [`Atomic<T>::load_volatile`]: AtomicI32::load_volatile
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::load`]: AtomicI32::load
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn atomic_load<T: Copy, const ORD: AtomicOrdering>(src: *const T) -> T;
+pub const unsafe fn atomic_load<T: Copy, const ORD: AtomicOrdering, const VOLATILE: bool>(
+    src: *const T,
+) -> T;
 
 /// Stores the value at the specified memory location.
 /// `T` must be an integer or pointer type.
 ///
+/// # Safety
+///
+/// * If `VOLATILE` is `true`, this is equivalent to [`Atomic<T>::store_volatile`].
+///   Refer to the documentation of that method for safety requirements.
+///
+/// * If `VOLATILE` is `false`, this is equivalent to [`Atomic<T>::from_ptr`] followed
+///   by [`Atomic<T>::store`]. Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `store` method. For example, [`AtomicBool::store`].
+///
+/// [`Atomic<T>::store_volatile`]: AtomicI32::store_volatile
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::store`]: AtomicI32::store
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn atomic_store<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, val: T);
+pub const unsafe fn atomic_store<T: Copy, const ORD: AtomicOrdering, const VOLATILE: bool>(
+    dst: *mut T,
+    val: T,
+);
 
 /// Stores the value at the specified memory location, returning the old value.
 /// `T` must be an integer or pointer type.
 ///
+/// # Safety
+///
+/// * If `T` is an integer type, this is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::swap`].
+///   Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
+/// * If `T` is a pointer type, this is equivalent to [`AtomicPtr<P>::from_ptr`] followed by [`AtomicPtr<P>::swap`],
+///   where `P` is the pointee type of the pointer.
+///   Refer to the documentation of [`AtomicPtr<P>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `swap` method. For example, [`AtomicBool::swap`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::swap`]: AtomicI32::swap
+/// [`AtomicPtr<P>::from_ptr`]: AtomicPtr::from_ptr
+/// [`AtomicPtr<P>::swap`]: AtomicPtr::swap
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn atomic_xchg<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T;
+pub const unsafe fn atomic_xchg<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T;
 
 /// Adds to the current value, returning the previous value.
 /// `T` must be an integer or pointer type.
 /// `U` must be the same as `T` if that is an integer type, or `usize` if `T` is a pointer type.
 ///
+/// # Safety
+///
+/// * If `T` is an integer type, this is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_add`].
+///   Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
+/// * If `T` is a pointer type, this is equivalent to [`AtomicPtr<P>::from_ptr`] followed by [`AtomicPtr<P>::fetch_byte_add`],
+///   where `P` is the pointee type of the pointer.
+///   Refer to the documentation of [`AtomicPtr<P>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `fetch_add` method. For example, [`AtomicIsize::fetch_add`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::fetch_add`]: AtomicI32::fetch_add
+/// [`AtomicPtr<P>::from_ptr`]: AtomicPtr::from_ptr
+/// [`AtomicPtr<P>::fetch_byte_add`]: AtomicPtr::fetch_byte_add
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn atomic_xadd<T: Copy, U: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: U) -> T;
+pub const unsafe fn atomic_xadd<T: Copy, U: Copy, const ORD: AtomicOrdering>(
+    dst: *mut T,
+    src: U,
+) -> T;
 
 /// Subtract from the current value, returning the previous value.
 /// `T` must be an integer or pointer type.
 /// `U` must be the same as `T` if that is an integer type, or `usize` if `T` is a pointer type.
 ///
+/// # Safety
+///
+/// * If `T` is an integer type, this is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_sub`].
+///   Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
+/// * If `T` is a pointer type, this is equivalent to [`AtomicPtr<P>::from_ptr`] followed by [`AtomicPtr<P>::fetch_byte_sub`],
+///   where `P` is the pointee type of the pointer.
+///   Refer to the documentation of [`AtomicPtr<P>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `fetch_sub` method. For example, [`AtomicIsize::fetch_sub`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::fetch_sub`]: AtomicI32::fetch_sub
+/// [`AtomicPtr<P>::from_ptr`]: AtomicPtr::from_ptr
+/// [`AtomicPtr<P>::fetch_byte_sub`]: AtomicPtr::fetch_byte_sub
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn atomic_xsub<T: Copy, U: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: U) -> T;
+pub const unsafe fn atomic_xsub<T: Copy, U: Copy, const ORD: AtomicOrdering>(
+    dst: *mut T,
+    src: U,
+) -> T;
 
 /// Bitwise and with the current value, returning the previous value.
 /// `T` must be an integer or pointer type.
 /// `U` must be the same as `T` if that is an integer type, or `usize` if `T` is a pointer type.
 ///
+/// # Safety
+///
+/// * If `T` is an integer type, this is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_and`].
+///   Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
+/// * If `T` is a pointer type, this is equivalent to [`AtomicPtr<P>::from_ptr`] followed by [`AtomicPtr<P>::fetch_and`],
+///   where `P` is the pointee type of the pointer.
+///   Refer to the documentation of [`AtomicPtr<P>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `fetch_and` method. For example, [`AtomicBool::fetch_and`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::fetch_and`]: AtomicI32::fetch_and
+/// [`AtomicPtr<P>::from_ptr`]: AtomicPtr::from_ptr
+/// [`AtomicPtr<P>::fetch_and`]: AtomicPtr::fetch_and
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn atomic_and<T: Copy, U: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: U) -> T;
+pub const unsafe fn atomic_and<T: Copy, U: Copy, const ORD: AtomicOrdering>(
+    dst: *mut T,
+    src: U,
+) -> T;
 
 /// Bitwise nand with the current value, returning the previous value.
 /// `T` must be an integer or pointer type.
 /// `U` must be the same as `T` if that is an integer type, or `usize` if `T` is a pointer type.
 ///
+/// # Safety
+///
+/// This is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_nand`].
+/// Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
-/// [`AtomicBool`] type via the `fetch_nand` method. For example, [`AtomicBool::fetch_nand`].
+/// [`atomic`] types via the `fetch_nand` method. For example, [`AtomicBool::fetch_nand`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::fetch_nand`]: AtomicI32::fetch_nand
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn atomic_nand<T: Copy, U: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: U) -> T;
+pub const unsafe fn atomic_nand<T: Copy, U: Copy, const ORD: AtomicOrdering>(
+    dst: *mut T,
+    src: U,
+) -> T;
 
 /// Bitwise or with the current value, returning the previous value.
 /// `T` must be an integer or pointer type.
 /// `U` must be the same as `T` if that is an integer type, or `usize` if `T` is a pointer type.
 ///
+/// # Safety
+///
+/// * If `T` is an integer type, this is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_or`].
+///   Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
+/// * If `T` is a pointer type, this is equivalent to [`AtomicPtr<P>::from_ptr`] followed by [`AtomicPtr<P>::fetch_or`],
+///   where `P` is the pointee type of the pointer.
+///   Refer to the documentation of [`AtomicPtr<P>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `fetch_or` method. For example, [`AtomicBool::fetch_or`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::fetch_or`]: AtomicI32::fetch_or
+/// [`AtomicPtr<P>::from_ptr`]: AtomicPtr::from_ptr
+/// [`AtomicPtr<P>::fetch_or`]: AtomicPtr::fetch_or
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn atomic_or<T: Copy, U: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: U) -> T;
+pub const unsafe fn atomic_or<T: Copy, U: Copy, const ORD: AtomicOrdering>(
+    dst: *mut T,
+    src: U,
+) -> T;
 
 /// Bitwise xor with the current value, returning the previous value.
 /// `T` must be an integer or pointer type.
 /// `U` must be the same as `T` if that is an integer type, or `usize` if `T` is a pointer type.
 ///
+/// # Safety
+///
+/// * If `T` is an integer type, this is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_xor`].
+///   Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
+/// * If `T` is a pointer type, this is equivalent to [`AtomicPtr<P>::from_ptr`] followed by [`AtomicPtr<P>::fetch_xor`],
+///   where `P` is the pointee type of the pointer.
+///   Refer to the documentation of [`AtomicPtr<P>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `fetch_xor` method. For example, [`AtomicBool::fetch_xor`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::fetch_xor`]: AtomicI32::fetch_xor
+/// [`AtomicPtr<P>::from_ptr`]: AtomicPtr::from_ptr
+/// [`AtomicPtr<P>::fetch_xor`]: AtomicPtr::fetch_xor
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn atomic_xor<T: Copy, U: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: U) -> T;
+pub const unsafe fn atomic_xor<T: Copy, U: Copy, const ORD: AtomicOrdering>(
+    dst: *mut T,
+    src: U,
+) -> T;
 
 /// Maximum with the current value using a signed comparison.
 /// `T` must be a signed integer type.
 ///
+/// # Safety
+///
+/// This is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_max`].
+/// Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] signed integer types via the `fetch_max` method. For example, [`AtomicI32::fetch_max`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::fetch_max`]: AtomicI32::fetch_max
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn atomic_max<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T;
+pub const unsafe fn atomic_max<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T;
 
 /// Minimum with the current value using a signed comparison.
 /// `T` must be a signed integer type.
 ///
+/// # Safety
+///
+/// This is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_min`].
+/// Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] signed integer types via the `fetch_min` method. For example, [`AtomicI32::fetch_min`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::fetch_min`]: AtomicI32::fetch_min
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn atomic_min<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T;
+pub const unsafe fn atomic_min<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T;
 
 /// Minimum with the current value using an unsigned comparison.
 /// `T` must be an unsigned integer type.
 ///
+/// # Safety
+///
+/// This is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_min`].
+/// Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] unsigned integer types via the `fetch_min` method. For example, [`AtomicU32::fetch_min`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicU32::from_ptr
+/// [`Atomic<T>::fetch_min`]: AtomicU32::fetch_min
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn atomic_umin<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T;
+pub const unsafe fn atomic_umin<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T;
 
 /// Maximum with the current value using an unsigned comparison.
 /// `T` must be an unsigned integer type.
 ///
+/// # Safety
+///
+/// This is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_max`].
+/// Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] unsigned integer types via the `fetch_max` method. For example, [`AtomicU32::fetch_max`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicU32::from_ptr
+/// [`Atomic<T>::fetch_max`]: AtomicU32::fetch_max
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn atomic_umax<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T;
+pub const unsafe fn atomic_umax<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T;
 
 /// An atomic fence.
 ///
@@ -256,7 +492,7 @@ pub unsafe fn atomic_umax<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: 
 /// [`atomic::fence`].
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn atomic_fence<const ORD: AtomicOrdering>();
+pub const unsafe fn atomic_fence<const ORD: AtomicOrdering>();
 
 /// An atomic fence for synchronization within a single thread.
 ///
@@ -264,7 +500,7 @@ pub unsafe fn atomic_fence<const ORD: AtomicOrdering>();
 /// [`atomic::compiler_fence`].
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn atomic_singlethreadfence<const ORD: AtomicOrdering>();
+pub const unsafe fn atomic_singlethreadfence<const ORD: AtomicOrdering>();
 
 /// The `prefetch` intrinsic is a hint to the code generator to insert a prefetch instruction
 /// for the given address if supported; otherwise, it is a no-op.
@@ -354,24 +590,23 @@ pub fn breakpoint();
 #[rustc_intrinsic]
 pub fn rustc_peek<T>(_: T) -> T;
 
-/// Aborts the execution of the process.
+/// Ungracefully aborts the execution of the process.
 ///
-/// Note that, unlike most intrinsics, this is safe to call;
-/// it does not require an `unsafe` block.
-/// Therefore, implementations must not require the user to uphold
-/// any safety invariants.
+/// This is the intrinsic for directly implementing [`core::process::abort_immediate`] which, on
+/// most platforms, will invoke an invalid instruction. On Unix, the process will probably
+/// terminate with a signal like `SIGABRT`, `SIGILL`, `SIGTRAP`, `SIGSEGV` or `SIGBUS`. The
+/// precise behavior is not guaranteed and not stable.
 ///
 /// [`std::process::abort`](../../std/process/fn.abort.html) is to be preferred if possible,
 /// as its behavior is more user-friendly and more stable.
 ///
-/// The current implementation of `intrinsics::abort` is to invoke an invalid instruction,
-/// on most platforms.
-/// On Unix, the
-/// process will probably terminate with a signal like `SIGABRT`, `SIGILL`, `SIGTRAP`, `SIGSEGV` or
-/// `SIGBUS`.  The precise behavior is not guaranteed and not stable.
+/// Note that, unlike most intrinsics, this is safe to call; it does not require an `unsafe` block.
+/// Therefore, implementations must not require the user to uphold any safety invariants.
+///
+/// The stabilized version of this intrinsic is [`core::process::abort_immediate`].
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub fn abort() -> !;
+pub const fn abort_immediate() -> !;
 
 /// Informs the optimizer that this point in the code is not reachable,
 /// enabling further optimizations.
@@ -414,8 +649,7 @@ pub const unsafe fn assume(b: bool) {
 /// Therefore, implementations must not require the user to uphold
 /// any safety invariants.
 ///
-/// This intrinsic does not have a stable counterpart.
-#[unstable(feature = "core_intrinsics", issue = "none")]
+/// The stabilized version of this intrinsic is [`core::hint::cold_path`].
 #[rustc_intrinsic]
 #[rustc_nounwind]
 #[miri::intrinsic_fallback_is_spec]
@@ -488,11 +722,14 @@ pub const fn unlikely(b: bool) -> bool {
 #[rustc_nounwind]
 #[miri::intrinsic_fallback_is_spec]
 #[inline]
-pub const fn select_unpredictable<T>(b: bool, true_val: T, false_val: T) -> T
-where
-    T: [const] Destruct,
-{
-    if b { true_val } else { false_val }
+pub const fn select_unpredictable<T>(b: bool, true_val: T, false_val: T) -> T {
+    if b {
+        forget(false_val);
+        true_val
+    } else {
+        forget(true_val);
+        false_val
+    }
 }
 
 /// A guard for unsafe functions that cannot ever be executed if `T` is uninhabited:
@@ -819,24 +1056,27 @@ pub const fn forget<T: ?Sized>(_: T);
 ///
 /// // This is how the standard library does it. This is the best method, if
 /// // you need to do something like this
-/// fn split_at_stdlib<T>(slice: &mut [T], mid: usize)
+/// fn split_at_stdlib<T>(to_split: &mut [T], mid: usize)
 ///                       -> (&mut [T], &mut [T]) {
-///     let len = slice.len();
+///     let len = to_split.len();
 ///     assert!(mid <= len);
 ///     unsafe {
-///         let ptr = slice.as_mut_ptr();
-///         // This now has three mutable references pointing at the same
-///         // memory. `slice`, the rvalue ret.0, and the rvalue ret.1.
-///         // `slice` is never used after `let ptr = ...`, and so one can
-///         // treat it as "dead", and therefore, you only have two real
-///         // mutable slices.
-///         (slice::from_raw_parts_mut(ptr, mid),
-///          slice::from_raw_parts_mut(ptr.add(mid), len - mid))
+///         let ptr = to_split.as_mut_ptr();
+///         let fst = slice::from_raw_parts_mut(ptr, mid);
+///         let snd = slice::from_raw_parts_mut(ptr.add(mid), len - mid);
+///         // The function now has three mutable references to overlapping memory:
+///         // `to_split`, `fst`, and `snd`.
+///         // `to_split` is never used after `let ptr = ...` so it can be treated as "dead".
+///         // This leaves two "live" mutable slice references, `fst` and `snd`, with no overlap.
+///         (fst, snd)
 ///     }
 /// }
 /// ```
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_allowed_through_unstable_modules = "import this function via `std::mem` instead"]
+#[rustc_allowed_through_unstable_modules(
+    message = "import this function via the `mem` module instead",
+    module = "mem"
+)]
 #[rustc_const_stable(feature = "const_transmute", since = "1.56.0")]
 #[rustc_diagnostic_item = "transmute"]
 #[rustc_nounwind]
@@ -873,7 +1113,8 @@ pub const unsafe fn transmute_unchecked<Src, Dst>(src: Src) -> Dst;
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub const fn needs_drop<T: ?Sized>() -> bool;
+#[rustc_comptime]
+pub fn needs_drop<T: ?Sized>() -> bool;
 
 /// Calculates the offset from a pointer.
 ///
@@ -990,20 +1231,20 @@ pub unsafe fn volatile_copy_memory<T>(dst: *mut T, src: *const T, count: usize);
 /// [`write_bytes`]: ptr::write_bytes
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn volatile_set_memory<T>(dst: *mut T, val: u8, count: usize);
+pub const unsafe fn volatile_set_memory<T>(dst: *mut T, val: u8, count: usize);
 
 /// Performs a volatile load from the `src` pointer.
 ///
 /// The stabilized version of this intrinsic is [`core::ptr::read_volatile`].
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn volatile_load<T>(src: *const T) -> T;
+pub const unsafe fn volatile_load<T>(src: *const T) -> T;
 /// Performs a volatile store to the `dst` pointer.
 ///
 /// The stabilized version of this intrinsic is [`core::ptr::write_volatile`].
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn volatile_store<T>(dst: *mut T, val: T);
+pub const unsafe fn volatile_store<T>(dst: *mut T, val: T);
 
 /// Performs a volatile load from the `src` pointer
 /// The pointer is not required to be aligned.
@@ -1026,9 +1267,12 @@ pub unsafe fn unaligned_volatile_store<T>(dst: *mut T, val: T);
 ///
 /// The stabilized version of this intrinsic is
 /// [`f16::sqrt`](../../std/primitive.f16.html#method.sqrt)
+#[inline]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub fn sqrtf16(x: f16) -> f16;
+pub fn sqrtf16(x: f16) -> f16 {
+    sqrtf32(x as f32) as f16
+}
 /// Returns the square root of an `f32`
 ///
 /// The stabilized version of this intrinsic is
@@ -1055,9 +1299,12 @@ pub fn sqrtf128(x: f128) -> f128;
 ///
 /// The stabilized version of this intrinsic is
 /// [`f16::powi`](../../std/primitive.f16.html#method.powi)
+#[inline]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub fn powif16(a: f16, x: i32) -> f16;
+pub fn powif16(a: f16, x: i32) -> f16 {
+    powif32(a as f32, x) as f16
+}
 /// Raises an `f32` to an integer power.
 ///
 /// The stabilized version of this intrinsic is
@@ -1080,263 +1327,231 @@ pub fn powif64(a: f64, x: i32) -> f64;
 #[rustc_nounwind]
 pub fn powif128(a: f128, x: i32) -> f128;
 
-/// Returns the sine of an `f16`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f16::sin`](../../std/primitive.f16.html#method.sin)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn sinf16(x: f16) -> f16;
-/// Returns the sine of an `f32`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f32::sin`](../../std/primitive.f32.html#method.sin)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn sinf32(x: f32) -> f32;
-/// Returns the sine of an `f64`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f64::sin`](../../std/primitive.f64.html#method.sin)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn sinf64(x: f64) -> f64;
-/// Returns the sine of an `f128`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f128::sin`](../../std/primitive.f128.html#method.sin)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn sinf128(x: f128) -> f128;
+intrinsic_dispatch_on_type! {
+    /// Returns the sine of a floating-point value.
+    ///
+    /// The stabilized versions of this intrinsic are available on the float primitives via the
+    /// `sin` method. For example, [`f32::sin`](../../std/primitive.f32.html#method.sin).
+    #[rustc_nounwind]
+    #[inline]
+    #[rustc_intrinsic]
+    pub fn sin<T: bounds::FloatPrimitive>(x: T) -> T;
 
-/// Returns the cosine of an `f16`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f16::cos`](../../std/primitive.f16.html#method.cos)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn cosf16(x: f16) -> f16;
-/// Returns the cosine of an `f32`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f32::cos`](../../std/primitive.f32.html#method.cos)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn cosf32(x: f32) -> f32;
-/// Returns the cosine of an `f64`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f64::cos`](../../std/primitive.f64.html#method.cos)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn cosf64(x: f64) -> f64;
-/// Returns the cosine of an `f128`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f128::cos`](../../std/primitive.f128.html#method.cos)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn cosf128(x: f128) -> f128;
+    f16 => { sin(x as f32) as f16 }
+    f32 => {
+        cfg_select! {
+            all(target_env = "msvc", target_arch = "x86") => sin(x as f64) as f32,
+            _ => libm::likely_available::sinf(x),
+        }
+    }
+    f64 => { libm::likely_available::sin(x) }
+    f128 => { libm::maybe_available::sinf128(x) }
+}
+
+intrinsic_dispatch_on_type! {
+    /// Returns the cosine of a floating-point value.
+    ///
+    /// The stabilized versions of this intrinsic are available on the float primitives via the
+    /// `cos` method. For example, [`f32::cos`](../../std/primitive.f32.html#method.cos).
+    #[rustc_nounwind]
+    #[inline]
+    #[rustc_intrinsic]
+    pub fn cos<T: bounds::FloatPrimitive>(x: T) -> T;
+
+    f16 => { cos(x as f32) as f16 }
+    f32 => {
+        cfg_select! {
+            all(target_env = "msvc", target_arch = "x86") => cos(x as f64) as f32,
+            _ => libm::likely_available::cosf(x),
+        }
+    }
+    f64 => { libm::likely_available::cos(x) }
+    f128 => { libm::maybe_available::cosf128(x) }
+}
 
 /// Raises an `f16` to an `f16` power.
 ///
 /// The stabilized version of this intrinsic is
 /// [`f16::powf`](../../std/primitive.f16.html#method.powf)
+#[inline]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub fn powf16(a: f16, x: f16) -> f16;
+pub fn powf16(a: f16, x: f16) -> f16 {
+    powf32(a as f32, x as f32) as f16
+}
 /// Raises an `f32` to an `f32` power.
 ///
 /// The stabilized version of this intrinsic is
 /// [`f32::powf`](../../std/primitive.f32.html#method.powf)
+#[inline]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub fn powf32(a: f32, x: f32) -> f32;
+pub fn powf32(a: f32, x: f32) -> f32 {
+    cfg_select! {
+        all(target_env = "msvc", target_arch = "x86") => powf64(a as f64, x as f64) as f32,
+        _ => libm::likely_available::powf(a, x),
+    }
+}
 /// Raises an `f64` to an `f64` power.
 ///
 /// The stabilized version of this intrinsic is
 /// [`f64::powf`](../../std/primitive.f64.html#method.powf)
+#[inline]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub fn powf64(a: f64, x: f64) -> f64;
+pub fn powf64(a: f64, x: f64) -> f64 {
+    libm::likely_available::pow(a, x)
+}
 /// Raises an `f128` to an `f128` power.
 ///
 /// The stabilized version of this intrinsic is
 /// [`f128::powf`](../../std/primitive.f128.html#method.powf)
+#[inline]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub fn powf128(a: f128, x: f128) -> f128;
+pub fn powf128(a: f128, x: f128) -> f128 {
+    libm::maybe_available::powf128(a, x)
+}
 
-/// Returns the exponential of an `f16`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f16::exp`](../../std/primitive.f16.html#method.exp)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn expf16(x: f16) -> f16;
-/// Returns the exponential of an `f32`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f32::exp`](../../std/primitive.f32.html#method.exp)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn expf32(x: f32) -> f32;
-/// Returns the exponential of an `f64`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f64::exp`](../../std/primitive.f64.html#method.exp)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn expf64(x: f64) -> f64;
-/// Returns the exponential of an `f128`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f128::exp`](../../std/primitive.f128.html#method.exp)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn expf128(x: f128) -> f128;
+intrinsic_dispatch_on_type! {
+    /// Returns the exponential of a floating-point value.
+    ///
+    /// The stabilized versions of this intrinsic are available on the float primitives via the
+    /// `exp` method. For example, [`f32::exp`](../../std/primitive.f32.html#method.exp).
+    #[rustc_nounwind]
+    #[inline]
+    #[rustc_intrinsic]
+    pub fn exp<T: bounds::FloatPrimitive>(x: T) -> T;
 
-/// Returns 2 raised to the power of an `f16`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f16::exp2`](../../std/primitive.f16.html#method.exp2)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn exp2f16(x: f16) -> f16;
-/// Returns 2 raised to the power of an `f32`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f32::exp2`](../../std/primitive.f32.html#method.exp2)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn exp2f32(x: f32) -> f32;
-/// Returns 2 raised to the power of an `f64`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f64::exp2`](../../std/primitive.f64.html#method.exp2)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn exp2f64(x: f64) -> f64;
-/// Returns 2 raised to the power of an `f128`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f128::exp2`](../../std/primitive.f128.html#method.exp2)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn exp2f128(x: f128) -> f128;
+    f16 => { exp(x as f32) as f16 }
+    f32 => {
+        cfg_select! {
+            all(target_env = "msvc", target_arch = "x86") => exp(x as f64) as f32,
+            _ => libm::likely_available::expf(x),
+        }
+    }
+    f64 => { libm::likely_available::exp(x) }
+    f128 => { libm::maybe_available::expf128(x) }
+}
 
-/// Returns the natural logarithm of an `f16`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f16::ln`](../../std/primitive.f16.html#method.ln)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn logf16(x: f16) -> f16;
-/// Returns the natural logarithm of an `f32`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f32::ln`](../../std/primitive.f32.html#method.ln)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn logf32(x: f32) -> f32;
-/// Returns the natural logarithm of an `f64`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f64::ln`](../../std/primitive.f64.html#method.ln)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn logf64(x: f64) -> f64;
-/// Returns the natural logarithm of an `f128`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f128::ln`](../../std/primitive.f128.html#method.ln)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn logf128(x: f128) -> f128;
+intrinsic_dispatch_on_type! {
+    /// Returns 2 raised to the power of a floating-point value.
+    ///
+    /// The stabilized versions of this intrinsic are available on the float primitives via the
+    /// `exp2` method. For example, [`f32::exp2`](../../std/primitive.f32.html#method.exp2).
+    #[rustc_nounwind]
+    #[inline]
+    #[rustc_intrinsic]
+    pub fn exp2<T: bounds::FloatPrimitive>(x: T) -> T;
 
-/// Returns the base 10 logarithm of an `f16`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f16::log10`](../../std/primitive.f16.html#method.log10)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn log10f16(x: f16) -> f16;
-/// Returns the base 10 logarithm of an `f32`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f32::log10`](../../std/primitive.f32.html#method.log10)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn log10f32(x: f32) -> f32;
-/// Returns the base 10 logarithm of an `f64`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f64::log10`](../../std/primitive.f64.html#method.log10)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn log10f64(x: f64) -> f64;
-/// Returns the base 10 logarithm of an `f128`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f128::log10`](../../std/primitive.f128.html#method.log10)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn log10f128(x: f128) -> f128;
+    f16 => { exp2(x as f32) as f16 }
+    f32 => {
+        cfg_select! {
+            all(target_env = "msvc", target_arch = "x86") => exp2(x as f64) as f32,
+            _ => libm::likely_available::exp2f(x),
+        }
+    }
+    f64 => { libm::likely_available::exp2(x) }
+    f128 => { libm::maybe_available::exp2f128(x) }
+}
 
-/// Returns the base 2 logarithm of an `f16`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f16::log2`](../../std/primitive.f16.html#method.log2)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn log2f16(x: f16) -> f16;
-/// Returns the base 2 logarithm of an `f32`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f32::log2`](../../std/primitive.f32.html#method.log2)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn log2f32(x: f32) -> f32;
-/// Returns the base 2 logarithm of an `f64`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f64::log2`](../../std/primitive.f64.html#method.log2)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn log2f64(x: f64) -> f64;
-/// Returns the base 2 logarithm of an `f128`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f128::log2`](../../std/primitive.f128.html#method.log2)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn log2f128(x: f128) -> f128;
+intrinsic_dispatch_on_type! {
+    /// Returns the natural logarithm of a floating-point value.
+    ///
+    /// The stabilized versions of this intrinsic are available on the float primitives via the
+    /// `ln` method. For example, [`f32::ln`](../../std/primitive.f32.html#method.ln).
+    #[rustc_nounwind]
+    #[inline]
+    #[rustc_intrinsic]
+    pub fn log<T: bounds::FloatPrimitive>(x: T) -> T;
 
-/// Returns `a * b + c` for `f16` values.
+    f16 => { log(x as f32) as f16 }
+    f32 => {
+        cfg_select! {
+            all(target_env = "msvc", target_arch = "x86") => log(x as f64) as f32,
+            _ => libm::likely_available::logf(x),
+        }
+    }
+    f64 => { libm::likely_available::log(x) }
+    f128 => { libm::maybe_available::logf128(x) }
+}
+
+intrinsic_dispatch_on_type! {
+    /// Returns the base 10 logarithm of a floating-point value.
+    ///
+    /// The stabilized versions of this intrinsic are available on the float primitives via the
+    /// `log10` method. For example, [`f32::log10`](../../std/primitive.f32.html#method.log10).
+    #[rustc_nounwind]
+    #[inline]
+    #[rustc_intrinsic]
+    pub fn log10<T: bounds::FloatPrimitive>(x: T) -> T;
+
+    f16 => { log10(x as f32) as f16 }
+    f32 => {
+        cfg_select! {
+            all(target_env = "msvc", target_arch = "x86") => log10(x as f64) as f32,
+            _ => libm::likely_available::log10f(x),
+        }
+    }
+    f64 => { libm::likely_available::log10(x) }
+    f128 => { libm::maybe_available::log10f128(x) }
+}
+
+intrinsic_dispatch_on_type! {
+    /// Returns the base 2 logarithm of a floating-point value.
+    ///
+    /// The stabilized versions of this intrinsic are available on the float primitives via the
+    /// `log2` method. For example, [`f32::log2`](../../std/primitive.f32.html#method.log2).
+    #[rustc_nounwind]
+    #[inline]
+    #[rustc_intrinsic]
+    pub fn log2<T: bounds::FloatPrimitive>(x: T) -> T;
+
+    f16 => { log2(x as f32) as f16 }
+    f32 => {
+        cfg_select! {
+            all(target_env = "msvc", target_arch = "x86") => log2(x as f64) as f32,
+            _ => libm::likely_available::log2f(x),
+        }
+    }
+    f64 => { libm::likely_available::log2(x) }
+    f128 => { libm::maybe_available::log2f128(x) }
+}
+
+/// Returns `a * b + c` without rounding the intermediate result for `f16` values.
 ///
 /// The stabilized version of this intrinsic is
 /// [`f16::mul_add`](../../std/primitive.f16.html#method.mul_add)
+#[rustc_intrinsic_const_stable_indirect]
+#[inline]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub const fn fmaf16(a: f16, b: f16, c: f16) -> f16;
-/// Returns `a * b + c` for `f32` values.
+pub const fn fmaf16(a: f16, b: f16, c: f16) -> f16 {
+    // NOTE: f32 does not have sufficient precision, so use f64 instead.
+    // see also https://github.com/llvm/llvm-project/issues/128450#issuecomment-2727540179.
+    fmaf64(a as f64, b as f64, c as f64) as f16
+}
+/// Returns `a * b + c` without rounding the intermediate result for `f32` values.
 ///
 /// The stabilized version of this intrinsic is
 /// [`f32::mul_add`](../../std/primitive.f32.html#method.mul_add)
+#[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const fn fmaf32(a: f32, b: f32, c: f32) -> f32;
-/// Returns `a * b + c` for `f64` values.
+/// Returns `a * b + c` without rounding the intermediate result for `f64` values.
 ///
 /// The stabilized version of this intrinsic is
 /// [`f64::mul_add`](../../std/primitive.f64.html#method.mul_add)
+#[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const fn fmaf64(a: f64, b: f64, c: f64) -> f64;
-/// Returns `a * b + c` for `f128` values.
+/// Returns `a * b + c` without rounding the intermediate result for `f128` values.
 ///
 /// The stabilized version of this intrinsic is
 /// [`f128::mul_add`](../../std/primitive.f128.html#method.mul_add)
+#[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const fn fmaf128(a: f128, b: f128, c: f128) -> f128;
@@ -1351,9 +1566,15 @@ pub const fn fmaf128(a: f128, b: f128, c: f128) -> f128;
 /// and add instructions. It is unspecified whether or not a fused operation
 /// is selected, and that may depend on optimization level and context, for
 /// example.
+///
+/// The stabilized version of this intrinsic is
+/// [`f16::mul_add_relaxed`](../../std/primitive.f16.html#method.mul_add_relaxed)
+#[inline]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub const fn fmuladdf16(a: f16, b: f16, c: f16) -> f16;
+pub const fn fmuladdf16(a: f16, b: f16, c: f16) -> f16 {
+    a * b + c
+}
 /// Returns `a * b + c` for `f32` values, non-deterministically executing
 /// either a fused multiply-add or two operations with rounding of the
 /// intermediate result.
@@ -1364,9 +1585,15 @@ pub const fn fmuladdf16(a: f16, b: f16, c: f16) -> f16;
 /// and add instructions. It is unspecified whether or not a fused operation
 /// is selected, and that may depend on optimization level and context, for
 /// example.
+///
+/// The stabilized version of this intrinsic is
+/// [`f32::mul_add_relaxed`](../../std/primitive.f32.html#method.mul_add_relaxed)
+#[inline]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub const fn fmuladdf32(a: f32, b: f32, c: f32) -> f32;
+pub const fn fmuladdf32(a: f32, b: f32, c: f32) -> f32 {
+    a * b + c
+}
 /// Returns `a * b + c` for `f64` values, non-deterministically executing
 /// either a fused multiply-add or two operations with rounding of the
 /// intermediate result.
@@ -1377,9 +1604,15 @@ pub const fn fmuladdf32(a: f32, b: f32, c: f32) -> f32;
 /// and add instructions. It is unspecified whether or not a fused operation
 /// is selected, and that may depend on optimization level and context, for
 /// example.
+///
+/// The stabilized version of this intrinsic is
+/// [`f64::mul_add_relaxed`](../../std/primitive.f64.html#method.mul_add_relaxed)
+#[inline]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub const fn fmuladdf64(a: f64, b: f64, c: f64) -> f64;
+pub const fn fmuladdf64(a: f64, b: f64, c: f64) -> f64 {
+    a * b + c
+}
 /// Returns `a * b + c` for `f128` values, non-deterministically executing
 /// either a fused multiply-add or two operations with rounding of the
 /// intermediate result.
@@ -1390,18 +1623,27 @@ pub const fn fmuladdf64(a: f64, b: f64, c: f64) -> f64;
 /// and add instructions. It is unspecified whether or not a fused operation
 /// is selected, and that may depend on optimization level and context, for
 /// example.
+///
+/// The stabilized version of this intrinsic is
+/// [`f128::mul_add_relaxed`](../../std/primitive.f128.html#method.mul_add_relaxed)
+#[inline]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub const fn fmuladdf128(a: f128, b: f128, c: f128) -> f128;
+pub const fn fmuladdf128(a: f128, b: f128, c: f128) -> f128 {
+    a * b + c
+}
 
 /// Returns the largest integer less than or equal to an `f16`.
 ///
 /// The stabilized version of this intrinsic is
 /// [`f16::floor`](../../std/primitive.f16.html#method.floor)
 #[rustc_intrinsic_const_stable_indirect]
+#[inline]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub const fn floorf16(x: f16) -> f16;
+pub const fn floorf16(x: f16) -> f16 {
+    floorf32(x as f32) as f16
+}
 /// Returns the largest integer less than or equal to an `f32`.
 ///
 /// The stabilized version of this intrinsic is
@@ -1432,9 +1674,12 @@ pub const fn floorf128(x: f128) -> f128;
 /// The stabilized version of this intrinsic is
 /// [`f16::ceil`](../../std/primitive.f16.html#method.ceil)
 #[rustc_intrinsic_const_stable_indirect]
+#[inline]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub const fn ceilf16(x: f16) -> f16;
+pub const fn ceilf16(x: f16) -> f16 {
+    ceilf32(x as f32) as f16
+}
 /// Returns the smallest integer greater than or equal to an `f32`.
 ///
 /// The stabilized version of this intrinsic is
@@ -1465,9 +1710,12 @@ pub const fn ceilf128(x: f128) -> f128;
 /// The stabilized version of this intrinsic is
 /// [`f16::trunc`](../../std/primitive.f16.html#method.trunc)
 #[rustc_intrinsic_const_stable_indirect]
+#[inline]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub const fn truncf16(x: f16) -> f16;
+pub const fn truncf16(x: f16) -> f16 {
+    truncf32(x as f32) as f16
+}
 /// Returns the integer part of an `f32`.
 ///
 /// The stabilized version of this intrinsic is
@@ -1499,9 +1747,12 @@ pub const fn truncf128(x: f128) -> f128;
 /// The stabilized version of this intrinsic is
 /// [`f16::round_ties_even`](../../std/primitive.f16.html#method.round_ties_even)
 #[rustc_intrinsic_const_stable_indirect]
+#[inline]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub const fn round_ties_even_f16(x: f16) -> f16;
+pub const fn round_ties_even_f16(x: f16) -> f16 {
+    round_ties_even_f32(x as f32) as f16
+}
 
 /// Returns the nearest integer to an `f32`. Rounds half-way cases to the number with an even
 /// least significant digit.
@@ -1538,9 +1789,12 @@ pub const fn round_ties_even_f128(x: f128) -> f128;
 /// The stabilized version of this intrinsic is
 /// [`f16::round`](../../std/primitive.f16.html#method.round)
 #[rustc_intrinsic_const_stable_indirect]
+#[inline]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub const fn roundf16(x: f16) -> f16;
+pub const fn roundf16(x: f16) -> f16 {
+    roundf32(x as f32) as f16
+}
 /// Returns the nearest integer to an `f32`. Rounds half-way cases away from zero.
 ///
 /// The stabilized version of this intrinsic is
@@ -1572,7 +1826,7 @@ pub const fn roundf128(x: f128) -> f128;
 /// This intrinsic does not have a stable counterpart.
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn fadd_fast<T: Copy>(a: T, b: T) -> T;
+pub unsafe fn fadd_fast<T: bounds::FloatPrimitive>(a: T, b: T) -> T;
 
 /// Float subtraction that allows optimizations based on algebraic rules.
 /// Requires that inputs and output of the operation are finite, causing UB otherwise.
@@ -1580,7 +1834,7 @@ pub unsafe fn fadd_fast<T: Copy>(a: T, b: T) -> T;
 /// This intrinsic does not have a stable counterpart.
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn fsub_fast<T: Copy>(a: T, b: T) -> T;
+pub unsafe fn fsub_fast<T: bounds::FloatPrimitive>(a: T, b: T) -> T;
 
 /// Float multiplication that allows optimizations based on algebraic rules.
 /// Requires that inputs and output of the operation are finite, causing UB otherwise.
@@ -1588,7 +1842,7 @@ pub unsafe fn fsub_fast<T: Copy>(a: T, b: T) -> T;
 /// This intrinsic does not have a stable counterpart.
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn fmul_fast<T: Copy>(a: T, b: T) -> T;
+pub unsafe fn fmul_fast<T: bounds::FloatPrimitive>(a: T, b: T) -> T;
 
 /// Float division that allows optimizations based on algebraic rules.
 /// Requires that inputs and output of the operation are finite, causing UB otherwise.
@@ -1596,7 +1850,7 @@ pub unsafe fn fmul_fast<T: Copy>(a: T, b: T) -> T;
 /// This intrinsic does not have a stable counterpart.
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn fdiv_fast<T: Copy>(a: T, b: T) -> T;
+pub unsafe fn fdiv_fast<T: bounds::FloatPrimitive>(a: T, b: T) -> T;
 
 /// Float remainder that allows optimizations based on algebraic rules.
 /// Requires that inputs and output of the operation are finite, causing UB otherwise.
@@ -1604,7 +1858,7 @@ pub unsafe fn fdiv_fast<T: Copy>(a: T, b: T) -> T;
 /// This intrinsic does not have a stable counterpart.
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn frem_fast<T: Copy>(a: T, b: T) -> T;
+pub unsafe fn frem_fast<T: bounds::FloatPrimitive>(a: T, b: T) -> T;
 
 /// Converts with LLVM’s fptoui/fptosi, which may return undef for values out of range
 /// (<https://github.com/rust-lang/rust/issues/10184>)
@@ -1612,42 +1866,76 @@ pub unsafe fn frem_fast<T: Copy>(a: T, b: T) -> T;
 /// Stabilized as [`f32::to_int_unchecked`] and [`f64::to_int_unchecked`].
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn float_to_int_unchecked<Float: Copy, Int: Copy>(value: Float) -> Int;
+pub unsafe fn float_to_int_unchecked<Float: bounds::FloatPrimitive, Int: Copy>(value: Float)
+-> Int;
 
 /// Float addition that allows optimizations based on algebraic rules.
 ///
 /// Stabilized as [`f16::algebraic_add`], [`f32::algebraic_add`], [`f64::algebraic_add`] and [`f128::algebraic_add`].
+#[rustc_intrinsic_const_stable_indirect]
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub const fn fadd_algebraic<T: Copy>(a: T, b: T) -> T;
+pub const fn fadd_algebraic<T: bounds::FloatPrimitive>(a: T, b: T) -> T;
 
 /// Float subtraction that allows optimizations based on algebraic rules.
 ///
 /// Stabilized as [`f16::algebraic_sub`], [`f32::algebraic_sub`], [`f64::algebraic_sub`] and [`f128::algebraic_sub`].
+#[rustc_intrinsic_const_stable_indirect]
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub const fn fsub_algebraic<T: Copy>(a: T, b: T) -> T;
+pub const fn fsub_algebraic<T: bounds::FloatPrimitive>(a: T, b: T) -> T;
 
 /// Float multiplication that allows optimizations based on algebraic rules.
 ///
 /// Stabilized as [`f16::algebraic_mul`], [`f32::algebraic_mul`], [`f64::algebraic_mul`] and [`f128::algebraic_mul`].
+#[rustc_intrinsic_const_stable_indirect]
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub const fn fmul_algebraic<T: Copy>(a: T, b: T) -> T;
+pub const fn fmul_algebraic<T: bounds::FloatPrimitive>(a: T, b: T) -> T;
 
 /// Float division that allows optimizations based on algebraic rules.
 ///
 /// Stabilized as [`f16::algebraic_div`], [`f32::algebraic_div`], [`f64::algebraic_div`] and [`f128::algebraic_div`].
+#[rustc_intrinsic_const_stable_indirect]
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub const fn fdiv_algebraic<T: Copy>(a: T, b: T) -> T;
+pub const fn fdiv_algebraic<T: bounds::FloatPrimitive>(a: T, b: T) -> T;
 
 /// Float remainder that allows optimizations based on algebraic rules.
 ///
 /// Stabilized as [`f16::algebraic_rem`], [`f32::algebraic_rem`], [`f64::algebraic_rem`] and [`f128::algebraic_rem`].
+#[rustc_intrinsic_const_stable_indirect]
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub const fn frem_algebraic<T: Copy>(a: T, b: T) -> T;
+pub const fn frem_algebraic<T: bounds::FloatPrimitive>(a: T, b: T) -> T;
+
+/// Integer `min`imum, signed or unsigned depending on `T`.
+///
+/// Allowed only on `uN`, `iN`, `usize`, and `isize`.
+/// (Not on `bool` nor on `char`.)
+///
+/// Stabilized as [`u16::min`] and [`i64::min`] and similar.
+#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
+#[rustc_nounwind]
+#[rustc_intrinsic]
+#[miri::intrinsic_fallback_is_spec]
+pub const fn integer_min<T: [const] bounds::IntegerPrimitive>(a: T, b: T) -> T {
+    if a < b { a } else { b }
+}
+
+/// Integer `max`imum, signed or unsigned depending on `T`.
+///
+/// Allowed only on `uN`, `iN`, `usize`, and `isize`.
+/// (Not on `bool` nor on `char`.)
+///
+/// Stabilized as [`u16::max`] and [`i64::max`] and similar.
+#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
+#[rustc_nounwind]
+#[rustc_intrinsic]
+#[miri::intrinsic_fallback_is_spec]
+pub const fn integer_max<T: [const] bounds::IntegerPrimitive>(a: T, b: T) -> T {
+    if a < b { b } else { a }
+}
 
 /// Returns the number of bits set in an integer type `T`
 ///
@@ -2019,7 +2307,7 @@ pub const unsafe fn unchecked_mul<T: Copy>(x: T, y: T) -> T;
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_nounwind]
 #[rustc_intrinsic]
-#[rustc_allow_const_fn_unstable(const_trait_impl, funnel_shifts)]
+#[rustc_allow_const_fn_unstable(const_trait_impl)]
 #[miri::intrinsic_fallback_is_spec]
 pub const fn rotate_left<T: [const] fallback::FunnelShift>(x: T, shift: u32) -> T {
     // Make sure to call the intrinsic for `funnel_shl`, not the fallback impl.
@@ -2041,7 +2329,7 @@ pub const fn rotate_left<T: [const] fallback::FunnelShift>(x: T, shift: u32) -> 
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_nounwind]
 #[rustc_intrinsic]
-#[rustc_allow_const_fn_unstable(const_trait_impl, funnel_shifts)]
+#[rustc_allow_const_fn_unstable(const_trait_impl)]
 #[miri::intrinsic_fallback_is_spec]
 pub const fn rotate_right<T: [const] fallback::FunnelShift>(x: T, shift: u32) -> T {
     // Make sure to call the intrinsic for `funnel_shr`, not the fallback impl.
@@ -2050,7 +2338,8 @@ pub const fn rotate_right<T: [const] fallback::FunnelShift>(x: T, shift: u32) ->
     unsafe { unchecked_funnel_shr(x, x, shift % (mem::size_of::<T>() as u32 * 8)) }
 }
 
-/// Returns (a + b) mod 2<sup>N</sup>, where N is the width of T in bits.
+/// Wrapping (modular) addition. Computes `a + b`,
+/// wrapping around at the boundary of the type.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -2064,7 +2353,8 @@ pub const fn rotate_right<T: [const] fallback::FunnelShift>(x: T, shift: u32) ->
 #[rustc_nounwind]
 #[rustc_intrinsic]
 pub const fn wrapping_add<T: Copy>(a: T, b: T) -> T;
-/// Returns (a - b) mod 2<sup>N</sup>, where N is the width of T in bits.
+/// Wrapping (modular) subtraction. Computes `a - b`,
+/// wrapping around at the boundary of the type.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -2078,7 +2368,8 @@ pub const fn wrapping_add<T: Copy>(a: T, b: T) -> T;
 #[rustc_nounwind]
 #[rustc_intrinsic]
 pub const fn wrapping_sub<T: Copy>(a: T, b: T) -> T;
-/// Returns (a * b) mod 2<sup>N</sup>, where N is the width of T in bits.
+/// Wrapping (modular) multiplication. Computes `a *
+/// b`, wrapping around at the boundary of the type.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -2134,11 +2425,11 @@ pub const fn saturating_sub<T: Copy>(a: T, b: T) -> T;
 ///
 /// Safe versions of this intrinsic are available on the integer primitives
 /// via the `funnel_shl` method. For example, [`u32::funnel_shl`].
+#[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-#[rustc_const_unstable(feature = "funnel_shifts", issue = "145686")]
-#[unstable(feature = "funnel_shifts", issue = "145686")]
 #[track_caller]
+#[rustc_allow_const_fn_unstable(const_trait_impl, core_intrinsics_fallbacks)]
 #[miri::intrinsic_fallback_is_spec]
 pub const unsafe fn unchecked_funnel_shl<T: [const] fallback::FunnelShift>(
     a: T,
@@ -2162,11 +2453,11 @@ pub const unsafe fn unchecked_funnel_shl<T: [const] fallback::FunnelShift>(
 ///
 /// Safer versions of this intrinsic are available on the integer primitives
 /// via the `funnel_shr` method. For example, [`u32::funnel_shr`]
+#[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-#[rustc_const_unstable(feature = "funnel_shifts", issue = "145686")]
-#[unstable(feature = "funnel_shifts", issue = "145686")]
 #[track_caller]
+#[rustc_allow_const_fn_unstable(const_trait_impl, core_intrinsics_fallbacks)]
 #[miri::intrinsic_fallback_is_spec]
 pub const unsafe fn unchecked_funnel_shr<T: [const] fallback::FunnelShift>(
     a: T,
@@ -2175,6 +2466,19 @@ pub const unsafe fn unchecked_funnel_shr<T: [const] fallback::FunnelShift>(
 ) -> T {
     // SAFETY: caller ensures that `shift` is in-range
     unsafe { a.unchecked_funnel_shr(b, shift) }
+}
+
+/// Carryless multiply.
+///
+/// Safe versions of this intrinsic are available on the integer primitives
+/// via the `carryless_mul` method. For example, [`u32::carryless_mul`].
+#[rustc_intrinsic]
+#[rustc_nounwind]
+#[rustc_const_unstable(feature = "uint_carryless_mul", issue = "152080")]
+#[unstable(feature = "uint_carryless_mul", issue = "152080")]
+#[miri::intrinsic_fallback_is_spec]
+pub const fn carryless_mul<T: [const] fallback::CarrylessMul>(a: T, b: T) -> T {
+    a.carryless_mul(b)
 }
 
 /// This is an implementation detail of [`crate::ptr::read`] and should
@@ -2215,7 +2519,7 @@ pub const fn discriminant_value<T>(v: &T) -> <T as DiscriminantKind>::Discrimina
 
 /// Rust's "try catch" construct for unwinding. Invokes the function pointer `try_fn` with the
 /// data pointer `data`, and calls `catch_fn` if unwinding occurs while `try_fn` runs.
-/// Returns `1` if unwinding occurred and `catch_fn` was called; returns `0` otherwise.
+/// Returns `true` if unwinding occurred and `catch_fn` was called; returns `false` otherwise.
 ///
 /// `catch_fn` must not unwind.
 ///
@@ -2232,11 +2536,11 @@ pub const fn discriminant_value<T>(v: &T) -> <T as DiscriminantKind>::Discrimina
 /// version of this intrinsic, `std::panic::catch_unwind`.
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn catch_unwind(
-    _try_fn: fn(*mut u8),
-    _data: *mut u8,
-    _catch_fn: fn(*mut u8, *mut u8),
-) -> i32;
+pub unsafe fn catch_unwind<Data: ptr::Thin>(
+    _try_fn: unsafe fn(*mut Data),
+    _data: *mut Data,
+    _catch_fn: unsafe fn(*mut Data, *mut u8),
+) -> bool;
 
 /// Emits a `nontemporal` store, which gives a hint to the CPU that the data should not be held
 /// in cache. Except for performance, this is fully equivalent to `ptr.write(val)`.
@@ -2404,8 +2708,7 @@ where
 /// The `@capture` block declares which surrounding variables / expressions can be
 /// used inside the `if const`.
 /// Note that the two arms of this `if` really each become their own function, which is why the
-/// macro supports setting attributes for those functions. The runtime function is always
-/// marked as `#[inline]`.
+/// macro supports setting attributes for those functions. Both functions are marked as `#[inline]`.
 ///
 /// See [`const_eval_select()`] for the rules and requirements around that intrinsic.
 pub(crate) macro const_eval_select {
@@ -2415,35 +2718,14 @@ pub(crate) macro const_eval_select {
             $(#[$compiletime_attr:meta])* $compiletime:block
         else
             $(#[$runtime_attr:meta])* $runtime:block
-    ) => {
-        // Use the `noinline` arm, after adding explicit `inline` attributes
-        $crate::intrinsics::const_eval_select!(
-            @capture$([$($binders)*])? { $($arg : $ty = $val),* } $(-> $ret)? :
-            #[noinline]
-            if const
-                #[inline] // prevent codegen on this function
-                $(#[$compiletime_attr])*
-                $compiletime
-            else
-                #[inline] // avoid the overhead of an extra fn call
-                $(#[$runtime_attr])*
-                $runtime
-        )
-    },
-    // With a leading #[noinline], we don't add inline attributes
-    (
-        @capture$([$($binders:tt)*])? { $($arg:ident : $ty:ty = $val:expr),* $(,)? } $( -> $ret:ty )? :
-        #[noinline]
-        if const
-            $(#[$compiletime_attr:meta])* $compiletime:block
-        else
-            $(#[$runtime_attr:meta])* $runtime:block
     ) => {{
+        #[inline]
         $(#[$runtime_attr])*
         fn runtime$(<$($binders)*>)?($($arg: $ty),*) $( -> $ret )? {
             $runtime
         }
 
+        #[inline]
         $(#[$compiletime_attr])*
         const fn compiletime$(<$($binders)*>)?($($arg: $ty),*) $( -> $ret )? {
             // Don't warn if one of the arguments is unused.
@@ -2509,14 +2791,6 @@ pub(crate) macro const_eval_select {
 /// Unsafe code may not rely on `is_val_statically_known` returning any
 /// particular value, ever. However, the compiler will generally make it
 /// return `true` only if the value of the argument is actually known.
-///
-/// # Stability concerns
-///
-/// While it is safe to call, this intrinsic may behave differently in
-/// a `const` context than otherwise. See the [`const_eval_select()`]
-/// documentation for an explanation of the issues this can cause. Unlike
-/// `const_eval_select`, this intrinsic isn't guaranteed to behave
-/// deterministically even in a `const` context.
 ///
 /// # Type Requirements
 ///
@@ -2584,7 +2858,7 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
 #[requires(ub_checks::can_dereference(x) && ub_checks::can_write(x))]
 #[requires(ub_checks::can_dereference(y) && ub_checks::can_write(y))]
 #[requires(x.addr() != y.addr() || core::mem::size_of::<T>() == 0)]
-#[requires(ub_checks::maybe_is_nonoverlapping(x as *const (), y as *const (), size_of::<T>(), 1))]
+#[requires(ub_checks::maybe_is_nonoverlapping(x as *const (), y as *const (), const { size_of::<T>() }, 1))]
 #[ensures(|_| ub_checks::can_dereference(x) && ub_checks::can_dereference(y))]
 pub const unsafe fn typed_swap_nonoverlapping<T>(x: *mut T, y: *mut T) {
     // SAFETY: The caller provided single non-overlapping items behind
@@ -2605,6 +2879,12 @@ pub const unsafe fn typed_swap_nonoverlapping<T>(x: *mut T, y: *mut T) {
 /// assertions are enabled whenever the *user crate* has UB checks enabled. However, if the
 /// user has UB checks disabled, the checks will still get optimized out. This intrinsic is
 /// primarily used by [`crate::ub_checks::assert_unsafe_precondition`].
+///
+/// # Consteval
+///
+/// In consteval, this function currently returns `true`. This is because the value of the `ub_checks`
+/// configuration can differ across crates, but we need this function to always return the same
+/// value in consteval in order to avoid unsoundness.
 #[rustc_intrinsic_const_stable_indirect] // just for UB checks
 #[inline(always)]
 #[rustc_intrinsic]
@@ -2624,6 +2904,12 @@ pub const fn ub_checks() -> bool {
 /// `#[inline]`), gating assertions on `overflow_checks()` rather than `cfg!(overflow_checks)` means that
 /// assertions are enabled whenever the *user crate* has overflow checks enabled. However if the
 /// user has overflow checks disabled, the checks will still get optimized out.
+///
+/// # Consteval
+///
+/// In consteval, this function currently returns `true`. This is because the value of the `overflow_checks`
+/// configuration can differ across crates, but we need this function to always return the same
+/// value in consteval in order to avoid unsoundness.
 #[inline(always)]
 #[rustc_intrinsic]
 pub const fn overflow_checks() -> bool {
@@ -2649,7 +2935,7 @@ pub const unsafe fn const_allocate(_size: usize, _align: usize) -> *mut u8 {
 }
 
 /// Deallocates a memory which allocated by `intrinsics::const_allocate` at compile time.
-/// At runtime, does nothing.
+/// At runtime, it does nothing.
 ///
 /// # Safety
 ///
@@ -2667,6 +2953,9 @@ pub const unsafe fn const_deallocate(_ptr: *mut u8, _size: usize, _align: usize)
     // Runtime NOP
 }
 
+/// Convert the allocation this pointer points to into immutable global memory.
+/// The pointer must point to the beginning of a heap allocation.
+/// This operation only makes sense during compile time. At runtime, it does nothing.
 #[rustc_const_unstable(feature = "const_heap", issue = "79597")]
 #[rustc_nounwind]
 #[rustc_intrinsic]
@@ -2729,14 +3018,9 @@ pub const fn contract_check_ensures<C: Fn(&Ret) -> bool + Copy, Ret>(
             // Do nothing
             ret
         } else {
-            match cond {
-                crate::option::Option::Some(cond) => {
-                    if !cond(&ret) {
-                        // Emit no unwind panic in case this was a safety requirement.
-                        crate::panicking::panic_nounwind("failed ensures check");
-                    }
-                },
-                crate::option::Option::None => {},
+            if let crate::option::Option::Some(cond) = cond && !cond(&ret) {
+                // Emit no unwind panic in case this was a safety requirement.
+                crate::panicking::panic_nounwind("failed ensures check");
             }
             ret
         }
@@ -2795,7 +3079,8 @@ pub unsafe fn vtable_align(_ptr: *const ()) -> usize;
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
-pub const fn size_of<T>() -> usize;
+#[rustc_comptime]
+pub fn size_of<T>() -> usize;
 
 /// The minimum alignment of a type.
 ///
@@ -2814,7 +3099,8 @@ pub const fn size_of<T>() -> usize;
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
-pub const fn align_of<T>() -> usize;
+#[rustc_comptime]
+pub fn align_of<T>() -> usize;
 
 /// The offset of a field inside a type.
 ///
@@ -2834,7 +3120,23 @@ pub const fn align_of<T>() -> usize;
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 #[lang = "offset_of"]
-pub const fn offset_of<T: PointeeSized>(variant: u32, field: u32) -> usize;
+#[rustc_comptime]
+pub fn offset_of<T: PointeeSized>(variant: u32, field: u32) -> usize;
+
+/// The offset of a field queried by its field representing type.
+///
+/// Returns the offset of the field represented by `F`. This function essentially does the same as
+/// the [`offset_of`] intrinsic, but expects the field to be represented by a generic rather than
+/// the variant and field indices. This also is a safe intrinsic and can only be evaluated at
+/// compile-time, so it should only appear in constants or inline const blocks.
+///
+/// There should be no need to call this intrinsic manually, as its value is used to define
+/// [`Field::OFFSET`](crate::field::Field::OFFSET), which is publicly accessible.
+#[rustc_intrinsic]
+#[unstable(feature = "field_projections", issue = "145383")]
+#[rustc_const_unstable(feature = "field_projections", issue = "145383")]
+#[rustc_comptime]
+pub fn field_offset<F: crate::field::Field>() -> usize;
 
 /// Returns the number of variants of the type `T` cast to a `usize`;
 /// if `T` has no variants, returns `0`. Uninhabited variants will be counted.
@@ -2848,7 +3150,8 @@ pub const fn offset_of<T: PointeeSized>(variant: u32, field: u32) -> usize;
 #[rustc_nounwind]
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
-pub const fn variant_count<T>() -> usize;
+#[rustc_comptime]
+pub fn variant_count<T>() -> usize;
 
 /// The size of the referenced value in bytes.
 ///
@@ -2887,35 +3190,40 @@ pub const unsafe fn align_of_val<T: ?Sized>(ptr: *const T) -> usize;
 #[rustc_nounwind]
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
-pub const fn type_name<T: ?Sized>() -> &'static str;
+#[rustc_comptime]
+pub fn type_name<T: ?Sized>() -> &'static str;
 
-/// Gets an identifier which is globally unique to the specified type. This
-/// function will return the same value for a type regardless of whichever
-/// crate it is invoked in.
+/// Gets the actual field `TypeId` of the [`FieldRepresentingType`]'s `TypeId`.
 ///
-/// Note that, unlike most intrinsics, this can only be called at compile-time
-/// as backends do not have an implementation for it. The only caller (its
-/// stable counterpart) wraps this intrinsic call in a `const` block so that
-/// backends only see an evaluated constant.
+/// The more user-friendly version of this intrinsic is [`core::mem::type_info::FieldId::type_id`].
 ///
-/// The stabilized version of this intrinsic is [`core::any::TypeId::of`].
-#[rustc_nounwind]
-#[unstable(feature = "core_intrinsics", issue = "none")]
+/// [`FieldRepresentingType`]: crate::field::FieldRepresentingType
 #[rustc_intrinsic]
-pub const fn type_id<T: ?Sized + 'static>() -> crate::any::TypeId;
+#[unstable(feature = "core_intrinsics", issue = "none")]
+#[rustc_comptime]
+pub fn field_representing_type_actual_type_id(
+    _frt_type_id: crate::any::TypeId,
+) -> crate::any::TypeId;
 
-/// Tests (at compile-time) if two [`crate::any::TypeId`] instances identify the
-/// same type. This is necessary because at const-eval time the actual discriminating
-/// data is opaque and cannot be inspected directly.
+/// Gets the name of the field represented by the [`FieldRepresentingType`]'s `TypeId`.
 ///
-/// The stabilized version of this intrinsic is the [PartialEq] impl for [`core::any::TypeId`].
-#[rustc_nounwind]
-#[unstable(feature = "core_intrinsics", issue = "none")]
+/// The more user-friendly version of this intrinsic is [`core::mem::type_info::FieldId::name`].
+///
+/// [`FieldRepresentingType`]: crate::field::FieldRepresentingType
 #[rustc_intrinsic]
-#[rustc_do_not_const_check]
-pub const fn type_id_eq(a: crate::any::TypeId, b: crate::any::TypeId) -> bool {
-    a.data == b.data
-}
+#[unstable(feature = "core_intrinsics", issue = "none")]
+#[rustc_comptime]
+pub fn field_representing_type_name(_frt_type_id: crate::any::TypeId) -> &'static str;
+
+/// Gets the name of the field represented by the [`FieldRepresentingType`]'s `TypeId`.
+///
+/// The more user-friendly version of this intrinsic is [`core::mem::type_info::FieldId::name`].
+///
+/// [`FieldRepresentingType`]: crate::field::FieldRepresentingType
+#[rustc_intrinsic]
+#[unstable(feature = "core_intrinsics", issue = "none")]
+#[rustc_comptime]
+pub fn field_representing_type_offset(_frt_type_id: crate::any::TypeId) -> usize;
 
 /// Lowers in MIR to `Rvalue::Aggregate` with `AggregateKind::RawPtr`.
 ///
@@ -2955,7 +3263,7 @@ fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
     #[cfg(kani)]
     if count > 0 {
         // Inspect a non-deterministically chosen byte in the copy.
-        let byte = kani::any_where(|sz: &usize| *sz < size_of::<T>());
+        let byte = kani::any_where(|sz: &usize| *sz < const { size_of::<T>() });
         // Instead of checking each of the `count`-many copies, non-deterministically pick one of
         // them and check it. Using quantifiers would not add value as we can rely on the solver to
         // pick an uninitialized element if such an element exists.
@@ -2976,7 +3284,10 @@ fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
 // debug assertions; if you are writing compiler tests or code inside the standard library
 // that wants to avoid those debug assertions, directly call this intrinsic instead.
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_allowed_through_unstable_modules = "import this function via `std::ptr` instead"]
+#[rustc_allowed_through_unstable_modules(
+    message = "import this function via the `ptr` module instead",
+    module = "ptr"
+)]
 #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
 #[rustc_nounwind]
 #[rustc_intrinsic]
@@ -2996,7 +3307,10 @@ pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: us
 // debug assertions; if you are writing compiler tests or code inside the standard library
 // that wants to avoid those debug assertions, directly call this intrinsic instead.
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_allowed_through_unstable_modules = "import this function via `std::ptr` instead"]
+#[rustc_allowed_through_unstable_modules(
+    message = "import this function via the `ptr` module instead",
+    module = "ptr"
+)]
 #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
 #[rustc_nounwind]
 #[rustc_intrinsic]
@@ -3014,7 +3328,10 @@ pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize);
 // debug assertions; if you are writing compiler tests or code inside the standard library
 // that wants to avoid those debug assertions, directly call this intrinsic instead.
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_allowed_through_unstable_modules = "import this function via `std::ptr` instead"]
+#[rustc_allowed_through_unstable_modules(
+    message = "import this function via the `ptr` module instead",
+    module = "ptr"
+)]
 #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
 #[rustc_nounwind]
 #[rustc_intrinsic]
@@ -3028,61 +3345,113 @@ pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize);
 // #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
 pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize);
 
-/// Returns the minimum (IEEE 754-2008 minNum) of two `f16` values.
+/// Returns the minimum of two `f16` values, ignoring NaN.
+///
+/// This behaves like IEEE 754-2019 minimumNumber, *except* that it does not order signed
+/// zeros deterministically. In particular:
+/// If one of the arguments is NaN (quiet or signaling), then the other argument is returned. If
+/// both arguments are NaN, returns NaN. If the inputs compare equal (such as for the case of `+0.0`
+/// and `-0.0`), either input may be returned non-deterministically.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
 /// Therefore, implementations must not require the user to uphold
 /// any safety invariants.
 ///
-/// The stabilized version of this intrinsic is
-/// [`f16::min`]
+/// The stabilized version of this intrinsic is [`f16::min`].
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub const fn minnumf16(x: f16, y: f16) -> f16;
+pub const fn minimum_number_nsz_f16(x: f16, y: f16) -> f16 {
+    if x.is_nan() || y <= x {
+        y
+    } else {
+        // Either y > x or y is a NaN.
+        x
+    }
+}
 
-/// Returns the minimum (IEEE 754-2008 minNum) of two `f32` values.
+/// Returns the minimum of two `f32` values, ignoring NaN.
+///
+/// This behaves like IEEE 754-2019 minimumNumber, *except* that it does not order signed
+/// zeros deterministically. In particular:
+/// If one of the arguments is NaN (quiet or signaling), then the other argument is returned. If
+/// both arguments are NaN, returns NaN. If the inputs compare equal (such as for the case of `+0.0`
+/// and `-0.0`), either input may be returned non-deterministically.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
 /// Therefore, implementations must not require the user to uphold
 /// any safety invariants.
 ///
-/// The stabilized version of this intrinsic is
-/// [`f32::min`]
+/// The stabilized version of this intrinsic is [`f32::min`].
 #[rustc_nounwind]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
-pub const fn minnumf32(x: f32, y: f32) -> f32;
+pub const fn minimum_number_nsz_f32(x: f32, y: f32) -> f32 {
+    if x.is_nan() || y <= x {
+        y
+    } else {
+        // Either y > x or y is a NaN.
+        x
+    }
+}
 
-/// Returns the minimum (IEEE 754-2008 minNum) of two `f64` values.
+/// Returns the minimum of two `f64` values, ignoring NaN.
+///
+/// This behaves like IEEE 754-2019 minimumNumber, *except* that it does not order signed
+/// zeros deterministically. In particular:
+/// If one of the arguments is NaN (quiet or signaling), then the other argument is returned. If
+/// both arguments are NaN, returns NaN. If the inputs compare equal (such as for the case of `+0.0`
+/// and `-0.0`), either input may be returned non-deterministically.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
 /// Therefore, implementations must not require the user to uphold
 /// any safety invariants.
 ///
-/// The stabilized version of this intrinsic is
-/// [`f64::min`]
+/// The stabilized version of this intrinsic is [`f64::min`].
 #[rustc_nounwind]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
-pub const fn minnumf64(x: f64, y: f64) -> f64;
+pub const fn minimum_number_nsz_f64(x: f64, y: f64) -> f64 {
+    if x.is_nan() || y <= x {
+        y
+    } else {
+        // Either y > x or y is a NaN.
+        x
+    }
+}
 
-/// Returns the minimum (IEEE 754-2008 minNum) of two `f128` values.
+/// Returns the minimum of two `f128` values, ignoring NaN.
+///
+/// This behaves like IEEE 754-2019 minimumNumber, *except* that it does not order signed
+/// zeros deterministically. In particular:
+/// If one of the arguments is NaN (quiet or signaling), then the other argument is returned. If
+/// both arguments are NaN, returns NaN. If the inputs compare equal (such as for the case of `+0.0`
+/// and `-0.0`), either input may be returned non-deterministically.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
 /// Therefore, implementations must not require the user to uphold
 /// any safety invariants.
 ///
-/// The stabilized version of this intrinsic is
-/// [`f128::min`]
+/// The stabilized version of this intrinsic is [`f128::min`].
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub const fn minnumf128(x: f128, y: f128) -> f128;
+pub const fn minimum_number_nsz_f128(x: f128, y: f128) -> f128 {
+    if x.is_nan() || y <= x {
+        y
+    } else {
+        // Either y > x or y is a NaN.
+        x
+    }
+}
 
-/// Returns the minimum (IEEE 754-2019 minimum) of two `f16` values.
+/// Returns the minimum of two `f16` values, propagating NaN.
+///
+/// This behaves like IEEE 754-2019 minimum. In particular:
+/// If one of the arguments is NaN, then a NaN is returned using the usual NaN propagation rules.
+/// For this operation, -0.0 is considered to be strictly less than +0.0.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -3103,7 +3472,11 @@ pub const fn minimumf16(x: f16, y: f16) -> f16 {
     }
 }
 
-/// Returns the minimum (IEEE 754-2019 minimum) of two `f32` values.
+/// Returns the minimum of two `f32` values, propagating NaN.
+///
+/// This behaves like IEEE 754-2019 minimum. In particular:
+/// If one of the arguments is NaN, then a NaN is returned using the usual NaN propagation rules.
+/// For this operation, -0.0 is considered to be strictly less than +0.0.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -3124,7 +3497,11 @@ pub const fn minimumf32(x: f32, y: f32) -> f32 {
     }
 }
 
-/// Returns the minimum (IEEE 754-2019 minimum) of two `f64` values.
+/// Returns the minimum of two `f64` values, propagating NaN.
+///
+/// This behaves like IEEE 754-2019 minimum. In particular:
+/// If one of the arguments is NaN, then a NaN is returned using the usual NaN propagation rules.
+/// For this operation, -0.0 is considered to be strictly less than +0.0.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -3145,7 +3522,11 @@ pub const fn minimumf64(x: f64, y: f64) -> f64 {
     }
 }
 
-/// Returns the minimum (IEEE 754-2019 minimum) of two `f128` values.
+/// Returns the minimum of two `f128` values, propagating NaN.
+///
+/// This behaves like IEEE 754-2019 minimum. In particular:
+/// If one of the arguments is NaN, then a NaN is returned using the usual NaN propagation rules.
+/// For this operation, -0.0 is considered to be strictly less than +0.0.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -3166,61 +3547,113 @@ pub const fn minimumf128(x: f128, y: f128) -> f128 {
     }
 }
 
-/// Returns the maximum (IEEE 754-2008 maxNum) of two `f16` values.
+/// Returns the maximum of two `f16` values, ignoring NaN.
+///
+/// This behaves like IEEE 754-2019 maximumNumber, *except* that it does not order signed
+/// zeros deterministically. In particular:
+/// If one of the arguments is NaN (quiet or signaling), then the other argument is returned. If
+/// both arguments are NaN, returns NaN. If the inputs compare equal (such as for the case of `+0.0`
+/// and `-0.0`), either input may be returned non-deterministically.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
 /// Therefore, implementations must not require the user to uphold
 /// any safety invariants.
 ///
-/// The stabilized version of this intrinsic is
-/// [`f16::max`]
+/// The stabilized version of this intrinsic is [`f16::max`].
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub const fn maxnumf16(x: f16, y: f16) -> f16;
+pub const fn maximum_number_nsz_f16(x: f16, y: f16) -> f16 {
+    if x.is_nan() || y >= x {
+        y
+    } else {
+        // Either y < x or y is a NaN.
+        x
+    }
+}
 
-/// Returns the maximum (IEEE 754-2008 maxNum) of two `f32` values.
+/// Returns the maximum of two `f32` values, ignoring NaN.
+///
+/// This behaves like IEEE 754-2019 maximumNumber, *except* that it does not order signed
+/// zeros deterministically. In particular:
+/// If one of the arguments is NaN (quiet or signaling), then the other argument is returned. If
+/// both arguments are NaN, returns NaN. If the inputs compare equal (such as for the case of `+0.0`
+/// and `-0.0`), either input may be returned non-deterministically.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
 /// Therefore, implementations must not require the user to uphold
 /// any safety invariants.
 ///
-/// The stabilized version of this intrinsic is
-/// [`f32::max`]
+/// The stabilized version of this intrinsic is [`f32::max`].
 #[rustc_nounwind]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
-pub const fn maxnumf32(x: f32, y: f32) -> f32;
+pub const fn maximum_number_nsz_f32(x: f32, y: f32) -> f32 {
+    if x.is_nan() || y >= x {
+        y
+    } else {
+        // Either y < x or y is a NaN.
+        x
+    }
+}
 
-/// Returns the maximum (IEEE 754-2008 maxNum) of two `f64` values.
+/// Returns the maximum of two `f64` values, ignoring NaN.
+///
+/// This behaves like IEEE 754-2019 maximumNumber, *except* that it does not order signed
+/// zeros deterministically. In particular:
+/// If one of the arguments is NaN (quiet or signaling), then the other argument is returned. If
+/// both arguments are NaN, returns NaN. If the inputs compare equal (such as for the case of `+0.0`
+/// and `-0.0`), either input may be returned non-deterministically.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
 /// Therefore, implementations must not require the user to uphold
 /// any safety invariants.
 ///
-/// The stabilized version of this intrinsic is
-/// [`f64::max`]
+/// The stabilized version of this intrinsic is [`f64::max`].
 #[rustc_nounwind]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
-pub const fn maxnumf64(x: f64, y: f64) -> f64;
+pub const fn maximum_number_nsz_f64(x: f64, y: f64) -> f64 {
+    if x.is_nan() || y >= x {
+        y
+    } else {
+        // Either y < x or y is a NaN.
+        x
+    }
+}
 
-/// Returns the maximum (IEEE 754-2008 maxNum) of two `f128` values.
+/// Returns the maximum of two `f128` values, ignoring NaN.
+///
+/// This behaves like IEEE 754-2019 maximumNumber, *except* that it does not order signed
+/// zeros deterministically. In particular:
+/// If one of the arguments is NaN (quiet or signaling), then the other argument is returned. If
+/// both arguments are NaN, returns NaN. If the inputs compare equal (such as for the case of `+0.0`
+/// and `-0.0`), either input may be returned non-deterministically.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
 /// Therefore, implementations must not require the user to uphold
 /// any safety invariants.
 ///
-/// The stabilized version of this intrinsic is
-/// [`f128::max`]
+/// The stabilized version of this intrinsic is [`f128::max`].
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub const fn maxnumf128(x: f128, y: f128) -> f128;
+pub const fn maximum_number_nsz_f128(x: f128, y: f128) -> f128 {
+    if x.is_nan() || y >= x {
+        y
+    } else {
+        // Either y < x or y is a NaN.
+        x
+    }
+}
 
-/// Returns the maximum (IEEE 754-2019 maximum) of two `f16` values.
+/// Returns the maximum of two `f16` values, propagating NaN.
+///
+/// This behaves like IEEE 754-2019 maximum. In particular:
+/// If one of the arguments is NaN, then a NaN is returned using the usual NaN propagation rules.
+/// For this operation, -0.0 is considered to be strictly less than +0.0.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -3240,7 +3673,11 @@ pub const fn maximumf16(x: f16, y: f16) -> f16 {
     }
 }
 
-/// Returns the maximum (IEEE 754-2019 maximum) of two `f32` values.
+/// Returns the maximum of two `f32` values, propagating NaN.
+///
+/// This behaves like IEEE 754-2019 maximum. In particular:
+/// If one of the arguments is NaN, then a NaN is returned using the usual NaN propagation rules.
+/// For this operation, -0.0 is considered to be strictly less than +0.0.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -3260,7 +3697,11 @@ pub const fn maximumf32(x: f32, y: f32) -> f32 {
     }
 }
 
-/// Returns the maximum (IEEE 754-2019 maximum) of two `f64` values.
+/// Returns the maximum of two `f64` values, propagating NaN.
+///
+/// This behaves like IEEE 754-2019 maximum. In particular:
+/// If one of the arguments is NaN, then a NaN is returned using the usual NaN propagation rules.
+/// For this operation, -0.0 is considered to be strictly less than +0.0.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -3280,7 +3721,11 @@ pub const fn maximumf64(x: f64, y: f64) -> f64 {
     }
 }
 
-/// Returns the maximum (IEEE 754-2019 maximum) of two `f128` values.
+/// Returns the maximum of two `f128` values, propagating NaN.
+///
+/// This behaves like IEEE 754-2019 maximum. In particular:
+/// If one of the arguments is NaN, then a NaN is returned using the usual NaN propagation rules.
+/// For this operation, -0.0 is considered to be strictly less than +0.0.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -3300,72 +3745,64 @@ pub const fn maximumf128(x: f128, y: f128) -> f128 {
     }
 }
 
-/// Returns the absolute value of an `f16`.
+/// Returns the absolute value of a floating-point value.
 ///
-/// The stabilized version of this intrinsic is
-/// [`f16::abs`](../../std/primitive.f16.html#method.abs)
+/// The stabilized versions of this intrinsic are available on the float
+/// primitives via the `abs` method. For example, [`f32::abs`].
 #[rustc_nounwind]
-#[rustc_intrinsic]
-pub const fn fabsf16(x: f16) -> f16;
-
-/// Returns the absolute value of an `f32`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f32::abs`](../../std/primitive.f32.html#method.abs)
-#[rustc_nounwind]
+#[rustc_const_unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
-pub const fn fabsf32(x: f32) -> f32;
-
-/// Returns the absolute value of an `f64`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f64::abs`](../../std/primitive.f64.html#method.abs)
-#[rustc_nounwind]
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-pub const fn fabsf64(x: f64) -> f64;
-
-/// Returns the absolute value of an `f128`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f128::abs`](../../std/primitive.f128.html#method.abs)
-#[rustc_nounwind]
-#[rustc_intrinsic]
-pub const fn fabsf128(x: f128) -> f128;
+#[miri::intrinsic_fallback_is_spec]
+#[rustc_do_not_const_check] // use built-in impl to avoid const-checks in the fallback body.
+pub const fn fabs<T: bounds::FloatPrimitive>(x: T) -> T {
+    T::from_bits(x.to_bits() & !T::SIGN_MASK)
+}
 
 /// Copies the sign from `y` to `x` for `f16` values.
 ///
 /// The stabilized version of this intrinsic is
 /// [`f16::copysign`](../../std/primitive.f16.html#method.copysign)
+#[inline]
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub const fn copysignf16(x: f16, y: f16) -> f16;
+pub const fn copysignf16(x: f16, y: f16) -> f16 {
+    f16::from_bits((x.to_bits() & !f16::SIGN_MASK) | (y.to_bits() & f16::SIGN_MASK))
+}
 
 /// Copies the sign from `y` to `x` for `f32` values.
 ///
 /// The stabilized version of this intrinsic is
 /// [`f32::copysign`](../../std/primitive.f32.html#method.copysign)
+#[inline]
 #[rustc_nounwind]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
-pub const fn copysignf32(x: f32, y: f32) -> f32;
+pub const fn copysignf32(x: f32, y: f32) -> f32 {
+    f32::from_bits((x.to_bits() & !f32::SIGN_MASK) | (y.to_bits() & f32::SIGN_MASK))
+}
 /// Copies the sign from `y` to `x` for `f64` values.
 ///
 /// The stabilized version of this intrinsic is
 /// [`f64::copysign`](../../std/primitive.f64.html#method.copysign)
+#[inline]
 #[rustc_nounwind]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
-pub const fn copysignf64(x: f64, y: f64) -> f64;
+pub const fn copysignf64(x: f64, y: f64) -> f64 {
+    f64::from_bits((x.to_bits() & !f64::SIGN_MASK) | (y.to_bits() & f64::SIGN_MASK))
+}
 
 /// Copies the sign from `y` to `x` for `f128` values.
 ///
 /// The stabilized version of this intrinsic is
 /// [`f128::copysign`](../../std/primitive.f128.html#method.copysign)
+#[inline]
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub const fn copysignf128(x: f128, y: f128) -> f128;
+pub const fn copysignf128(x: f128, y: f128) -> f128 {
+    f128::from_bits((x.to_bits() & !f128::SIGN_MASK) | (y.to_bits() & f128::SIGN_MASK))
+}
 
 /// Generates the LLVM body for the automatic differentiation of `f` using Enzyme,
 /// with `df` as the derivative function and `args` as its arguments.
@@ -3405,6 +3842,63 @@ pub const fn copysignf128(x: f128, y: f128) -> f128;
 #[rustc_intrinsic]
 pub const fn autodiff<F, G, T: crate::marker::Tuple, R>(f: F, df: G, args: T) -> R;
 
+/// Generates the LLVM body of a wrapper function to offload a kernel `f`.
+///
+/// Type Parameters:
+/// - `F`: The kernel to offload. Must be a function item.
+/// - `T`: A tuple of arguments passed to `f`.
+/// - `R`: The return type of the kernel.
+///
+/// Arguments:
+/// - `f`: The kernel function to offload.
+/// - `workgroup_dim`: A 3D size specifying the number of workgroups to launch.
+/// - `thread_dim`: A 3D size specifying the number of threads per workgroup.
+/// - `dyn_cache`: The amount of dynamic shared memory to request for the kernel.
+/// - `device_id`: The device to offload to. Use `-1` to select the default device.
+/// - `args`: A tuple of arguments forwarded to `f`.
+///
+/// Example usage (pseudocode):
+///
+/// ```rust,ignore (pseudocode)
+/// fn kernel(x: *mut [f64; 128]) {
+///     core::intrinsics::offload(kernel_1, [256, 1, 1], [32, 1, 1], 0, -1, (x,))
+/// }
+///
+/// #[cfg(target_os = "linux")]
+/// extern "C" {
+///     pub fn kernel_1(array_b: *mut [f64; 128]);
+/// }
+///
+/// #[cfg(not(target_os = "linux"))]
+/// #[rustc_offload_kernel]
+/// extern "gpu-kernel" fn kernel_1(x: *mut [f64; 128]) {
+///     unsafe { (*x)[0] = 21.0 };
+/// }
+/// ```
+///
+/// For reference, see the Clang documentation on offloading:
+/// <https://clang.llvm.org/docs/OffloadingDesign.html>.
+#[rustc_nounwind]
+#[rustc_intrinsic]
+pub const fn offload<F, T: crate::marker::Tuple, R>(
+    f: F,
+    workgroup_dim: [u32; 3],
+    thread_dim: [u32; 3],
+    dyn_cache: u32,
+    device_id: i32,
+    args: T,
+) -> R;
+
+/// Returns the number of offload devices available on the system.
+///
+/// Use this to discover which `device_id` values are valid to pass to
+/// [`offload`]. Devices are numbered from `0` to the returned value minus one.
+///
+/// Returns `0` if no offloading devices are present.
+#[rustc_nounwind]
+#[rustc_intrinsic]
+pub const fn offload_get_num_devices() -> i32;
+
 /// Inform Miri that a given pointer definitely has a certain alignment.
 #[cfg(miri)]
 #[rustc_allow_const_fn_unstable(const_eval_select)]
@@ -3429,19 +3923,6 @@ pub(crate) const fn miri_promise_symbolic_alignment(ptr: *const (), align: usize
     )
 }
 
-/// Copies the current location of arglist `src` to the arglist `dst`.
-///
-/// # Safety
-///
-/// You must check the following invariants before you call this function:
-///
-/// - `dest` must be non-null and point to valid, writable memory.
-/// - `dest` must not alias `src`.
-///
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub unsafe fn va_copy<'f>(dest: *mut VaListImpl<'f>, src: &VaListImpl<'f>);
-
 /// Loads an argument of type `T` from the `va_list` `ap` and increment the
 /// argument `ap` points to.
 ///
@@ -3458,9 +3939,34 @@ pub unsafe fn va_copy<'f>(dest: *mut VaListImpl<'f>, src: &VaListImpl<'f>);
 ///
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn va_arg<T: VaArgSafe>(ap: &mut VaListImpl<'_>) -> T;
+pub const unsafe fn va_arg<T: VaArgSafe>(ap: &mut VaList<'_>) -> T;
 
-/// Destroy the arglist `ap` after initialization with `va_start` or `va_copy`.
+/// Duplicates a variable argument list. The returned list is initially at the same position as
+/// the one in `src`, but can be advanced independently.
+///
+/// Codegen backends should not have custom behavior for this intrinsic, they should always use
+/// this fallback implementation. This intrinsic *does not* map to the LLVM `va_copy` intrinsic.
+///
+/// This intrinsic exists only as a hook for Miri and constant evaluation, and is used to detect UB
+/// when a variable argument list is used incorrectly.
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub const fn va_copy<'f>(src: &VaList<'f>) -> VaList<'f> {
+    // This fallback body exploits the fact that our codegen backends all just use
+    // a plain memcpy to duplicate VaList. This assumption is wrong for Miri.
+    assert!(!cfg!(miri), "fallback body is incorrect under Miri");
+
+    src.duplicate()
+}
+
+/// Destroy the variable argument list `ap` after initialization with `va_start` (part of the
+/// desugaring of `...`) or `va_copy`.
+///
+/// Code generation backends should not provide a custom implementation for this intrinsic. This
+/// intrinsic *does not* map to the LLVM `va_end` intrinsic.
+///
+/// This function is a no-op on all current targets, but used as a hook for const evaluation to
+/// detect UB when a variable argument list is used incorrectly.
 ///
 /// # Safety
 ///
@@ -3468,7 +3974,9 @@ pub unsafe fn va_arg<T: VaArgSafe>(ap: &mut VaListImpl<'_>) -> T;
 ///
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn va_end(ap: &mut VaListImpl<'_>);
+pub const unsafe fn va_end(ap: &mut VaList<'_>) {
+    /* deliberately does nothing */
+}
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
@@ -4150,4 +4658,17 @@ mod verify {
     fn supported_status(status: AllocationStatus) -> bool {
         status != AllocationStatus::Dangling && status != AllocationStatus::DeadObject
     }
+}
+
+/// Returns the return address of the caller function (after inlining) in a best-effort manner or a null pointer if it is not supported on the current backend.
+/// Returning an accurate value is a quality-of-implementation concern, but no hard guarantees are
+/// made about the return value: formally, the intrinsic non-deterministically returns
+/// an arbitrary pointer without provenance.
+///
+/// Note that unlike most intrinsics, this is safe to call. This is because it only finds the return address of the immediate caller, which is guaranteed to be possible.
+/// Other forms of the corresponding gcc or llvm intrinsic (which can have wildly unpredictable results or even crash at runtime) are not exposed.
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub fn return_address() -> *const () {
+    core::ptr::null()
 }

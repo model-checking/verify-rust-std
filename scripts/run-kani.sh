@@ -162,6 +162,12 @@ build_kani() {
         if [[ "$os_name" == "Linux" ]]; then
             ./scripts/setup/ubuntu/install_deps.sh
         elif [[ "$os_name" == "Darwin" ]]; then
+            # Homebrew 6.0+ refuses to load formulae from third-party taps
+            # unless they are explicitly trusted, which breaks the
+            # `brew tap diffblue/cbmc` in the pinned Kani's install_cbmc.sh.
+            # Trust the tap first (no-op on older Homebrew). Mirrors
+            # model-checking/kani#4785.
+            brew trust diffblue/cbmc 2>/dev/null || true
             ./scripts/setup/macos/install_deps.sh
         else
             echo "Unknown operating system"
@@ -213,11 +219,18 @@ run_verification_subset() {
 
     echo "Running verification for harnesses:"
     printf '%s\n' "${harnesses[@]}"
+    # Use KANI_JOBS to cap the number of parallel harnesses; some harnesses peak
+    # at close to 10 GB of memory, so running one per core can exhaust the
+    # memory of smaller CI runners (e.g., 4-core/16 GB ubuntu-latest).
+    local jobs_arg="-j"
+    if [[ -n "${KANI_JOBS:-}" ]]; then
+        jobs_arg="--jobs=${KANI_JOBS}"
+    fi
     "$kani_path" verify-std -Z unstable-options ./library \
         $unstable_args \
         --no-assert-contracts \
         $harness_args --exact \
-        -j \
+        $jobs_arg \
         --output-format=terse \
         "${command_args[@]}" \
         --cbmc-args --object-bits 12
@@ -315,7 +328,8 @@ main() {
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
         if [[ "$with_autoharness" == "true" ]]; then
-            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format markdown
+            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format markdown \
+                "${command_args[@]}"
         else
             "$kani_path" list $unstable_args ./library --std --format markdown
         fi
@@ -323,7 +337,8 @@ main() {
         local current_dir=$(pwd)
         echo "Running Kani list command..."
         if [[ "$with_autoharness" == "true" ]]; then
-            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format json
+            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format json \
+                "${command_args[@]}"
         else
             "$kani_path" list $unstable_args ./library --std --format json
         fi
@@ -335,6 +350,9 @@ main() {
         ./kani_std_analysis.py --crate core \
           --kani-list-file $current_dir/kani-list.json \
           --metrics-file metrics-data-core.json
+        ./kani_std_analysis.py --crate alloc \
+          --kani-list-file $current_dir/kani-list.json \
+          --metrics-file metrics-data-alloc.json
         ./kani_std_analysis.py --crate std \
           --kani-list-file $current_dir/kani-list.json \
           --metrics-file metrics-data-std.json
@@ -349,19 +367,28 @@ main() {
             --cbmc-args --object-bits 12
         # remove metadata file for Kani-generated "dummy" crate that we won't
         # get scanner data for
-        local target=$(find "target/kani_verify_std/target/" -mindepth 1 \
-                         -type d -exec test -e '{}'/debug/deps/ \; -print)
-        rm $target/debug/deps/dummy-*
+        local target=$(find "target/kani_verify_std/target/" -mindepth 1 -maxdepth 1 \
+                         -type d -exec test -d '{}'/debug/ \; -print)
+        local metadata=$target/debug/deps
+        # Cargo 1.99+ gives each package its own debug/build/PKG/HASH/out/ and no longer creates
+        # debug/deps, so gather the metadata files in one directory for the analyzer.
+        if [ ! -d "$metadata" ]; then
+            metadata=$(mktemp -d)
+            find "$(pwd)/$target/debug/build" -path '*/out/*.kani-metadata.json' \
+                 -exec ln -s '{}' "$metadata/" \;
+        fi
+        rm $metadata/dummy-*
         echo "Running Kani's std-analysis command..."
         pushd scripts/kani-std-analysis
         ./std-analysis.sh $build_dir
         popd
         echo "Running autoharness-analyzer command..."
         pushd scripts/autoharness_analyzer
+        [[ $metadata = /* ]] || metadata=../../$metadata
         cargo run -- --per-crate \
-          ../../$target/debug/deps/ /tmp/std_lib_analysis/results/
+          $metadata/ /tmp/std_lib_analysis/results/
         cargo run -- --per-crate --unsafe-fns-only \
-          ../../$target/debug/deps/ /tmp/std_lib_analysis/results/
+          $metadata/ /tmp/std_lib_analysis/results/
         popd
     fi
 }

@@ -11,7 +11,7 @@ import pprint
 import re
 import subprocess as sp
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cache
 from glob import glob
 from inspect import cleandoc
@@ -19,8 +19,7 @@ from os import getenv
 from pathlib import Path
 from typing import TypedDict, Self
 
-USAGE = cleandoc(
-    """
+USAGE = cleandoc("""
     usage:
 
     ./ci/ci-util.py <COMMAND> [flags]
@@ -38,18 +37,17 @@ USAGE = cleandoc(
             `--tag` can be specified to look for artifacts with a specific tag, such as
             for a specific architecture.
 
-            Note that `--extract` will overwrite files in `iai-home`.
+            Note that `--extract` will overwrite files in `gungraun-home`.
 
         handle-bench-regressions PR_NUMBER
             Exit with success if the pull request contains a line starting with
             `ci: allow-regressions`, indicating that regressions in benchmarks should
             be accepted. Otherwise, exit 1.
-    """
-)
+    """)
 
 REPO_ROOT = Path(__file__).parent.parent
 GIT = ["git", "-C", REPO_ROOT]
-DEFAULT_BRANCH = "master"
+DEFAULT_BRANCH = "main"
 WORKFLOW_NAME = "CI"  # Workflow that generates the benchmark artifacts
 ARTIFACT_PREFIX = "baseline-icount*"
 
@@ -73,17 +71,21 @@ def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
 
-@dataclass(init=False)
+@dataclass(kw_only=True)
 class PrCfg:
     """Directives that we allow in the commit body to control test behavior.
 
     These are of the form `ci: foo`, at the start of a line.
     """
 
+    # The PR body
+    body: str
     # Skip regression checks (must be at the start of a line).
     allow_regressions: bool = False
     # Don't run extensive tests
     skip_extensive: bool = False
+    # Add these extensive tests to the list
+    extra_extensive: list[str] = field(default_factory=list, init=False)
 
     # Allow running a large number of extensive tests. If not set, this script
     # will error out if a threshold is exceeded in order to avoid accidentally
@@ -101,11 +103,17 @@ class PrCfg:
     DIR_SKIP_EXTENSIVE: str = "skip-extensive"
     DIR_ALLOW_MANY_EXTENSIVE: str = "allow-many-extensive"
     DIR_TEST_LIBM: str = "test-libm"
+    DIR_EXTRA_EXTENSIVE: str = "extra-extensive"
 
-    def __init__(self, body: str):
-        directives = re.finditer(r"^\s*ci:\s*(?P<dir_name>\S*)", body, re.MULTILINE)
+    def __post_init__(self):
+        directives = re.finditer(
+            r"^\s*ci:\s*(?P<dir_name>[^\s=]*)(?:\s*=\s*(?P<args>.*))?",
+            self.body,
+            re.MULTILINE,
+        )
         for dir in directives:
             name = dir.group("dir_name")
+            args = dir.group("args")
             if name == self.DIR_ALLOW_REGRESSIONS:
                 self.allow_regressions = True
             elif name == self.DIR_SKIP_EXTENSIVE:
@@ -114,11 +122,18 @@ class PrCfg:
                 self.allow_many_extensive = True
             elif name == self.DIR_TEST_LIBM:
                 self.always_test_libm = True
+            elif name == self.DIR_EXTRA_EXTENSIVE:
+                self.extra_extensive = [x.strip() for x in args.split(",")]
+                args = None
             else:
                 eprint(f"Found unexpected directive `{name}`")
                 exit(1)
 
-        pprint.pp(self)
+            if args is not None:
+                eprint("Found arguments where not expected")
+                exit(1)
+
+        eprint(pprint.pformat(self))
 
 
 @dataclass
@@ -158,7 +173,7 @@ class PrInfo:
         )
         pr_json = json.loads(pr_info)
         eprint("PR info:", json.dumps(pr_json, indent=4))
-        return cls(**json.loads(pr_info), cfg=PrCfg(pr_json["body"]))
+        return cls(**pr_json, cfg=PrCfg(body=pr_json["body"]))
 
 
 class FunctionDef(TypedDict):
@@ -186,7 +201,7 @@ class Context:
 
     def _init_change_list(self):
         """Create a list of files that have been changed. This uses GITHUB_REF if
-        available, otherwise a diff between `HEAD` and `master`.
+        available, otherwise a diff between `HEAD` and `main`.
         """
 
         # For pull requests, GitHub creates a ref `refs/pull/1234/merge` (1234 being
@@ -214,12 +229,21 @@ class Context:
         assert len(parents) == 2, f"expected two-parent merge but got:\n{parents}"
         base = parents[0].strip()
         incoming = parents[1].strip()
-
         eprint(f"base: {base}, incoming: {incoming}")
+
+        merge_base = sp.check_output(
+            GIT + ["merge-base", base, incoming], text=True
+        ).strip()
+        eprint(f"merge base: {merge_base}")
+
         textlist = sp.check_output(
-            GIT + ["diff", base, incoming, "--name-only"], text=True
+            GIT + ["diff", merge_base, incoming, "--name-only"], text=True
         )
         self.changed = [Path(p) for p in textlist.splitlines()]
+        eprint("all changed: [")
+        for f in self.changed:
+            eprint(f"    {f},")
+        eprint("]")
 
     def is_pr(self) -> bool:
         """Check if we are looking at a PR rather than a push."""
@@ -276,29 +300,35 @@ class Context:
 
         skip_tests = False
         error_on_many_tests = False
+        extra_tests = {}
 
         pr = PrInfo.from_env()
         if pr is not None:
             skip_tests = pr.cfg.skip_extensive
             error_on_many_tests = not pr.cfg.allow_many_extensive
+            for fn_name in pr.cfg.extra_extensive:
+                extra_tests.setdefault(base_name(fn_name)[1], []).append(fn_name)
 
             if skip_tests:
                 eprint("Skipping all extensive tests")
 
         changed = self.changed_routines()
+        eprint(f"changed routines: {changed}")
+
         matrix = []
         total_to_test = 0
 
         # Figure out which extensive tests need to run
         for ty in TYPES:
             ty_changed = changed.get(ty, [])
-            ty_to_test = [] if skip_tests else ty_changed
+            ty_to_test = [] if skip_tests else ty_changed.copy()
+            ty_to_test.extend(extra_tests.get(ty, []))
             total_to_test += len(ty_to_test)
 
             item = {
                 "ty": ty,
-                "changed": ",".join(ty_changed),
-                "to_test": ",".join(ty_to_test),
+                "changed": ",".join(sorted(set(ty_changed))),
+                "to_test": ",".join(sorted(set(ty_to_test))),
             }
 
             matrix.append(item)
@@ -317,6 +347,37 @@ class Context:
                 f" files, `{PrCfg.DIR_SKIP_EXTENSIVE}` can be used instead."
             )
             exit(1)
+
+
+def base_name(name: str) -> tuple[str, str]:
+    """Return the basename and type from a full function name. Keep in sync with Rust's
+    `fn base_name`.
+    """
+    known_mappings = [
+        ("erff", ("erf", "f32")),
+        ("erf", ("erf", "f64")),
+        ("modff", ("modf", "f32")),
+        ("modf", ("modf", "f64")),
+        ("lgammaf_r", ("lgamma_r", "f32")),
+        ("lgamma_r", ("lgamma_r", "f64")),
+    ]
+
+    found = next((base for (full, base) in known_mappings if full == name), None)
+    if found is not None:
+        return found
+
+    if name.endswith("f"):
+        return (name.rstrip("f"), "f32")
+    elif name.endswith("f16"):
+        return (name.rstrip("f16"), "f16")
+    elif name.endswith("f32"):
+        return (name.rstrip("f32"), "f32")
+    elif name.endswith("f64"):
+        return (name.rstrip("f64"), "f64")
+    elif name.endswith("f128"):
+        return (name.rstrip("f128"), "f128")
+
+    return (name, "f64")
 
 
 def locate_baseline(flags: list[str]) -> None:
@@ -390,6 +451,7 @@ def locate_baseline(flags: list[str]) -> None:
 
     artifact_glob = f"{ARTIFACT_PREFIX}{f"-{tag}" if tag else ""}*"
 
+    # Skip checking because this will fail if the file already exists, which is fine.
     sp.run(
         ["gh", "run", "download", str(job_id), f"--pattern={artifact_glob}"],
         check=False,
@@ -409,7 +471,17 @@ def locate_baseline(flags: list[str]) -> None:
     candidate_baselines.sort(reverse=True)
     baseline_archive = candidate_baselines[0]
     eprint(f"extracting {baseline_archive}")
-    sp.run(["tar", "xJvf", baseline_archive], check=True)
+
+    all_paths = sp.check_output(["tar", "tJf", baseline_archive], encoding="utf8")
+    sp.run(["tar", "xJf", baseline_archive], check=True)
+
+    # Print a short summary of paths, we don't use `tar v` since the list is huge
+    short_paths = re.findall(r"^(?:[^/\n]+/?){1,3}", all_paths, re.MULTILINE)
+
+    print("Extracted:")
+    for path in sorted(set(short_paths)):
+        print(f"* {path}")
+
     eprint("baseline extracted successfully")
 
 

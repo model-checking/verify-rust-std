@@ -277,7 +277,7 @@ impl<T: ?Sized> Mutex<T> {
     ///
     /// thread::spawn(move || {
     ///     *c_mutex.lock() = 10;
-    /// }).join().expect("thread::spawn failed");
+    /// }).join().expect("`thread::spawn` should not fail");
     /// assert_eq!(*mutex.lock(), 10);
     /// ```
     #[unstable(feature = "nonpoison_mutex", issue = "134645")]
@@ -316,7 +316,7 @@ impl<T: ?Sized> Mutex<T> {
     ///     } else {
     ///         println!("try_lock failed");
     ///     }
-    /// }).join().expect("thread::spawn failed");
+    /// }).join().expect("`thread::spawn` should not fail");
     /// assert_eq!(*mutex.lock().unwrap(), 10);
     /// ```
     #[unstable(feature = "nonpoison_mutex", issue = "134645")]
@@ -422,7 +422,7 @@ impl<T> From<T> for Mutex<T> {
 }
 
 #[unstable(feature = "nonpoison_mutex", issue = "134645")]
-impl<T: ?Sized + Default> Default for Mutex<T> {
+impl<T: Default> Default for Mutex<T> {
     /// Creates a `Mutex<T>`, with the `Default` value for T.
     fn default() -> Mutex<T> {
         Mutex::new(Default::default())
@@ -447,7 +447,7 @@ impl<T: ?Sized + fmt::Debug> fmt::Debug for Mutex<T> {
 
 impl<'mutex, T: ?Sized> MutexGuard<'mutex, T> {
     unsafe fn new(lock: &'mutex Mutex<T>) -> MutexGuard<'mutex, T> {
-        return MutexGuard { lock };
+        MutexGuard { lock }
     }
 }
 

@@ -1,14 +1,11 @@
 #[cfg(target_os = "hermit")]
 use hermit_abi::{EBADF, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
-#[cfg(target_family = "unix")]
+#[cfg(any(target_family = "unix", target_os = "wasi"))]
 use libc::{EBADF, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
 
 use crate::io::{self, BorrowedCursor, IoSlice, IoSliceMut};
 use crate::mem::ManuallyDrop;
-#[cfg(target_os = "hermit")]
-use crate::os::hermit::io::FromRawFd;
-#[cfg(target_family = "unix")]
-use crate::os::unix::io::FromRawFd;
+use crate::os::fd::FromRawFd;
 use crate::sys::fd::FileDesc;
 
 pub struct Stdin;
@@ -26,7 +23,7 @@ impl io::Read for Stdin {
         unsafe { ManuallyDrop::new(FileDesc::from_raw_fd(STDIN_FILENO)).read(buf) }
     }
 
-    fn read_buf(&mut self, buf: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf(&mut self, buf: BorrowedCursor<'_, u8>) -> io::Result<()> {
         unsafe { ManuallyDrop::new(FileDesc::from_raw_fd(STDIN_FILENO)).read_buf(buf) }
     }
 

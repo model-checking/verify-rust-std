@@ -4,7 +4,7 @@ use safety::requires;
 
 use crate::iter::adapters::zip::try_get_unchecked;
 use crate::iter::adapters::{SourceIter, TrustedRandomAccess, TrustedRandomAccessNoCoerce};
-use crate::iter::{FusedIterator, InPlaceIterable, TrustedLen, UncheckedIterator};
+use crate::iter::{FusedIterator, InPlaceIterable, TrustedLen};
 #[cfg(kani)]
 use crate::kani;
 use crate::ops::Try;
@@ -24,7 +24,7 @@ pub struct Cloned<I> {
 }
 
 impl<I> Cloned<I> {
-    pub(in crate::iter) fn new(it: I) -> Cloned<I> {
+    pub(in crate::iter) const fn new(it: I) -> Cloned<I> {
         Cloned { it }
     }
 }
@@ -145,19 +145,6 @@ where
     I: TrustedLen<Item = &'a T>,
     T: Clone,
 {
-}
-
-impl<'a, I, T: 'a> UncheckedIterator for Cloned<I>
-where
-    I: UncheckedIterator<Item = &'a T>,
-    T: Clone,
-{
-    unsafe fn next_unchecked(&mut self) -> T {
-        // SAFETY: `Cloned` is 1:1 with the inner iterator, so if the caller promised
-        // that there's an element left, the inner iterator has one too.
-        let item = unsafe { self.it.next_unchecked() };
-        item.clone()
-    }
 }
 
 #[stable(feature = "default_iters", since = "1.70.0")]

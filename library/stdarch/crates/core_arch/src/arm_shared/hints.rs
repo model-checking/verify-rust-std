@@ -17,8 +17,11 @@
 ))]
 #[inline(always)]
 #[unstable(feature = "stdarch_arm_hints", issue = "117218")]
-pub unsafe fn __wfi() {
-    hint(HINT_WFI);
+pub fn __wfi() {
+    // SAFETY: The right HINT_WFI constant is passed to the llvm intrinsic。
+    unsafe {
+        hint(HINT_WFI);
+    }
 }
 
 /// Generates a WFE (wait for event) hint instruction, or nothing.
@@ -36,8 +39,11 @@ pub unsafe fn __wfi() {
 ))]
 #[inline(always)]
 #[unstable(feature = "stdarch_arm_hints", issue = "117218")]
-pub unsafe fn __wfe() {
-    hint(HINT_WFE);
+pub fn __wfe() {
+    // SAFETY: The right HINT_WFE constant is passed to the llvm intrinsic。
+    unsafe {
+        hint(HINT_WFE);
+    }
 }
 
 /// Generates a SEV (send a global event) hint instruction.
@@ -54,8 +60,11 @@ pub unsafe fn __wfe() {
 ))]
 #[inline(always)]
 #[unstable(feature = "stdarch_arm_hints", issue = "117218")]
-pub unsafe fn __sev() {
-    hint(HINT_SEV);
+pub fn __sev() {
+    // SAFETY: The right HINT_SEV constant is passed to the llvm intrinsic。
+    unsafe {
+        hint(HINT_SEV);
+    }
 }
 
 /// Generates a send a local event hint instruction.
@@ -72,8 +81,11 @@ pub unsafe fn __sev() {
 ))]
 #[inline(always)]
 #[unstable(feature = "stdarch_arm_hints", issue = "117218")]
-pub unsafe fn __sevl() {
-    hint(HINT_SEVL);
+pub fn __sevl() {
+    // SAFETY: The right HINT_SEVL constant is passed to the llvm intrinsic。
+    unsafe {
+        hint(HINT_SEVL);
+    }
 }
 
 /// Generates a YIELD hint instruction.
@@ -83,16 +95,22 @@ pub unsafe fn __sevl() {
 /// improve overall system performance.
 // Section 10.1 of ACLE says that the supported arches are: 8, 6K, 6-M
 // LLVM says "instruction requires: armv6k"
+// On ARMv6 in Thumb mode, T2 is required (see Arm DDI0406C Section A8.8.427)
 #[cfg(any(
-    target_feature = "v6",
+    all(target_feature = "v6k", not(target_feature = "thumb-mode")),
+    target_feature = "v6t2",
+    all(target_feature = "v6", target_feature = "mclass"),
     target_arch = "aarch64",
     target_arch = "arm64ec",
     doc
 ))]
 #[inline(always)]
 #[unstable(feature = "stdarch_arm_hints", issue = "117218")]
-pub unsafe fn __yield() {
-    hint(HINT_YIELD);
+pub fn __yield() {
+    // SAFETY: The right HINT_YIELD constant is passed to the llvm intrinsic。
+    unsafe {
+        hint(HINT_YIELD);
+    }
 }
 
 /// Generates an unspecified no-op instruction.
@@ -103,11 +121,14 @@ pub unsafe fn __yield() {
 /// will increase execution time.
 #[inline(always)]
 #[unstable(feature = "stdarch_arm_hints", issue = "117218")]
-pub unsafe fn __nop() {
-    crate::arch::asm!("nop", options(nomem, nostack, preserves_flags));
+pub fn __nop() {
+    // SAFETY: `nop` performs no operation.
+    unsafe {
+        crate::arch::asm!("nop", options(nomem, nostack, preserves_flags));
+    }
 }
 
-unsafe extern "unadjusted" {
+unsafe extern "llvm-intrinsic" {
     #[cfg_attr(
         any(target_arch = "aarch64", target_arch = "arm64ec"),
         link_name = "llvm.aarch64.hint"

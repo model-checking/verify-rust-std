@@ -12,7 +12,7 @@ use stdarch_test::assert_instr;
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpwssd))]
 pub fn _mm512_dpwssd_epi32(src: __m512i, a: __m512i, b: __m512i) -> __m512i {
-    unsafe { transmute(vpdpwssd(src.as_i32x16(), a.as_i32x16(), b.as_i32x16())) }
+    unsafe { transmute(vpdpwssd(src.as_i32x16(), a.as_i16x32(), b.as_i16x32())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of signed 16-bit integers in a with corresponding 16-bit integers in b, producing 2 intermediate signed 32-bit results. Sum these 2 results with the corresponding 32-bit integer in src, and store the packed 32-bit results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
@@ -51,7 +51,7 @@ pub fn _mm512_maskz_dpwssd_epi32(k: __mmask16, src: __m512i, a: __m512i, b: __m5
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpwssd))]
 pub fn _mm256_dpwssd_avx_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpwssd256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpwssd256(src.as_i32x8(), a.as_i16x16(), b.as_i16x16())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of signed 16-bit integers in a with corresponding 16-bit integers in b, producing 2 intermediate signed 32-bit results. Sum these 2 results with the corresponding 32-bit integer in src, and store the packed 32-bit results in dst.
@@ -62,7 +62,7 @@ pub fn _mm256_dpwssd_avx_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i 
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpwssd))]
 pub fn _mm256_dpwssd_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpwssd256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpwssd256(src.as_i32x8(), a.as_i16x16(), b.as_i16x16())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of signed 16-bit integers in a with corresponding 16-bit integers in b, producing 2 intermediate signed 32-bit results. Sum these 2 results with the corresponding 32-bit integer in src, and store the packed 32-bit results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
@@ -101,7 +101,7 @@ pub fn _mm256_maskz_dpwssd_epi32(k: __mmask8, src: __m256i, a: __m256i, b: __m25
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpwssd))]
 pub fn _mm_dpwssd_avx_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpwssd128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpwssd128(src.as_i32x4(), a.as_i16x8(), b.as_i16x8())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of signed 16-bit integers in a with corresponding 16-bit integers in b, producing 2 intermediate signed 32-bit results. Sum these 2 results with the corresponding 32-bit integer in src, and store the packed 32-bit results in dst.
@@ -112,7 +112,7 @@ pub fn _mm_dpwssd_avx_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpwssd))]
 pub fn _mm_dpwssd_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpwssd128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpwssd128(src.as_i32x4(), a.as_i16x8(), b.as_i16x8())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of signed 16-bit integers in a with corresponding 16-bit integers in b, producing 2 intermediate signed 32-bit results. Sum these 2 results with the corresponding 32-bit integer in src, and store the packed 32-bit results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
@@ -151,7 +151,7 @@ pub fn _mm_maskz_dpwssd_epi32(k: __mmask8, src: __m128i, a: __m128i, b: __m128i)
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpwssds))]
 pub fn _mm512_dpwssds_epi32(src: __m512i, a: __m512i, b: __m512i) -> __m512i {
-    unsafe { transmute(vpdpwssds(src.as_i32x16(), a.as_i32x16(), b.as_i32x16())) }
+    unsafe { transmute(vpdpwssds(src.as_i32x16(), a.as_i16x32(), b.as_i16x32())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of signed 16-bit integers in a with corresponding 16-bit integers in b, producing 2 intermediate signed 32-bit results. Sum these 2 results with the corresponding 32-bit integer in src using signed saturation, and store the packed 32-bit results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
@@ -190,7 +190,7 @@ pub fn _mm512_maskz_dpwssds_epi32(k: __mmask16, src: __m512i, a: __m512i, b: __m
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpwssds))]
 pub fn _mm256_dpwssds_avx_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpwssds256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpwssds256(src.as_i32x8(), a.as_i16x16(), b.as_i16x16())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of signed 16-bit integers in a with corresponding 16-bit integers in b, producing 2 intermediate signed 32-bit results. Sum these 2 results with the corresponding 32-bit integer in src using signed saturation, and store the packed 32-bit results in dst.
@@ -201,7 +201,7 @@ pub fn _mm256_dpwssds_avx_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpwssds))]
 pub fn _mm256_dpwssds_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpwssds256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpwssds256(src.as_i32x8(), a.as_i16x16(), b.as_i16x16())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of signed 16-bit integers in a with corresponding 16-bit integers in b, producing 2 intermediate signed 32-bit results. Sum these 2 results with the corresponding 32-bit integer in src using signed saturation, and store the packed 32-bit results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
@@ -240,7 +240,7 @@ pub fn _mm256_maskz_dpwssds_epi32(k: __mmask8, src: __m256i, a: __m256i, b: __m2
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpwssds))]
 pub fn _mm_dpwssds_avx_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpwssds128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpwssds128(src.as_i32x4(), a.as_i16x8(), b.as_i16x8())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of signed 16-bit integers in a with corresponding 16-bit integers in b, producing 2 intermediate signed 32-bit results. Sum these 2 results with the corresponding 32-bit integer in src using signed saturation, and store the packed 32-bit results in dst.
@@ -251,7 +251,7 @@ pub fn _mm_dpwssds_avx_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpwssds))]
 pub fn _mm_dpwssds_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpwssds128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpwssds128(src.as_i32x4(), a.as_i16x8(), b.as_i16x8())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of signed 16-bit integers in a with corresponding 16-bit integers in b, producing 2 intermediate signed 32-bit results. Sum these 2 results with the corresponding 32-bit integer in src using signed saturation, and store the packed 32-bit results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
@@ -290,7 +290,7 @@ pub fn _mm_maskz_dpwssds_epi32(k: __mmask8, src: __m128i, a: __m128i, b: __m128i
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpbusd))]
 pub fn _mm512_dpbusd_epi32(src: __m512i, a: __m512i, b: __m512i) -> __m512i {
-    unsafe { transmute(vpdpbusd(src.as_i32x16(), a.as_i32x16(), b.as_i32x16())) }
+    unsafe { transmute(vpdpbusd(src.as_i32x16(), a.as_u8x64(), b.as_i8x64())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in a with corresponding signed 8-bit integers in b, producing 4 intermediate signed 16-bit results. Sum these 4 results with the corresponding 32-bit integer in src, and store the packed 32-bit results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
@@ -329,7 +329,7 @@ pub fn _mm512_maskz_dpbusd_epi32(k: __mmask16, src: __m512i, a: __m512i, b: __m5
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpbusd))]
 pub fn _mm256_dpbusd_avx_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpbusd256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpbusd256(src.as_i32x8(), a.as_u8x32(), b.as_i8x32())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in a with corresponding signed 8-bit integers in b, producing 4 intermediate signed 16-bit results. Sum these 4 results with the corresponding 32-bit integer in src, and store the packed 32-bit results in dst.
@@ -340,7 +340,7 @@ pub fn _mm256_dpbusd_avx_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i 
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpbusd))]
 pub fn _mm256_dpbusd_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpbusd256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpbusd256(src.as_i32x8(), a.as_u8x32(), b.as_i8x32())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in a with corresponding signed 8-bit integers in b, producing 4 intermediate signed 16-bit results. Sum these 4 results with the corresponding 32-bit integer in src, and store the packed 32-bit results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
@@ -379,7 +379,7 @@ pub fn _mm256_maskz_dpbusd_epi32(k: __mmask8, src: __m256i, a: __m256i, b: __m25
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpbusd))]
 pub fn _mm_dpbusd_avx_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpbusd128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpbusd128(src.as_i32x4(), a.as_u8x16(), b.as_i8x16())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in a with corresponding signed 8-bit integers in b, producing 4 intermediate signed 16-bit results. Sum these 4 results with the corresponding 32-bit integer in src, and store the packed 32-bit results in dst.
@@ -390,7 +390,7 @@ pub fn _mm_dpbusd_avx_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpbusd))]
 pub fn _mm_dpbusd_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpbusd128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpbusd128(src.as_i32x4(), a.as_u8x16(), b.as_i8x16())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in a with corresponding signed 8-bit integers in b, producing 4 intermediate signed 16-bit results. Sum these 4 results with the corresponding 32-bit integer in src, and store the packed 32-bit results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
@@ -429,7 +429,7 @@ pub fn _mm_maskz_dpbusd_epi32(k: __mmask8, src: __m128i, a: __m128i, b: __m128i)
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpbusds))]
 pub fn _mm512_dpbusds_epi32(src: __m512i, a: __m512i, b: __m512i) -> __m512i {
-    unsafe { transmute(vpdpbusds(src.as_i32x16(), a.as_i32x16(), b.as_i32x16())) }
+    unsafe { transmute(vpdpbusds(src.as_i32x16(), a.as_u8x64(), b.as_i8x64())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in a with corresponding signed 8-bit integers in b, producing 4 intermediate signed 16-bit results. Sum these 4 results with the corresponding 32-bit integer in src using signed saturation, and store the packed 32-bit results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
@@ -468,7 +468,7 @@ pub fn _mm512_maskz_dpbusds_epi32(k: __mmask16, src: __m512i, a: __m512i, b: __m
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpbusds))]
 pub fn _mm256_dpbusds_avx_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpbusds256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpbusds256(src.as_i32x8(), a.as_u8x32(), b.as_i8x32())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in a with corresponding signed 8-bit integers in b, producing 4 intermediate signed 16-bit results. Sum these 4 results with the corresponding 32-bit integer in src using signed saturation, and store the packed 32-bit results in dst.
@@ -479,7 +479,7 @@ pub fn _mm256_dpbusds_avx_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpbusds))]
 pub fn _mm256_dpbusds_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpbusds256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpbusds256(src.as_i32x8(), a.as_u8x32(), b.as_i8x32())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in a with corresponding signed 8-bit integers in b, producing 4 intermediate signed 16-bit results. Sum these 4 results with the corresponding 32-bit integer in src using signed saturation, and store the packed 32-bit results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
@@ -518,7 +518,7 @@ pub fn _mm256_maskz_dpbusds_epi32(k: __mmask8, src: __m256i, a: __m256i, b: __m2
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpbusds))]
 pub fn _mm_dpbusds_avx_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpbusds128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpbusds128(src.as_i32x4(), a.as_u8x16(), b.as_i8x16())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in a with corresponding signed 8-bit integers in b, producing 4 intermediate signed 16-bit results. Sum these 4 results with the corresponding 32-bit integer in src using signed saturation, and store the packed 32-bit results in dst.
@@ -529,7 +529,7 @@ pub fn _mm_dpbusds_avx_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 #[cfg_attr(test, assert_instr(vpdpbusds))]
 pub fn _mm_dpbusds_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpbusds128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpbusds128(src.as_i32x4(), a.as_u8x16(), b.as_i8x16())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in a with corresponding signed 8-bit integers in b, producing 4 intermediate signed 16-bit results. Sum these 4 results with the corresponding 32-bit integer in src using signed saturation, and store the packed 32-bit results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
@@ -570,7 +570,7 @@ pub fn _mm_maskz_dpbusds_epi32(k: __mmask8, src: __m128i, a: __m128i, b: __m128i
 #[cfg_attr(test, assert_instr(vpdpbssd))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm_dpbssd_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpbssd_128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpbssd_128(src.as_i32x4(), a.as_i8x16(), b.as_i8x16())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of signed 8-bit integers in a with corresponding signed 8-bit
@@ -583,7 +583,7 @@ pub fn _mm_dpbssd_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
 #[cfg_attr(test, assert_instr(vpdpbssd))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm256_dpbssd_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpbssd_256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpbssd_256(src.as_i32x8(), a.as_i8x32(), b.as_i8x32())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of signed 8-bit integers in a with corresponding signed 8-bit
@@ -596,7 +596,7 @@ pub fn _mm256_dpbssd_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
 #[cfg_attr(test, assert_instr(vpdpbssds))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm_dpbssds_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpbssds_128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpbssds_128(src.as_i32x4(), a.as_i8x16(), b.as_i8x16())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of signed 8-bit integers in a with corresponding signed 8-bit
@@ -609,7 +609,7 @@ pub fn _mm_dpbssds_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
 #[cfg_attr(test, assert_instr(vpdpbssds))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm256_dpbssds_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpbssds_256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpbssds_256(src.as_i32x8(), a.as_i8x32(), b.as_i8x32())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of signed 8-bit integers in a with corresponding unsigned 8-bit
@@ -622,7 +622,7 @@ pub fn _mm256_dpbssds_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
 #[cfg_attr(test, assert_instr(vpdpbsud))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm_dpbsud_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpbsud_128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpbsud_128(src.as_i32x4(), a.as_i8x16(), b.as_u8x16())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of signed 8-bit integers in a with corresponding unsigned 8-bit
@@ -635,7 +635,7 @@ pub fn _mm_dpbsud_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
 #[cfg_attr(test, assert_instr(vpdpbsud))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm256_dpbsud_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpbsud_256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpbsud_256(src.as_i32x8(), a.as_i8x32(), b.as_u8x32())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of signed 8-bit integers in a with corresponding unsigned 8-bit
@@ -648,7 +648,7 @@ pub fn _mm256_dpbsud_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
 #[cfg_attr(test, assert_instr(vpdpbsuds))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm_dpbsuds_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpbsuds_128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpbsuds_128(src.as_i32x4(), a.as_i8x16(), b.as_u8x16())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of signed 8-bit integers in a with corresponding unsigned 8-bit
@@ -661,7 +661,7 @@ pub fn _mm_dpbsuds_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
 #[cfg_attr(test, assert_instr(vpdpbsuds))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm256_dpbsuds_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpbsuds_256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpbsuds_256(src.as_i32x8(), a.as_i8x32(), b.as_u8x32())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in a with corresponding unsigned 8-bit
@@ -674,7 +674,7 @@ pub fn _mm256_dpbsuds_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
 #[cfg_attr(test, assert_instr(vpdpbuud))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm_dpbuud_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpbuud_128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpbuud_128(src.as_i32x4(), a.as_u8x16(), b.as_u8x16())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in a with corresponding unsigned 8-bit
@@ -687,7 +687,7 @@ pub fn _mm_dpbuud_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
 #[cfg_attr(test, assert_instr(vpdpbuud))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm256_dpbuud_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpbuud_256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpbuud_256(src.as_i32x8(), a.as_u8x32(), b.as_u8x32())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in a with corresponding unsigned 8-bit
@@ -700,7 +700,7 @@ pub fn _mm256_dpbuud_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
 #[cfg_attr(test, assert_instr(vpdpbuuds))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm_dpbuuds_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpbuuds_128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpbuuds_128(src.as_i32x4(), a.as_u8x16(), b.as_u8x16())) }
 }
 
 /// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in a with corresponding unsigned 8-bit
@@ -713,7 +713,7 @@ pub fn _mm_dpbuuds_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
 #[cfg_attr(test, assert_instr(vpdpbuuds))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm256_dpbuuds_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpbuuds_256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpbuuds_256(src.as_i32x8(), a.as_u8x32(), b.as_u8x32())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of signed 16-bit integers in a with corresponding unsigned 16-bit
@@ -726,7 +726,7 @@ pub fn _mm256_dpbuuds_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
 #[cfg_attr(test, assert_instr(vpdpwsud))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm_dpwsud_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpwsud_128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpwsud_128(src.as_i32x4(), a.as_i16x8(), b.as_u16x8())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of signed 16-bit integers in a with corresponding unsigned 16-bit
@@ -739,7 +739,7 @@ pub fn _mm_dpwsud_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
 #[cfg_attr(test, assert_instr(vpdpwsud))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm256_dpwsud_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpwsud_256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpwsud_256(src.as_i32x8(), a.as_i16x16(), b.as_u16x16())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of signed 16-bit integers in a with corresponding unsigned 16-bit
@@ -752,7 +752,7 @@ pub fn _mm256_dpwsud_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
 #[cfg_attr(test, assert_instr(vpdpwsuds))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm_dpwsuds_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpwsuds_128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpwsuds_128(src.as_i32x4(), a.as_i16x8(), b.as_u16x8())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of signed 16-bit integers in a with corresponding unsigned 16-bit
@@ -765,7 +765,7 @@ pub fn _mm_dpwsuds_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
 #[cfg_attr(test, assert_instr(vpdpwsuds))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm256_dpwsuds_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpwsuds_256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpwsuds_256(src.as_i32x8(), a.as_i16x16(), b.as_u16x16())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of unsigned 16-bit integers in a with corresponding signed 16-bit
@@ -778,7 +778,7 @@ pub fn _mm256_dpwsuds_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
 #[cfg_attr(test, assert_instr(vpdpwusd))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm_dpwusd_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpwusd_128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpwusd_128(src.as_i32x4(), a.as_u16x8(), b.as_i16x8())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of unsigned 16-bit integers in a with corresponding signed 16-bit
@@ -791,7 +791,7 @@ pub fn _mm_dpwusd_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
 #[cfg_attr(test, assert_instr(vpdpwusd))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm256_dpwusd_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpwusd_256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpwusd_256(src.as_i32x8(), a.as_u16x16(), b.as_i16x16())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of unsigned 16-bit integers in a with corresponding signed 16-bit
@@ -804,7 +804,7 @@ pub fn _mm256_dpwusd_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
 #[cfg_attr(test, assert_instr(vpdpwusds))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm_dpwusds_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpwusds_128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpwusds_128(src.as_i32x4(), a.as_u16x8(), b.as_i16x8())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of unsigned 16-bit integers in a with corresponding signed 16-bit
@@ -817,7 +817,7 @@ pub fn _mm_dpwusds_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
 #[cfg_attr(test, assert_instr(vpdpwusds))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm256_dpwusds_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpwusds_256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpwusds_256(src.as_i32x8(), a.as_u16x16(), b.as_i16x16())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of unsigned 16-bit integers in a with corresponding unsigned 16-bit
@@ -830,7 +830,7 @@ pub fn _mm256_dpwusds_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
 #[cfg_attr(test, assert_instr(vpdpwuud))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm_dpwuud_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpwuud_128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpwuud_128(src.as_i32x4(), a.as_u16x8(), b.as_u16x8())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of unsigned 16-bit integers in a with corresponding unsigned 16-bit
@@ -843,7 +843,7 @@ pub fn _mm_dpwuud_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
 #[cfg_attr(test, assert_instr(vpdpwuud))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm256_dpwuud_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpwuud_256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpwuud_256(src.as_i32x8(), a.as_u16x16(), b.as_u16x16())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of unsigned 16-bit integers in a with corresponding unsigned 16-bit
@@ -856,7 +856,7 @@ pub fn _mm256_dpwuud_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
 #[cfg_attr(test, assert_instr(vpdpwuuds))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm_dpwuuds_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vpdpwuuds_128(src.as_i32x4(), a.as_i32x4(), b.as_i32x4())) }
+    unsafe { transmute(vpdpwuuds_128(src.as_i32x4(), a.as_u16x8(), b.as_u16x8())) }
 }
 
 /// Multiply groups of 2 adjacent pairs of unsigned 16-bit integers in a with corresponding unsigned 16-bit
@@ -869,98 +869,98 @@ pub fn _mm_dpwuuds_epi32(src: __m128i, a: __m128i, b: __m128i) -> __m128i {
 #[cfg_attr(test, assert_instr(vpdpwuuds))]
 #[stable(feature = "stdarch_x86_avx512", since = "1.89")]
 pub fn _mm256_dpwuuds_epi32(src: __m256i, a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vpdpwuuds_256(src.as_i32x8(), a.as_i32x8(), b.as_i32x8())) }
+    unsafe { transmute(vpdpwuuds_256(src.as_i32x8(), a.as_u16x16(), b.as_u16x16())) }
 }
 
 #[allow(improper_ctypes)]
-unsafe extern "C" {
+unsafe extern "llvm-intrinsic" {
     #[link_name = "llvm.x86.avx512.vpdpwssd.512"]
-    fn vpdpwssd(src: i32x16, a: i32x16, b: i32x16) -> i32x16;
+    fn vpdpwssd(src: i32x16, a: i16x32, b: i16x32) -> i32x16;
     #[link_name = "llvm.x86.avx512.vpdpwssd.256"]
-    fn vpdpwssd256(src: i32x8, a: i32x8, b: i32x8) -> i32x8;
+    fn vpdpwssd256(src: i32x8, a: i16x16, b: i16x16) -> i32x8;
     #[link_name = "llvm.x86.avx512.vpdpwssd.128"]
-    fn vpdpwssd128(src: i32x4, a: i32x4, b: i32x4) -> i32x4;
+    fn vpdpwssd128(src: i32x4, a: i16x8, b: i16x8) -> i32x4;
 
     #[link_name = "llvm.x86.avx512.vpdpwssds.512"]
-    fn vpdpwssds(src: i32x16, a: i32x16, b: i32x16) -> i32x16;
+    fn vpdpwssds(src: i32x16, a: i16x32, b: i16x32) -> i32x16;
     #[link_name = "llvm.x86.avx512.vpdpwssds.256"]
-    fn vpdpwssds256(src: i32x8, a: i32x8, b: i32x8) -> i32x8;
+    fn vpdpwssds256(src: i32x8, a: i16x16, b: i16x16) -> i32x8;
     #[link_name = "llvm.x86.avx512.vpdpwssds.128"]
-    fn vpdpwssds128(src: i32x4, a: i32x4, b: i32x4) -> i32x4;
+    fn vpdpwssds128(src: i32x4, a: i16x8, b: i16x8) -> i32x4;
 
     #[link_name = "llvm.x86.avx512.vpdpbusd.512"]
-    fn vpdpbusd(src: i32x16, a: i32x16, b: i32x16) -> i32x16;
+    fn vpdpbusd(src: i32x16, a: u8x64, b: i8x64) -> i32x16;
     #[link_name = "llvm.x86.avx512.vpdpbusd.256"]
-    fn vpdpbusd256(src: i32x8, a: i32x8, b: i32x8) -> i32x8;
+    fn vpdpbusd256(src: i32x8, a: u8x32, b: i8x32) -> i32x8;
     #[link_name = "llvm.x86.avx512.vpdpbusd.128"]
-    fn vpdpbusd128(src: i32x4, a: i32x4, b: i32x4) -> i32x4;
+    fn vpdpbusd128(src: i32x4, a: u8x16, b: i8x16) -> i32x4;
 
     #[link_name = "llvm.x86.avx512.vpdpbusds.512"]
-    fn vpdpbusds(src: i32x16, a: i32x16, b: i32x16) -> i32x16;
+    fn vpdpbusds(src: i32x16, a: u8x64, b: i8x64) -> i32x16;
     #[link_name = "llvm.x86.avx512.vpdpbusds.256"]
-    fn vpdpbusds256(src: i32x8, a: i32x8, b: i32x8) -> i32x8;
+    fn vpdpbusds256(src: i32x8, a: u8x32, b: i8x32) -> i32x8;
     #[link_name = "llvm.x86.avx512.vpdpbusds.128"]
-    fn vpdpbusds128(src: i32x4, a: i32x4, b: i32x4) -> i32x4;
+    fn vpdpbusds128(src: i32x4, a: u8x16, b: i8x16) -> i32x4;
 
     #[link_name = "llvm.x86.avx2.vpdpbssd.128"]
-    fn vpdpbssd_128(src: i32x4, a: i32x4, b: i32x4) -> i32x4;
+    fn vpdpbssd_128(src: i32x4, a: i8x16, b: i8x16) -> i32x4;
     #[link_name = "llvm.x86.avx2.vpdpbssd.256"]
-    fn vpdpbssd_256(src: i32x8, a: i32x8, b: i32x8) -> i32x8;
+    fn vpdpbssd_256(src: i32x8, a: i8x32, b: i8x32) -> i32x8;
 
     #[link_name = "llvm.x86.avx2.vpdpbssds.128"]
-    fn vpdpbssds_128(src: i32x4, a: i32x4, b: i32x4) -> i32x4;
+    fn vpdpbssds_128(src: i32x4, a: i8x16, b: i8x16) -> i32x4;
     #[link_name = "llvm.x86.avx2.vpdpbssds.256"]
-    fn vpdpbssds_256(src: i32x8, a: i32x8, b: i32x8) -> i32x8;
+    fn vpdpbssds_256(src: i32x8, a: i8x32, b: i8x32) -> i32x8;
 
     #[link_name = "llvm.x86.avx2.vpdpbsud.128"]
-    fn vpdpbsud_128(src: i32x4, a: i32x4, b: i32x4) -> i32x4;
+    fn vpdpbsud_128(src: i32x4, a: i8x16, b: u8x16) -> i32x4;
     #[link_name = "llvm.x86.avx2.vpdpbsud.256"]
-    fn vpdpbsud_256(src: i32x8, a: i32x8, b: i32x8) -> i32x8;
+    fn vpdpbsud_256(src: i32x8, a: i8x32, b: u8x32) -> i32x8;
 
     #[link_name = "llvm.x86.avx2.vpdpbsuds.128"]
-    fn vpdpbsuds_128(src: i32x4, a: i32x4, b: i32x4) -> i32x4;
+    fn vpdpbsuds_128(src: i32x4, a: i8x16, b: u8x16) -> i32x4;
     #[link_name = "llvm.x86.avx2.vpdpbsuds.256"]
-    fn vpdpbsuds_256(src: i32x8, a: i32x8, b: i32x8) -> i32x8;
+    fn vpdpbsuds_256(src: i32x8, a: i8x32, b: u8x32) -> i32x8;
 
     #[link_name = "llvm.x86.avx2.vpdpbuud.128"]
-    fn vpdpbuud_128(src: i32x4, a: i32x4, b: i32x4) -> i32x4;
+    fn vpdpbuud_128(src: i32x4, a: u8x16, b: u8x16) -> i32x4;
     #[link_name = "llvm.x86.avx2.vpdpbuud.256"]
-    fn vpdpbuud_256(src: i32x8, a: i32x8, b: i32x8) -> i32x8;
+    fn vpdpbuud_256(src: i32x8, a: u8x32, b: u8x32) -> i32x8;
 
     #[link_name = "llvm.x86.avx2.vpdpbuuds.128"]
-    fn vpdpbuuds_128(src: i32x4, a: i32x4, b: i32x4) -> i32x4;
+    fn vpdpbuuds_128(src: i32x4, a: u8x16, b: u8x16) -> i32x4;
     #[link_name = "llvm.x86.avx2.vpdpbuuds.256"]
-    fn vpdpbuuds_256(src: i32x8, a: i32x8, b: i32x8) -> i32x8;
+    fn vpdpbuuds_256(src: i32x8, a: u8x32, b: u8x32) -> i32x8;
 
     #[link_name = "llvm.x86.avx2.vpdpwsud.128"]
-    fn vpdpwsud_128(src: i32x4, a: i32x4, b: i32x4) -> i32x4;
+    fn vpdpwsud_128(src: i32x4, a: i16x8, b: u16x8) -> i32x4;
     #[link_name = "llvm.x86.avx2.vpdpwsud.256"]
-    fn vpdpwsud_256(src: i32x8, a: i32x8, b: i32x8) -> i32x8;
+    fn vpdpwsud_256(src: i32x8, a: i16x16, b: u16x16) -> i32x8;
 
     #[link_name = "llvm.x86.avx2.vpdpwsuds.128"]
-    fn vpdpwsuds_128(src: i32x4, a: i32x4, b: i32x4) -> i32x4;
+    fn vpdpwsuds_128(src: i32x4, a: i16x8, b: u16x8) -> i32x4;
     #[link_name = "llvm.x86.avx2.vpdpwsuds.256"]
-    fn vpdpwsuds_256(src: i32x8, a: i32x8, b: i32x8) -> i32x8;
+    fn vpdpwsuds_256(src: i32x8, a: i16x16, b: u16x16) -> i32x8;
 
     #[link_name = "llvm.x86.avx2.vpdpwusd.128"]
-    fn vpdpwusd_128(src: i32x4, a: i32x4, b: i32x4) -> i32x4;
+    fn vpdpwusd_128(src: i32x4, a: u16x8, b: i16x8) -> i32x4;
     #[link_name = "llvm.x86.avx2.vpdpwusd.256"]
-    fn vpdpwusd_256(src: i32x8, a: i32x8, b: i32x8) -> i32x8;
+    fn vpdpwusd_256(src: i32x8, a: u16x16, b: i16x16) -> i32x8;
 
     #[link_name = "llvm.x86.avx2.vpdpwusds.128"]
-    fn vpdpwusds_128(src: i32x4, a: i32x4, b: i32x4) -> i32x4;
+    fn vpdpwusds_128(src: i32x4, a: u16x8, b: i16x8) -> i32x4;
     #[link_name = "llvm.x86.avx2.vpdpwusds.256"]
-    fn vpdpwusds_256(src: i32x8, a: i32x8, b: i32x8) -> i32x8;
+    fn vpdpwusds_256(src: i32x8, a: u16x16, b: i16x16) -> i32x8;
 
     #[link_name = "llvm.x86.avx2.vpdpwuud.128"]
-    fn vpdpwuud_128(src: i32x4, a: i32x4, b: i32x4) -> i32x4;
+    fn vpdpwuud_128(src: i32x4, a: u16x8, b: u16x8) -> i32x4;
     #[link_name = "llvm.x86.avx2.vpdpwuud.256"]
-    fn vpdpwuud_256(src: i32x8, a: i32x8, b: i32x8) -> i32x8;
+    fn vpdpwuud_256(src: i32x8, a: u16x16, b: u16x16) -> i32x8;
 
     #[link_name = "llvm.x86.avx2.vpdpwuuds.128"]
-    fn vpdpwuuds_128(src: i32x4, a: i32x4, b: i32x4) -> i32x4;
+    fn vpdpwuuds_128(src: i32x4, a: u16x8, b: u16x8) -> i32x4;
     #[link_name = "llvm.x86.avx2.vpdpwuuds.256"]
-    fn vpdpwuuds_256(src: i32x8, a: i32x8, b: i32x8) -> i32x8;
+    fn vpdpwuuds_256(src: i32x8, a: u16x16, b: u16x16) -> i32x8;
 }
 
 #[cfg(test)]
@@ -970,7 +970,7 @@ mod tests {
     use stdarch_test::simd_test;
 
     #[simd_test(enable = "avx512vnni")]
-    unsafe fn test_mm512_dpwssd_epi32() {
+    fn test_mm512_dpwssd_epi32() {
         let src = _mm512_set1_epi32(1);
         let a = _mm512_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm512_set1_epi32(1 << 16 | 1 << 0);
@@ -980,7 +980,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni")]
-    unsafe fn test_mm512_mask_dpwssd_epi32() {
+    fn test_mm512_mask_dpwssd_epi32() {
         let src = _mm512_set1_epi32(1);
         let a = _mm512_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm512_set1_epi32(1 << 16 | 1 << 0);
@@ -992,7 +992,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni")]
-    unsafe fn test_mm512_maskz_dpwssd_epi32() {
+    fn test_mm512_maskz_dpwssd_epi32() {
         let src = _mm512_set1_epi32(1);
         let a = _mm512_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm512_set1_epi32(1 << 16 | 1 << 0);
@@ -1004,7 +1004,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnni")]
-    unsafe fn test_mm256_dpwssd_avx_epi32() {
+    fn test_mm256_dpwssd_avx_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 16 | 1 << 0);
@@ -1014,7 +1014,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm256_dpwssd_epi32() {
+    fn test_mm256_dpwssd_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 16 | 1 << 0);
@@ -1024,7 +1024,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm256_mask_dpwssd_epi32() {
+    fn test_mm256_mask_dpwssd_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 16 | 1 << 0);
@@ -1036,7 +1036,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm256_maskz_dpwssd_epi32() {
+    fn test_mm256_maskz_dpwssd_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 16 | 1 << 0);
@@ -1048,7 +1048,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnni")]
-    unsafe fn test_mm_dpwssd_avx_epi32() {
+    fn test_mm_dpwssd_avx_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm_set1_epi32(1 << 16 | 1 << 0);
@@ -1058,7 +1058,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm_dpwssd_epi32() {
+    fn test_mm_dpwssd_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm_set1_epi32(1 << 16 | 1 << 0);
@@ -1068,7 +1068,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm_mask_dpwssd_epi32() {
+    fn test_mm_mask_dpwssd_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm_set1_epi32(1 << 16 | 1 << 0);
@@ -1080,7 +1080,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm_maskz_dpwssd_epi32() {
+    fn test_mm_maskz_dpwssd_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm_set1_epi32(1 << 16 | 1 << 0);
@@ -1092,7 +1092,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni")]
-    unsafe fn test_mm512_dpwssds_epi32() {
+    fn test_mm512_dpwssds_epi32() {
         let src = _mm512_set1_epi32(1);
         let a = _mm512_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm512_set1_epi32(1 << 16 | 1 << 0);
@@ -1102,7 +1102,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni")]
-    unsafe fn test_mm512_mask_dpwssds_epi32() {
+    fn test_mm512_mask_dpwssds_epi32() {
         let src = _mm512_set1_epi32(1);
         let a = _mm512_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm512_set1_epi32(1 << 16 | 1 << 0);
@@ -1114,7 +1114,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni")]
-    unsafe fn test_mm512_maskz_dpwssds_epi32() {
+    fn test_mm512_maskz_dpwssds_epi32() {
         let src = _mm512_set1_epi32(1);
         let a = _mm512_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm512_set1_epi32(1 << 16 | 1 << 0);
@@ -1126,7 +1126,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnni")]
-    unsafe fn test_mm256_dpwssds_avx_epi32() {
+    fn test_mm256_dpwssds_avx_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 16 | 1 << 0);
@@ -1136,7 +1136,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm256_dpwssds_epi32() {
+    fn test_mm256_dpwssds_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 16 | 1 << 0);
@@ -1146,7 +1146,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm256_mask_dpwssds_epi32() {
+    fn test_mm256_mask_dpwssds_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 16 | 1 << 0);
@@ -1158,7 +1158,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm256_maskz_dpwssds_epi32() {
+    fn test_mm256_maskz_dpwssds_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 16 | 1 << 0);
@@ -1170,7 +1170,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnni")]
-    unsafe fn test_mm_dpwssds_avx_epi32() {
+    fn test_mm_dpwssds_avx_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm_set1_epi32(1 << 16 | 1 << 0);
@@ -1180,7 +1180,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm_dpwssds_epi32() {
+    fn test_mm_dpwssds_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm_set1_epi32(1 << 16 | 1 << 0);
@@ -1190,7 +1190,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm_mask_dpwssds_epi32() {
+    fn test_mm_mask_dpwssds_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm_set1_epi32(1 << 16 | 1 << 0);
@@ -1202,7 +1202,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm_maskz_dpwssds_epi32() {
+    fn test_mm_maskz_dpwssds_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm_set1_epi32(1 << 16 | 1 << 0);
@@ -1214,7 +1214,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni")]
-    unsafe fn test_mm512_dpbusd_epi32() {
+    fn test_mm512_dpbusd_epi32() {
         let src = _mm512_set1_epi32(1);
         let a = _mm512_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm512_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1224,7 +1224,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni")]
-    unsafe fn test_mm512_mask_dpbusd_epi32() {
+    fn test_mm512_mask_dpbusd_epi32() {
         let src = _mm512_set1_epi32(1);
         let a = _mm512_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm512_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1236,7 +1236,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni")]
-    unsafe fn test_mm512_maskz_dpbusd_epi32() {
+    fn test_mm512_maskz_dpbusd_epi32() {
         let src = _mm512_set1_epi32(1);
         let a = _mm512_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm512_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1248,7 +1248,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnni")]
-    unsafe fn test_mm256_dpbusd_avx_epi32() {
+    fn test_mm256_dpbusd_avx_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1258,7 +1258,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm256_dpbusd_epi32() {
+    fn test_mm256_dpbusd_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1268,7 +1268,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm256_mask_dpbusd_epi32() {
+    fn test_mm256_mask_dpbusd_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1280,7 +1280,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm256_maskz_dpbusd_epi32() {
+    fn test_mm256_maskz_dpbusd_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1292,7 +1292,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnni")]
-    unsafe fn test_mm_dpbusd_avx_epi32() {
+    fn test_mm_dpbusd_avx_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1302,7 +1302,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm_dpbusd_epi32() {
+    fn test_mm_dpbusd_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1312,7 +1312,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm_mask_dpbusd_epi32() {
+    fn test_mm_mask_dpbusd_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1324,7 +1324,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm_maskz_dpbusd_epi32() {
+    fn test_mm_maskz_dpbusd_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1336,7 +1336,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni")]
-    unsafe fn test_mm512_dpbusds_epi32() {
+    fn test_mm512_dpbusds_epi32() {
         let src = _mm512_set1_epi32(1);
         let a = _mm512_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm512_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1346,7 +1346,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni")]
-    unsafe fn test_mm512_mask_dpbusds_epi32() {
+    fn test_mm512_mask_dpbusds_epi32() {
         let src = _mm512_set1_epi32(1);
         let a = _mm512_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm512_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1358,7 +1358,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni")]
-    unsafe fn test_mm512_maskz_dpbusds_epi32() {
+    fn test_mm512_maskz_dpbusds_epi32() {
         let src = _mm512_set1_epi32(1);
         let a = _mm512_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm512_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1370,7 +1370,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnni")]
-    unsafe fn test_mm256_dpbusds_avx_epi32() {
+    fn test_mm256_dpbusds_avx_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1380,7 +1380,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm256_dpbusds_epi32() {
+    fn test_mm256_dpbusds_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1390,7 +1390,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm256_mask_dpbusds_epi32() {
+    fn test_mm256_mask_dpbusds_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1402,7 +1402,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm256_maskz_dpbusds_epi32() {
+    fn test_mm256_maskz_dpbusds_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1414,7 +1414,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnni")]
-    unsafe fn test_mm_dpbusds_avx_epi32() {
+    fn test_mm_dpbusds_avx_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1424,7 +1424,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm_dpbusds_epi32() {
+    fn test_mm_dpbusds_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1434,7 +1434,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm_mask_dpbusds_epi32() {
+    fn test_mm_mask_dpbusds_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1446,7 +1446,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512vnni,avx512vl")]
-    unsafe fn test_mm_maskz_dpbusds_epi32() {
+    fn test_mm_maskz_dpbusds_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1458,7 +1458,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint8")]
-    unsafe fn test_mm_dpbssd_epi32() {
+    fn test_mm_dpbssd_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1468,7 +1468,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint8")]
-    unsafe fn test_mm256_dpbssd_epi32() {
+    fn test_mm256_dpbssd_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1478,7 +1478,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint8")]
-    unsafe fn test_mm_dpbssds_epi32() {
+    fn test_mm_dpbssds_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1488,7 +1488,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint8")]
-    unsafe fn test_mm256_dpbssds_epi32() {
+    fn test_mm256_dpbssds_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1498,7 +1498,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint8")]
-    unsafe fn test_mm_dpbsud_epi32() {
+    fn test_mm_dpbsud_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1508,7 +1508,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint8")]
-    unsafe fn test_mm256_dpbsud_epi32() {
+    fn test_mm256_dpbsud_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1518,7 +1518,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint8")]
-    unsafe fn test_mm_dpbsuds_epi32() {
+    fn test_mm_dpbsuds_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1528,7 +1528,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint8")]
-    unsafe fn test_mm256_dpbsuds_epi32() {
+    fn test_mm256_dpbsuds_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1538,7 +1538,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint8")]
-    unsafe fn test_mm_dpbuud_epi32() {
+    fn test_mm_dpbuud_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1548,7 +1548,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint8")]
-    unsafe fn test_mm256_dpbuud_epi32() {
+    fn test_mm256_dpbuud_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1558,7 +1558,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint8")]
-    unsafe fn test_mm_dpbuuds_epi32() {
+    fn test_mm_dpbuuds_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1568,7 +1568,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint8")]
-    unsafe fn test_mm256_dpbuuds_epi32() {
+    fn test_mm256_dpbuuds_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 24 | 1 << 16 | 1 << 8 | 1 << 0);
@@ -1578,7 +1578,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint16")]
-    unsafe fn test_mm_dpwsud_epi32() {
+    fn test_mm_dpwsud_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm_set1_epi32(1 << 16 | 1 << 0);
@@ -1588,7 +1588,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint16")]
-    unsafe fn test_mm256_dpwsud_epi32() {
+    fn test_mm256_dpwsud_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 16 | 1 << 0);
@@ -1598,7 +1598,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint16")]
-    unsafe fn test_mm_dpwsuds_epi32() {
+    fn test_mm_dpwsuds_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm_set1_epi32(1 << 16 | 1 << 0);
@@ -1608,7 +1608,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint16")]
-    unsafe fn test_mm256_dpwsuds_epi32() {
+    fn test_mm256_dpwsuds_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 16 | 1 << 0);
@@ -1618,7 +1618,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint16")]
-    unsafe fn test_mm_dpwusd_epi32() {
+    fn test_mm_dpwusd_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm_set1_epi32(1 << 16 | 1 << 0);
@@ -1628,7 +1628,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint16")]
-    unsafe fn test_mm256_dpwusd_epi32() {
+    fn test_mm256_dpwusd_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 16 | 1 << 0);
@@ -1638,7 +1638,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint16")]
-    unsafe fn test_mm_dpwusds_epi32() {
+    fn test_mm_dpwusds_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm_set1_epi32(1 << 16 | 1 << 0);
@@ -1648,7 +1648,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint16")]
-    unsafe fn test_mm256_dpwusds_epi32() {
+    fn test_mm256_dpwusds_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 16 | 1 << 0);
@@ -1658,7 +1658,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint16")]
-    unsafe fn test_mm_dpwuud_epi32() {
+    fn test_mm_dpwuud_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm_set1_epi32(1 << 16 | 1 << 0);
@@ -1668,7 +1668,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint16")]
-    unsafe fn test_mm256_dpwuud_epi32() {
+    fn test_mm256_dpwuud_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 16 | 1 << 0);
@@ -1678,7 +1678,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint16")]
-    unsafe fn test_mm_dpwuuds_epi32() {
+    fn test_mm_dpwuuds_epi32() {
         let src = _mm_set1_epi32(1);
         let a = _mm_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm_set1_epi32(1 << 16 | 1 << 0);
@@ -1688,7 +1688,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avxvnniint16")]
-    unsafe fn test_mm256_dpwuuds_epi32() {
+    fn test_mm256_dpwuuds_epi32() {
         let src = _mm256_set1_epi32(1);
         let a = _mm256_set1_epi32(1 << 16 | 1 << 0);
         let b = _mm256_set1_epi32(1 << 16 | 1 << 0);

@@ -1,4 +1,5 @@
 use crate::fmt::{self, Debug};
+use crate::marker::Destruct;
 use crate::mem::ManuallyDrop;
 use crate::ops::{Deref, DerefMut};
 
@@ -10,7 +11,6 @@ use crate::ops::{Deref, DerefMut};
 ///
 /// ```rust
 /// # #![allow(unused)]
-/// #![feature(drop_guard)]
 ///
 /// use std::mem::DropGuard;
 ///
@@ -27,7 +27,7 @@ use crate::ops::{Deref, DerefMut};
 ///     // "Chashu likes tuna!!!"
 /// }
 /// ```
-#[unstable(feature = "drop_guard", issue = "144426")]
+#[stable(feature = "drop_guard", since = "1.100.0")]
 #[doc(alias = "ScopeGuard")]
 #[doc(alias = "defer")]
 pub struct DropGuard<T, F>
@@ -48,14 +48,14 @@ where
     ///
     /// ```rust
     /// # #![allow(unused)]
-    /// #![feature(drop_guard)]
     ///
     /// use std::mem::DropGuard;
     ///
     /// let value = String::from("Chashu likes tuna");
     /// let guard = DropGuard::new(value, |s| println!("{s}"));
     /// ```
-    #[unstable(feature = "drop_guard", issue = "144426")]
+    #[stable(feature = "drop_guard", since = "1.100.0")]
+    #[rustc_const_unstable(feature = "const_drop_guard", issue = "none")]
     #[must_use]
     pub const fn new(inner: T, f: F) -> Self {
         Self { inner: ManuallyDrop::new(inner), f: ManuallyDrop::new(f) }
@@ -63,29 +63,29 @@ where
 
     /// Consumes the `DropGuard`, returning the wrapped value.
     ///
-    /// This will not execute the closure. This is implemented as an associated
-    /// function to prevent any potential conflicts with any other methods called
-    /// `into_inner` from the `Deref` and `DerefMut` impls.
-    ///
-    /// It is typically preferred to call this function instead of `mem::forget`
-    /// because it will return the stored value and drop variables captured
-    /// by the closure instead of leaking their owned resources.
+    /// This will not execute the closure. It is typically preferred to call
+    /// this function instead of `mem::forget` because it will return the stored
+    /// value and drop variables captured by the closure instead of leaking their
+    /// owned resources.
     ///
     /// # Example
     ///
     /// ```rust
     /// # #![allow(unused)]
-    /// #![feature(drop_guard)]
     ///
     /// use std::mem::DropGuard;
     ///
     /// let value = String::from("Nori likes chicken");
     /// let guard = DropGuard::new(value, |s| println!("{s}"));
-    /// assert_eq!(DropGuard::into_inner(guard), "Nori likes chicken");
+    /// assert_eq!(DropGuard::dismiss(guard), "Nori likes chicken");
     /// ```
-    #[unstable(feature = "drop_guard", issue = "144426")]
+    #[stable(feature = "drop_guard", since = "1.100.0")]
+    #[rustc_const_unstable(feature = "const_drop_guard", issue = "none")]
     #[inline]
-    pub fn into_inner(guard: Self) -> T {
+    pub const fn dismiss(guard: Self) -> T
+    where
+        F: [const] Destruct,
+    {
         // First we ensure that dropping the guard will not trigger
         // its destructor
         let mut guard = ManuallyDrop::new(guard);
@@ -105,32 +105,35 @@ where
     }
 }
 
-#[unstable(feature = "drop_guard", issue = "144426")]
-impl<T, F> Deref for DropGuard<T, F>
+#[stable(feature = "drop_guard", since = "1.100.0")]
+#[rustc_const_unstable(feature = "const_convert", issue = "143773")]
+const impl<T, F> Deref for DropGuard<T, F>
 where
     F: FnOnce(T),
 {
     type Target = T;
 
     fn deref(&self) -> &T {
-        &*self.inner
+        &self.inner
     }
 }
 
-#[unstable(feature = "drop_guard", issue = "144426")]
-impl<T, F> DerefMut for DropGuard<T, F>
+#[stable(feature = "drop_guard", since = "1.100.0")]
+#[rustc_const_unstable(feature = "const_convert", issue = "143773")]
+const impl<T, F> DerefMut for DropGuard<T, F>
 where
     F: FnOnce(T),
 {
     fn deref_mut(&mut self) -> &mut T {
-        &mut *self.inner
+        &mut self.inner
     }
 }
 
-#[unstable(feature = "drop_guard", issue = "144426")]
-impl<T, F> Drop for DropGuard<T, F>
+#[stable(feature = "drop_guard", since = "1.100.0")]
+#[rustc_const_unstable(feature = "const_drop_guard", issue = "none")]
+const impl<T, F> Drop for DropGuard<T, F>
 where
-    F: FnOnce(T),
+    F: [const] FnOnce(T),
 {
     fn drop(&mut self) {
         // SAFETY: `DropGuard` is in the process of being dropped.
@@ -143,7 +146,7 @@ where
     }
 }
 
-#[unstable(feature = "drop_guard", issue = "144426")]
+#[stable(feature = "drop_guard", since = "1.100.0")]
 impl<T, F> Debug for DropGuard<T, F>
 where
     T: Debug,

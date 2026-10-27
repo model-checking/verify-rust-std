@@ -12,6 +12,7 @@
 #![feature(exact_size_is_empty)]
 #![feature(hasher_prefixfree_extras)]
 #![feature(box_into_inner)]
+#![feature(trusted_len)]
 
 #![stable(feature = "rust1", since = "1.0.0")]
 

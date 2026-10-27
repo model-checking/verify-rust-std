@@ -4,7 +4,7 @@
 use stdarch_test::assert_instr;
 
 #[allow(improper_ctypes)]
-unsafe extern "C" {
+unsafe extern "llvm-intrinsic" {
     #[link_name = "llvm.x86.fxsave"]
     fn fxsave(p: *mut u8);
     #[link_name = "llvm.x86.fxrstor"]
@@ -77,12 +77,14 @@ mod tests {
 
     #[simd_test(enable = "fxsr")]
     #[cfg_attr(miri, ignore)] // Register saving/restoring is not supported in Miri
-    unsafe fn test_fxsave() {
+    fn test_fxsave() {
         let mut a = FxsaveArea::new();
         let mut b = FxsaveArea::new();
 
-        fxsr::_fxsave(a.ptr());
-        fxsr::_fxrstor(a.ptr());
-        fxsr::_fxsave(b.ptr());
+        unsafe {
+            fxsr::_fxsave(a.ptr());
+            fxsr::_fxrstor(a.ptr());
+            fxsr::_fxsave(b.ptr());
+        }
     }
 }

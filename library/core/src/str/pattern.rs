@@ -38,7 +38,12 @@
     issue = "27721"
 )]
 
-#[cfg(all(target_arch = "x86_64", any(kani, target_feature = "sse2")))]
+// Must match the `cfg` on `small_slice_eq`, the only user of these attributes.
+#[cfg(any(
+    all(target_arch = "x86_64", any(kani, target_feature = "sse2")),
+    all(target_arch = "loongarch64", target_feature = "lsx"),
+    all(target_arch = "aarch64", target_feature = "neon")
+))]
 use safety::{loop_invariant, requires};
 
 #[cfg(kani)]
@@ -168,7 +173,7 @@ pub trait Pattern: Sized {
         }
     }
 
-    /// Returns the pattern as utf-8 bytes if possible.
+    /// Returns the pattern as UTF-8 if possible.
     fn as_utf8_pattern(&self) -> Option<Utf8Pattern<'_>> {
         None
     }
@@ -179,7 +184,9 @@ pub trait Pattern: Sized {
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum Utf8Pattern<'a> {
     /// Type returned by String and str types.
-    StringPattern(&'a [u8]),
+    /// This stores `str` rather than bytes so callers cannot describe
+    /// non-UTF-8 string patterns through this API.
+    StringPattern(&'a str),
     /// Type returned by char types.
     CharPattern(char),
 }
@@ -992,7 +999,7 @@ impl<'b> Pattern for &'b str {
     /// Checks whether the pattern matches anywhere in the haystack
     #[inline]
     fn is_contained_in(self, haystack: &str) -> bool {
-        if self.len() == 0 {
+        if self.is_empty() {
             return true;
         }
 
@@ -1004,7 +1011,8 @@ impl<'b> Pattern for &'b str {
 
                 #[cfg(any(
                     all(target_arch = "x86_64", target_feature = "sse2"),
-                    all(target_arch = "loongarch64", target_feature = "lsx")
+                    all(target_arch = "loongarch64", target_feature = "lsx"),
+                    all(target_arch = "aarch64", target_feature = "neon")
                 ))]
                 if self.len() <= 32 {
                     if let Some(result) = simd_contains(self, haystack) {
@@ -1023,7 +1031,7 @@ impl<'b> Pattern for &'b str {
     fn strip_prefix_of(self, haystack: &str) -> Option<&str> {
         if self.is_prefix_of(haystack) {
             // SAFETY: prefix was just verified to exist.
-            unsafe { Some(haystack.get_unchecked(self.as_bytes().len()..)) }
+            unsafe { Some(haystack.get_unchecked(self.len()..)) }
         } else {
             None
         }
@@ -1045,7 +1053,7 @@ impl<'b> Pattern for &'b str {
         Self::Searcher<'a>: ReverseSearcher<'a>,
     {
         if self.is_suffix_of(haystack) {
-            let i = haystack.len() - self.as_bytes().len();
+            let i = haystack.len() - self.len();
             // SAFETY: suffix was just verified to exist.
             unsafe { Some(haystack.get_unchecked(..i)) }
         } else {
@@ -1055,7 +1063,7 @@ impl<'b> Pattern for &'b str {
 
     #[inline]
     fn as_utf8_pattern(&self) -> Option<Utf8Pattern<'_>> {
-        Some(Utf8Pattern::StringPattern(self.as_bytes()))
+        Some(Utf8Pattern::StringPattern(self))
     }
 }
 
@@ -1075,6 +1083,7 @@ pub struct StrSearcher<'a, 'b> {
 #[derive(Clone, Debug)]
 enum StrSearcherImpl {
     Empty(EmptyNeedle),
+    Byte(ByteNeedle),
     TwoWay(TwoWaySearcher),
 }
 
@@ -1086,6 +1095,16 @@ struct EmptyNeedle {
     is_match_bw: bool,
     // Needed in case of an empty haystack, see #85462
     is_finished: bool,
+}
+
+/// Fast searcher for a single-byte needle using `memchr`/`memrchr`.
+#[derive(Clone, Debug)]
+struct ByteNeedle {
+    b: u8,
+    /// Forward cursor: `haystack[..position]` has already been reported.
+    position: usize,
+    /// Backward cursor: `haystack[end..]` has already been reported.
+    end: usize,
 }
 
 impl<'a, 'b> StrSearcher<'a, 'b> {
@@ -1101,6 +1120,12 @@ impl<'a, 'b> StrSearcher<'a, 'b> {
                     is_match_bw: true,
                     is_finished: false,
                 }),
+            }
+        } else if let &[b] = needle.as_bytes() {
+            StrSearcher {
+                haystack,
+                needle,
+                searcher: StrSearcherImpl::Byte(ByteNeedle { b, position: 0, end: haystack.len() }),
             }
         } else {
             StrSearcher {
@@ -1189,6 +1214,23 @@ unsafe impl<'a, 'b> Searcher<'a> for StrSearcher<'a, 'b> {
                     }
                 }
             }
+            StrSearcherImpl::Byte(ref mut searcher) => {
+                let bytes = self.haystack.as_bytes();
+                let pos = searcher.position;
+                if pos >= bytes.len() {
+                    return SearchStep::Done;
+                }
+                if bytes[pos] == searcher.b {
+                    searcher.position = pos + 1;
+                    SearchStep::Match(pos, pos + 1)
+                } else {
+                    // `pos` is always on a char boundary, so this rejects
+                    // exactly the char starting at `pos`.
+                    let end = self.haystack.ceil_char_boundary(pos + 1);
+                    searcher.position = end;
+                    SearchStep::Reject(pos, end)
+                }
+            }
             StrSearcherImpl::TwoWay(ref mut searcher) => {
                 // TwoWaySearcher produces valid *Match* indices that split at char boundaries
                 // as long as it does correct matching and that haystack and needle are
@@ -1199,51 +1241,16 @@ unsafe impl<'a, 'b> Searcher<'a> for StrSearcher<'a, 'b> {
                     return SearchStep::Done;
                 }
                 let is_long = searcher.memory == usize::MAX;
-                #[cfg(not(kani))]
-                {
-                    match searcher.next::<RejectAndMatch>(
-                        self.haystack.as_bytes(),
-                        self.needle.as_bytes(),
-                        is_long,
-                    ) {
-                        SearchStep::Reject(a, mut b) => {
-                            // skip to next char boundary
-                            while !self.haystack.is_char_boundary(b) {
-                                b += 1;
-                            }
-                            searcher.position = cmp::max(b, searcher.position);
-                            SearchStep::Reject(a, b)
-                        }
-                        otherwise => otherwise,
-                    }
-                }
-
-                #[cfg(kani)]
-                {
-                    match searcher.next::<RejectAndMatch>(
-                        self.haystack.as_bytes(),
-                        self.needle.as_bytes(),
-                        is_long,
-                    ) {
-                        SearchStep::Reject(a, mut b) => {
-                            assert!(
-                                b <= self.haystack.len(),
-                                "Two-Way forward reject cursor must remain in the haystack",
-                            );
-                            kani::assume(
-                                kani_pattern_harness_helpers::valid_utf8_forward_boundary_reachability(
-                                    self.haystack,
-                                    b,
-                                ),
-                            );
-                            b = kani_pattern_harness_helpers::stub_utf8_forward_boundary_repair(
-                                self.haystack,
-                                b,
-                            );
-                            searcher.position = cmp::max(b, searcher.position);
-                            SearchStep::Reject(a, b)
-                        }
-                        otherwise => otherwise,
+                match searcher.next::<RejectAndMatch>(
+                    self.haystack.as_bytes(),
+                    self.needle.as_bytes(),
+                    is_long,
+                ) {
+                    SearchStep::Reject(a, b) => {
+                        // skip to next char boundary
+                        let b = self.haystack.ceil_char_boundary(b);
+                        searcher.position = cmp::max(b, searcher.position);
+                        SearchStep::Reject(a, b)
                     }
                 }
             }
@@ -1272,12 +1279,21 @@ unsafe impl<'a, 'b> Searcher<'a> for StrSearcher<'a, 'b> {
                         },
                     }
                 }
-                #[cfg(not(kani))]
-                loop {
-                    match self.next() {
-                        SearchStep::Match(a, b) => return Some((a, b)),
-                        SearchStep::Done => return None,
-                        SearchStep::Reject(..) => {}
+            },
+            StrSearcherImpl::Byte(ref mut searcher) => {
+                let bytes = self.haystack.as_bytes();
+                if searcher.position >= bytes.len() {
+                    return None;
+                }
+                match memchr::memchr(searcher.b, &bytes[searcher.position..]) {
+                    Some(i) => {
+                        let pos = searcher.position + i;
+                        searcher.position = pos + 1;
+                        Some((pos, pos + 1))
+                    }
+                    None => {
+                        searcher.position = bytes.len();
+                        None
                     }
                 }
             }
@@ -1455,56 +1471,36 @@ unsafe impl<'a, 'b> ReverseSearcher<'a> for StrSearcher<'a, 'b> {
                     }
                 }
             }
+            StrSearcherImpl::Byte(ref mut searcher) => {
+                let end = searcher.end;
+                if end == 0 {
+                    return SearchStep::Done;
+                }
+                let bytes = self.haystack.as_bytes();
+                if bytes[end - 1] == searcher.b {
+                    searcher.end = end - 1;
+                    SearchStep::Match(end - 1, end)
+                } else {
+                    let start = self.haystack.floor_char_boundary(end - 1);
+                    searcher.end = start;
+                    SearchStep::Reject(start, end)
+                }
+            }
             StrSearcherImpl::TwoWay(ref mut searcher) => {
                 if searcher.end == 0 {
                     return SearchStep::Done;
                 }
                 let is_long = searcher.memory == usize::MAX;
-                #[cfg(not(kani))]
-                {
-                    match searcher.next_back::<RejectAndMatch>(
-                        self.haystack.as_bytes(),
-                        self.needle.as_bytes(),
-                        is_long,
-                    ) {
-                        SearchStep::Reject(mut a, b) => {
-                            // skip to next char boundary
-                            while !self.haystack.is_char_boundary(a) {
-                                a -= 1;
-                            }
-                            searcher.end = cmp::min(a, searcher.end);
-                            SearchStep::Reject(a, b)
-                        }
-                        otherwise => otherwise,
-                    }
-                }
-
-                #[cfg(kani)]
-                {
-                    match searcher.next_back::<RejectAndMatch>(
-                        self.haystack.as_bytes(),
-                        self.needle.as_bytes(),
-                        is_long,
-                    ) {
-                        SearchStep::Reject(mut a, b) => {
-                            assert!(
-                                a <= self.haystack.len(),
-                                "Two-Way reverse reject cursor must remain in the haystack",
-                            );
-                            kani::assume(
-                                kani_pattern_harness_helpers::valid_utf8_reverse_boundary_reachability(
-                                    self.haystack,
-                                    a,
-                                ),
-                            );
-                            a = kani_pattern_harness_helpers::stub_utf8_reverse_boundary_repair(
-                                self.haystack,
-                                a,
-                            );
-                            searcher.end = cmp::min(a, searcher.end);
-                            SearchStep::Reject(a, b)
-                        }
-                        otherwise => otherwise,
+                match searcher.next_back::<RejectAndMatch>(
+                    self.haystack.as_bytes(),
+                    self.needle.as_bytes(),
+                    is_long,
+                ) {
+                    SearchStep::Reject(a, b) => {
+                        // skip to previous char boundary
+                        let a = self.haystack.floor_char_boundary(a);
+                        searcher.end = cmp::min(a, searcher.end);
+                        SearchStep::Reject(a, b)
                     }
                 }
             }
@@ -1533,12 +1529,20 @@ unsafe impl<'a, 'b> ReverseSearcher<'a> for StrSearcher<'a, 'b> {
                         },
                     }
                 }
-                #[cfg(not(kani))]
-                loop {
-                    match self.next_back() {
-                        SearchStep::Match(a, b) => return Some((a, b)),
-                        SearchStep::Done => return None,
-                        SearchStep::Reject(..) => {}
+            },
+            StrSearcherImpl::Byte(ref mut searcher) => {
+                if searcher.end == 0 {
+                    return None;
+                }
+                let bytes = self.haystack.as_bytes();
+                match memchr::memrchr(searcher.b, &bytes[..searcher.end]) {
+                    Some(i) => {
+                        searcher.end = i;
+                        Some((i, i + 1))
+                    }
+                    None => {
+                        searcher.end = 0;
+                        None
                     }
                 }
             }
@@ -2098,13 +2102,14 @@ impl TwoWaySearcher {
             // See if the right part of the needle matches
             let right_start =
                 if long_period { self.crit_pos } else { cmp::max(self.crit_pos, self.memory) };
-
-            #[cfg(kani)]
-            let matched_from = if long_period { 0 } else { self.memory };
-
-            #[cfg(not(kani))]
-            for i in right_start..needle.len() {
-                if needle[i] != haystack[self.position + i] {
+            for i in start..needle.len() {
+                // SAFETY: on every iteration of `'search`, the `haystack.get(self.position + needle_last)`
+                // check returned `Some`, so `self.position + needle_last < haystack.len()`.
+                // Since `i < needle.len()` implies `i <= needle_last`, we have
+                // `self.position + i < haystack.len()`.
+                // Every path that mutates `self.position` below either returns or re-enters `'search`,
+                // which re-runs the check before reaching the loop again.
+                if needle[i] != unsafe { *haystack.get_unchecked(self.position + i) } {
                     self.position += i - self.crit_pos + 1;
                     if !long_period {
                         self.memory = 0;
@@ -2139,11 +2144,15 @@ impl TwoWaySearcher {
             }
 
             // See if the left part of the needle matches
-            let left_start = if long_period { 0 } else { self.memory };
-
-            #[cfg(not(kani))]
-            for i in (left_start..self.crit_pos).rev() {
-                if needle[i] != haystack[self.position + i] {
+            let start = if long_period { 0 } else { self.memory };
+            for i in (start..self.crit_pos).rev() {
+                // SAFETY: on every iteration of `'search`, the `haystack.get(self.position + needle_last)`
+                // check returned `Some`, so `self.position + needle_last < haystack.len()`.
+                // Since `i < self.crit_pos <= needle.len()`, we have `i <= needle_last`, and thus
+                // `self.position + i <= self.position + needle_last < haystack.len()`.
+                // Every path that mutates `self.position` below either returns or re-enters `'search`,
+                // which re-runs the check before reaching the loop again.
+                if needle[i] != unsafe { *haystack.get_unchecked(self.position + i) } {
                     self.position += self.period;
                     if !long_period {
                         self.memory = needle.len() - self.period;
@@ -2423,7 +2432,14 @@ impl TwoWaySearcher {
             };
             #[cfg(not(kani))]
             for i in (0..crit).rev() {
-                if needle[i] != haystack[self.end - needle.len() + i] {
+                // SAFETY: On every iteration of `'search`, `haystack.get(self.end.wrapping_sub(needle.len()))`
+                //   returned `Some`, so `self.end >= needle.len()` and `self.end - needle.len() < haystack.len()`.
+                //   Since `self.end <= haystack.len()` and `i < needle.len()`, we have
+                //   `self.end - needle.len() + i < self.end <= haystack.len()`, so
+                //   `haystack.get_unchecked(self.end - needle.len() + i)` is safe.
+                // - The path that mutates `self.end` either re-enters `'search`, which re-runs the checks
+                //   before reaching this loop again, or returns on match, so the invariant holds.
+                if needle[i] != unsafe { *haystack.get_unchecked(self.end - needle.len() + i) } {
                     self.end -= self.crit_pos_back - i;
                     if !long_period {
                         self.memory_back = needle.len();
@@ -2477,7 +2493,12 @@ impl TwoWaySearcher {
             let needle_end = if long_period { needle.len() } else { self.memory_back };
             #[cfg(not(kani))]
             for i in self.crit_pos_back..needle_end {
-                if needle[i] != haystack[self.end - needle.len() + i] {
+                // SAFETY: The same `self.end - needle.len() + i < haystack.len()` argument as the
+                // left-part loop applies: the `haystack.get(self.end.wrapping_sub(needle.len()))`
+                // check at the top of `'search` established the bound for this iteration, and
+                // every mutation of `self.end` is followed by `continue 'search` (which re-runs
+                // the check) or a `return` (which exits before any further unsafe access).
+                if needle[i] != unsafe { *haystack.get_unchecked(self.end - needle.len() + i) } {
                     self.end -= self.period;
                     if !long_period {
                         self.memory_back = self.period;
@@ -2753,7 +2774,8 @@ impl TwoWayStrategy for RejectAndMatch {
 /// [0]: http://0x80.pl/articles/simd-strfind.html#sse-avx2
 #[cfg(any(
     all(target_arch = "x86_64", target_feature = "sse2"),
-    all(target_arch = "loongarch64", target_feature = "lsx")
+    all(target_arch = "loongarch64", target_feature = "lsx"),
+    all(target_arch = "aarch64", target_feature = "neon")
 ))]
 #[inline]
 fn simd_contains(needle: &str, haystack: &str) -> Option<bool> {
@@ -2834,9 +2856,7 @@ fn simd_contains(needle: &str, haystack: &str) -> Option<bool> {
         let eq_first: Mask = a.simd_eq(first_probe);
         let eq_last: Mask = b.simd_eq(second_probe);
         let both = eq_first.bitand(eq_last);
-        let mask = both.to_bitmask() as u16;
-
-        mask
+        both.to_bitmask() as u16
     };
 
     let mut i = 0;
@@ -2888,7 +2908,8 @@ fn simd_contains(needle: &str, haystack: &str) -> Option<bool> {
 /// Both slices must have the same length.
 #[cfg(any(
     all(target_arch = "x86_64", any(kani, target_feature = "sse2")),
-    all(target_arch = "loongarch64", target_feature = "lsx")
+    all(target_arch = "loongarch64", target_feature = "lsx"),
+    all(target_arch = "aarch64", target_feature = "neon")
 ))]
 #[inline]
 #[requires(x.len() == y.len())]
