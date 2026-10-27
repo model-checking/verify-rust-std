@@ -9,8 +9,14 @@ if ! command -v verifast >/dev/null 2>&1 && [ -d "$VERIFAST_HOME/bin" ]; then
   export PATH="$VERIFAST_HOME/bin:$PATH"
 fi
 
-RUSTC="$(rustup which --toolchain nightly-2026-09-25 rustc 2>/dev/null || rustup which rustc 2>/dev/null || which rustc)"
-CARGO="$(rustup which --toolchain nightly-2026-09-25 cargo 2>/dev/null || rustup which cargo 2>/dev/null || which cargo)"
+# VeriFast 26.10 is built against rustc nightly-2026-09-25 (see setup-verifast-home).
+# The `core` sysroot below must be compiled by that exact rustc, so it is built from the
+# `rust-src` component of that toolchain rather than from the repository's `library/core`
+# subtree, which tracks a newer nightly whose intrinsics and feature gates that rustc
+# does not know.
+VF_RUST_TOOLCHAIN=nightly-2026-09-25
+RUSTC="$(rustup which --toolchain $VF_RUST_TOOLCHAIN rustc 2>/dev/null || rustup which rustc 2>/dev/null || which rustc)"
+CARGO="$(rustup which --toolchain $VF_RUST_TOOLCHAIN cargo 2>/dev/null || rustup which cargo 2>/dev/null || which cargo)"
 HOST_TRIPLE="$("$RUSTC" -vV | sed -n 's/^host: //p')"
 if [[ "$HOST_TRIPLE" == *"apple-darwin"* ]]; then
   DYLIB_EXT="dylib"
@@ -32,13 +38,16 @@ if [ ! -f "$SYSROOT_LIB_REL/libcore_noslice.rlib" ] || [ ! -f "$SYSROOT_LIB_REL/
     (cd ../../../../deps/safety && RUSTC="$RUSTC" "$CARGO" build --release)
     cp "../../../../deps/safety/target/release/libsafety.$DYLIB_EXT" "$SYSROOT_LIB_REL/"
   fi
+  RUST_SRC="$RUSTC_SYSROOT/lib/rustlib/src/rust/library"
+  if [ ! -d "$RUST_SRC/core/src" ]; then
+    rustup component add rust-src --toolchain "$VF_RUST_TOOLCHAIN"
+  fi
   CORE_SRC_TMP="$SYSROOT_REL/core_src/core"
   rm -rf "$SYSROOT_REL/core_src"
   mkdir -p "$CORE_SRC_TMP"
-  ln -s "$(cd ../../../../library/stdarch && pwd)" "$SYSROOT_REL/core_src/stdarch"
-  ln -s "$(cd ../../../../library/portable-simd && pwd)" "$SYSROOT_REL/core_src/portable-simd"
-  cp -R ../../../../library/core/src "$CORE_SRC_TMP/src"
-  cp -R ../../../../library/core/benches "$CORE_SRC_TMP/benches" 2>/dev/null || true
+  ln -s "$RUST_SRC/stdarch" "$SYSROOT_REL/core_src/stdarch"
+  ln -s "$RUST_SRC/portable-simd" "$SYSROOT_REL/core_src/portable-simd"
+  cp -R "$RUST_SRC/core/src" "$CORE_SRC_TMP/src"
   python3 - "$CORE_SRC_TMP/src" << 'PYEOF'
 import sys, os
 
