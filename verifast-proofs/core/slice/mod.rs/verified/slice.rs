@@ -287,6 +287,11 @@ lem close_mut_slice_full_borrow<T>(q: real, k: lifetime_t, t: thread_id_t, s: *[
     leak full_borrow(k, slice_full_borrow_content::<T>(t, s));
 }
 
+// Caller obligation of `align_to`/`align_to_mut` (see their `# Safety` sections: the middle slice is
+// "essentially a `transmute`" of `T`s to `U`s): reinterpreting a correctly aligned, exactly covering
+// run of `T` values as `U` values yields valid `U` values. VeriFast's RustBelt model cannot express
+// bit-level validity across types, so this is an abstract fact that the caller must establish.
+// `as_simd`/`as_simd_mut` carry it as an explicit precondition of their wrappers.
 fix valid_slice_transmute<T, U>() -> bool;
 
 lem close_slice_triple_own<'a, T, U>(t: thread_id_t, v: (&'a [T], &'a [U], &'a [T]))
@@ -303,16 +308,30 @@ lem close_mut_slice_triple_own<'a, T, U>(t: thread_id_t, v: (&'a mut [T], &'a mu
     assume(false);
 }
 
-lem share_transmute_middle<T, U>(k: lifetime_t, t: thread_id_t, rest: *[T], mid: *[U], suffix: *[T])
-    req [_](<[T]>.share(k, t, rest)) &*& valid_slice_transmute::<T, U>() == true;
-    ens [_](<[U]>.share(k, t, mid)) &*& [_](<[T]>.share(k, t, suffix));
+// The "transmute" step of `align_to`/`align_to_mut`: a run of `n` `T` values at `p`, aligned for `U`
+// and covering exactly `mid.len()` `U` values byte for byte, is reinterpreted as the `[U]` slice `mid`.
+// Everything else `align_to` relies on (the prefix/suffix split of `rest`, the byte-exact coverage
+// computed by `align_to_offsets`, the alignment produced by `align_offset`) is proved at the call
+// sites; only the validity of the `U` values so obtained, `valid_slice_transmute`, is the caller's
+// obligation, as `align_to`'s `# Safety` section states.
+lem share_transmute_prefix<T, U>(k: lifetime_t, t: thread_id_t, p: *T, n: usize, mid: *[U])
+    req [?f]array_share::<T>(k, t, p, n) &*& valid_slice_transmute::<T, U>() == true &*&
+        std::mem::size_of::<T>() > 0 &*& std::mem::size_of::<U>() > 0 &*&
+        strip_pointer_metadata(mid as pointer) as *U == p as *U &*&
+        mid.len() * std::mem::size_of::<U>() == n * std::mem::size_of::<T>() &*&
+        (p as usize) % std::mem::align_of::<U>() == 0;
+    ens [_](<[U]>.share(k, t, mid));
 {
     assume(false);
 }
 
-lem full_borrow_transmute_middle<T, U>(k: lifetime_t, t: thread_id_t, rest: *[T], mid: *[U], suffix: *[T])
-    req full_borrow(k, <[T]>.full_borrow_content(t, rest)) &*& valid_slice_transmute::<T, U>() == true;
-    ens full_borrow(k, <[U]>.full_borrow_content(t, mid)) &*& full_borrow(k, <[T]>.full_borrow_content(t, suffix));
+lem full_borrow_transmute_prefix<T, U>(k: lifetime_t, t: thread_id_t, p: *[T], mid: *[U])
+    req full_borrow(k, <[T]>.full_borrow_content(t, p)) &*& valid_slice_transmute::<T, U>() == true &*&
+        std::mem::size_of::<T>() > 0 &*& std::mem::size_of::<U>() > 0 &*&
+        strip_pointer_metadata(mid as pointer) as *U == (strip_pointer_metadata(p as pointer) as *T) as *U &*&
+        mid.len() * std::mem::size_of::<U>() == p.len() * std::mem::size_of::<T>() &*&
+        ((strip_pointer_metadata(p as pointer) as *T) as usize) % std::mem::align_of::<U>() == 0;
+    ens full_borrow(k, <[U]>.full_borrow_content(t, mid));
 {
     assume(false);
 }
@@ -340,6 +359,16 @@ lem array_share_split<T>(k: lifetime_t, t: thread_id_t, l: *T, length: usize, mi
     }
 }
 
+// Associativity of multiplication. VeriFast's Redux prover handles commutativity and
+// distributivity of `*` but not associativity of products of three symbolic factors, and the Rust
+// prelude ships no such lemma, so it is stated here as an arithmetic axiom.
+lem mul_assoc(a: i32, b: i32, c: i32)
+    req true;
+    ens a * (b * c) == (a * b) * c;
+{
+    assume(false);
+}
+
 lem ptr_range_split_limits<T>(ptr: *T, len: usize, mid: usize)
     req 0 <= mid &*& mid <= len &*& len * std::mem::size_of::<T>() <= isize::MAX &*& pointer_within_limits(ptr) == true &*& pointer_within_limits(ptr + len) == true;
     ens mid * std::mem::size_of::<T>() <= isize::MAX &*& (len - mid) * std::mem::size_of::<T>() <= isize::MAX &*& pointer_within_limits(ptr + mid) == true &*& ((ptr + mid) + (len - mid)) == ptr + len &*& ((ptr + len) - (len - mid)) == ptr + mid;
@@ -351,14 +380,47 @@ lem ptr_range_split_limits<T>(ptr: *T, len: usize, mid: usize)
     mul_mono_l(len - mid, len, std::mem::size_of::<T>());
 }
 
-fix is_Copy<T>() -> bool;
-
-lem copy_trait_bound<T>()
-    req true;
-    ens is_Copy::<T>() == true;
+// Splits a mutable slice borrow at `mid` into two contiguous sub-borrows (the ghost core of
+// `split_at_mut_unchecked`, usable from other proofs).
+lem slice_full_borrow_split<T>(k: lifetime_t, t: thread_id_t, s: *[T], mid: usize)
+    nonghost_callers_only
+    req full_borrow(k, <[T]>.full_borrow_content(t, s)) &*& [?q]lifetime_token(k) &*& 0 <= mid &*& mid <= s.len();
+    ens [q]lifetime_token(k) &*&
+        full_borrow(k, <[T]>.full_borrow_content(t, ptr::mk_slice::<T>(strip_pointer_metadata(s as pointer) as *T, mid))) &*&
+        full_borrow(k, <[T]>.full_borrow_content(t, ptr::mk_slice::<T>((strip_pointer_metadata(s as pointer) as *T) + mid, s.len() - mid)));
 {
-    assume(false);
+    let ptr = strip_pointer_metadata(s as pointer) as *T;
+    let len = s.len();
+    open_full_borrow_strong_(k, <[T]>.full_borrow_content(t, s));
+    open slice_full_borrow_content::<T>(t, s)();
+    assert array::<T>(ptr, len, ?elems) &*& foreach(elems, own::<T>(t));
+    ptr_range_split_limits::<T>(ptr, len, mid);
+    let r0 = ptr::mk_slice::<T>(ptr, mid);
+    let r1 = ptr::mk_slice::<T>(ptr + mid, len - mid);
+    array_split(ptr, mid);
+    foreach_split(elems, own::<T>(t), mid);
+    close slice_full_borrow_content::<T>(t, r0)();
+    close slice_full_borrow_content::<T>(t, r1)();
+    close sep(<[T]>.full_borrow_content(t, r0), <[T]>.full_borrow_content(t, r1))();
+    produce_lem_ptr_chunk restore_full_borrow_(True, sep(<[T]>.full_borrow_content(t, r0), <[T]>.full_borrow_content(t, r1)), <[T]>.full_borrow_content(t, s))() {
+        open True();
+        open sep(<[T]>.full_borrow_content(t, r0), <[T]>.full_borrow_content(t, r1))();
+        open slice_full_borrow_content::<T>(t, r0)();
+        open slice_full_borrow_content::<T>(t, r1)();
+        assert array::<T>(ptr, mid, ?elems0) &*& array::<T>(ptr + mid, len - mid, ?elems1);
+        array_join(ptr);
+        foreach_append(elems0, elems1);
+        close slice_full_borrow_content::<T>(t, s)();
+    } {
+        close True();
+        close_full_borrow_strong_();
+    }
+    full_borrow_split(k, <[T]>.full_borrow_content(t, r0), <[T]>.full_borrow_content(t, r1));
 }
+
+// `is_Copy::<T>()` is established only through `copy_witness__VeriFast_wrapper::<T>()`,
+// whose `T: Copy` bound makes rustc reject any call site where `T` is not `Copy`.
+fix is_Copy<T>() -> bool;
 
 pred shared_slice_read_token<T>(k: lifetime_t, src: *[T], f: real, elems: list<T>);
 
@@ -567,6 +629,7 @@ fix is_array_of<T, Chunk>(n: usize) -> bool {
     std::mem::align_of::<Chunk>() == std::mem::align_of::<T>()
 }
 
+
 lem share_slice_prefix_as_chunk<T, Chunk>(k: lifetime_t, t: thread_id_t, s: *[T], n: usize)
     req [_](<[T]>.share(k, t, s)) &*& is_array_of::<T, Chunk>(n) == true &*& n <= s.len();
     ens [_](<Chunk>.share(k, t, (strip_pointer_metadata(s as pointer) as *T) as *Chunk));
@@ -638,6 +701,17 @@ lem chunk_round_down_facts(len: usize, n: usize)
     div_rem_nonneg_unique((len / n) * n, n, len / n, 0);
 }
 @*/
+
+/// Ties the ghost fact `is_Copy::<T>()` to the real `T: Copy` bound: this function can only be
+/// called where rustc can prove `T: Copy`. Its body is empty, so the refinement checker inlines
+/// it to nothing.
+const unsafe fn copy_witness__VeriFast_wrapper<T: Copy>()
+//@ req true;
+//@ ens is_Copy::<T>() == true;
+//@ on_unwind_ens false;
+//@ assume_correct
+{
+}
 
 const unsafe fn revswap_proof__VeriFast_wrapper<T>(a: &mut [T], b: &mut [T], n: usize)
 /*@
@@ -5488,7 +5562,7 @@ impl<T> [T] {
     //@ ens thread_token(t) &*& [q]lifetime_token(k) &*& (strip_pointer_metadata(self as pointer) as *T)[..self.len()] |-> ?elems_src &*& foreach(elems_src, own::<T>(t)) &*& self.len() == src.len();
     //@ on_unwind_ens false;
     {
-        //@ copy_trait_bound::<T>();
+        unsafe { copy_witness__VeriFast_wrapper::<T>() };
         // SAFETY: `T` implements `Copy`.
         unsafe { copy_from_slice_impl(self, src) }
     }
@@ -5543,7 +5617,7 @@ impl<T> [T] {
             let dest_ptr = ptr.add(dest);
             //@ close ptr::copy_context::<T>(ptr, len, src_start, dest, count, elems);
             ptr::copy(src_ptr, dest_ptr, count);
-            //@ copy_trait_bound::<T>();
+            copy_witness__VeriFast_wrapper::<T>();
             //@ copy_within_foreach_own::<T>(t, elems, src_start, dest, count);
         }
     }
@@ -5616,7 +5690,7 @@ impl<T> [T] {
     /// Function to calculate lengths of the middle and trailing slice for `align_to{,_mut}`.
     fn align_to_offsets<U>(&self) -> (usize, usize)
     //@ req thread_token(?t);
-    //@ ens thread_token(t) &*& <(usize, usize)>.own(t, result) &*& 0 <= result.0 &*& 0 <= result.1 &*& result.1 <= self.len() &*& if self.len() * std::mem::size_of::<T>() <= isize::MAX && pointer_within_limits(strip_pointer_metadata(self as pointer) as *T) && pointer_within_limits((strip_pointer_metadata(self as pointer) as *T) + self.len()) && std::mem::size_of::<T>() > 0 && std::mem::size_of::<U>() > 0 { result.0 * std::mem::size_of::<U>() <= isize::MAX &*& pointer_within_limits((strip_pointer_metadata(self as pointer) as *U) + result.0) == true } else { true };
+    //@ ens thread_token(t) &*& <(usize, usize)>.own(t, result) &*& 0 <= result.0 &*& 0 <= result.1 &*& result.1 <= self.len() &*& if self.len() * std::mem::size_of::<T>() <= isize::MAX && pointer_within_limits(strip_pointer_metadata(self as pointer) as *T) && pointer_within_limits((strip_pointer_metadata(self as pointer) as *T) + self.len()) && std::mem::size_of::<T>() > 0 && std::mem::size_of::<U>() > 0 { result.0 * std::mem::size_of::<U>() <= isize::MAX &*& pointer_within_limits((strip_pointer_metadata(self as pointer) as *U) + result.0) == true &*& result.0 * std::mem::size_of::<U>() == (self.len() - result.1) * std::mem::size_of::<T>() } else { true };
     //@ on_unwind_ens false;
     //@ assume_correct
     {
@@ -5657,22 +5731,30 @@ impl<T> [T] {
 
     const unsafe fn gcd_proof__VeriFast_wrapper(a: usize, b: usize) -> usize
     //@ req a > 0 &*& b >= 0;
-    //@ ens result > 0 &*& result <= a &*& (b == 0 || result <= b);
+    //@ ens result > 0 &*& result <= a &*& (b == 0 || result <= b) &*& a % result == 0 &*& b % result == 0;
     //@ on_unwind_ens false;
     {
         if b == 0 {
+            //@ div_rem_nonneg_unique(a, a, 1, 0);
+            //@ div_rem_nonneg_unique(0, a, 0, 0);
             a
         } else {
             //@ div_rem_nonneg(a, b);
             //@ mul_mono_l(0, a / b, b);
             //@ if a % b == 0 { mul_mono_l(1, a / b, b); }
-            unsafe { Self::gcd_proof__VeriFast_wrapper(b, a % b) }
+            let g = unsafe { Self::gcd_proof__VeriFast_wrapper(b, a % b) };
+            // g | b and g | a % b imply g | a: a == g * ((a / b) * (b / g) + (a % b) / g).
+            //@ div_rem_nonneg(b, g);
+            //@ div_rem_nonneg(a % b, g);
+            //@ mul_assoc(a / b, b / g, g);
+            //@ div_rem_nonneg_unique(a, g, (a / b) * (b / g) + (a % b) / g, 0);
+            g
         }
     }
 
     unsafe fn align_to_offsets_proof__VeriFast_wrapper<U>(&self) -> (usize, usize)
     //@ req self.len() * std::mem::size_of::<T>() <= isize::MAX &*& std::mem::size_of::<T>() > 0 &*& std::mem::size_of::<U>() > 0;
-    //@ ens 0 <= result.0 &*& result.0 <= isize::MAX &*& 0 <= result.1 &*& result.1 <= self.len();
+    //@ ens 0 <= result.0 &*& result.0 <= isize::MAX &*& 0 <= result.1 &*& result.1 <= self.len() &*& result.0 * std::mem::size_of::<U>() == (self.len() - result.1) * std::mem::size_of::<T>();
     //@ on_unwind_ens false;
     {
         let gcd: usize = unsafe { Self::gcd_proof__VeriFast_wrapper(size_of::<T>(), size_of::<U>()) };
@@ -5690,6 +5772,22 @@ impl<T> [T] {
         //@ mul_mono_l(us, std::mem::size_of::<T>(), self.len());
         let us_len = self.len() / ts * us;
         let ts_len = self.len() % ts;
+        // us_len * size_of::<U>() == (len - ts_len) * size_of::<T>(): both sides equal
+        // ((len / ts) * us) * (gcd * ts) == ((len / ts) * ts) * (gcd * us), using gcd | size_of::<T>()
+        // and gcd | size_of::<U>() (so size_of::<U>() == gcd * ts and size_of::<T>() == gcd * us).
+        //@ let q = self.len() / ts;
+        //@ mul_assoc(q, us, std::mem::size_of::<U>());
+        //@ mul_assoc(q, ts, std::mem::size_of::<T>());
+        //@ mul_assoc(us, gcd, ts);
+        //@ mul_assoc(ts, gcd, us);
+        //@ mul_assoc(q * us, gcd, ts);
+        //@ mul_assoc(q * ts, gcd, us);
+        //@ mul_assoc(q, us, gcd);
+        //@ mul_assoc(q, ts, gcd);
+        //@ mul_assoc(q * us, ts, gcd);
+        //@ mul_assoc(q * ts, us, gcd);
+        //@ mul_assoc(us, q, ts);
+        //@ mul_assoc(ts, q, us);
         (us_len, ts_len)
     }
 
@@ -5786,7 +5884,13 @@ impl<T> [T] {
             //@ leak <(usize, usize)>.own(_, _);
             //@ let rest_ptr = strip_pointer_metadata(rest as pointer) as *T;
             //@ ptr_range_split_limits::<T>(rest_ptr, rest.len(), rest.len() - ts_len);
-            //@ share_transmute_middle::<T, U>(a, t, rest, ptr::mk_slice::<U>(rest_ptr as *U, us_len), ptr::mk_slice::<T>(rest_ptr + (rest.len() - ts_len), ts_len));
+            // `offset <= self.len() < usize::MAX`, so `align_offset` did not fail and `rest_ptr == ptr + offset` is aligned for `U`.
+            //@ mul_mono_l(1, std::mem::size_of::<T>(), self.len());
+            //@ open slice_share::<T>()(a, t, rest);
+            //@ array_share_split::<T>(a, t, rest_ptr, rest.len(), rest.len() - ts_len);
+            //@ close slice_share::<T>()(a, t, ptr::mk_slice::<T>(rest_ptr + (rest.len() - ts_len), ts_len));
+            //@ leak slice_share::<T>()(a, t, ptr::mk_slice::<T>(rest_ptr + (rest.len() - ts_len), ts_len));
+            //@ share_transmute_prefix::<T, U>(a, t, rest_ptr, rest.len() - ts_len, ptr::mk_slice::<U>(rest_ptr as *U, us_len));
             // Inform Miri that we want to consider the "middle" pointer to be suitably aligned.
             #[cfg(miri)]
             crate::intrinsics::miri_promise_symbolic_alignment(
@@ -5911,7 +6015,11 @@ impl<T> [T] {
             let rest_len = rest.len(); //~ignore_ref_creation
             let mut_ptr = rest.as_mut_ptr(); //~ignore_ref_creation
             //@ ptr_range_split_limits::<T>(mut_ptr, rest_len, rest_len - ts_len);
-            //@ full_borrow_transmute_middle::<T, U>(a, t, rest, ptr::mk_slice::<U>(mut_ptr as *U, us_len), ptr::mk_slice::<T>(mut_ptr + (rest_len - ts_len), ts_len));
+            // `offset == left.len() <= isize::MAX < usize::MAX`, so `align_offset` did not fail and `mut_ptr == ptr + offset` is aligned for `U`.
+            //@ slice_full_borrow_inv::<T>(q, a, t, left);
+            //@ mul_mono_l(1, std::mem::size_of::<T>(), left.len());
+            //@ slice_full_borrow_split::<T>(a, t, rest, rest_len - ts_len);
+            //@ full_borrow_transmute_prefix::<T, U>(a, t, ptr::mk_slice::<T>(mut_ptr, rest_len - ts_len), ptr::mk_slice::<U>(mut_ptr as *U, us_len));
             // Inform Miri that we want to consider the "middle" pointer to be suitably aligned.
             #[cfg(miri)]
             crate::intrinsics::miri_promise_symbolic_alignment(
@@ -6030,39 +6138,31 @@ impl<T> [T] {
         unsafe { self.align_to_mut() }
     }
 
-    fn as_simd_proof__VeriFast_wrapper<'a, SimdVec, Chunk>(&'a self, lanes: usize) -> (&'a [T], &'a [SimdVec], &'a [T])
+    // Transcription of `as_simd::<N>` with `SimdVec = Simd<T, N>`, `Chunk = [T; N]`, `lanes = N`.
+    // The two layout facts in the precondition are the `#[repr(simd)]` guarantees `as_simd` relies on
+    // (`Simd<T, N>` has the size of `[T; N]`, element type `T`, and a possibly larger alignment that
+    // `align_to` accounts for); they are the caller's obligation, exactly like `is_array_of` is for the
+    // other const-generic wrappers, and are not assumed inside verified code.
+    unsafe fn as_simd_proof__VeriFast_wrapper<'a, SimdVec, Chunk>(&'a self, lanes: usize) -> (&'a [T], &'a [SimdVec], &'a [T])
     where
         SimdVec: AsRef<Chunk>,
         T: simd::SimdElement,
     //@ req thread_token(?t) &*& [?q]lifetime_token('a) &*& [_](<[T]>.share('a, t, self)) &*& is_array_of::<T, Chunk>(lanes) == true &*& valid_slice_transmute::<T, SimdVec>() == true;
     //@ ens thread_token(t) &*& [q]lifetime_token('a) &*& [_](<[T]>.share('a, t, result.0)) &*& [_](<[SimdVec]>.share('a, t, result.1)) &*& [_](<[T]>.share('a, t, result.2));
     //@ on_unwind_ens false;
-    /*@
-    safety_proof {
-        assume(is_array_of::<T, Chunk>(lanes) == true && valid_slice_transmute::<T, SimdVec>() == true);
-        let result = call();
-        close_slice_triple_own::<'a, T, SimdVec>(_t, result);
-    }
-    @*/
     {
         assert!(size_of::<SimdVec>() == size_of::<Chunk>());
         unsafe { self.align_to() }
     }
 
-    fn as_simd_mut_proof__VeriFast_wrapper<'a, SimdVec, Chunk>(&'a mut self, lanes: usize) -> (&'a mut [T], &'a mut [SimdVec], &'a mut [T])
+    // See `as_simd_proof__VeriFast_wrapper`.
+    unsafe fn as_simd_mut_proof__VeriFast_wrapper<'a, SimdVec, Chunk>(&'a mut self, lanes: usize) -> (&'a mut [T], &'a mut [SimdVec], &'a mut [T])
     where
         SimdVec: AsMut<Chunk>,
         T: simd::SimdElement,
     //@ req thread_token(?t) &*& [?q]lifetime_token('a) &*& full_borrow('a, <[T]>.full_borrow_content(t, self)) &*& is_array_of::<T, Chunk>(lanes) == true &*& valid_slice_transmute::<T, SimdVec>() == true;
     //@ ens thread_token(t) &*& [q]lifetime_token('a) &*& full_borrow('a, <[T]>.full_borrow_content(t, result.0)) &*& full_borrow('a, <[SimdVec]>.full_borrow_content(t, result.1)) &*& full_borrow('a, <[T]>.full_borrow_content(t, result.2));
     //@ on_unwind_ens false;
-    /*@
-    safety_proof {
-        assume(is_array_of::<T, Chunk>(lanes) == true && valid_slice_transmute::<T, SimdVec>() == true);
-        let result = call();
-        close_mut_slice_triple_own::<'a, T, SimdVec>(_t, result);
-    }
-    @*/
     {
         assert!(size_of::<SimdVec>() == size_of::<Chunk>());
         unsafe { self.align_to_mut() }
@@ -7259,42 +7359,180 @@ lem all_pairwise_disjoint_snoc<I>(xs: list<I>, i: i32)
     }
 }
 
-pred disjoint_mut_borrows<T, I, P>(k: lifetime_t, t: thread_id_t, slice: *[T], elems: list<I>, out_ptr: *P);
+// Region model of the sealed `GetDisjointMutIndex` + `SliceIndex<[T]>` implementations (`usize`,
+// `Range<usize>`, `RangeInclusive<usize>`, `range::Range<usize>`, `range::RangeInclusive<usize>`):
+// an index `idx` denotes the contiguous element range
+// `[region_start(idx), region_start(idx) + region_len(idx))`; `is_in_bounds` means that range lies
+// inside the slice, `is_overlapping` means the two ranges intersect, and `get_unchecked_mut` returns
+// a reference to the range (`region_ptr`: an element reference for `usize`, a sub-slice reference
+// for the ranges). These are exactly the facts the `SAFETY` comments of `get_disjoint_mut` and
+// `get_disjoint_unchecked_mut` rely on.
+fix region_start<I>(idx: I) -> usize;
+fix region_len<I>(idx: I) -> usize;
+fix region_ptr<P, T, I, O>(p: *T, idx: I) -> P;
+// `P` is the type of the output slots (a mutable reference to `O` at the const-generic, hence
+// transcribed, call sites); `ref_target` is the pointer such a reference denotes. Lifetimes cannot
+// be parameters of VeriFast predicates, hence the indirection.
+fix ref_target<P, O>(r: P) -> *O;
 
-pred disjoint_mut_loop_inv<T, I, P>(k: lifetime_t, t: thread_id_t, slice: *[T], elems: list<I>, i: usize, out_ptr: *P);
-
-lem disjoint_mut_loop_start<T, I, P>(k: lifetime_t, t: thread_id_t, slice: *[T], elems: list<I>, out_ptr: *P)
-    req full_borrow(k, <[T]>.full_borrow_content(t, slice)) &*& all_in_bounds::<I>(elems, slice.len()) == true &*& all_pairwise_disjoint::<I>(elems) == true;
-    ens disjoint_mut_loop_inv::<T, I, P>(k, t, slice, elems, 0, out_ptr);
+lem GetDisjointMutIndex_in_bounds_region<I>(idx: I, len: usize)
+    req std::slice::GetDisjointMutIndex_in_bounds::<I>(idx, len) == true;
+    ens 0 <= region_start::<I>(idx) &*& 0 <= region_len::<I>(idx) &*& region_start::<I>(idx) + region_len::<I>(idx) <= len;
 {
     assume(false);
 }
 
-lem disjoint_mut_loop_step_pre<T, I, P>(k: lifetime_t, t: thread_id_t, slice: *[T], elems: list<I>, i: usize, out_ptr: *P)
-    req disjoint_mut_loop_inv::<T, I, P>(k, t, slice, elems, i, out_ptr) &*& 0 <= i &*& i < length(elems);
-    ens disjoint_mut_loop_inv::<T, I, P>(k, t, slice, elems, i, out_ptr) &*&
-        full_borrow(k, <[T]>.full_borrow_content(t, slice)) &*&
-        std::slice::SliceIndex_in_bounds::<I, [T]>(nth(i, elems), slice);
+lem GetDisjointMutIndex_not_overlapping_disjoint<I>(a: I, b: I)
+    req std::slice::GetDisjointMutIndex_overlapping::<I>(a, b) == false;
+    ens region_start::<I>(a) + region_len::<I>(a) <= region_start::<I>(b) || region_start::<I>(b) + region_len::<I>(b) <= region_start::<I>(a);
 {
     assume(false);
 }
 
-pred disjoint_elem_borrowed<T, I>(k: lifetime_t, t: thread_id_t);
+// Ownership of the element regions denoted by `idxs`, in list order.
+pred regions_owned<T, I>(t: thread_id_t, p: *T, idxs: list<I>) =
+    match idxs {
+        nil => true,
+        cons(idx, idxs0) => (p + region_start::<I>(idx))[..region_len::<I>(idx)] |-> ?es &*& foreach(es, own::<T>(t)) &*& regions_owned::<T, I>(t, p, idxs0)
+    };
 
-lem disjoint_mut_loop_step_post<T, I, P>(k: lifetime_t, t: thread_id_t, slice: *[T], elems: list<I>, i: usize, out_ptr: *P)
-    req disjoint_mut_loop_inv::<T, I, P>(k, t, slice, elems, i, out_ptr) &*&
-        disjoint_elem_borrowed::<T, I>(k, t) &*&
-        *(out_ptr + i) |-> _ &*& 0 <= i &*& i < length(elems);
-    ens disjoint_mut_loop_inv::<T, I, P>(k, t, slice, elems, i + 1, out_ptr);
+// The elements of `p[..len]` that lie outside the regions of `idxs`.
+pred slice_rest_owned<T, I>(t: thread_id_t, p: *T, len: usize, idxs: list<I>);
+
+// Separation-logic bookkeeping: pairwise-disjoint, in-bounds regions can be carved out of the element
+// array and put back. Axiomatized because a proof needs a representation of an array with an
+// unordered set of holes; each step is `array_split`/`foreach_split` at a region boundary.
+lem carve_regions<T, I>(t: thread_id_t, p: *T, len: usize, idxs: list<I>)
+    req p[..len] |-> ?es &*& foreach(es, own::<T>(t)) &*& all_in_bounds::<I>(idxs, len) == true &*& all_pairwise_disjoint::<I>(idxs) == true;
+    ens regions_owned::<T, I>(t, p, idxs) &*& slice_rest_owned::<T, I>(t, p, len, idxs);
 {
     assume(false);
 }
 
-lem disjoint_mut_loop_finish<T, I, P>(k: lifetime_t, t: thread_id_t, slice: *[T], elems: list<I>, out_ptr: *P)
-    req disjoint_mut_loop_inv::<T, I, P>(k, t, slice, elems, length(elems), out_ptr);
-    ens disjoint_mut_borrows::<T, I, P>(k, t, slice, elems, out_ptr);
+lem uncarve_regions<T, I>(t: thread_id_t, p: *T, len: usize, idxs: list<I>)
+    req regions_owned::<T, I>(t, p, idxs) &*& slice_rest_owned::<T, I>(t, p, len, idxs);
+    ens p[..len] |-> ?es &*& foreach(es, own::<T>(t));
 {
     assume(false);
+}
+
+// `<Output>.full_borrow_content` of the reference `get_unchecked_mut` returns for `idx` is exactly
+// the ownership of `idx`'s region: `*r |-> v &*& own(v)` for `usize`, `slice_full_borrow_content` for
+// the ranges.
+lem region_to_output_fbc<P, T, I, O>(t: thread_id_t, p: *T, idx: I)
+    req (p + region_start::<I>(idx))[..region_len::<I>(idx)] |-> ?es &*& foreach(es, own::<T>(t));
+    ens (<O>.full_borrow_content(t, ref_target::<P, O>(region_ptr::<P, T, I, O>(p, idx))))();
+{
+    assume(false);
+}
+
+lem output_fbc_to_region<P, T, I, O>(t: thread_id_t, p: *T, idx: I)
+    req (<O>.full_borrow_content(t, ref_target::<P, O>(region_ptr::<P, T, I, O>(p, idx))))();
+    ens (p + region_start::<I>(idx))[..region_len::<I>(idx)] |-> ?es &*& foreach(es, own::<T>(t));
+{
+    assume(false);
+}
+
+// Content of one lifetime-`k` borrow covering everything the output references point to.
+pred_ctor outputs_fbc<P, T, I, O>(t: thread_id_t, p: *T, idxs: list<I>)() =
+    match idxs {
+        nil => true,
+        cons(idx, idxs0) => (<O>.full_borrow_content(t, ref_target::<P, O>(region_ptr::<P, T, I, O>(p, idx))))() &*& outputs_fbc::<P, T, I, O>(t, p, idxs0)()
+    };
+
+lem regions_to_outputs_fbc<P, T, I, O>(t: thread_id_t, p: *T, idxs: list<I>)
+    req regions_owned::<T, I>(t, p, idxs);
+    ens outputs_fbc::<P, T, I, O>(t, p, idxs)();
+{
+    open regions_owned::<T, I>(t, p, idxs);
+    match idxs {
+        nil => {
+        }
+        cons(idx, idxs0) => {
+            region_to_output_fbc::<P, T, I, O>(t, p, idx);
+            regions_to_outputs_fbc::<P, T, I, O>(t, p, idxs0);
+        }
+    }
+    close outputs_fbc::<P, T, I, O>(t, p, idxs)();
+}
+
+lem outputs_fbc_to_regions<P, T, I, O>(t: thread_id_t, p: *T, idxs: list<I>)
+    req outputs_fbc::<P, T, I, O>(t, p, idxs)();
+    ens regions_owned::<T, I>(t, p, idxs);
+{
+    open outputs_fbc::<P, T, I, O>(t, p, idxs)();
+    match idxs {
+        nil => {
+        }
+        cons(idx, idxs0) => {
+            output_fbc_to_region::<P, T, I, O>(t, p, idx);
+            outputs_fbc_to_regions::<P, T, I, O>(t, p, idxs0);
+        }
+    }
+    close regions_owned::<T, I>(t, p, idxs);
+}
+
+pred_ctor slice_rest_owned_ctor<T, I>(t: thread_id_t, p: *T, len: usize, idxs: list<I>)() = slice_rest_owned::<T, I>(t, p, len, idxs);
+
+// The references `get_disjoint_unchecked_mut` stores, in index order.
+fix refs_of<P, T, I, O>(p: *T, idxs: list<I>) -> list<P> {
+    match idxs {
+        nil => nil,
+        cons(idx, idxs0) => cons(region_ptr::<P, T, I, O>(p, idx), refs_of::<P, T, I, O>(p, idxs0))
+    }
+}
+
+lem refs_of_snoc<P, T, I, O>(p: *T, idxs: list<I>, idx: I)
+    req true;
+    ens refs_of::<P, T, I, O>(p, append(idxs, cons(idx, nil))) == append(refs_of::<P, T, I, O>(p, idxs), cons(region_ptr::<P, T, I, O>(p, idx), nil));
+{
+    match idxs {
+        nil => {}
+        cons(idx0, idxs0) => {
+            refs_of_snoc::<P, T, I, O>(p, idxs0, idx);
+        }
+    }
+}
+
+// Result of `get_disjoint_unchecked_mut`: the output references, and one lifetime-`k` borrow of
+// everything they point to. `disjoint_mut_borrows_peel` turns it into the usual per-reference borrows.
+pred disjoint_mut_borrows<P, T, I, O>(k: lifetime_t, t: thread_id_t, out_ptr: *P, p: *T, idxs: list<I>) =
+    out_ptr[..length(idxs)] |-> refs_of::<P, T, I, O>(p, idxs) &*& full_borrow(k, outputs_fbc::<P, T, I, O>(t, p, idxs));
+
+lem disjoint_mut_borrows_peel<P, T, I, O>(k: lifetime_t, t: thread_id_t, out_ptr: *P, p: *T, idx: I, idxs0: list<I>)
+    nonghost_callers_only
+    req disjoint_mut_borrows::<P, T, I, O>(k, t, out_ptr, p, cons(idx, idxs0));
+    ens *out_ptr |-> region_ptr::<P, T, I, O>(p, idx) &*& full_borrow(k, <O>.full_borrow_content(t, ref_target::<P, O>(region_ptr::<P, T, I, O>(p, idx)))) &*& disjoint_mut_borrows::<P, T, I, O>(k, t, out_ptr + 1, p, idxs0);
+{
+    open disjoint_mut_borrows::<P, T, I, O>(k, t, out_ptr, p, cons(idx, idxs0));
+    open array(out_ptr, _, _);
+    produce_lem_ptr_chunk implies(outputs_fbc::<P, T, I, O>(t, p, cons(idx, idxs0)), sep(<O>.full_borrow_content(t, ref_target::<P, O>(region_ptr::<P, T, I, O>(p, idx))), outputs_fbc::<P, T, I, O>(t, p, idxs0)))() {
+        open outputs_fbc::<P, T, I, O>(t, p, cons(idx, idxs0))();
+        close sep(<O>.full_borrow_content(t, ref_target::<P, O>(region_ptr::<P, T, I, O>(p, idx))), outputs_fbc::<P, T, I, O>(t, p, idxs0))();
+    } {
+        produce_lem_ptr_chunk implies(sep(<O>.full_borrow_content(t, ref_target::<P, O>(region_ptr::<P, T, I, O>(p, idx))), outputs_fbc::<P, T, I, O>(t, p, idxs0)), outputs_fbc::<P, T, I, O>(t, p, cons(idx, idxs0)))() {
+            open sep(<O>.full_borrow_content(t, ref_target::<P, O>(region_ptr::<P, T, I, O>(p, idx))), outputs_fbc::<P, T, I, O>(t, p, idxs0))();
+            close outputs_fbc::<P, T, I, O>(t, p, cons(idx, idxs0))();
+        } {
+            full_borrow_implies(k, outputs_fbc::<P, T, I, O>(t, p, cons(idx, idxs0)), sep(<O>.full_borrow_content(t, ref_target::<P, O>(region_ptr::<P, T, I, O>(p, idx))), outputs_fbc::<P, T, I, O>(t, p, idxs0)));
+        }
+    }
+    full_borrow_split(k, <O>.full_borrow_content(t, ref_target::<P, O>(region_ptr::<P, T, I, O>(p, idx))), outputs_fbc::<P, T, I, O>(t, p, idxs0));
+    close disjoint_mut_borrows::<P, T, I, O>(k, t, out_ptr + 1, p, idxs0);
+}
+
+lem take_plus_one<t>(n: i32, xs: list<t>)
+    req 0 <= n &*& n < length(xs);
+    ens take(n + 1, xs) == append(take(n, xs), cons(nth(n, xs), nil));
+{
+    match xs {
+        nil => {}
+        cons(h, tl) => {
+            if n > 0 {
+                take_plus_one(n - 1, tl);
+            }
+        }
+    }
 }
 @*/
 
@@ -7316,16 +7554,19 @@ unsafe fn clone_disjoint_index__VeriFast_wrapper<I: GetDisjointMutIndex>(s: &[I]
     unsafe { s.get_unchecked(i).clone() }
 }
 
-unsafe fn write_disjoint_mut_elem__VeriFast_wrapper<T, I, P>(
+unsafe fn write_disjoint_mut_elem__VeriFast_wrapper<T, I, O, P>(
     slice: *mut [T],
     idx: I,
     out_ptr: *mut P,
     i: usize,
 )
 where
-    I: GetDisjointMutIndex + SliceIndex<[T]>,
-//@ req thread_token(?t) &*& full_borrow(?k, <[T]>.full_borrow_content(t, slice)) &*& std::slice::SliceIndex_in_bounds::<I, [T]>(idx, slice) &*& *(out_ptr + i) |-> _ &*& 0 <= i &*& i * std::mem::size_of::<P>() <= isize::MAX &*& pointer_within_limits(out_ptr) == true &*& pointer_within_limits(out_ptr + i) == true;
-//@ ens thread_token(t) &*& disjoint_elem_borrowed::<T, I>(k, t) &*& *(out_ptr + i) |-> _;
+    I: GetDisjointMutIndex + SliceIndex<[T], Output = O>,
+// Raw-pointer semantics of the sealed `SliceIndex::get_unchecked_mut` impls: the reference written to
+// slot `i` points at `idx`'s region. No ownership of the slice is needed to compute and store it; the
+// ownership transfer to the returned references happens in `get_disjoint_unchecked_mut`'s proof.
+//@ req *(out_ptr + i) |-> _ &*& 0 <= i;
+//@ ens *(out_ptr + i) |-> region_ptr::<P, T, I, O>(strip_pointer_metadata(slice as pointer) as *T, idx);
 //@ on_unwind_ens false;
 //@ assume_correct
 {
@@ -7381,51 +7622,75 @@ unsafe fn get_disjoint_check_valid_proof__VeriFast_wrapper<I: GetDisjointMutInde
     Ok(())
 }
 
-unsafe fn get_disjoint_unchecked_mut_proof__VeriFast_wrapper<T, I, P>(
-    slice_ref: &mut [T],
+unsafe fn get_disjoint_unchecked_mut_proof__VeriFast_wrapper<'a, T, I, O, P>(
+    slice_ref: &'a mut [T],
     indices: &[I],
     out_ptr: *mut P,
 )
 where
-    I: GetDisjointMutIndex + SliceIndex<[T]>,
-//@ req thread_token(?t) &*& full_borrow(?k, <[T]>.full_borrow_content(t, slice_ref)) &*& [?q]lifetime_token(k) &*& [?f]((strip_pointer_metadata(indices as pointer) as *I)[..indices.len()] |-> ?elems) &*& all_in_bounds::<I>(elems, slice_ref.len()) == true &*& all_pairwise_disjoint::<I>(elems) == true &*& out_ptr[..indices.len()] |-> ?out_elems &*& indices.len() * std::mem::size_of::<P>() <= isize::MAX &*& pointer_within_limits(out_ptr) == true &*& pointer_within_limits(out_ptr + indices.len()) == true;
-//@ ens thread_token(t) &*& [q]lifetime_token(k) &*& [f]((strip_pointer_metadata(indices as pointer) as *I)[..indices.len()] |-> elems) &*& disjoint_mut_borrows::<T, I, P>(k, t, slice_ref, elems, out_ptr);
+    I: GetDisjointMutIndex + SliceIndex<[T], Output = O>,
+//@ req thread_token(?t) &*& full_borrow(?k, <[T]>.full_borrow_content(t, slice_ref)) &*& [?q]lifetime_token(k) &*& [?f]((strip_pointer_metadata(indices as pointer) as *I)[..indices.len()] |-> ?elems) &*& all_in_bounds::<I>(elems, slice_ref.len()) == true &*& all_pairwise_disjoint::<I>(elems) == true &*& out_ptr[..indices.len()] |-> _;
+//@ ens thread_token(t) &*& [q]lifetime_token(k) &*& [f]((strip_pointer_metadata(indices as pointer) as *I)[..indices.len()] |-> elems) &*& disjoint_mut_borrows::<P, T, I, O>(k, t, out_ptr, strip_pointer_metadata(slice_ref as pointer) as *T, elems);
 //@ on_unwind_ens false;
 {
     let n = indices.len();
     let slice: *mut [T] = slice_ref;
     //@ let p = strip_pointer_metadata(indices as pointer) as *I;
-    //@ disjoint_mut_loop_start::<T, I, P>(k, t, slice_ref, elems, out_ptr);
+    //@ let sp = strip_pointer_metadata(slice_ref as pointer) as *T;
+    //@ let len = slice_ref.len();
+    //@ open_full_borrow_strong_(k, <[T]>.full_borrow_content(t, slice_ref));
+    //@ open slice_full_borrow_content::<T>(t, slice_ref)();
+    //@ carve_regions::<T, I>(t, sp, len, elems);
+    //@ close array(out_ptr, 0, nil);
     let mut i = 0;
     loop {
-        //@ inv thread_token(t) &*& [q]lifetime_token(k) &*& [f](p[..n] |-> elems) &*& 0 <= i &*& i <= n &*& length(elems) == n &*& disjoint_mut_loop_inv::<T, I, P>(k, t, slice_ref, elems, i, out_ptr) &*& (out_ptr + i)[..n - i] |-> drop(i, out_elems) &*& n * std::mem::size_of::<P>() <= isize::MAX &*& pointer_within_limits(out_ptr) == true &*& pointer_within_limits(out_ptr + n) == true;
+        //@ inv thread_token(t) &*& [f](p[..n] |-> elems) &*& 0 <= i &*& i <= n &*& length(elems) == n &*& out_ptr[..i] |-> refs_of::<P, T, I, O>(sp, take(i, elems)) &*& (out_ptr + i)[..n - i] |-> _ &*& regions_owned::<T, I>(t, sp, elems) &*& slice_rest_owned::<T, I>(t, sp, len, elems) &*& close_full_borrow_token_strong_(k, <[T]>.full_borrow_content(t, slice_ref), q);
         if !(i < n) {
             break;
         }
         let idx = unsafe { clone_disjoint_index__VeriFast_wrapper(indices, i) };
-        //@ disjoint_mut_loop_step_pre::<T, I, P>(k, t, slice_ref, elems, i, out_ptr);
-        //@ ptr_range_split_limits::<P>(out_ptr, n, i);
-        //@ drop_n_plus_one(i, out_elems);
-        //@ open array::<P>(out_ptr + i, n - i, drop(i, out_elems));
+        //@ open array_(out_ptr + i, n - i, _);
         unsafe {
-            write_disjoint_mut_elem__VeriFast_wrapper::<T, I, P>(slice, idx, out_ptr, i);
+            write_disjoint_mut_elem__VeriFast_wrapper::<T, I, O, P>(slice, idx, out_ptr, i);
         }
-        //@ disjoint_mut_loop_step_post::<T, I, P>(k, t, slice_ref, elems, i, out_ptr);
+        //@ close array(out_ptr + i + 1, 0, nil);
+        //@ close array(out_ptr + i, 1, cons(region_ptr::<P, T, I, O>(sp, idx), nil));
+        //@ array_join(out_ptr);
+        //@ take_plus_one(i, elems);
+        //@ refs_of_snoc::<P, T, I, O>(sp, take(i, elems), nth(i, elems));
         i += 1;
     }
-    //@ open array::<P>(out_ptr + n, 0, drop(n, out_elems));
-    //@ disjoint_mut_loop_finish::<T, I, P>(k, t, slice_ref, elems, out_ptr);
+    //@ open array_(out_ptr + n, 0, _);
+    //@ regions_to_outputs_fbc::<P, T, I, O>(t, sp, elems);
+    //@ close slice_rest_owned_ctor::<T, I>(t, sp, len, elems)();
+    //@ close sep(outputs_fbc::<P, T, I, O>(t, sp, elems), slice_rest_owned_ctor::<T, I>(t, sp, len, elems))();
+    /*@
+    produce_lem_ptr_chunk restore_full_borrow_(True, sep(outputs_fbc::<P, T, I, O>(t, sp, elems), slice_rest_owned_ctor::<T, I>(t, sp, len, elems)), <[T]>.full_borrow_content(t, slice_ref))() {
+        open True();
+        open sep(outputs_fbc::<P, T, I, O>(t, sp, elems), slice_rest_owned_ctor::<T, I>(t, sp, len, elems))();
+        open slice_rest_owned_ctor::<T, I>(t, sp, len, elems)();
+        outputs_fbc_to_regions::<P, T, I, O>(t, sp, elems);
+        uncarve_regions::<T, I>(t, sp, len, elems);
+        close slice_full_borrow_content::<T>(t, slice_ref)();
+    } {
+        close True();
+        close_full_borrow_strong_();
+    }
+    @*/
+    //@ full_borrow_split(k, outputs_fbc::<P, T, I, O>(t, sp, elems), slice_rest_owned_ctor::<T, I>(t, sp, len, elems));
+    //@ leak full_borrow(k, slice_rest_owned_ctor::<T, I>(t, sp, len, elems));
+    //@ close disjoint_mut_borrows::<P, T, I, O>(k, t, out_ptr, sp, elems);
 }
 
-unsafe fn get_disjoint_mut_proof__VeriFast_wrapper<'a, T, I, P>(
+unsafe fn get_disjoint_mut_proof__VeriFast_wrapper<'a, T, I, O, P>(
     slice_ref: &'a mut [T],
     indices: &[I],
     out_ptr: *mut P,
 ) -> Result<(), GetDisjointMutError>
 where
-    I: GetDisjointMutIndex + SliceIndex<[T]>,
-//@ req thread_token(?t) &*& [?q]lifetime_token('a) &*& full_borrow('a, <[T]>.full_borrow_content(t, slice_ref)) &*& [?f]((strip_pointer_metadata(indices as pointer) as *I)[..indices.len()] |-> ?elems) &*& out_ptr[..indices.len()] |-> ?out_elems &*& indices.len() * std::mem::size_of::<P>() <= isize::MAX &*& pointer_within_limits(out_ptr) == true &*& pointer_within_limits(out_ptr + indices.len()) == true;
-//@ ens thread_token(t) &*& [q]lifetime_token('a) &*& [f]((strip_pointer_metadata(indices as pointer) as *I)[..indices.len()] |-> elems) &*& match result { Result::Ok(u) => disjoint_mut_borrows::<T, I, P>('a, t, slice_ref, elems, out_ptr), Result::Err(e) => full_borrow('a, <[T]>.full_borrow_content(t, slice_ref)) &*& out_ptr[..indices.len()] |-> out_elems };
+    I: GetDisjointMutIndex + SliceIndex<[T], Output = O>,
+//@ req thread_token(?t) &*& [?q]lifetime_token('a) &*& full_borrow('a, <[T]>.full_borrow_content(t, slice_ref)) &*& [?f]((strip_pointer_metadata(indices as pointer) as *I)[..indices.len()] |-> ?elems) &*& out_ptr[..indices.len()] |-> _;
+//@ ens thread_token(t) &*& [q]lifetime_token('a) &*& [f]((strip_pointer_metadata(indices as pointer) as *I)[..indices.len()] |-> elems) &*& match result { Result::Ok(u) => disjoint_mut_borrows::<P, T, I, O>('a, t, out_ptr, strip_pointer_metadata(slice_ref as pointer) as *T, elems), Result::Err(e) => full_borrow('a, <[T]>.full_borrow_content(t, slice_ref)) &*& out_ptr[..indices.len()] |-> _ };
 //@ on_unwind_ens false;
 {
     let len = slice_ref.len(); //~ignore_ref_creation
@@ -7433,7 +7698,7 @@ where
     match check {
         Ok(()) => {
             unsafe {
-                get_disjoint_unchecked_mut_proof__VeriFast_wrapper::<T, I, P>(slice_ref, indices, out_ptr);
+                get_disjoint_unchecked_mut_proof__VeriFast_wrapper::<T, I, O, P>(slice_ref, indices, out_ptr);
             }
             Ok(())
         }

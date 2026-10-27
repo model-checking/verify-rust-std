@@ -44,17 +44,21 @@ lem rotate_ptr_limits<T>(ptr: *T, len: usize, mid: usize)
     mul_mono_l(len - mid, len, std::mem::size_of::<T>());
 }
 
-pred rawarray_rest<U>(rawarray: *U, k: usize);
+// Reinterpretation of the uninitialized stack buffer `MaybeUninit<(BufType, [T; 0])>` (whose size is
+// `size_of::<BufType>()`, as `[T; 0]` is a ZST) as `k` uninitialized `T` slots, and back. VeriFast's
+// prelude has `u8s__to_array_` only for `u8` reinterpretation, so this is axiomatized, with the
+// buffer type fixed to the one `ptr_rotate_memmove` uses and the bound stated in bytes.
+pred rawarray_rest<T>(rawarray: *std::mem::MaybeUninit<([usize; 32], [T; 0])>, k: usize);
 
-lem rawarray_to_buf<U, T>(rawarray: *U, buf: *T, k: usize)
-    req *rawarray |-> ?_ &*& buf == rawarray as *T &*& 0 <= k &*& 0 < std::mem::size_of::<T>() &*& k <= std::mem::size_of(typeid([usize; 32])) / std::mem::size_of::<T>();
-    ens buf[..k] |-> _ &*& rawarray_rest::<U>(rawarray, k);
+lem rawarray_to_buf<T>(rawarray: *std::mem::MaybeUninit<([usize; 32], [T; 0])>, buf: *T, k: usize)
+    req *rawarray |-> ?_ &*& buf == rawarray as *T &*& 0 <= k &*& 0 < std::mem::size_of::<T>() &*& k * std::mem::size_of::<T>() <= std::mem::size_of(typeid([usize; 32]));
+    ens buf[..k] |-> _ &*& rawarray_rest::<T>(rawarray, k);
 {
     assume(false);
 }
 
-lem buf_to_rawarray<U, T>(rawarray: *U, buf: *T, k: usize)
-    req buf[..k] |-> _ &*& rawarray_rest::<U>(rawarray, k);
+lem buf_to_rawarray<T>(rawarray: *std::mem::MaybeUninit<([usize; 32], [T; 0])>, buf: *T, k: usize)
+    req buf[..k] |-> _ &*& rawarray_rest::<T>(rawarray, k);
     ens *rawarray |-> ?_;
 {
     assume(false);
@@ -136,6 +140,9 @@ const unsafe fn ptr_rotate_memmove<T>(left: usize, mid: *mut T, right: usize)
         //    - `buf` is valid and `left` elements were written in it in 1)
         //    - `dim+left = mid-left+right+left = mid+right` and we write `[dim, dim+left)`
         unsafe {
+            //@ std::alloc::is_valid_layout_size_of_align_of::<[usize; 32]>();
+            //@ div_rem_nonneg(std::mem::size_of(typeid([usize; 32])), std::mem::size_of::<T>());
+            //@ mul_mono_l(left, std::mem::size_of(typeid([usize; 32])) / std::mem::size_of::<T>(), std::mem::size_of::<T>());
             //@ rawarray_to_buf(&rawarray, buf, left);
             //@ array_split(p_start, left);
             //@ foreach_split(elems, own::<T>(t), left);
@@ -158,6 +165,9 @@ const unsafe fn ptr_rotate_memmove<T>(left: usize, mid: *mut T, right: usize)
     } else {
         // SAFETY: same reasoning as above but with `left` and `right` reversed
         unsafe {
+            //@ std::alloc::is_valid_layout_size_of_align_of::<[usize; 32]>();
+            //@ div_rem_nonneg(std::mem::size_of(typeid([usize; 32])), std::mem::size_of::<T>());
+            //@ mul_mono_l(right, std::mem::size_of(typeid([usize; 32])) / std::mem::size_of::<T>(), std::mem::size_of::<T>());
             //@ rawarray_to_buf(&rawarray, buf, right);
             //@ array_split(p_start, left);
             //@ foreach_split(elems, own::<T>(t), left);

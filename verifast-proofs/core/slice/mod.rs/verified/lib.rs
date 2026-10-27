@@ -219,7 +219,7 @@ pub mod ptr {
     #[unstable(feature = "ptr_internals", issue = "none")]
     pub unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize
     //@ req pointer_within_limits(p) == true &*& a > 0;
-    //@ ens 0 <= result &*& result <= usize::MAX;
+    //@ ens 0 <= result &*& result <= usize::MAX &*& (result == usize::MAX || ((p + result) as usize) % a == 0);
     //@ on_unwind_ens false;
     //@ assume_correct
     {
