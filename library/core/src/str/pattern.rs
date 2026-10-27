@@ -2116,20 +2116,34 @@ pub mod verify {
         let y: [u8; ARR_SIZE] = kani::any();
         let xs = kani::slice::any_slice_of_array(&x);
         let ys = kani::slice::any_slice_of_array(&y);
+        // UNSAFE PRECONDITION: required by the operation under test.
         kani::assume(xs.len() == ys.len());
+        kani::cover(true, "C22-A26: check_small_slice_eq assumption admitted");
         unsafe {
             small_slice_eq(xs, ys);
         }
+        kani::cover(true, "C22-END: check_small_slice_eq completed");
     }
 
     #[cfg(all(kani, target_arch = "x86_64"))] // only called on x86
     #[kani::proof]
     #[kani::unwind(4)]
     pub fn check_small_slice_eq_empty() {
-        let ptr_x = kani::any_where::<usize, _>(|val| *val != 0) as *const u8;
-        let ptr_y = kani::any_where::<usize, _>(|val| *val != 0) as *const u8;
-        kani::assume(ptr_x.is_aligned());
-        kani::assume(ptr_y.is_aligned());
+        // Zero-length raw slices still require non-null pointers. Make the
+        // former any_where filters explicit so each has a coverage witness.
+        let address_x: usize = kani::any();
+        // UNSAFE PRECONDITION: required by the operation under test.
+        kani::assume(address_x != 0);
+        kani::cover(true, "C22-A27: check_small_slice_eq_empty assumption admitted");
+        let address_y: usize = kani::any();
+        // UNSAFE PRECONDITION: required by the operation under test.
+        kani::assume(address_y != 0);
+        kani::cover(true, "C22-A28: check_small_slice_eq_empty assumption admitted");
+        let ptr_x = address_x as *const u8;
+        let ptr_y = address_y as *const u8;
+        // u8 has alignment one; prove this instead of filtering inputs.
+        assert!(ptr_x.is_aligned());
+        assert!(ptr_y.is_aligned());
         assert_eq!(
             unsafe {
                 small_slice_eq(
@@ -2139,5 +2153,318 @@ pub mod verify {
             },
             true
         );
+        kani::cover(true, "C22-END: check_small_slice_eq_empty completed");
+    }
+
+    // Challenge 22: specifications for the permitted `str::pattern` assumption.
+    // These helpers are inside `str::pattern::verify`, not production code.
+    // Iterator harnesses stub only the explicitly annotated directional search
+    // operations; all real production bodies remain unchanged. These are
+    // manual safety abstractions under assumption 2, not stub_verified proofs.
+    // The simulation relation is observational: iter.rs reads haystack and
+    // match intervals, not search-algorithm preprocessing or equality state.
+    // See doc/src/verification/challenge-22-coverage.md for each adapter's
+    // admitted returns, frame conditions, progress, and proof obligations.
+
+    pub fn verifier_char_searcher_invariant(searcher: &CharSearcher<'_>) -> bool {
+        let haystack = searcher.haystack;
+        let mut encoded = [0u8; 4];
+        let width = searcher.needle.encode_utf8(&mut encoded).len();
+        searcher.finger <= searcher.finger_back
+            && searcher.finger_back <= haystack.len()
+            && haystack.is_char_boundary(searcher.finger)
+            && haystack.is_char_boundary(searcher.finger_back)
+            && searcher.utf8_size() == width
+            && searcher.utf8_encoded[0] == encoded[0]
+            && (width < 2 || searcher.utf8_encoded[1] == encoded[1])
+            && (width < 3 || searcher.utf8_encoded[2] == encoded[2])
+            && (width < 4 || searcher.utf8_encoded[3] == encoded[3])
+    }
+
+    // A real call is checked against the return/frame relation imported by
+    // the char stubs below. The caller selects a valid input window; assert
+    // that precondition instead of silently filtering it with kani::assume.
+    // The dedicated harness preserves both real CharSearcher methods; its
+    // reverse slice byte-search leaf uses an exact model under assumption 1.
+    pub fn verifier_assert_real_char_searcher(
+        haystack: &str,
+        needle: char,
+        front: usize,
+        back: usize,
+        reverse: bool,
+    ) -> Option<(usize, usize)> {
+        assert!(front <= back && back <= haystack.len());
+        assert!(haystack.is_char_boundary(front) && haystack.is_char_boundary(back));
+        let mut searcher = needle.into_searcher(haystack);
+        searcher.finger = front;
+        searcher.finger_back = back;
+        assert!(verifier_char_searcher_invariant(&searcher));
+        let encoding = searcher.utf8_encoded;
+        let width = searcher.utf8_size;
+        let result = if reverse {
+            searcher.next_match_back()
+        } else {
+            searcher.next_match()
+        };
+        assert!(verifier_char_searcher_invariant(&searcher));
+        assert_eq!(searcher.haystack.as_ptr(), haystack.as_ptr());
+        assert_eq!(searcher.haystack.len(), haystack.len());
+        assert_eq!(searcher.needle, needle);
+        assert_eq!(searcher.utf8_size, width);
+        for i in 0..4 {
+            assert_eq!(searcher.utf8_encoded[i], encoding[i]);
+        }
+        if reverse {
+            assert_eq!(searcher.finger, front);
+        } else {
+            assert_eq!(searcher.finger_back, back);
+        }
+        match result {
+            Some((a, b)) => {
+                assert!(front <= a && a < b && b <= back);
+                assert_eq!(b - a, needle.len_utf8());
+                assert!(haystack.is_char_boundary(a) && haystack.is_char_boundary(b));
+                let mut matched = haystack[a..b].chars();
+                assert_eq!(matched.next(), Some(needle));
+                assert!(matched.next().is_none());
+                if reverse {
+                    assert_eq!(searcher.finger_back, a);
+                } else {
+                    assert_eq!(searcher.finger, b);
+                }
+            }
+            None => assert_eq!(searcher.finger, searcher.finger_back),
+        }
+        result
+    }
+
+    // This over-approximates Searcher::next_match under Challenge 22
+    // assumption 2: either no match remains, or a needle-width boundary
+    // range lies between the current search frontiers. This may admit a
+    // sequence of shorter scalars, an intentional safety over-approximation.
+    // We do not assume the match actually equals the needle, so the model
+    // admits at least the real searcher's possible returns.
+    pub fn verifier_stub_char_next_match<'a: 'a>(
+        searcher: &mut CharSearcher<'a>,
+    ) -> Option<(usize, usize)> {
+        assert!(verifier_char_searcher_invariant(searcher));
+        let found: bool = kani::any();
+        if !found {
+            searcher.finger = searcher.finger_back;
+            return None;
+        }
+        let start: usize = kani::any();
+        let width = searcher.needle.len_utf8();
+        // CHALLENGE 22 assumption 2: dependency Searcher range guarantee.
+        kani::assume(searcher.finger <= start && start <= searcher.finger_back);
+        kani::cover(true, "C22-A29: verifier_stub_char_next_match assumption admitted");
+        // CHALLENGE 22 assumption 2: dependency Searcher range guarantee.
+        kani::assume(width <= searcher.finger_back - start);
+        kani::cover(true, "C22-A30: verifier_stub_char_next_match assumption admitted");
+        let end = start + width;
+        // CHALLENGE 22 assumption 2: dependency Searcher range guarantee.
+        kani::assume(
+            searcher.haystack.is_char_boundary(start) && searcher.haystack.is_char_boundary(end),
+        );
+        kani::cover(true, "C22-A31: verifier_stub_char_next_match assumption admitted");
+        searcher.finger = end;
+        assert!(verifier_char_searcher_invariant(searcher));
+        Some((start, end))
+    }
+
+    // ReverseSearcher::next_match_back: same permitted abstraction, with
+    // the opposite search frontier moved to the beginning of the match.
+    pub fn verifier_stub_char_next_match_back<'a: 'a>(
+        searcher: &mut CharSearcher<'a>,
+    ) -> Option<(usize, usize)> {
+        assert!(verifier_char_searcher_invariant(searcher));
+        let found: bool = kani::any();
+        if !found {
+            searcher.finger_back = searcher.finger;
+            return None;
+        }
+        let start: usize = kani::any();
+        let width = searcher.needle.len_utf8();
+        // CHALLENGE 22 assumption 2: dependency Searcher range guarantee.
+        kani::assume(searcher.finger <= start && start <= searcher.finger_back);
+        kani::cover(true, "C22-A32: verifier_stub_char_next_match_back assumption admitted");
+        // CHALLENGE 22 assumption 2: dependency Searcher range guarantee.
+        kani::assume(width <= searcher.finger_back - start);
+        kani::cover(true, "C22-A33: verifier_stub_char_next_match_back assumption admitted");
+        let end = start + width;
+        // CHALLENGE 22 assumption 2: dependency Searcher range guarantee.
+        kani::assume(
+            searcher.haystack.is_char_boundary(start) && searcher.haystack.is_char_boundary(end),
+        );
+        kani::cover(true, "C22-A34: verifier_stub_char_next_match_back assumption admitted");
+        searcher.finger_back = start;
+        assert!(verifier_char_searcher_invariant(searcher));
+        Some((start, end))
+    }
+    // Directional adapters for Challenge 22 assumption 2. They constrain
+    // returned ranges and the state consumed by iter.rs, not match contents.
+    // In particular StrSearcher has independent forward/reverse cursors:
+    // it must not inherit CharSearcher's shared-finger ordering invariant.
+    // None normalizes a cursor to an exhausted representative. Algorithm
+    // metadata is unobserved by iter.rs; these are not verified contracts for
+    // the real search bodies. Explicit self-bounded lifetimes match the
+    // early-bound generic parameters required by Kani's stub checker.
+    pub fn verifier_stub_str_next_match<'a: 'a, 'b: 'b>(
+        s: &mut StrSearcher<'a, 'b>,
+    ) -> Option<(usize, usize)> {
+        if s.needle.is_empty() {
+            // Empty-needle Match/Reject alternation needs at most two real
+            // steps. Retain its actual phase, UTF-8 decoding and exhaustion.
+            return match s.next() {
+                SearchStep::Match(a, b) => Some((a, b)),
+                SearchStep::Done => None,
+                SearchStep::Reject(..) => match s.next() {
+                    SearchStep::Match(a, b) => Some((a, b)),
+                    SearchStep::Done => None,
+                    SearchStep::Reject(..) => unreachable!("empty needle alternates"),
+                },
+            };
+        }
+        verifier_stub_str_nonempty_next_match(s)
+    }
+
+    pub fn verifier_stub_str_next_match_back<'a: 'a, 'b: 'b>(
+        s: &mut StrSearcher<'a, 'b>,
+    ) -> Option<(usize, usize)> {
+        if s.needle.is_empty() {
+            return match s.next_back() {
+                SearchStep::Match(a, b) => Some((a, b)),
+                SearchStep::Done => None,
+                SearchStep::Reject(..) => match s.next_back() {
+                    SearchStep::Match(a, b) => Some((a, b)),
+                    SearchStep::Done => None,
+                    SearchStep::Reject(..) => unreachable!("empty needle alternates"),
+                },
+            };
+        }
+        verifier_stub_str_nonempty_next_match_back(s)
+    }
+
+    // Nonempty-only entry keeps the Empty branch's real next() out of
+    // this harness call graph; pattern algorithms remain assumed correct.
+    pub fn verifier_stub_str_nonempty_next_match<'a: 'a, 'b: 'b>(
+        s: &mut StrSearcher<'a, 'b>,
+    ) -> Option<(usize, usize)> {
+        assert!(!s.needle.is_empty());
+        let front = match &s.searcher {
+            StrSearcherImpl::Byte(x) => x.position,
+            StrSearcherImpl::TwoWay(x) => x.position,
+            StrSearcherImpl::Empty(_) => unreachable!(),
+        };
+        assert!(front <= s.haystack.len() && s.haystack.is_char_boundary(front));
+        let result =
+            verifier_directional_match(s.haystack, front, s.haystack.len(), s.needle.len());
+        let next = result.map_or(s.haystack.len(), |(_, b)| b);
+        match &mut s.searcher {
+            StrSearcherImpl::Byte(x) => x.position = next,
+            StrSearcherImpl::TwoWay(x) => x.position = next,
+            StrSearcherImpl::Empty(_) => unreachable!(),
+        }
+        result
+    }
+
+    // Nonempty-only entry keeps the Empty branch's real next() out of
+    // this harness call graph; pattern algorithms remain assumed correct.
+    pub fn verifier_stub_str_nonempty_next_match_back<'a: 'a, 'b: 'b>(
+        s: &mut StrSearcher<'a, 'b>,
+    ) -> Option<(usize, usize)> {
+        assert!(!s.needle.is_empty());
+        let back = match &s.searcher {
+            StrSearcherImpl::Byte(x) => x.end,
+            StrSearcherImpl::TwoWay(x) => x.end,
+            StrSearcherImpl::Empty(_) => unreachable!(),
+        };
+        assert!(back <= s.haystack.len() && s.haystack.is_char_boundary(back));
+        let result = verifier_directional_match(s.haystack, 0, back, s.needle.len());
+        let next = result.map_or(0, |(a, _)| a);
+        match &mut s.searcher {
+            StrSearcherImpl::Byte(x) => x.end = next,
+            StrSearcherImpl::TwoWay(x) => x.end = next,
+            StrSearcherImpl::Empty(_) => unreachable!(),
+        }
+        result
+    }
+
+    fn verifier_directional_match(
+        s: &str,
+        front: usize,
+        back: usize,
+        width: usize,
+    ) -> Option<(usize, usize)> {
+        if !kani::any::<bool>() {
+            return None;
+        }
+        let a: usize = kani::any();
+        // CHALLENGE 22 assumption 2: dependency Searcher range guarantee.
+        kani::assume(front <= a && a <= back);
+        kani::cover(true, "C22-A35: verifier_directional_match assumption admitted");
+        // CHALLENGE 22 assumption 2: dependency Searcher range guarantee.
+        kani::assume(width <= back - a);
+        kani::cover(true, "C22-A36: verifier_directional_match assumption admitted");
+        let b = a + width;
+        // CHALLENGE 22 assumption 2: dependency Searcher range guarantee.
+        kani::assume(s.is_char_boundary(a) && s.is_char_boundary(b));
+        kani::cover(true, "C22-A37: verifier_directional_match assumption admitted");
+        Some((a, b))
+    }
+
+    pub fn verifier_char_slice_position(s: &CharSliceSearcher<'_, '_>) -> (usize, usize) {
+        let front = s.0.char_indices.front_offset;
+        (front, front + s.0.char_indices.iter.iter.len())
+    }
+
+    fn verifier_stub_char_slice_match(
+        s: &mut CharSliceSearcher<'_, '_>,
+        reverse: bool,
+    ) -> Option<(usize, usize)> {
+        let (front, back) = verifier_char_slice_position(s);
+        let haystack = s.0.haystack;
+        assert!(front <= back && back <= haystack.len());
+        assert!(haystack.is_char_boundary(front) && haystack.is_char_boundary(back));
+        let result = if s.0.char_eq.is_empty() || !kani::any::<bool>() {
+            None
+        } else {
+            let a: usize = kani::any();
+            // CHALLENGE 22 assumption 2: dependency Searcher range guarantee.
+            kani::assume(front <= a && a < back);
+            kani::cover(true, "C22-A38: verifier_stub_char_slice_match assumption admitted");
+            // CHALLENGE 22 assumption 2: dependency Searcher range guarantee.
+            kani::assume(haystack.is_char_boundary(a));
+            kani::cover(true, "C22-A39: verifier_stub_char_slice_match assumption admitted");
+            // The real character width makes each result exactly one scalar,
+            // while the selected set element and equality are abstracted.
+            let width = super::super::validations::utf8_char_width(haystack.as_bytes()[a]);
+            assert!(width > 0 && width <= back - a);
+            let b = a + width;
+            assert!(haystack.is_char_boundary(b));
+            Some((a, b))
+        };
+        let (new_front, new_back) = if reverse {
+            (front, result.map_or(front, |(a, _)| a))
+        } else {
+            (result.map_or(back, |(_, b)| b), back)
+        };
+        s.0.char_indices = super::super::CharIndices {
+            front_offset: new_front,
+            iter: haystack[new_front..new_back].chars(),
+        };
+        result
+    }
+
+    pub fn verifier_stub_char_slice_next_match<'a: 'a, 'b: 'b>(
+        s: &mut CharSliceSearcher<'a, 'b>,
+    ) -> Option<(usize, usize)> {
+        verifier_stub_char_slice_match(s, false)
+    }
+
+    pub fn verifier_stub_char_slice_next_match_back<'a: 'a, 'b: 'b>(
+        s: &mut CharSliceSearcher<'a, 'b>,
+    ) -> Option<(usize, usize)> {
+        verifier_stub_char_slice_match(s, true)
     }
 }
