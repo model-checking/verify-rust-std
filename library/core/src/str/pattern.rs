@@ -880,6 +880,16 @@ impl<C: MultiCharEq> MultiCharEqSearcher<'_, C> {
     fn kani_ok(&self) -> bool {
         multi_char_eq_inv!(self, kani_raw_parts)
     }
+
+    /// `char_indices` as the words it consists of, for the step contracts. A
+    /// replaced step havocs its targets element by element, so this takes
+    /// three writes where a byte range would take one per byte.
+    fn kani_cursor_words(&self) -> *const [usize] {
+        crate::ptr::slice_from_raw_parts(
+            &raw const self.char_indices as *const usize,
+            size_of_val(&self.char_indices) / size_of::<usize>(),
+        )
+    }
 }
 
 #[cfg(kani)]
@@ -940,10 +950,7 @@ unsafe impl<'a, C: MultiCharEq> Searcher<'a> for MultiCharEqSearcher<'a, C> {
     #[inline]
     #[cfg_attr(
         kani,
-        kani::modifies(
-            SearcherLoopContract::kani_fwd_cursor(self),
-            SearcherLoopContract::kani_pred_state(self)
-        )
+        kani::modifies(self.kani_cursor_words(), SearcherLoopContract::kani_pred_state(self))
     )]
     #[safety::requires(self.kani_ok())]
     #[safety::ensures(|step| self.kani_ok() && kani_step_ok(self.haystack, *step))]
@@ -969,10 +976,7 @@ unsafe impl<'a, C: MultiCharEq> ReverseSearcher<'a> for MultiCharEqSearcher<'a, 
     #[inline]
     #[cfg_attr(
         kani,
-        kani::modifies(
-            SearcherLoopContract::kani_fwd_cursor(self),
-            SearcherLoopContract::kani_pred_state(self)
-        )
+        kani::modifies(self.kani_cursor_words(), SearcherLoopContract::kani_pred_state(self))
     )]
     #[safety::requires(self.kani_ok())]
     #[safety::ensures(|step| self.kani_ok() && kani_step_ok(self.haystack, *step))]
