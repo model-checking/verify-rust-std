@@ -65,9 +65,9 @@ macro_rules! test_mask_api {
             fn roundtrip_int_conversion() {
                 let values = [true, false, false, true, false, false, true, false];
                 let mask = Mask::<$type, 8>::from_array(values);
-                let int = mask.to_int();
+                let int = mask.to_simd();
                 assert_eq!(int.to_array(), [-1, 0, 0, -1, 0, 0, -1, 0]);
-                assert_eq!(Mask::<$type, 8>::from_int(int), mask);
+                assert_eq!(Mask::<$type, 8>::from_simd(int), mask);
             }
 
             #[test]
@@ -132,6 +132,24 @@ macro_rules! test_mask_api {
                 cast_impl::<i32>();
                 cast_impl::<i64>();
                 cast_impl::<isize>();
+            }
+
+            #[test]
+            fn first_set() {
+                for bitmask in 0..=u8::MAX {
+                    let mask = Mask::<$type, 8>::from_bitmask(bitmask as u64);
+                    let expected = bitmask.lowest_one().map(|i| i as usize);
+                    assert_eq!(mask.first_set(), expected);
+                }
+            }
+
+            #[test]
+            fn last_set() {
+                for bitmask in 0..=u8::MAX {
+                    let mask = Mask::<$type, 8>::from_bitmask(bitmask as u64);
+                    let expected = bitmask.highest_one().map(|i| i as usize);
+                    assert_eq!(mask.last_set(), expected);
+                }
             }
         }
     }

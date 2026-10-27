@@ -1,8 +1,9 @@
-//! HermitCore-specific extension to the primitives in the `std::ffi` module
+//! Hermit-specific extension to the primitives in the `std::ffi` module
 //!
 //! # Examples
 //!
-//! ```
+#![cfg_attr(target_os = "hermit", doc = "```")]
+#![cfg_attr(not(target_os = "hermit"), doc = "```ignore (needs hermit)")]
 //! use std::ffi::OsString;
 //! use std::os::hermit::ffi::OsStringExt;
 //!
@@ -17,7 +18,8 @@
 //! assert_eq!(bytes, b"foo");
 //! ```
 //!
-//! ```
+#![cfg_attr(target_os = "hermit", doc = "```")]
+#![cfg_attr(not(target_os = "hermit"), doc = "```ignore (needs hermit)")]
 //! use std::ffi::OsStr;
 //! use std::os::hermit::ffi::OsStrExt;
 //!

@@ -47,6 +47,31 @@ impl<T> OnceCell<T> {
         OnceCell { inner: UnsafeCell::new(None) }
     }
 
+    /// Creates a new initialized cell.
+    ///
+    /// This is equivalent to `OnceCell::from(value)`, but can be used in
+    /// const contexts, unlike the `From` implementation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(once_cell_new_init)]
+    /// use std::cell::OnceCell;
+    ///
+    /// const CELL: OnceCell<i32> = OnceCell::new_init(1);
+    /// assert_eq!(CELL.get(), Some(&1));
+    ///
+    /// let cell = OnceCell::new_init(String::from("kitty"));
+    /// assert_eq!(cell.set(String::from("puppy")), Err(String::from("puppy")));
+    /// assert_eq!(cell.get(), Some(&"kitty".to_string()));
+    /// ```
+    #[inline]
+    #[must_use]
+    #[unstable(feature = "once_cell_new_init", issue = "159859")]
+    pub const fn new_init(init_value: T) -> OnceCell<T> {
+        OnceCell { inner: UnsafeCell::new(Some(init_value)) }
+    }
+
     /// Gets the reference to the underlying value.
     ///
     /// Returns `None` if the cell is uninitialized.
@@ -353,7 +378,8 @@ impl<T> OnceCell<T> {
 }
 
 #[stable(feature = "once_cell", since = "1.70.0")]
-impl<T> Default for OnceCell<T> {
+#[rustc_const_unstable(feature = "const_default", issue = "143894")]
+const impl<T> Default for OnceCell<T> {
     #[inline]
     fn default() -> Self {
         Self::new()
@@ -376,14 +402,10 @@ impl<T: fmt::Debug> fmt::Debug for OnceCell<T> {
 impl<T: Clone> Clone for OnceCell<T> {
     #[inline]
     fn clone(&self) -> OnceCell<T> {
-        let res = OnceCell::new();
-        if let Some(value) = self.get() {
-            match res.set(value.clone()) {
-                Ok(()) => (),
-                Err(_) => unreachable!(),
-            }
+        match self.get() {
+            Some(value) => OnceCell::from(value.clone()),
+            None => OnceCell::new(),
         }
-        res
     }
 }
 
@@ -400,7 +422,7 @@ impl<T: Eq> Eq for OnceCell<T> {}
 
 #[stable(feature = "once_cell", since = "1.70.0")]
 #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
-impl<T> const From<T> for OnceCell<T> {
+const impl<T> From<T> for OnceCell<T> {
     /// Creates a new `OnceCell<T>` which already contains the given `value`.
     #[inline]
     fn from(value: T) -> Self {

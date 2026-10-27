@@ -1,15 +1,27 @@
-#![allow(unknown_lints)] // FIXME(msrv) we shouldn't need this
-
 use core::{fmt, mem, ops};
 
 use super::int_traits::{CastFrom, Int, MinInt};
+use crate::support::{DInt, DisplayHex};
+
+/// Wrapper to extract the integer type half of the float's size
+#[allow(unused)] // only used in c-b
+pub type HalfRep<F> = <<F as Float>::Int as DInt>::H;
+
+/// Whether MIPS sNaN/qNaNs should be used.
+///
+/// Note that MIPS is doing some general migration here, though this is only available on (rare)
+/// modern MIPS hardware per discussion at <https://github.com/WebAssembly/design/issues/976>.
+const MIPS_NAN: bool = cfg!(target_arch = "mips")
+    || cfg!(target_arch = "mips64")
+    || cfg!(target_arch = "mips32r6")
+    || cfg!(target_arch = "mips64r6");
 
 /// Trait for some basic operations on floats
-// #[allow(dead_code)]
 #[allow(dead_code)] // Some constants are only used with tests
 pub trait Float:
     Copy
     + fmt::Debug
+    + DisplayHex
     + PartialEq
     + PartialOrd
     + ops::AddAssign
@@ -36,24 +48,34 @@ pub trait Float:
     const NEG_ONE: Self;
     const INFINITY: Self;
     const NEG_INFINITY: Self;
-    const NAN: Self;
-    const NEG_NAN: Self;
     const MAX: Self;
     const MIN: Self;
+
+    /// Quiet NaN.
+    const NAN: Self;
+    /// Signaling NaN.
+    const SNAN: Self;
+    const NEG_NAN: Self;
+    const NEG_SNAN: Self;
+    /// The result of quieting the default sNaN.
+    const QSNAN: Self;
+    const NEG_QSNAN: Self;
+
     const EPSILON: Self;
     const PI: Self;
     const NEG_PI: Self;
     const FRAC_PI_2: Self;
 
     const MIN_POSITIVE_NORMAL: Self;
+    const MIN_POSITIVE_SUBNORMAL: Self;
 
-    /// The bitwidth of the float type
+    /// The bitwidth of the float type.
     const BITS: u32;
 
-    /// The bitwidth of the significand
+    /// The bitwidth of the significand (does not include the implicit bit).
     const SIG_BITS: u32;
 
-    /// The bitwidth of the exponent
+    /// The bitwidth of the exponent.
     const EXP_BITS: u32 = Self::BITS - Self::SIG_BITS - 1;
 
     /// The saturated (maximum bitpattern) value of the exponent, i.e. the infinite
@@ -62,7 +84,7 @@ pub trait Float:
     /// This shifted fully right, use `EXP_MASK` for the shifted value.
     const EXP_SAT: u32 = (1 << Self::EXP_BITS) - 1;
 
-    /// The exponent bias value
+    /// The exponent bias value.
     const EXP_BIAS: u32 = Self::EXP_SAT >> 1;
 
     /// Maximum unbiased exponent value.
@@ -86,6 +108,9 @@ pub trait Float:
     /// The implicit bit of the float format
     const IMPLICIT_BIT: Self::Int;
 
+    /// A mask for the top bit of the significand, useful for NaN ops.
+    const SIG_TOP_BIT: Self::Int;
+
     /// Returns `self` transmuted to `Self::Int`
     fn to_bits(self) -> Self::Int;
 
@@ -107,19 +132,37 @@ pub trait Float:
     /// This method returns `true` if two NaNs are compared. Use [`biteq`](Self::biteq) instead
     /// if `NaN` should not be treated separately.
     #[allow(dead_code)]
-    fn eq_repr(self, rhs: Self) -> bool {
-        if self.is_nan() && rhs.is_nan() {
-            true
-        } else {
-            self.biteq(rhs)
-        }
-    }
+    fn eq_repr(self, rhs: Self) -> bool;
 
     /// Returns true if the value is NaN.
     fn is_nan(self) -> bool;
 
+    fn is_qnan(self) -> bool {
+        if !self.is_nan() {
+            return false;
+        }
+
+        let top = self.to_bits() & Self::SIG_TOP_BIT;
+
+        if MIPS_NAN {
+            top == Self::Int::ZERO
+        } else {
+            top != Self::Int::ZERO
+        }
+    }
+
+    fn is_snan(self) -> bool {
+        self.is_nan() && !self.is_qnan()
+    }
+
     /// Returns true if the value is +inf or -inf.
     fn is_infinite(self) -> bool;
+
+    /// Returns true if this number is neither infinite nor NaN.
+    #[allow(dead_code)]
+    fn is_finite(self) -> bool {
+        self.abs() < Self::INFINITY
+    }
 
     /// Returns true if the sign is negative. Extracts the sign bit regardless of zero or NaN.
     fn is_sign_negative(self) -> bool;
@@ -178,7 +221,6 @@ pub trait Float:
     fn fma(self, y: Self, z: Self) -> Self;
 
     /// Returns (normalized exponent, normalized significand)
-    #[allow(dead_code)]
     fn normalize(significand: Self::Int) -> (i32, Self::Int);
 
     /// Returns a number that represents the sign of self.
@@ -226,17 +268,41 @@ macro_rules! float_impl {
             const NEG_ONE: Self = -1.0;
             const INFINITY: Self = Self::INFINITY;
             const NEG_INFINITY: Self = Self::NEG_INFINITY;
-            const NAN: Self = Self::NAN;
-            // NAN isn't guaranteed to be positive but it usually is. We only use this for
-            // tests.
-            const NEG_NAN: Self = $from_bits($to_bits(Self::NAN) | Self::SIGN_MASK);
             const MAX: Self = -Self::MIN;
             // Sign bit set, saturated mantissa, saturated exponent with last bit zeroed
             const MIN: Self = $from_bits(Self::Int::MAX & !(1 << Self::SIG_BITS));
+
+            // The default NaN seems to set one of the top two significand bits on most
+            // platforms (sNaN vs. qNaN). For mips, the significand is all 1s (with the
+            // exception of the signaling bit).
+            const NAN: Self = $from_bits(if MIPS_NAN {
+                Self::EXP_MASK | (Self::SIG_TOP_BIT - 1)
+            } else {
+                Self::EXP_MASK | Self::SIG_TOP_BIT
+            });
+            const SNAN: Self = $from_bits(if MIPS_NAN {
+                Self::EXP_MASK | Self::SIG_MASK
+            } else {
+                Self::EXP_MASK | (Self::SIG_TOP_BIT >> 1)
+            });
+            const QSNAN: Self = if MIPS_NAN {
+                <Self as Float>::NAN
+            } else {
+                $from_bits($to_bits(Self::SNAN) | Self::SIG_TOP_BIT)
+            };
+            // NAN isn't guaranteed to be positive but it usually is. We only use these for
+            // tests.
+            const NEG_NAN: Self = $from_bits($to_bits(Self::NAN) | Self::SIGN_MASK);
+            const NEG_SNAN: Self = $from_bits($to_bits(Self::SNAN) | Self::SIGN_MASK);
+            const NEG_QSNAN: Self = $from_bits($to_bits(Self::QSNAN) | Self::SIGN_MASK);
+
             const EPSILON: Self = <$ty>::EPSILON;
 
             // Exponent is a 1 in the LSB
             const MIN_POSITIVE_NORMAL: Self = $from_bits(1 << Self::SIG_BITS);
+
+            // Single 1 in the LSB
+            const MIN_POSITIVE_SUBNORMAL: Self = $from_bits(1);
 
             const PI: Self = core::$ty::consts::PI;
             const NEG_PI: Self = -Self::PI;
@@ -249,10 +315,32 @@ macro_rules! float_impl {
             const SIG_MASK: Self::Int = (1 << Self::SIG_BITS) - 1;
             const EXP_MASK: Self::Int = !(Self::SIGN_MASK | Self::SIG_MASK);
             const IMPLICIT_BIT: Self::Int = 1 << Self::SIG_BITS;
+            const SIG_TOP_BIT: Self::Int = Self::IMPLICIT_BIT >> 1;
 
             fn to_bits(self) -> Self::Int {
                 self.to_bits()
             }
+
+            fn eq_repr(self, rhs: Self) -> bool {
+                #[cfg(not(feature = "unmangled-names"))]
+                fn is_nan(x: $ty) -> bool {
+                    // When not using unmangled-names, the "real" compiler-builtins might not have
+                    // the necessary builtin (__unordtf2) to test whether `f128` is NaN.
+                    // FIXME(f128): Remove once the nightly toolchain has the __unordtf2 builtin
+                    // x is NaN if all the bits of the exponent are set and the significand is non-0
+                    x.to_bits() & $ty::EXP_MASK == $ty::EXP_MASK && x.to_bits() & $ty::SIG_MASK != 0
+                }
+                #[cfg(feature = "unmangled-names")]
+                fn is_nan(x: $ty) -> bool {
+                    x.is_nan()
+                }
+                if is_nan(self) && is_nan(rhs) {
+                    true
+                } else {
+                    self.to_bits() == rhs.to_bits()
+                }
+            }
+
             fn is_nan(self) -> bool {
                 self.is_nan()
             }
@@ -266,41 +354,41 @@ macro_rules! float_impl {
                 Self::from_bits(a)
             }
             fn abs(self) -> Self {
-                cfg_if! {
+                cfg_select_nofmt! {
                     // FIXME(msrv): `abs` is available in `core` starting with 1.85.
-                    if #[cfg(intrinsics_enabled)] {
+                    intrinsics_enabled => {
                         self.abs()
-                    } else {
+                    }
+                    _ => {
                         super::super::generic::fabs(self)
                     }
                 }
             }
             fn copysign(self, other: Self) -> Self {
-                cfg_if! {
+                cfg_select_nofmt! {
                     // FIXME(msrv): `copysign` is available in `core` starting with 1.85.
-                    if #[cfg(intrinsics_enabled)] {
+                    intrinsics_enabled => {
                         self.copysign(other)
-                    } else {
+                    }
+                    _ => {
                         super::super::generic::copysign(self, other)
                     }
                 }
             }
             fn fma(self, y: Self, z: Self) -> Self {
-                cfg_if! {
+                cfg_select_nofmt! {
                     // fma is not yet available in `core`
-                    if #[cfg(intrinsics_enabled)] {
+                    intrinsics_enabled => {
                         core::intrinsics::$fma_intrinsic(self, y, z)
-                    } else {
+                    }
+                    _ => {
                         super::super::$fma_fn(self, y, z)
                     }
                 }
             }
             fn normalize(significand: Self::Int) -> (i32, Self::Int) {
                 let shift = significand.leading_zeros().wrapping_sub(Self::EXP_BITS);
-                (
-                    1i32.wrapping_sub(shift as i32),
-                    significand << shift as Self::Int,
-                )
+                (1i32.wrapping_sub(shift as i32), significand << shift)
             }
         }
     };
@@ -385,28 +473,28 @@ pub const fn f64_to_bits(x: f64) -> u64 {
     unsafe { mem::transmute::<f64, u64>(x) }
 }
 
-/// Trait for floats twice the bit width of another integer.
-pub trait DFloat: Float {
+/// Trait for floats that are wider than a `NFloat` type.
+pub trait WideFloat: Float {
     /// Float that is half the bit width of the floatthis trait is implemented for.
-    type H: HFloat<D = Self>;
+    type H: NarrowFloat<D = Self>;
 
     /// Narrow the float type.
     fn narrow(self) -> Self::H;
 }
 
-/// Trait for floats half the bit width of another float.
-pub trait HFloat: Float {
+/// Trait for floats narrower than a `WFloat` type.
+pub trait NarrowFloat: Float {
     /// Float that is double the bit width of the float this trait is implemented for.
-    type D: DFloat<H = Self>;
+    type D: WideFloat<H = Self>;
 
     /// Widen the float type.
     fn widen(self) -> Self::D;
 }
 
-macro_rules! impl_d_float {
+macro_rules! impl_wide_float {
     ($($X:ident $D:ident),*) => {
         $(
-            impl DFloat for $D {
+            impl WideFloat for $D {
                 type H = $X;
 
                 fn narrow(self) -> Self::H {
@@ -417,10 +505,10 @@ macro_rules! impl_d_float {
     };
 }
 
-macro_rules! impl_h_float {
+macro_rules! impl_narrow_float {
     ($($H:ident $X:ident),*) => {
         $(
-            impl HFloat for $H {
+            impl NarrowFloat for $H {
                 type D = $X;
 
                 fn widen(self) -> Self::D {
@@ -431,17 +519,17 @@ macro_rules! impl_h_float {
     };
 }
 
-impl_d_float!(f32 f64);
+impl_wide_float!(f32 f64);
 #[cfg(f16_enabled)]
-impl_d_float!(f16 f32);
+impl_wide_float!(f16 f32);
 #[cfg(f128_enabled)]
-impl_d_float!(f64 f128);
+impl_wide_float!(f64 f128);
 
-impl_h_float!(f32 f64);
+impl_narrow_float!(f32 f64);
 #[cfg(f16_enabled)]
-impl_h_float!(f16 f32);
+impl_narrow_float!(f16 f32);
 #[cfg(f128_enabled)]
-impl_h_float!(f64 f128);
+impl_narrow_float!(f64 f128);
 
 #[cfg(test)]
 mod tests {
@@ -456,6 +544,20 @@ mod tests {
         assert_eq!(f16::EXP_MAX, 15);
         assert_eq!(f16::EXP_MIN, -14);
         assert_eq!(f16::EXP_MIN_SUBNORM, -24);
+        assert_biteq!(f16::NAN, <f16 as Float>::NAN);
+        // Value of NAN and FLT16_SNAN in C. We don't strictly need to match up, but it is good to
+        // be aware if there are platforms where we don't.
+        if MIPS_NAN {
+            assert_biteq!(<f16 as Float>::NAN, f16::from_bits(0x7dff));
+            assert_biteq!(f16::SNAN, f16::from_bits(0x7fff));
+            assert_biteq!(f16::QSNAN, f16::from_bits(0x7dff));
+        } else {
+            assert_biteq!(f16::NAN, f16::from_bits(0x7e00));
+            assert_biteq!(f16::SNAN, f16::from_bits(0x7d00));
+            assert_biteq!(f16::QSNAN, f16::from_bits(0x7f00));
+        }
+        assert!(<f16 as Float>::NAN.is_qnan());
+        assert!(f16::SNAN.is_snan());
 
         // `exp_unbiased`
         assert_eq!(f16::FRAC_PI_2.exp_unbiased(), 0);
@@ -482,6 +584,23 @@ mod tests {
         assert_eq!(f32::EXP_MAX, 127);
         assert_eq!(f32::EXP_MIN, -126);
         assert_eq!(f32::EXP_MIN_SUBNORM, -149);
+        assert_biteq!(f32::NAN, <f32 as Float>::NAN);
+        // Value of NAN and FLT_SNAN in C. We don't strictly need to match up, but it is good to
+        // be aware if there are platforms where we don't.
+        if MIPS_NAN {
+            assert_biteq!(<f32 as Float>::NAN, f32::from_bits(0x7fbfffff));
+            assert_biteq!(f32::SNAN, f32::from_bits(0x7fffffff));
+            assert_biteq!(f32::QSNAN, f32::from_bits(0x7fbfffff));
+        } else {
+            assert_biteq!(f32::NAN, f32::from_bits(0x7fc00000));
+            assert_biteq!(f32::SNAN, f32::from_bits(0x7fa00000));
+            assert_biteq!(f32::QSNAN, f32::from_bits(0x7fe00000));
+        }
+        assert!(<f32 as Float>::NAN.is_qnan());
+        // FIXME(rust-lang/rust#115567): x87 use in `is_snan` quiets the sNaN
+        if !cfg!(x86_no_sse2) {
+            assert!(f32::SNAN.is_snan());
+        }
 
         // `exp_unbiased`
         assert_eq!(f32::FRAC_PI_2.exp_unbiased(), 0);
@@ -512,6 +631,23 @@ mod tests {
         assert_eq!(f64::EXP_MAX, 1023);
         assert_eq!(f64::EXP_MIN, -1022);
         assert_eq!(f64::EXP_MIN_SUBNORM, -1074);
+        assert_biteq!(f64::NAN, <f64 as Float>::NAN);
+        // Value of NAN and DBL_SNAN in C. We don't strictly need to match up, but it is good to
+        // be aware if there are platforms where we don't.
+        if MIPS_NAN {
+            assert_biteq!(<f64 as Float>::NAN, f64::from_bits(0x7ff7ffffffffffff));
+            assert_biteq!(f64::SNAN, f64::from_bits(0x7fffffffffffffff));
+            assert_biteq!(f64::QSNAN, f64::from_bits(0x7ff7ffffffffffff));
+        } else {
+            assert_biteq!(f64::NAN, f64::from_bits(0x7ff8000000000000));
+            assert_biteq!(f64::SNAN, f64::from_bits(0x7ff4000000000000));
+            assert_biteq!(f64::QSNAN, f64::from_bits(0x7ffc000000000000));
+        }
+        assert!(<f64 as Float>::NAN.is_qnan());
+        // FIXME(rust-lang/rust#115567): x87 use in `is_snan` quiets the sNaN
+        if !cfg!(x86_no_sse2) {
+            assert!(f64::SNAN.is_snan());
+        }
 
         // `exp_unbiased`
         assert_eq!(f64::FRAC_PI_2.exp_unbiased(), 0);
@@ -543,6 +679,38 @@ mod tests {
         assert_eq!(f128::EXP_MAX, 16383);
         assert_eq!(f128::EXP_MIN, -16382);
         assert_eq!(f128::EXP_MIN_SUBNORM, -16494);
+        assert_biteq!(f128::NAN, <f128 as Float>::NAN);
+        // Value of NAN and FLT128_SNAN in C. We don't strictly need to match up, but it is good to
+        // be aware if there are platforms where we don't.
+        if MIPS_NAN {
+            assert_biteq!(
+                <f128 as Float>::NAN,
+                f128::from_bits(0x7fff7fffffffffffffffffffffffffff)
+            );
+            assert_biteq!(
+                f128::SNAN,
+                f128::from_bits(0x7fffffffffffffffffffffffffffffff)
+            );
+            assert_biteq!(
+                f128::QSNAN,
+                f128::from_bits(0x7fff7fffffffffffffffffffffffffff)
+            );
+        } else {
+            assert_biteq!(
+                f128::NAN,
+                f128::from_bits(0x7fff8000000000000000000000000000)
+            );
+            assert_biteq!(
+                f128::SNAN,
+                f128::from_bits(0x7fff4000000000000000000000000000)
+            );
+            assert_biteq!(
+                f128::QSNAN,
+                f128::from_bits(0x7fffc000000000000000000000000000)
+            );
+        }
+        assert!(<f128 as Float>::NAN.is_qnan());
+        assert!(f128::SNAN.is_snan());
 
         // `exp_unbiased`
         assert_eq!(f128::FRAC_PI_2.exp_unbiased(), 0);

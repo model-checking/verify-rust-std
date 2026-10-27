@@ -16,34 +16,43 @@ pub struct TcpStream {
 }
 
 impl TcpStream {
+    fn new(inner: tcp::Tcp) -> Self {
+        Self {
+            inner,
+            read_timeout: Arc::new(Mutex::new(None)),
+            write_timeout: Arc::new(Mutex::new(None)),
+        }
+    }
+
     pub fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<TcpStream> {
         return each_addr(addr, inner);
 
         fn inner(addr: &SocketAddr) -> io::Result<TcpStream> {
             let inner = tcp::Tcp::connect(addr, None)?;
-            Ok(TcpStream {
-                inner,
-                read_timeout: Arc::new(Mutex::new(None)),
-                write_timeout: Arc::new(Mutex::new(None)),
-            })
+            Ok(TcpStream::new(inner))
         }
     }
 
     pub fn connect_timeout(addr: &SocketAddr, timeout: Duration) -> io::Result<TcpStream> {
+        if timeout == Duration::ZERO {
+            return Err(io::Error::ZERO_TIMEOUT);
+        }
         let inner = tcp::Tcp::connect(addr, Some(timeout))?;
-        Ok(Self {
-            inner,
-            read_timeout: Arc::new(Mutex::new(None)),
-            write_timeout: Arc::new(Mutex::new(None)),
-        })
+        Ok(Self::new(inner))
     }
 
     pub fn set_read_timeout(&self, t: Option<Duration>) -> io::Result<()> {
+        if t == Some(Duration::ZERO) {
+            return Err(io::Error::ZERO_TIMEOUT);
+        }
         self.read_timeout.set(t).unwrap();
         Ok(())
     }
 
     pub fn set_write_timeout(&self, t: Option<Duration>) -> io::Result<()> {
+        if t == Some(Duration::ZERO) {
+            return Err(io::Error::ZERO_TIMEOUT);
+        }
         self.write_timeout.set(t).unwrap();
         Ok(())
     }
@@ -64,7 +73,7 @@ impl TcpStream {
         self.inner.read(buf, self.read_timeout()?)
     }
 
-    pub fn read_buf(&self, cursor: BorrowedCursor<'_>) -> io::Result<()> {
+    pub fn read_buf(&self, cursor: BorrowedCursor<'_, u8>) -> io::Result<()> {
         crate::io::default_read_buf(|buf| self.read(buf), cursor)
     }
 
@@ -112,6 +121,14 @@ impl TcpStream {
         unsupported()
     }
 
+    pub fn set_keepalive(&self, _: bool) -> io::Result<()> {
+        unsupported()
+    }
+
+    pub fn keepalive(&self) -> io::Result<bool> {
+        unsupported()
+    }
+
     pub fn set_nodelay(&self, _: bool) -> io::Result<()> {
         unsupported()
     }
@@ -139,7 +156,8 @@ impl TcpStream {
 
 impl fmt::Debug for TcpStream {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        // FIXME(implement this)
+        unimplemented!()
     }
 }
 
@@ -148,16 +166,23 @@ pub struct TcpListener {
 }
 
 impl TcpListener {
-    pub fn bind<A: ToSocketAddrs>(_: A) -> io::Result<TcpListener> {
-        unsupported()
+    pub fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<TcpListener> {
+        return each_addr(addr, inner);
+
+        fn inner(addr: &SocketAddr) -> io::Result<TcpListener> {
+            let inner = tcp::Tcp::bind(addr)?;
+            Ok(TcpListener { inner })
+        }
     }
 
     pub fn socket_addr(&self) -> io::Result<SocketAddr> {
-        unsupported()
+        self.inner.socket_addr()
     }
 
     pub fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
-        unsupported()
+        let tcp = self.inner.accept()?;
+        let addr = tcp.peer_addr()?;
+        Ok((TcpStream::new(tcp), addr))
     }
 
     pub fn duplicate(&self) -> io::Result<TcpListener> {
@@ -191,7 +216,8 @@ impl TcpListener {
 
 impl fmt::Debug for TcpListener {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        // FIXME(implement this)
+        unimplemented!()
     }
 }
 

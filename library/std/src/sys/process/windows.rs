@@ -5,7 +5,7 @@ mod tests;
 
 use core::ffi::c_void;
 
-use super::env::{CommandEnv, CommandEnvs};
+use super::env::{CommandEnv, CommandEnvs, CommandResolvedEnvs};
 use crate::collections::BTreeMap;
 use crate::env::consts::{EXE_EXTENSION, EXE_SUFFIX};
 use crate::ffi::{OsStr, OsString};
@@ -23,10 +23,12 @@ use crate::sys::fs::{File, OpenOptions};
 use crate::sys::handle::Handle;
 use crate::sys::pal::api::{self, WinError, utf16};
 use crate::sys::pal::{ensure_no_nuls, fill_utf16_buf};
-use crate::sys::pipe::{self, AnonPipe};
-use crate::sys::{cvt, path, stdio};
-use crate::sys_common::IntoInner;
+use crate::sys::{IntoInner, cvt, path, stdio};
 use crate::{cmp, env, fmt, ptr};
+
+mod child_pipe;
+
+pub use self::child_pipe::{ChildPipe, read_output};
 
 ////////////////////////////////////////////////////////////////////////////////
 // Command
@@ -160,6 +162,7 @@ pub struct Command {
     startupinfo_untrusted_source: bool,
     startupinfo_force_feedback: Option<bool>,
     inherit_handles: bool,
+    desktop: Option<Vec<u16>>,
 }
 
 pub enum Stdio {
@@ -167,7 +170,7 @@ pub enum Stdio {
     InheritSpecific { from_stdio_id: u32 },
     Null,
     MakePipe,
-    Pipe(AnonPipe),
+    Pipe(ChildPipe),
     Handle(Handle),
 }
 
@@ -189,6 +192,7 @@ impl Command {
             startupinfo_untrusted_source: false,
             startupinfo_force_feedback: None,
             inherit_handles: true,
+            desktop: None,
         }
     }
 
@@ -213,6 +217,7 @@ impl Command {
     pub fn creation_flags(&mut self, flags: u32) {
         self.flags = flags;
     }
+
     pub fn show_window(&mut self, cmd_show: Option<u16>) {
         self.show_window = cmd_show;
     }
@@ -237,6 +242,10 @@ impl Command {
         self.startupinfo_force_feedback = enabled;
     }
 
+    pub fn desktop(&mut self, desktop: &OsStr) {
+        self.desktop = Some(desktop.encode_wide().chain([0]).collect());
+    }
+
     pub fn get_program(&self) -> &OsStr {
         &self.program
     }
@@ -248,6 +257,14 @@ impl Command {
 
     pub fn get_envs(&self) -> CommandEnvs<'_> {
         self.env.iter()
+    }
+
+    pub fn get_env_clear(&self) -> bool {
+        self.env.does_clear()
+    }
+
+    pub fn get_resolved_envs(&self) -> CommandResolvedEnvs {
+        CommandResolvedEnvs::new(self.env.capture())
     }
 
     pub fn get_current_dir(&self) -> Option<&Path> {
@@ -381,6 +398,10 @@ impl Command {
             None => {}
         }
 
+        if let Some(desktop) = &mut self.desktop {
+            si.lpDesktop = desktop.as_mut_ptr();
+        }
+
         let si_ptr: *mut c::STARTUPINFOW;
 
         let mut si_ex;
@@ -394,7 +415,10 @@ impl Command {
                 // SAFETY: Casting this `*const` pointer to a `*mut` pointer is "safe"
                 // here because windows does not internally mutate the attribute list.
                 // Ideally this should be reflected in the interface of the `windows-sys` crate.
-                lpAttributeList: proc_thread_attribute_list.as_ptr().cast::<c_void>().cast_mut(),
+                lpAttributeList: proc_thread_attribute_list
+                    .as_ptr()
+                    .cast::<c::_PROC_THREAD_ATTRIBUTE_LIST>()
+                    .cast_mut(),
             };
             si_ptr = (&raw mut si_ex) as _;
         } else {
@@ -592,7 +616,7 @@ fn program_exists(path: &Path) -> Option<Vec<u16>> {
 }
 
 impl Stdio {
-    fn to_handle(&self, stdio_id: u32, pipe: &mut Option<AnonPipe>) -> io::Result<Handle> {
+    fn to_handle(&self, stdio_id: u32, pipe: &mut Option<ChildPipe>) -> io::Result<Handle> {
         let use_stdio_id = |stdio_id| match stdio::get_handle(stdio_id) {
             Ok(io) => unsafe {
                 let io = Handle::from_raw_handle(io);
@@ -609,14 +633,15 @@ impl Stdio {
 
             Stdio::MakePipe => {
                 let ours_readable = stdio_id != c::STD_INPUT_HANDLE;
-                let pipes = pipe::anon_pipe(ours_readable, true)?;
+                let pipes = child_pipe::child_pipe(ours_readable, true)?;
                 *pipe = Some(pipes.ours);
                 Ok(pipes.theirs.into_handle())
             }
 
             Stdio::Pipe(ref source) => {
                 let ours_readable = stdio_id != c::STD_INPUT_HANDLE;
-                pipe::spawn_pipe_relay(source, ours_readable, true).map(AnonPipe::into_handle)
+                child_pipe::spawn_pipe_relay(source, ours_readable, true)
+                    .map(ChildPipe::into_handle)
             }
 
             Stdio::Handle(ref handle) => handle.duplicate(0, true, c::DUPLICATE_SAME_ACCESS),
@@ -629,14 +654,31 @@ impl Stdio {
                 opts.read(stdio_id == c::STD_INPUT_HANDLE);
                 opts.write(stdio_id != c::STD_INPUT_HANDLE);
                 opts.inherit_handle(true);
-                File::open(Path::new(r"\\.\NUL"), &opts).map(|file| file.into_inner())
+                File::open(Path::new(r"\\.\NUL"), &opts).map(|file| file.into_inner()).map_err(
+                    |e| {
+                        // A raw `NotFound` here is easily mistaken for the program
+                        // being missing, so say what actually failed to open.
+                        // `spawn` only passes the three standard ids, but print
+                        // anything else as a number rather than mislabeling it.
+                        let stream = match stdio_id {
+                            c::STD_INPUT_HANDLE => "stdin".to_string(),
+                            c::STD_OUTPUT_HANDLE => "stdout".to_string(),
+                            c::STD_ERROR_HANDLE => "stderr".to_string(),
+                            id => format!("stdio handle {id}"),
+                        };
+                        Error::new(
+                            e.kind(),
+                            format!("failed to open NUL device for child {stream}: {e}"),
+                        )
+                    },
+                )
             }
         }
     }
 }
 
-impl From<AnonPipe> for Stdio {
-    fn from(pipe: AnonPipe) -> Stdio {
+impl From<ChildPipe> for Stdio {
+    fn from(pipe: ChildPipe) -> Stdio {
         Stdio::Pipe(pipe)
     }
 }
@@ -811,7 +853,7 @@ impl From<u8> for ExitCode {
 
 impl From<u32> for ExitCode {
     fn from(code: u32) -> Self {
-        ExitCode(u32::from(code))
+        ExitCode(code)
     }
 }
 
@@ -968,4 +1010,8 @@ impl<'a> fmt::Debug for CommandArgs<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.iter.clone()).finish()
     }
+}
+
+pub fn getpid() -> u32 {
+    unsafe { c::GetCurrentProcessId() }
 }

@@ -24,12 +24,17 @@ use crate::fmt;
 /// [`with`]) within a thread, and values that implement [`Drop`] get
 /// destructed when a thread exits. Some platform-specific caveats apply, which
 /// are explained below.
-/// Note that if the destructor panics, the whole process will be [aborted].
+/// Note that, should the destructor panic, the whole process will be [aborted].
+/// On platforms where initialization requires memory allocation, this is
+/// performed directly through [`System`], allowing the [global allocator]
+/// to make use of thread local storage.
 ///
 /// A `LocalKey`'s initializer cannot recursively depend on itself. Using a
 /// `LocalKey` in this way may cause panics, aborts, or infinite recursion on
 /// the first call to `with`.
 ///
+/// [`System`]: crate::alloc::System
+/// [global allocator]: crate::alloc
 /// [aborted]: crate::process::abort
 ///
 /// # Single-thread Synchronization
@@ -93,17 +98,17 @@ use crate::fmt;
 ///    run on the thread that causes the process to exit. This is because the
 ///    other threads may be forcibly terminated.
 ///
-/// ## Synchronization in thread-local destructors
+///    TLS destructors may be leaked if a thread exits while [converted into a fiber],
+///    or if Rust TLS destructor support is first needed while running in a fiber.
 ///
-/// On Windows, synchronization operations (such as [`JoinHandle::join`]) in
-/// thread local destructors are prone to deadlocks and so should be avoided.
-/// This is because the [loader lock] is held while a destructor is run. The
-/// lock is acquired whenever a thread starts or exits or when a DLL is loaded
-/// or unloaded. Therefore these events are blocked for as long as a thread
-/// local destructor is running.
+///    If a process loads a Rust `cdylib`, it must not cause the Rust TLS destructor support
+///    to be initialized for the first time during process shutdown.
 ///
+///    When dynamically unloading a Rust `cdylib`, pending TLS destructors may run
+///    during the unload or may be leaked.
+///
+/// [converted into a fiber]: https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-convertthreadtofiber
 /// [loader lock]: https://docs.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-best-practices
-/// [`JoinHandle::join`]: crate::thread::JoinHandle::join
 /// [`with`]: LocalKey::with
 #[cfg_attr(not(test), rustc_diagnostic_item = "LocalKey")]
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -122,7 +127,14 @@ pub struct LocalKey<T: 'static> {
     // trivially devirtualizable by LLVM because the value of `inner` never
     // changes and the constant should be readonly within a crate. This mainly
     // only runs into problems when TLS statics are exported across crates.
-    inner: fn(Option<&mut Option<T>>) -> *const T,
+    //
+    // The argument of the function, `init`, can be used to initialize the key for the current
+    // thread: if it is not yet initialized, and if the argument is `Some(&mut Some(val))`, the
+    // inner `val` should be `take`en out and used as the initial value instead of the default.
+    // Also, in that case `inner` *must not* panic. However, it is okay (but potentially
+    // inefficient) for `inner` to ignore `init` and use a default value as long as that is
+    // guaranteed not to panic.
+    inner: fn(/* init */ Option<&mut Option<T>>) -> *const T,
 }
 
 #[stable(feature = "std_debug", since = "1.16.0")]
@@ -135,7 +147,7 @@ impl<T: 'static> fmt::Debug for LocalKey<T> {
 #[doc(hidden)]
 #[allow_internal_unstable(thread_local_internals)]
 #[unstable(feature = "thread_local_internals", issue = "none")]
-#[rustc_macro_transparency = "semitransparent"]
+#[rustc_macro_transparency = "semiopaque"]
 pub macro thread_local_process_attrs {
 
     // Parse `cfg_attr` to figure out whether it's a `rustc_align_static`.
@@ -193,41 +205,10 @@ pub macro thread_local_process_attrs {
         );
     ),
 
-    // it's a nested `cfg_attr(true, ...)`; recurse into RHS
-    (
-        [$($prev_align_attrs:tt)*] [$($prev_other_attrs:tt)*];
-        @processing_cfg_attr { pred: ($($predicate:tt)*), rhs: [cfg_attr(true, $($cfg_rhs:tt)*) $(, $($attr_rhs:tt)*)?] };
-        $($rest:tt)*
-    ) => (
-        $crate::thread::local_impl::thread_local_process_attrs!(
-            [] [];
-            @processing_cfg_attr { pred: (true), rhs: [$($cfg_rhs)*] };
-            [$($prev_align_attrs)*] [$($prev_other_attrs)*];
-            @processing_cfg_attr { pred: ($($predicate)*), rhs: [$($($attr_rhs)*)?] };
-            $($rest)*
-        );
-    ),
-
-    // it's a nested `cfg_attr(false, ...)`; recurse into RHS
-    (
-        [$($prev_align_attrs:tt)*] [$($prev_other_attrs:tt)*];
-        @processing_cfg_attr { pred: ($($predicate:tt)*), rhs: [cfg_attr(false, $($cfg_rhs:tt)*) $(, $($attr_rhs:tt)*)?] };
-        $($rest:tt)*
-    ) => (
-        $crate::thread::local_impl::thread_local_process_attrs!(
-            [] [];
-            @processing_cfg_attr { pred: (false), rhs: [$($cfg_rhs)*] };
-            [$($prev_align_attrs)*] [$($prev_other_attrs)*];
-            @processing_cfg_attr { pred: ($($predicate)*), rhs: [$($($attr_rhs)*)?] };
-            $($rest)*
-        );
-    ),
-
-
     // it's a nested `cfg_attr(..., ...)`; recurse into RHS
     (
         [$($prev_align_attrs:tt)*] [$($prev_other_attrs:tt)*];
-        @processing_cfg_attr { pred: ($($predicate:tt)*), rhs: [cfg_attr($cfg_lhs:meta, $($cfg_rhs:tt)*) $(, $($attr_rhs:tt)*)?] };
+        @processing_cfg_attr { pred: ($($predicate:tt)*), rhs: [cfg_attr($cfg_lhs:expr, $($cfg_rhs:tt)*) $(, $($attr_rhs:tt)*)?] };
         $($rest:tt)*
     ) => (
         $crate::thread::local_impl::thread_local_process_attrs!(
@@ -263,28 +244,8 @@ pub macro thread_local_process_attrs {
         );
     ),
 
-    // `cfg_attr(true, ...)` attribute; parse it
-    ([$($prev_align_attrs:tt)*] [$($prev_other_attrs:tt)*]; #[cfg_attr(true, $($cfg_rhs:tt)*)] $($rest:tt)*) => (
-        $crate::thread::local_impl::thread_local_process_attrs!(
-            [] [];
-            @processing_cfg_attr { pred: (true), rhs: [$($cfg_rhs)*] };
-            [$($prev_align_attrs)*] [$($prev_other_attrs)*];
-            $($rest)*
-        );
-    ),
-
-    // `cfg_attr(false, ...)` attribute; parse it
-    ([$($prev_align_attrs:tt)*] [$($prev_other_attrs:tt)*]; #[cfg_attr(false, $($cfg_rhs:tt)*)] $($rest:tt)*) => (
-        $crate::thread::local_impl::thread_local_process_attrs!(
-            [] [];
-            @processing_cfg_attr { pred: (false), rhs: [$($cfg_rhs)*] };
-            [$($prev_align_attrs)*] [$($prev_other_attrs)*];
-            $($rest)*
-        );
-    ),
-
     // `cfg_attr(..., ...)` attribute; parse it
-    ([$($prev_align_attrs:tt)*] [$($prev_other_attrs:tt)*]; #[cfg_attr($cfg_pred:meta, $($cfg_rhs:tt)*)] $($rest:tt)*) => (
+    ([$($prev_align_attrs:tt)*] [$($prev_other_attrs:tt)*]; #[cfg_attr($cfg_pred:expr, $($cfg_rhs:tt)*)] $($rest:tt)*) => (
         $crate::thread::local_impl::thread_local_process_attrs!(
             [] [];
             @processing_cfg_attr { pred: ($cfg_pred), rhs: [$($cfg_rhs)*] };
@@ -391,6 +352,7 @@ pub macro thread_local_process_attrs {
 #[stable(feature = "rust1", since = "1.0.0")]
 #[cfg_attr(not(test), rustc_diagnostic_item = "thread_local_macro")]
 #[allow_internal_unstable(thread_local_internals)]
+#[rustc_diagnostic_opaque]
 macro_rules! thread_local {
     () => {};
 
@@ -479,7 +441,7 @@ impl<T: 'static> LocalKey<T> {
     ///
     /// This will lazily initialize the value if this thread has not referenced
     /// this key yet. If the key has been destroyed (which may happen if this is called
-    /// in a destructor), this function will return an [`AccessError`].
+    /// in a destructor), this function may return an [`AccessError`].
     ///
     /// # Panics
     ///
@@ -665,10 +627,17 @@ impl<T: 'static> LocalKey<Cell<T>> {
 
     /// Updates the contained value using a function.
     ///
+    /// This will lazily initialize the value if this thread has not referenced
+    /// this key yet.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the key currently has its destructor running,
+    /// and it **may** panic if the destructor has previously been run for this thread.
+    ///
     /// # Examples
     ///
     /// ```
-    /// #![feature(local_key_cell_update)]
     /// use std::cell::Cell;
     ///
     /// thread_local! {
@@ -678,7 +647,7 @@ impl<T: 'static> LocalKey<Cell<T>> {
     /// X.update(|x| x + 1);
     /// assert_eq!(X.get(), 6);
     /// ```
-    #[unstable(feature = "local_key_cell_update", issue = "143989")]
+    #[stable(feature = "local_key_cell_update", since = "1.99.0")]
     pub fn update(&'static self, f: impl FnOnce(T) -> T)
     where
         T: Copy,

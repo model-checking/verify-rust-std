@@ -9,7 +9,7 @@ use crate::intrinsics::simd::*;
 use stdarch_test::assert_instr;
 
 #[allow(improper_ctypes)]
-unsafe extern "unadjusted" {
+unsafe extern "llvm-intrinsic" {
     #[link_name = "llvm.x86.vcvtps2ph.128"]
     fn llvm_vcvtps2ph_128(a: f32x4, rounding: i32) -> i16x8;
     #[link_name = "llvm.x86.vcvtps2ph.256"]
@@ -25,7 +25,8 @@ unsafe extern "unadjusted" {
 #[target_feature(enable = "f16c")]
 #[cfg_attr(test, assert_instr("vcvtph2ps"))]
 #[stable(feature = "x86_f16c_intrinsics", since = "1.68.0")]
-pub fn _mm_cvtph_ps(a: __m128i) -> __m128 {
+#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
+pub const fn _mm_cvtph_ps(a: __m128i) -> __m128 {
     unsafe {
         let a: f16x8 = transmute(a);
         let a: f16x4 = simd_shuffle!(a, a, [0, 1, 2, 3]);
@@ -41,7 +42,8 @@ pub fn _mm_cvtph_ps(a: __m128i) -> __m128 {
 #[target_feature(enable = "f16c")]
 #[cfg_attr(test, assert_instr("vcvtph2ps"))]
 #[stable(feature = "x86_f16c_intrinsics", since = "1.68.0")]
-pub fn _mm256_cvtph_ps(a: __m128i) -> __m256 {
+#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
+pub const fn _mm256_cvtph_ps(a: __m128i) -> __m256 {
     unsafe {
         let a: f16x8 = transmute(a);
         simd_cast(a)
@@ -54,10 +56,10 @@ pub fn _mm256_cvtph_ps(a: __m128i) -> __m256 {
 ///
 /// Rounding is done according to the `imm_rounding` parameter, which can be one of:
 ///
-/// * [`_MM_FROUND_TO_NEAREST_INT`] | [`_MM_FROUND_NO_EXC`] : round to nearest and suppress exceptions
-/// * [`_MM_FROUND_TO_NEG_INF`] | [`_MM_FROUND_NO_EXC`] : round down and suppress exceptions
-/// * [`_MM_FROUND_TO_POS_INF`] | [`_MM_FROUND_NO_EXC`] : round up and suppress exceptions
-/// * [`_MM_FROUND_TO_ZERO`] | [`_MM_FROUND_NO_EXC`] : truncate and suppress exceptions
+/// * [`_MM_FROUND_TO_NEAREST_INT`] : round to nearest
+/// * [`_MM_FROUND_TO_NEG_INF`] : round down
+/// * [`_MM_FROUND_TO_POS_INF`] : round up
+/// * [`_MM_FROUND_TO_ZERO`] : truncate
 /// * [`_MM_FROUND_CUR_DIRECTION`] : use `MXCSR.RC` - see [`_MM_SET_ROUNDING_MODE`]
 ///
 /// [Intel's documentation](https://software.intel.com/sites/landingpage/IntrinsicsGuide/#text=_mm_cvtps_ph)
@@ -67,7 +69,7 @@ pub fn _mm256_cvtph_ps(a: __m128i) -> __m256 {
 #[rustc_legacy_const_generics(1)]
 #[stable(feature = "x86_f16c_intrinsics", since = "1.68.0")]
 pub fn _mm_cvtps_ph<const IMM_ROUNDING: i32>(a: __m128) -> __m128i {
-    static_assert_uimm_bits!(IMM_ROUNDING, 3);
+    static_assert_round_mode!(IMM_ROUNDING);
     unsafe {
         let a = a.as_f32x4();
         let r = llvm_vcvtps2ph_128(a, IMM_ROUNDING);
@@ -80,10 +82,10 @@ pub fn _mm_cvtps_ph<const IMM_ROUNDING: i32>(a: __m128) -> __m128i {
 ///
 /// Rounding is done according to the `imm_rounding` parameter, which can be one of:
 ///
-/// * [`_MM_FROUND_TO_NEAREST_INT`] | [`_MM_FROUND_NO_EXC`] : round to nearest and suppress exceptions
-/// * [`_MM_FROUND_TO_NEG_INF`] | [`_MM_FROUND_NO_EXC`] : round down and suppress exceptions
-/// * [`_MM_FROUND_TO_POS_INF`] | [`_MM_FROUND_NO_EXC`] : round up and suppress exceptions
-/// * [`_MM_FROUND_TO_ZERO`] | [`_MM_FROUND_NO_EXC`] : truncate and suppress exceptions
+/// * [`_MM_FROUND_TO_NEAREST_INT`] : round to nearest
+/// * [`_MM_FROUND_TO_NEG_INF`] : round down
+/// * [`_MM_FROUND_TO_POS_INF`] : round up
+/// * [`_MM_FROUND_TO_ZERO`] : truncate
 /// * [`_MM_FROUND_CUR_DIRECTION`] : use `MXCSR.RC` - see [`_MM_SET_ROUNDING_MODE`]
 ///
 /// [Intel's documentation](https://software.intel.com/sites/landingpage/IntrinsicsGuide/#text=_mm256_cvtps_ph)
@@ -93,7 +95,7 @@ pub fn _mm_cvtps_ph<const IMM_ROUNDING: i32>(a: __m128) -> __m128i {
 #[rustc_legacy_const_generics(1)]
 #[stable(feature = "x86_f16c_intrinsics", since = "1.68.0")]
 pub fn _mm256_cvtps_ph<const IMM_ROUNDING: i32>(a: __m256) -> __m128i {
-    static_assert_uimm_bits!(IMM_ROUNDING, 3);
+    static_assert_round_mode!(IMM_ROUNDING);
     unsafe {
         let a = a.as_f32x8();
         let r = llvm_vcvtps2ph_256(a, IMM_ROUNDING);
@@ -103,7 +105,8 @@ pub fn _mm256_cvtps_ph<const IMM_ROUNDING: i32>(a: __m256) -> __m128i {
 
 #[cfg(test)]
 mod tests {
-    use crate::{core_arch::x86::*, mem::transmute};
+    use crate::core_arch::assert_eq_const as assert_eq;
+    use crate::core_arch::x86::*;
     use stdarch_test::simd_test;
 
     const F16_ONE: i16 = 0x3c00;
@@ -116,7 +119,7 @@ mod tests {
     const F16_EIGHT: i16 = 0x4800;
 
     #[simd_test(enable = "f16c")]
-    unsafe fn test_mm_cvtph_ps() {
+    const fn test_mm_cvtph_ps() {
         let a = _mm_set_epi16(0, 0, 0, 0, F16_ONE, F16_TWO, F16_THREE, F16_FOUR);
         let r = _mm_cvtph_ps(a);
         let e = _mm_set_ps(1.0, 2.0, 3.0, 4.0);
@@ -124,7 +127,7 @@ mod tests {
     }
 
     #[simd_test(enable = "f16c")]
-    unsafe fn test_mm256_cvtph_ps() {
+    const fn test_mm256_cvtph_ps() {
         let a = _mm_set_epi16(
             F16_ONE, F16_TWO, F16_THREE, F16_FOUR, F16_FIVE, F16_SIX, F16_SEVEN, F16_EIGHT,
         );
@@ -134,7 +137,7 @@ mod tests {
     }
 
     #[simd_test(enable = "f16c")]
-    unsafe fn test_mm_cvtps_ph() {
+    fn test_mm_cvtps_ph() {
         let a = _mm_set_ps(1.0, 2.0, 3.0, 4.0);
         let r = _mm_cvtps_ph::<_MM_FROUND_CUR_DIRECTION>(a);
         let e = _mm_set_epi16(0, 0, 0, 0, F16_ONE, F16_TWO, F16_THREE, F16_FOUR);
@@ -142,7 +145,7 @@ mod tests {
     }
 
     #[simd_test(enable = "f16c")]
-    unsafe fn test_mm256_cvtps_ph() {
+    fn test_mm256_cvtps_ph() {
         let a = _mm256_set_ps(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
         let r = _mm256_cvtps_ph::<_MM_FROUND_CUR_DIRECTION>(a);
         let e = _mm_set_epi16(

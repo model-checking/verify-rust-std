@@ -95,12 +95,33 @@ const fn stderr_raw() -> StderrRaw {
     StderrRaw(stdio::Stderr::new())
 }
 
+#[cfg(windows)]
+impl StdoutRaw {
+    /// Starts a new lock session: stream state cached per lock session (the
+    /// handle and its console mode) is re-queried at the next write, so that
+    /// changing the process stdio handles (e.g. with `SetStdHandle`) between
+    /// lock sessions keeps working.
+    #[inline]
+    fn refresh(&mut self) {
+        self.0.refresh();
+    }
+}
+
+#[cfg(windows)]
+impl StderrRaw {
+    /// See `StdoutRaw::refresh`.
+    #[inline]
+    fn refresh(&mut self) {
+        self.0.refresh();
+    }
+}
+
 impl Read for StdinRaw {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         handle_ebadf(self.0.read(buf), || Ok(0))
     }
 
-    fn read_buf(&mut self, buf: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf(&mut self, buf: BorrowedCursor<'_, u8>) -> io::Result<()> {
         handle_ebadf(self.0.read_buf(buf), || Ok(()))
     }
 
@@ -120,7 +141,7 @@ impl Read for StdinRaw {
         handle_ebadf(self.0.read_exact(buf), || Err(io::Error::READ_EXACT_EOF))
     }
 
-    fn read_buf_exact(&mut self, buf: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf_exact(&mut self, buf: BorrowedCursor<'_, u8>) -> io::Result<()> {
         if buf.capacity() == 0 {
             return Ok(());
         }
@@ -285,6 +306,7 @@ pub struct Stdin {
 /// ```
 #[must_use = "if unused stdin will immediately unlock"]
 #[stable(feature = "rust1", since = "1.0.0")]
+#[cfg_attr(not(test), rustc_diagnostic_item = "StdinLock")]
 pub struct StdinLock<'a> {
     inner: MutexGuard<'a, BufReader<StdinRaw>>,
 }
@@ -446,7 +468,7 @@ impl Read for Stdin {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.lock().read(buf)
     }
-    fn read_buf(&mut self, buf: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf(&mut self, buf: BorrowedCursor<'_, u8>) -> io::Result<()> {
         self.lock().read_buf(buf)
     }
     fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
@@ -465,7 +487,7 @@ impl Read for Stdin {
     fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
         self.lock().read_exact(buf)
     }
-    fn read_buf_exact(&mut self, cursor: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf_exact(&mut self, cursor: BorrowedCursor<'_, u8>) -> io::Result<()> {
         self.lock().read_buf_exact(cursor)
     }
 }
@@ -475,7 +497,7 @@ impl Read for &Stdin {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.lock().read(buf)
     }
-    fn read_buf(&mut self, buf: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf(&mut self, buf: BorrowedCursor<'_, u8>) -> io::Result<()> {
         self.lock().read_buf(buf)
     }
     fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
@@ -494,7 +516,7 @@ impl Read for &Stdin {
     fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
         self.lock().read_exact(buf)
     }
-    fn read_buf_exact(&mut self, cursor: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf_exact(&mut self, cursor: BorrowedCursor<'_, u8>) -> io::Result<()> {
         self.lock().read_buf_exact(cursor)
     }
 }
@@ -513,7 +535,7 @@ impl Read for StdinLock<'_> {
         self.inner.read(buf)
     }
 
-    fn read_buf(&mut self, buf: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf(&mut self, buf: BorrowedCursor<'_, u8>) -> io::Result<()> {
         self.inner.read_buf(buf)
     }
 
@@ -538,11 +560,13 @@ impl Read for StdinLock<'_> {
         self.inner.read_exact(buf)
     }
 
-    fn read_buf_exact(&mut self, cursor: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf_exact(&mut self, cursor: BorrowedCursor<'_, u8>) -> io::Result<()> {
         self.inner.read_buf_exact(cursor)
     }
 }
 
+#[doc(hidden)]
+#[unstable(feature = "core_io_internals", reason = "exposed only for libstd", issue = "none")]
 impl SpecReadByte for StdinLock<'_> {
     #[inline]
     fn spec_read_byte(&mut self) -> Option<io::Result<u8>> {
@@ -723,7 +747,7 @@ pub fn stdout() -> Stdout {
 // Flush the data and disable buffering during shutdown
 // by replacing the line writer by one with zero
 // buffering capacity.
-pub fn cleanup() {
+pub(crate) fn cleanup() {
     let mut initialized = false;
     let stdout = STDOUT.get_or_init(|| {
         initialized = true;
@@ -766,7 +790,19 @@ impl Stdout {
         // Locks this handle with 'static lifetime. This depends on the
         // implementation detail that the underlying `ReentrantMutex` is
         // static.
-        StdoutLock { inner: self.inner.lock() }
+        let lock = StdoutLock { inner: self.inner.lock() };
+        // A new lock session begins, so let Windows re-query cached stream
+        // state at the next write; other platforms cache nothing, and skip
+        // this entirely so their `lock()` is unchanged. Skipped also if the
+        // cell is already borrowed (a nested lock during an ongoing write);
+        // such a lock is part of the outer session anyway.
+        #[cfg(windows)]
+        {
+            if let Ok(mut w) = lock.inner.try_borrow_mut() {
+                w.get_mut().refresh();
+            }
+        }
+        lock
     }
 }
 
@@ -793,7 +829,7 @@ impl Write for Stdout {
     }
     #[inline]
     fn is_write_vectored(&self) -> bool {
-        io::Write::is_write_vectored(&&*self)
+        io::Write::is_write_vectored(&self)
     }
     fn flush(&mut self) -> io::Result<()> {
         (&*self).flush()
@@ -998,7 +1034,15 @@ impl Stderr {
         // Locks this handle with 'static lifetime. This depends on the
         // implementation detail that the underlying `ReentrantMutex` is
         // static.
-        StderrLock { inner: self.inner.lock() }
+        let lock = StderrLock { inner: self.inner.lock() };
+        // See `Stdout::lock`: a new lock session begins (Windows only).
+        #[cfg(windows)]
+        {
+            if let Ok(mut w) = lock.inner.try_borrow_mut() {
+                w.refresh();
+            }
+        }
+        lock
     }
 }
 
@@ -1025,7 +1069,7 @@ impl Write for Stderr {
     }
     #[inline]
     fn is_write_vectored(&self) -> bool {
-        io::Write::is_write_vectored(&&*self)
+        io::Write::is_write_vectored(&self)
     }
     fn flush(&mut self) -> io::Result<()> {
         (&*self).flush()
@@ -1194,7 +1238,7 @@ pub(crate) fn attempt_print_to_stderr(args: fmt::Arguments<'_>) {
 
 /// Trait to determine if a descriptor/handle refers to a terminal/tty.
 #[stable(feature = "is_terminal", since = "1.70.0")]
-pub trait IsTerminal: crate::sealed::Sealed {
+pub impl(crate) trait IsTerminal {
     /// Returns `true` if the descriptor/handle refers to a terminal/tty.
     ///
     /// On platforms where Rust does not know how to detect a terminal yet, this will return
@@ -1242,16 +1286,13 @@ pub trait IsTerminal: crate::sealed::Sealed {
     ///
     /// [changes]: io#platform-specific-behavior
     /// [`Stdin`]: crate::io::Stdin
-    #[doc(alias = "isatty")]
+    #[doc(alias = "isatty", alias = "atty")]
     #[stable(feature = "is_terminal", since = "1.70.0")]
     fn is_terminal(&self) -> bool;
 }
 
 macro_rules! impl_is_terminal {
     ($($t:ty),*$(,)?) => {$(
-        #[unstable(feature = "sealed", issue = "none")]
-        impl crate::sealed::Sealed for $t {}
-
         #[stable(feature = "is_terminal", since = "1.70.0")]
         impl IsTerminal for $t {
             #[inline]

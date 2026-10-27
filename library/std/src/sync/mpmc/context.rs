@@ -17,7 +17,7 @@ use crate::time::Instant;
 
 /// Thread-local context.
 #[derive(Debug, Clone)]
-pub struct Context {
+pub(crate) struct Context {
     inner: Arc<Inner>,
 }
 
@@ -40,7 +40,7 @@ struct Inner {
 impl Context {
     /// Creates a new context for the duration of the closure.
     #[inline]
-    pub fn with<F, R>(f: F) -> R
+    pub(crate) fn with<F, R>(f: F) -> R
     where
         F: FnOnce(&Context) -> R,
     {
@@ -92,7 +92,7 @@ impl Context {
     ///
     /// On failure, the previously selected operation is returned.
     #[inline]
-    pub fn try_select(&self, select: Selected) -> Result<(), Selected> {
+    pub(crate) fn try_select(&self, select: Selected) -> Result<(), Selected> {
         self.inner
             .select
             .compare_exchange(
@@ -109,7 +109,7 @@ impl Context {
     ///
     /// This method must be called after `try_select` succeeds and there is a packet to provide.
     #[inline]
-    pub fn store_packet(&self, packet: *mut ()) {
+    pub(crate) fn store_packet(&self, packet: *mut ()) {
         if !packet.is_null() {
             self.inner.packet.store(packet, Ordering::Release);
         }
@@ -123,7 +123,7 @@ impl Context {
     /// This may only be called from the thread this `Context` belongs to.
     #[inline]
     #[requires(self.thread_id() == current_thread_id())]
-    pub unsafe fn wait_until(&self, deadline: Option<Instant>) -> Selected {
+    pub(crate) unsafe fn wait_until(&self, deadline: Option<Instant>) -> Selected {
         loop {
             // Check whether an operation has been selected.
             let sel = Selected::from(self.inner.select.load(Ordering::Acquire));
@@ -154,13 +154,13 @@ impl Context {
 
     /// Unparks the thread this context belongs to.
     #[inline]
-    pub fn unpark(&self) {
+    pub(crate) fn unpark(&self) {
         self.inner.thread.unpark();
     }
 
     /// Returns the id of the thread this context belongs to.
     #[inline]
-    pub fn thread_id(&self) -> usize {
+    pub(crate) fn thread_id(&self) -> usize {
         self.inner.thread_id
     }
 }

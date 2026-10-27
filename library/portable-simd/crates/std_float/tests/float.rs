@@ -1,4 +1,8 @@
 #![feature(portable_simd)]
+#![feature(f16)]
+#![feature(cfg_target_has_reliable_f16_f128)]
+#![allow(internal_features)]
+#![allow(unused_features)]
 
 macro_rules! unary_test {
     { $scalar:tt, $($func:tt),+ } => {
@@ -16,15 +20,16 @@ macro_rules! unary_test {
     }
 }
 
-macro_rules! binary_test {
+macro_rules! unary_approx_test {
     { $scalar:tt, $($func:tt),+ } => {
         test_helpers::test_lanes! {
             $(
             fn $func<const LANES: usize>() {
-                test_helpers::test_binary_elementwise(
+                test_helpers::test_unary_elementwise_approx(
                     &core_simd::simd::Simd::<$scalar, LANES>::$func,
                     &$scalar::$func,
-                    &|_, _| true,
+                    &|_| true,
+                    16,
                 )
             }
             )*
@@ -53,9 +58,24 @@ macro_rules! impl_tests {
         mod $scalar {
             use std_float::StdFloat;
 
-            unary_test! { $scalar, sqrt, sin, cos, exp, exp2, ln, log2, log10, ceil, floor, round, trunc }
-            binary_test! { $scalar, log }
+            unary_test! { $scalar, sqrt, ceil, floor, round, trunc, round_ties_even }
             ternary_test! { $scalar, mul_add }
+
+            // https://github.com/rust-lang/miri/issues/3555
+            unary_approx_test! { $scalar, sin, cos, exp, exp2, ln, log2, log10 }
+
+            // The implementation of log is a.ln() / b.ln(), so there are 2 inexact operations,
+            // hence a larger ulps is needed.
+            test_helpers::test_lanes! {
+                fn log<const LANES: usize>() {
+                    test_helpers::test_binary_elementwise_approx(
+                        &core_simd::simd::Simd::<$scalar, LANES>::log,
+                        &$scalar::log,
+                        &|_, _| true,
+                        32,
+                    )
+                }
+            }
 
             test_helpers::test_lanes! {
                 fn fract<const LANES: usize>() {
@@ -70,5 +90,7 @@ macro_rules! impl_tests {
     }
 }
 
+#[cfg(target_has_reliable_f16_math)]
+impl_tests! { f16 }
 impl_tests! { f32 }
 impl_tests! { f64 }

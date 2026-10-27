@@ -60,14 +60,14 @@ cfg_select! {
         pub use loongarch::*;
     }
     target_arch = "s390x" => {
-        #[stable(feature = "stdarch_s390x_feature_detection", since = "CURRENT_RUSTC_VERSION")]
+        #[stable(feature = "stdarch_s390x_feature_detection", since = "1.93.0")]
         pub use s390x::*;
     }
     _ => {
         // Unimplemented architecture:
         #[doc(hidden)]
         pub(crate) enum Feature {
-            Null
+            Null,
         }
         #[doc(hidden)]
         #[unstable(feature = "stdarch_internal", issue = "none")]
@@ -75,9 +75,13 @@ cfg_select! {
 
         impl Feature {
             #[doc(hidden)]
-            pub(crate) fn from_str(_s: &str) -> Result<Feature, ()> { Err(()) }
+            pub(crate) fn from_str(_s: &str) -> Result<Feature, ()> {
+                Err(())
+            }
             #[doc(hidden)]
-            pub(crate) fn to_str(self) -> &'static str { "" }
+            pub(crate) fn to_str(self) -> &'static str {
+                ""
+            }
         }
     }
 }

@@ -1,20 +1,14 @@
 use core::any::Any;
-#[cfg(not(no_global_oom_handling))]
-use core::clone::TrivialClone;
 use core::error::Error;
+#[cfg(not(no_global_oom_handling))]
+use core::fmt;
 use core::mem;
 use core::pin::Pin;
-#[cfg(not(no_global_oom_handling))]
-use core::{fmt, ptr};
 
-use crate::alloc::Allocator;
+use crate::alloc::{Allocator, StaticAllocator};
 #[cfg(not(no_global_oom_handling))]
 use crate::borrow::Cow;
 use crate::boxed::Box;
-#[cfg(not(no_global_oom_handling))]
-use crate::raw_vec::RawVec;
-#[cfg(not(no_global_oom_handling))]
-use crate::str::from_boxed_utf8_unchecked;
 #[cfg(not(no_global_oom_handling))]
 use crate::string::String;
 #[cfg(not(no_global_oom_handling))]
@@ -44,7 +38,7 @@ impl<T> From<T> for Box<T> {
 #[stable(feature = "pin", since = "1.33.0")]
 impl<T: ?Sized, A: Allocator> From<Box<T, A>> for Pin<Box<T, A>>
 where
-    A: 'static,
+    A: StaticAllocator,
 {
     /// Converts a `Box<T>` into a `Pin<Box<T>>`. If `T` does not implement [`Unpin`], then
     /// `*boxed` will be pinned in memory and unable to be moved.
@@ -59,35 +53,6 @@ where
     /// constructing a (pinned) `Box` in a different way than with [`Box::new`].
     fn from(boxed: Box<T, A>) -> Self {
         Box::into_pin(boxed)
-    }
-}
-
-/// Specialization trait used for `From<&[T]>`.
-#[cfg(not(no_global_oom_handling))]
-trait BoxFromSlice<T> {
-    fn from_slice(slice: &[T]) -> Self;
-}
-
-#[cfg(not(no_global_oom_handling))]
-impl<T: Clone> BoxFromSlice<T> for Box<[T]> {
-    #[inline]
-    default fn from_slice(slice: &[T]) -> Self {
-        slice.to_vec().into_boxed_slice()
-    }
-}
-
-#[cfg(not(no_global_oom_handling))]
-impl<T: TrivialClone> BoxFromSlice<T> for Box<[T]> {
-    #[inline]
-    fn from_slice(slice: &[T]) -> Self {
-        let len = slice.len();
-        let buf = RawVec::with_capacity(len);
-        // SAFETY: since `T` implements `TrivialClone`, this is sound and
-        // equivalent to the above.
-        unsafe {
-            ptr::copy_nonoverlapping(slice.as_ptr(), buf.ptr(), len);
-            buf.into_box(slice.len()).assume_init()
-        }
     }
 }
 
@@ -109,7 +74,7 @@ impl<T: Clone> From<&[T]> for Box<[T]> {
     /// ```
     #[inline]
     fn from(slice: &[T]) -> Box<[T]> {
-        <Self as BoxFromSlice<T>>::from_slice(slice)
+        Box::clone_from_ref(slice)
     }
 }
 
@@ -170,7 +135,7 @@ impl From<&str> for Box<str> {
     /// ```
     #[inline]
     fn from(s: &str) -> Box<str> {
-        unsafe { from_boxed_utf8_unchecked(Box::from(s.as_bytes())) }
+        Box::clone_from_ref(s)
     }
 }
 
@@ -252,6 +217,7 @@ impl<A: Allocator> From<Box<str, A>> for Box<[u8], A> {
     #[inline]
     fn from(s: Box<str, A>) -> Self {
         let (raw, alloc) = Box::into_raw_with_allocator(s);
+        // SAFETY: All `str`s are also valid if reinterpreted as `[u8]`s.
         unsafe { Box::from_raw_in(raw as *mut [u8], alloc) }
     }
 }
@@ -291,8 +257,8 @@ unsafe fn boxed_slice_as_array_unchecked<T, A: Allocator, const N: usize>(
 }
 
 #[stable(feature = "boxed_slice_try_from", since = "1.43.0")]
-impl<T, const N: usize> TryFrom<Box<[T]>> for Box<[T; N]> {
-    type Error = Box<[T]>;
+impl<T, const N: usize, A: Allocator> TryFrom<Box<[T], A>> for Box<[T; N], A> {
+    type Error = Box<[T], A>;
 
     /// Attempts to convert a `Box<[T]>` into a `Box<[T; N]>`.
     ///
@@ -303,8 +269,9 @@ impl<T, const N: usize> TryFrom<Box<[T]>> for Box<[T; N]> {
     ///
     /// Returns the old `Box<[T]>` in the `Err` variant if
     /// `boxed_slice.len()` does not equal `N`.
-    fn try_from(boxed_slice: Box<[T]>) -> Result<Self, Self::Error> {
+    fn try_from(boxed_slice: Box<[T], A>) -> Result<Self, Self::Error> {
         if boxed_slice.len() == N {
+            // SAFETY: Checked length.
             Ok(unsafe { boxed_slice_as_array_unchecked(boxed_slice) })
         } else {
             Err(boxed_slice)
@@ -314,8 +281,8 @@ impl<T, const N: usize> TryFrom<Box<[T]>> for Box<[T; N]> {
 
 #[cfg(not(no_global_oom_handling))]
 #[stable(feature = "boxed_array_try_from_vec", since = "1.66.0")]
-impl<T, const N: usize> TryFrom<Vec<T>> for Box<[T; N]> {
-    type Error = Vec<T>;
+impl<T, const N: usize, A: Allocator> TryFrom<Vec<T, A>> for Box<[T; N], A> {
+    type Error = Vec<T, A>;
 
     /// Attempts to convert a `Vec<T>` into a `Box<[T; N]>`.
     ///
@@ -335,9 +302,10 @@ impl<T, const N: usize> TryFrom<Vec<T>> for Box<[T; N]> {
     /// let state: Box<[f32; 100]> = vec![1.0; 100].try_into().unwrap();
     /// assert_eq!(state.len(), 100);
     /// ```
-    fn try_from(vec: Vec<T>) -> Result<Self, Self::Error> {
+    fn try_from(vec: Vec<T, A>) -> Result<Self, Self::Error> {
         if vec.len() == N {
             let boxed_slice = vec.into_boxed_slice();
+            // SAFETY: Checked length.
             Ok(unsafe { boxed_slice_as_array_unchecked(boxed_slice) })
         } else {
             Err(vec)
@@ -366,6 +334,7 @@ impl<A: Allocator> Box<dyn Any, A> {
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn downcast<T: Any>(self) -> Result<Box<T, A>, Self> {
+        // SAFETY: Check ensures the type is correct.
         if self.is::<T>() { unsafe { Ok(self.downcast_unchecked::<T>()) } } else { Err(self) }
     }
 
@@ -397,6 +366,7 @@ impl<A: Allocator> Box<dyn Any, A> {
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
+        // SAFETY: Caller ensures the type is correct.
         unsafe {
             let (raw, alloc): (*mut dyn Any, _) = Box::into_raw_with_allocator(self);
             Box::from_raw_in(raw as *mut T, alloc)
@@ -425,6 +395,7 @@ impl<A: Allocator> Box<dyn Any + Send, A> {
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn downcast<T: Any>(self) -> Result<Box<T, A>, Self> {
+        // SAFETY: Check ensures the type is correct.
         if self.is::<T>() { unsafe { Ok(self.downcast_unchecked::<T>()) } } else { Err(self) }
     }
 
@@ -456,6 +427,7 @@ impl<A: Allocator> Box<dyn Any + Send, A> {
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
+        // SAFETY: Caller ensures the type is correct.
         unsafe {
             let (raw, alloc): (*mut (dyn Any + Send), _) = Box::into_raw_with_allocator(self);
             Box::from_raw_in(raw as *mut T, alloc)
@@ -484,6 +456,7 @@ impl<A: Allocator> Box<dyn Any + Send + Sync, A> {
     #[inline]
     #[stable(feature = "box_send_sync_any_downcast", since = "1.51.0")]
     pub fn downcast<T: Any>(self) -> Result<Box<T, A>, Self> {
+        // SAFETY: Check ensures the type is correct.
         if self.is::<T>() { unsafe { Ok(self.downcast_unchecked::<T>()) } } else { Err(self) }
     }
 
@@ -515,6 +488,7 @@ impl<A: Allocator> Box<dyn Any + Send + Sync, A> {
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
+        // SAFETY: Caller ensures the type is correct.
         unsafe {
             let (raw, alloc): (*mut (dyn Any + Send + Sync), _) =
                 Box::into_raw_with_allocator(self);
@@ -744,6 +718,7 @@ impl dyn Error {
     #[rustc_allow_incoherent_impl]
     pub fn downcast<T: Error + 'static>(self: Box<Self>) -> Result<Box<T>, Box<dyn Error>> {
         if self.is::<T>() {
+            // SAFETY: Check ensures the type is correct.
             unsafe {
                 let raw: *mut dyn Error = Box::into_raw(self);
                 Ok(Box::from_raw(raw as *mut T))
@@ -761,10 +736,9 @@ impl dyn Error + Send {
     #[rustc_allow_incoherent_impl]
     pub fn downcast<T: Error + 'static>(self: Box<Self>) -> Result<Box<T>, Box<dyn Error + Send>> {
         let err: Box<dyn Error> = self;
-        <dyn Error>::downcast(err).map_err(|s| unsafe {
-            // Reapply the `Send` marker.
-            mem::transmute::<Box<dyn Error>, Box<dyn Error + Send>>(s)
-        })
+        <dyn Error>::downcast(err)
+            // SAFETY: Reapplying the `Send` marker we already know to hold.
+            .map_err(|s| unsafe { mem::transmute::<Box<dyn Error>, Box<dyn Error + Send>>(s) })
     }
 }
 
@@ -775,8 +749,8 @@ impl dyn Error + Send + Sync {
     #[rustc_allow_incoherent_impl]
     pub fn downcast<T: Error + 'static>(self: Box<Self>) -> Result<Box<T>, Box<Self>> {
         let err: Box<dyn Error> = self;
+        // SAFETY: Reapplying the `Send` and `Sync` markers we already know to hold.
         <dyn Error>::downcast(err).map_err(|s| unsafe {
-            // Reapply the `Send + Sync` markers.
             mem::transmute::<Box<dyn Error>, Box<dyn Error + Send + Sync>>(s)
         })
     }
