@@ -1,0 +1,97 @@
+mod num {
+    impl usize {
+        fn is_multiple_of(self: usize, rhs: usize) -> bool;
+        //@ req true;
+        //@ ens result == if rhs == 0 { self == 0 } else { self % rhs == 0 };
+        //@ on_unwind_ens false;
+    }
+}
+
+mod hint {
+    fn select_unpredictable<T>(b: bool, true_val: T, false_val: T) -> T;
+    //@ req true;
+    //@ ens result == if b { true_val } else { false_val };
+    //@ on_unwind_ens false;
+}
+
+mod cmp {
+    mod PartialEq {
+        fn eq<T, U, 'a, 'b>(self: &'a T, other: &'b U) -> bool;
+        //@ req <&'b U>.own(?_t, other);
+        //@ ens true;
+        //@ on_unwind_ens false;
+    }
+}
+
+mod mem {
+    fn swap<T, 'a, 'b>(x: &'a mut T, y: &'b mut T);
+    //@ req *x |-> ?vx &*& *y |-> ?vy;
+    //@ ens *x |-> vy &*& *y |-> vx;
+    //@ on_unwind_ens false;
+}
+
+mod ptr {
+    fn metadata<T: ?Sized>(p: *const T) -> usize;
+    //@ req true;
+    //@ ens result == ptr_len(p) &*& 0 <= result &*& result <= usize::MAX;
+    //@ on_unwind_ens false;
+}
+
+mod slice {
+
+    /*@
+    pred SliceIndex_in_bounds<I, T>(idx: I, slice: *T);
+
+    lem usize_SliceIndex_in_bounds<T>(i: usize, slice: *[T]);
+        req i < slice.len();
+        ens SliceIndex_in_bounds::<usize, [T]>(i, slice);
+
+    fix GetDisjointMutIndex_in_bounds<I>(idx: I, len: usize) -> bool;
+    fix GetDisjointMutIndex_overlapping<I>(idx1: I, idx2: I) -> bool;
+    @*/
+
+    enum GetDisjointMutError {
+        IndexOutOfBounds,
+        OverlappingIndices,
+    }
+
+    trait SliceIndex<T> {
+        type Output;
+    }
+
+    mod SliceIndex {
+
+        unsafe fn get_unchecked<I: ?Sized, T: ?Sized>(self: I, slice: *const T) -> *const <I as std::slice::SliceIndex<T>>::Output;
+        //@ req thread_token(?t) &*& [_](<T>.share(?k, t, slice)) &*& std::slice::SliceIndex_in_bounds::<I, T>(self, slice);
+        //@ ens thread_token(t) &*& [_](< <I as std::slice::SliceIndex<T>>::Output>.share(k, t, result));
+        //@ on_unwind_ens false;
+
+        unsafe fn get_unchecked_mut<I: ?Sized, T: ?Sized>(self: I, slice: *mut T) -> *mut <I as std::slice::SliceIndex<T>>::Output;
+        //@ req thread_token(?t) &*& full_borrow(?k, <T>.full_borrow_content(t, slice)) &*& std::slice::SliceIndex_in_bounds::<I, T>(self, slice);
+        //@ ens thread_token(t) &*& full_borrow(k, < <I as std::slice::SliceIndex<T>>::Output>.full_borrow_content(t, result));
+        //@ on_unwind_ens false;
+
+    }
+
+    mod GetDisjointMutIndex {
+
+        fn is_in_bounds<I, 'a>(self: &'a I, len: usize) -> bool;
+        //@ req thread_token(?t) &*& [?f](*self |-> ?v);
+        //@ ens thread_token(t) &*& [f](*self |-> v) &*& result == std::slice::GetDisjointMutIndex_in_bounds::<I>(v, len);
+        //@ on_unwind_ens false;
+
+        fn is_overlapping<I, 'a, 'b>(self: &'a I, other: &'b I) -> bool;
+        //@ req thread_token(?t) &*& [?f1](*self |-> ?v1) &*& [?f2](*other |-> ?v2);
+        //@ ens thread_token(t) &*& [f1](*self |-> v1) &*& [f2](*other |-> v2) &*& result == std::slice::GetDisjointMutIndex_overlapping::<I>(v1, v2);
+        //@ on_unwind_ens false;
+
+    }
+
+    fn copy_from_slice_impl::len_mismatch_fail(dst_len: usize, src_len: usize) -> !;
+    //@ req true;
+    //@ ens false;
+    //@ on_unwind_ens false;
+
+}
+
+
