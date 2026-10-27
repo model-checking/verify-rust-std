@@ -168,6 +168,23 @@ impl<T> AsRef<[T]> for Iter<'_, T> {
     }
 }
 
+#[cfg(kani)]
+impl<T> Iter<'_, T> {
+    /// `(ptr, end_or_len)`, read without calls, for the contracts in
+    /// `str::pattern`.
+    pub(crate) fn kani_raw_parts(&self) -> (*const T, *const T) {
+        // SAFETY: `NonNull<T>` is a transparent `*const T`.
+        (unsafe { mem::transmute::<NonNull<T>, *const T>(self.ptr) }, self.end_or_len)
+    }
+
+    /// The same, for the loop invariants in `str::pattern`: a loop invariant
+    /// must not call a function that other code also calls.
+    pub(crate) fn kani_loop_raw_parts(&self) -> (*const T, *const T) {
+        // SAFETY: `NonNull<T>` is a transparent `*const T`.
+        (unsafe { mem::transmute::<NonNull<T>, *const T>(self.ptr) }, self.end_or_len)
+    }
+}
+
 #[unstable(feature = "ub_checks", issue = "none")]
 impl<T> Invariant for Iter<'_, T> {
     /// An iterator can be safely used if its pointer can be read for its current length.
