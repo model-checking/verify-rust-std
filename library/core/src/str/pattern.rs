@@ -257,6 +257,20 @@ impl kani::Arbitrary for SearchStep {
     }
 }
 
+/// A step returns a range in bounds of `haystack` and on char boundaries.
+#[cfg(kani)]
+fn kani_step_ok(haystack: &str, step: SearchStep) -> bool {
+    match step {
+        SearchStep::Match(a, b) | SearchStep::Reject(a, b) => {
+            a <= b
+                && b <= haystack.len()
+                && haystack.is_char_boundary(a)
+                && haystack.is_char_boundary(b)
+        }
+        SearchStep::Done => true,
+    }
+}
+
 /// A searcher for a string pattern.
 ///
 /// This trait provides methods for searching for non-overlapping
@@ -490,6 +504,18 @@ impl CharSearcher<'_> {
 }
 
 #[cfg(kani)]
+impl CharSearcher<'_> {
+    /// The fingers part of `C`, for the contracts of `next` / `next_back`: the
+    /// safety of a step depends on nothing else.
+    fn kani_ok(&self) -> bool {
+        self.finger <= self.finger_back
+            && self.finger_back <= self.haystack.len()
+            && self.haystack.is_char_boundary(self.finger)
+            && self.haystack.is_char_boundary(self.finger_back)
+    }
+}
+
+#[cfg(kani)]
 impl SearcherLoopContract for CharSearcher<'_> {
     /// `finger <= finger_back <= haystack.len()`, both on char boundaries
     /// (`str::len` and `str::is_char_boundary` spelled out).
@@ -525,6 +551,9 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
         self.haystack
     }
     #[inline]
+    #[cfg_attr(kani, kani::modifies(&self.finger))]
+    #[safety::requires(self.kani_ok())]
+    #[safety::ensures(|step| self.kani_ok() && kani_step_ok(self.haystack, *step))]
     fn next(&mut self) -> SearchStep {
         let old_finger = self.finger;
         // SAFETY: 1-4 guarantee safety of `get_unchecked`
@@ -602,6 +631,9 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
 
 unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
     #[inline]
+    #[cfg_attr(kani, kani::modifies(&self.finger_back))]
+    #[safety::requires(self.kani_ok())]
+    #[safety::ensures(|step| self.kani_ok() && kani_step_ok(self.haystack, *step))]
     fn next_back(&mut self) -> SearchStep {
         let old_finger = self.finger_back;
         // SAFETY: see the comment for next() above
@@ -822,7 +854,7 @@ macro_rules! multi_char_eq_inv {
         let len: usize = crate::intrinsics::ptr_metadata(s.haystack as *const str);
         let f = s.char_indices.front_offset;
         let (start, end) = s.char_indices.iter.iter.$parts();
-        let b = (end as usize).wrapping_sub(p as usize);
+        let b = crate::intrinsics::wrapping_sub(end as usize, p as usize);
         // SAFETY: both reads are guarded by `< len`.
         let f_ok = f == 0
             || f == len
@@ -847,19 +879,6 @@ impl<C: MultiCharEq> MultiCharEqSearcher<'_, C> {
     /// `C`, for the contracts of `next` / `next_back`.
     fn kani_ok(&self) -> bool {
         multi_char_eq_inv!(self, kani_raw_parts)
-    }
-
-    /// A step returns a range in bounds and on char boundaries.
-    fn kani_step_ok(&self, step: SearchStep) -> bool {
-        match step {
-            SearchStep::Match(a, b) | SearchStep::Reject(a, b) => {
-                a <= b
-                    && b <= self.haystack.len()
-                    && self.haystack.is_char_boundary(a)
-                    && self.haystack.is_char_boundary(b)
-            }
-            SearchStep::Done => true,
-        }
     }
 }
 
@@ -927,7 +946,7 @@ unsafe impl<'a, C: MultiCharEq> Searcher<'a> for MultiCharEqSearcher<'a, C> {
         )
     )]
     #[safety::requires(self.kani_ok())]
-    #[safety::ensures(|step| self.kani_ok() && self.kani_step_ok(*step))]
+    #[safety::ensures(|step| self.kani_ok() && kani_step_ok(self.haystack, *step))]
     fn next(&mut self) -> SearchStep {
         let s = &mut self.char_indices;
         // Compare lengths of the internal byte slice iterator
@@ -956,7 +975,7 @@ unsafe impl<'a, C: MultiCharEq> ReverseSearcher<'a> for MultiCharEqSearcher<'a, 
         )
     )]
     #[safety::requires(self.kani_ok())]
-    #[safety::ensures(|step| self.kani_ok() && self.kani_step_ok(*step))]
+    #[safety::ensures(|step| self.kani_ok() && kani_step_ok(self.haystack, *step))]
     fn next_back(&mut self) -> SearchStep {
         let s = &mut self.char_indices;
         // Compare lengths of the internal byte slice iterator
@@ -2549,17 +2568,14 @@ pub mod verify_char_searcher {
         Some(ch)
     }
 
-    /// Model of `next_code_point_reverse`: the local rule on the (up to four)
-    /// bytes the decode can read, then the upstream body.
+    /// Model of `next_code_point_reverse`: the local rule at the last byte,
+    /// where the decode starts, then the upstream body.
     unsafe fn model_next_code_point_reverse<'a, I>(bytes: &mut I) -> Option<u32>
     where
         I: DoubleEndedIterator<Item = &'a u8>,
     {
         if let Some((_, end)) = GhostRange::ghost_range(&*bytes) {
             kani::assume(end < 1 || utf8_ok_at(end - 1));
-            kani::assume(end < 2 || utf8_ok_at(end - 2));
-            kani::assume(end < 3 || utf8_ok_at(end - 3));
-            kani::assume(end < 4 || utf8_ok_at(end - 4));
         }
         // ---- upstream body, `utf8_first_byte` / `utf8_acc_cont_byte` inlined ----
         let w = match *bytes.next_back()? {
@@ -2666,10 +2682,7 @@ pub mod verify_char_searcher {
         let mut utf8 = [0; 4];
         let n = s.needle.encode_utf8(&mut utf8).len();
         let e = &s.utf8_encoded;
-        s.finger <= s.finger_back
-            && s.finger_back <= s.haystack.len()
-            && s.haystack.is_char_boundary(s.finger)
-            && s.haystack.is_char_boundary(s.finger_back)
+        s.kani_ok()
             && s.utf8_size() == n
             && e[0] == utf8[0]
             && (n < 2 || e[1] == utf8[1])
@@ -2720,26 +2733,24 @@ pub mod verify_char_searcher {
         assert!(char_searcher_inv(&s));
     }
 
-    #[kani::proof]
+    #[kani::proof_for_contract(<CharSearcher as Searcher>::next)]
     #[kani::stub(crate::str::validations::next_code_point, model_next_code_point)]
     fn check_char_searcher_next() {
         let mut s = any_char_searcher(any_haystack());
         let r = step_range(s.next());
-        check_result(&s, r);
         kani::cover(r.is_some_and(|(_, b)| b > 4096), "a step far into the haystack");
     }
 
-    #[kani::proof]
+    #[kani::proof_for_contract(<CharSearcher as ReverseSearcher>::next_back)]
     #[kani::stub(crate::str::validations::next_code_point_reverse, model_next_code_point_reverse)]
     fn check_char_searcher_next_back() {
         let mut s = any_char_searcher(any_haystack());
         let r = step_range(s.next_back());
-        check_result(&s, r);
         kani::cover(r.is_some_and(|(a, _)| a > 4096), "a step far into the haystack");
     }
 
     #[kani::proof]
-    #[kani::stub(crate::str::validations::next_code_point, model_next_code_point)]
+    #[kani::stub_verified(<CharSearcher as Searcher>::next)]
     fn check_char_searcher_next_reject() {
         let mut s = any_char_searcher(any_haystack());
         let r = s.next_reject();
@@ -2749,7 +2760,7 @@ pub mod verify_char_searcher {
     }
 
     #[kani::proof]
-    #[kani::stub(crate::str::validations::next_code_point_reverse, model_next_code_point_reverse)]
+    #[kani::stub_verified(<CharSearcher as ReverseSearcher>::next_back)]
     fn check_char_searcher_next_reject_back() {
         let mut s = any_char_searcher(any_haystack());
         let r = s.next_reject_back();
@@ -2914,7 +2925,6 @@ pub mod verify_char_searcher {
                     let $set: [char; 2] = kani::any();
                     let mut s = $wrapper(any_multi_char_eq_searcher(any_haystack(), $eq));
                     let r = step_range(s.next());
-                    check_multi_char_eq_result(&s.0, r);
                     kani::cover(r.is_some_and(|(_, b)| b > 4096), "a step far into the haystack");
                 }
 
@@ -2928,7 +2938,6 @@ pub mod verify_char_searcher {
                     let $set: [char; 2] = kani::any();
                     let mut s = $wrapper(any_multi_char_eq_searcher(any_haystack(), $eq));
                     let r = step_range(s.next_back());
-                    check_multi_char_eq_result(&s.0, r);
                     kani::cover(r.is_some_and(|(a, _)| a > 4096), "a step far into the haystack");
                 }
 
