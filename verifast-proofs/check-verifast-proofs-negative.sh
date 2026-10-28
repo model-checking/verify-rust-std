@@ -12,3 +12,10 @@ cd alloc
     cd ..
   cd ..
 cd ..
+cd core
+  cd slice
+    cd mod.rs-negative
+      bash verify.sh
+    cd ..
+  cd ..
+cd ..

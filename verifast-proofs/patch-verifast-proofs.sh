@@ -22,3 +22,9 @@ popd
 pushd alloc/raw_vec/mod.rs
   patch_proof
 popd
+pushd core/slice/mod.rs
+  patch_proof
+popd
+pushd core/slice/mod.rs-negative
+  patch_proof
+popd

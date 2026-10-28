@@ -1366,6 +1366,9 @@ impl<T> [T] {
     #[cfg_attr(rapx, rapx::verify)]
     #[cfg_attr(rapx, rapx::requires(ValidNum(N, "[1,)")))]
     #[cfg_attr(rapx, rapx::requires(ValidNum(len(self) % N == 0)))]
+    // Safety precondition from the documentation: `N != 0` and the length is a multiple of `N`.
+    #[requires(N != 0 && self.len().is_multiple_of(N))]
+    #[ensures(|chunks: &&[[T; N]]| chunks.len() == self.len() / N && chunks.as_ptr() as *const T == self.as_ptr())]
     pub const unsafe fn as_chunks_unchecked<#[rustc_panics_when_zero] const N: usize>(
         &self,
     ) -> &[[T; N]] {
@@ -1533,6 +1536,9 @@ impl<T> [T] {
     #[cfg_attr(rapx, rapx::verify)]
     #[cfg_attr(rapx, rapx::requires(ValidNum(N, "[1,)")))]
     #[cfg_attr(rapx, rapx::requires(ValidNum(len(self) % N == 0)))]
+    // Safety precondition from the documentation: `N != 0` and the length is a multiple of `N`.
+    #[requires(N != 0 && self.len().is_multiple_of(N))]
+    #[ensures(|chunks: &&mut [[T; N]]| chunks.len() == old(self.len()) / N)]
     pub const unsafe fn as_chunks_unchecked_mut<#[rustc_panics_when_zero] const N: usize>(
         &mut self,
     ) -> &mut [[T; N]] {
@@ -5283,6 +5289,9 @@ impl<T> [T] {
     #[cfg_attr(rapx, rapx::verify)]
     #[cfg_attr(rapx, rapx::requires(InBound(self, indices)))]
     #[cfg_attr(rapx, rapx::requires(NonOverlap(indices)))]
+    // Safety precondition from the documentation: all indices in bounds and pairwise disjoint,
+    // i.e. exactly what `get_disjoint_mut` checks before calling this function.
+    #[requires(get_disjoint_check_valid(&indices, self.len()).is_ok())]
     pub unsafe fn get_disjoint_unchecked_mut<I, const N: usize>(
         &mut self,
         indices: [I; N],
@@ -6065,5 +6074,205 @@ mod verify {
     fn check_reverse() {
         let mut a: [u8; 100] = kani::any();
         a.reverse();
+    }
+
+    // Const-generic functions. The VeriFast proof in verifast-proofs/core/slice verifies these
+    // through runtime-`n` transcriptions (VeriFast cannot yet attach specifications to
+    // `<const N>` functions); the harnesses below run the exact shipped bodies, bounded in slice
+    // length and monomorphized over a few element types and chunk sizes.
+
+    const CG_ARR_SIZE: usize = 12;
+
+    macro_rules! proof_of_contract_for_as_chunks_unchecked {
+        ($harness:ident, $t:ty, $n:expr) => {
+            #[kani::proof_for_contract(<[$t]>::as_chunks_unchecked)]
+            fn $harness() {
+                let arr: [$t; CG_ARR_SIZE] = kani::any();
+                let s = kani::slice::any_slice_of_array(&arr);
+                let chunks = unsafe { s.as_chunks_unchecked::<$n>() };
+                assert_eq!(chunks.len(), s.len() / $n);
+            }
+        };
+    }
+    proof_of_contract_for_as_chunks_unchecked!(check_as_chunks_unchecked_u8_1, u8, 1);
+    proof_of_contract_for_as_chunks_unchecked!(check_as_chunks_unchecked_u8_3, u8, 3);
+    proof_of_contract_for_as_chunks_unchecked!(check_as_chunks_unchecked_u32_2, u32, 2);
+    proof_of_contract_for_as_chunks_unchecked!(check_as_chunks_unchecked_unit_4, (), 4);
+
+    macro_rules! proof_of_contract_for_as_chunks_unchecked_mut {
+        ($harness:ident, $t:ty, $n:expr) => {
+            #[kani::proof_for_contract(<[$t]>::as_chunks_unchecked_mut)]
+            fn $harness() {
+                let mut arr: [$t; CG_ARR_SIZE] = kani::any();
+                let s = kani::slice::any_slice_of_array_mut(&mut arr);
+                let len = s.len();
+                let chunks = unsafe { s.as_chunks_unchecked_mut::<$n>() };
+                assert_eq!(chunks.len(), len / $n);
+            }
+        };
+    }
+    proof_of_contract_for_as_chunks_unchecked_mut!(check_as_chunks_unchecked_mut_u8_1, u8, 1);
+    proof_of_contract_for_as_chunks_unchecked_mut!(check_as_chunks_unchecked_mut_u8_3, u8, 3);
+    proof_of_contract_for_as_chunks_unchecked_mut!(check_as_chunks_unchecked_mut_u32_2, u32, 2);
+    proof_of_contract_for_as_chunks_unchecked_mut!(check_as_chunks_unchecked_mut_unit_4, (), 4);
+
+    #[kani::proof_for_contract(<[u8]>::get_disjoint_unchecked_mut)]
+    fn check_get_disjoint_unchecked_mut_usize() {
+        let mut arr: [u8; CG_ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut arr);
+        let indices: [usize; 3] = kani::any();
+        let [a, b, c] = unsafe { s.get_disjoint_unchecked_mut(indices) };
+        *a = 1;
+        *b = 2;
+        *c = 3;
+    }
+
+    #[kani::proof_for_contract(<[u32]>::get_disjoint_unchecked_mut)]
+    fn check_get_disjoint_unchecked_mut_range() {
+        let mut arr: [u32; CG_ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut arr);
+        let indices: [Range<usize>; 2] = [kani::any()..kani::any(), kani::any()..kani::any()];
+        let [a, b] = unsafe { s.get_disjoint_unchecked_mut(indices) };
+        if let Some(x) = a.first_mut() {
+            *x = 1;
+        }
+        if let Some(y) = b.first_mut() {
+            *y = 2;
+        }
+    }
+
+    macro_rules! check_chunk_accessors {
+        ($harness:ident, $t:ty, $n:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                let mut arr: [$t; CG_ARR_SIZE] = kani::any();
+                let s = kani::slice::any_slice_of_array(&arr);
+                let len = s.len();
+                match s.first_chunk::<$n>() {
+                    Some(c) => assert!(len >= $n && c.as_ptr() == s.as_ptr()),
+                    None => assert!(len < $n),
+                }
+                match s.last_chunk::<$n>() {
+                    Some(c) => {
+                        assert!(len >= $n && c.as_ptr() == unsafe { s.as_ptr().add(len - $n) })
+                    }
+                    None => assert!(len < $n),
+                }
+                match s.split_first_chunk::<$n>() {
+                    Some((c, rest)) => assert!(c.len() + rest.len() == len),
+                    None => assert!(len < $n),
+                }
+                match s.split_last_chunk::<$n>() {
+                    Some((rest, c)) => assert!(rest.len() + c.len() == len),
+                    None => assert!(len < $n),
+                }
+                let (chunks, rem) = s.as_chunks::<$n>();
+                assert!(chunks.len() == len / $n && rem.len() == len % $n);
+                let (rem, chunks) = s.as_rchunks::<$n>();
+                assert!(chunks.len() == len / $n && rem.len() == len % $n);
+
+                let s = kani::slice::any_slice_of_array_mut(&mut arr);
+                let len = s.len();
+                match s.first_chunk_mut::<$n>() {
+                    Some(c) => assert!(len >= $n && c.len() == $n),
+                    None => assert!(len < $n),
+                }
+                match s.last_chunk_mut::<$n>() {
+                    Some(c) => assert!(len >= $n && c.len() == $n),
+                    None => assert!(len < $n),
+                }
+                match s.split_first_chunk_mut::<$n>() {
+                    Some((c, rest)) => assert!(c.len() + rest.len() == len),
+                    None => assert!(len < $n),
+                }
+                match s.split_last_chunk_mut::<$n>() {
+                    Some((rest, c)) => assert!(rest.len() + c.len() == len),
+                    None => assert!(len < $n),
+                }
+                let (chunks, rem) = s.as_chunks_mut::<$n>();
+                assert!(chunks.len() == len / $n && rem.len() == len % $n);
+            }
+        };
+    }
+    check_chunk_accessors!(check_chunk_accessors_u8_1, u8, 1);
+    check_chunk_accessors!(check_chunk_accessors_u8_3, u8, 3);
+    check_chunk_accessors!(check_chunk_accessors_u32_2, u32, 2);
+    check_chunk_accessors!(check_chunk_accessors_unit_5, (), 5);
+
+    macro_rules! check_as_flattened {
+        ($harness:ident, $t:ty, $n:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                let mut arr: [[$t; $n]; 4] = kani::any();
+                let s = kani::slice::any_slice_of_array(&arr);
+                let flat = s.as_flattened();
+                assert!(flat.len() == s.len() * $n);
+                let s = kani::slice::any_slice_of_array_mut(&mut arr);
+                let len = s.len();
+                let flat = s.as_flattened_mut();
+                assert!(flat.len() == len * $n);
+            }
+        };
+    }
+    check_as_flattened!(check_as_flattened_u8_3, u8, 3);
+    check_as_flattened!(check_as_flattened_u32_2, u32, 2);
+    check_as_flattened!(check_as_flattened_u8_0, u8, 0);
+
+    #[kani::proof]
+    fn check_as_simd_u8_4() {
+        let mut arr: [u8; CG_ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array(&arr);
+        let (prefix, middle, suffix) = s.as_simd::<4>();
+        assert!(prefix.len() + middle.len() * 4 + suffix.len() == s.len());
+        let s = kani::slice::any_slice_of_array_mut(&mut arr);
+        let len = s.len();
+        let (prefix, middle, suffix) = s.as_simd_mut::<4>();
+        assert!(prefix.len() + middle.len() * 4 + suffix.len() == len);
+    }
+
+    #[kani::proof]
+    fn check_get_disjoint_mut_usize() {
+        let mut arr: [u8; CG_ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut arr);
+        let len = s.len();
+        let indices: [usize; 3] = kani::any();
+        let valid = get_disjoint_check_valid(&indices, len).is_ok();
+        match s.get_disjoint_mut(indices) {
+            Ok([a, b, c]) => {
+                assert!(valid);
+                *a = 1;
+                *b = 2;
+                *c = 3;
+            }
+            Err(_) => assert!(!valid),
+        }
+    }
+
+    #[kani::proof]
+    fn check_get_disjoint_mut_range() {
+        let mut arr: [u8; CG_ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut arr);
+        let len = s.len();
+        let indices: [Range<usize>; 2] = [kani::any()..kani::any(), kani::any()..kani::any()];
+        let valid = get_disjoint_check_valid(&indices, len).is_ok();
+        match s.get_disjoint_mut(indices) {
+            Ok([a, b]) => {
+                assert!(valid);
+                assert!(a.len() + b.len() <= len);
+            }
+            Err(_) => assert!(!valid),
+        }
+    }
+
+    #[kani::proof]
+    fn check_get_disjoint_check_valid() {
+        let len: usize = kani::any();
+        kani::assume(len <= CG_ARR_SIZE);
+        let indices: [usize; 3] = kani::any();
+        let r = get_disjoint_check_valid(&indices, len);
+        let in_bounds = indices.iter().all(|i| *i < len);
+        let disjoint =
+            indices[0] != indices[1] && indices[0] != indices[2] && indices[1] != indices[2];
+        assert!(r.is_ok() == (in_bounds && disjoint));
     }
 }
