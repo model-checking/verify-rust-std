@@ -206,6 +206,7 @@ lem close_slice_pair_own<'a, T>(t: thread_id_t, v: (&'a [T], &'a [T]))
     req [_](<[T]>.share('a, t, v.0)) &*& [_](<[T]>.share('a, t, v.1));
     ens <(&'a [T], &'a [T])>.own(t, v);
 {
+    // https://github.com/verifast/verifast/issues/1049
     assume(false);
 }
 
@@ -213,6 +214,7 @@ lem close_mut_slice_pair_own<'a, T>(t: thread_id_t, v: (&'a mut [T], &'a mut [T]
     req full_borrow('a, <[T]>.full_borrow_content(t, v.0)) &*& full_borrow('a, <[T]>.full_borrow_content(t, v.1));
     ens <(&'a mut [T], &'a mut [T])>.own(t, v);
 {
+    // https://github.com/verifast/verifast/issues/1049
     assume(false);
 }
 
@@ -220,6 +222,7 @@ lem close_Range_own<Idx>(t: thread_id_t, v: std::ops::Range<Idx>)
     req (<Idx>.own)(t, v.start) &*& (<Idx>.own)(t, v.end);
     ens <std::ops::Range<Idx>>.own(t, v);
 {
+    // https://github.com/verifast/verifast/issues/1049
     assume(false);
 }
 
@@ -245,6 +248,7 @@ lem slice_share_inv<T>(k: lifetime_t, t: thread_id_t, s: *[T])
         pointer_within_limits(strip_pointer_metadata(s as pointer) as *T) == true &*&
         pointer_within_limits((strip_pointer_metadata(s as pointer) as *T) + s.len()) == true;
 {
+    // https://github.com/verifast/verifast/issues/1050
     assume(false);
 }
 
@@ -298,6 +302,7 @@ lem close_slice_triple_own<'a, T, U>(t: thread_id_t, v: (&'a [T], &'a [U], &'a [
     req [_](<[T]>.share('a, t, v.0)) &*& [_](<[U]>.share('a, t, v.1)) &*& [_](<[T]>.share('a, t, v.2));
     ens <(&'a [T], &'a [U], &'a [T])>.own(t, v);
 {
+    // https://github.com/verifast/verifast/issues/1049
     assume(false);
 }
 
@@ -305,6 +310,7 @@ lem close_mut_slice_triple_own<'a, T, U>(t: thread_id_t, v: (&'a mut [T], &'a mu
     req full_borrow('a, <[T]>.full_borrow_content(t, v.0)) &*& full_borrow('a, <[U]>.full_borrow_content(t, v.1)) &*& full_borrow('a, <[T]>.full_borrow_content(t, v.2));
     ens <(&'a mut [T], &'a mut [U], &'a mut [T])>.own(t, v);
 {
+    // https://github.com/verifast/verifast/issues/1049
     assume(false);
 }
 
@@ -366,6 +372,7 @@ lem mul_assoc(a: i32, b: i32, c: i32)
     req true;
     ens a * (b * c) == (a * b) * c;
 {
+    // https://github.com/verifast/verifast/issues/1052
     assume(false);
 }
 
@@ -429,6 +436,7 @@ lem open_shared_slice_copy<T>(k: lifetime_t, t: thread_id_t, src: *[T])
     ens [q / 2]lifetime_token(k) &*& [?f](strip_pointer_metadata(src as pointer) as *T)[..src.len()] |-> ?elems &*&
         foreach(elems, own::<T>(t)) &*& shared_slice_read_token::<T>(k, src, f, elems);
 {
+    // https://github.com/verifast/verifast/issues/1051
     assume(false);
 }
 
@@ -436,6 +444,7 @@ lem close_shared_slice_copy<T>(k: lifetime_t, src: *[T])
     req shared_slice_read_token::<T>(k, src, ?f, ?elems) &*& [f](strip_pointer_metadata(src as pointer) as *T)[..src.len()] |-> elems &*& [?q]lifetime_token(k);
     ens [2 * q]lifetime_token(k);
 {
+    // https://github.com/verifast/verifast/issues/1051
     assume(false);
 }
 
@@ -443,6 +452,7 @@ lem copy_elem_own_dup<T>(t: thread_id_t, v: T)
     req (<T>.own)(t, v) &*& is_Copy::<T>() == true;
     ens (<T>.own)(t, v) &*& (<T>.own)(t, v);
 {
+    // https://github.com/verifast/verifast/issues/1051
     assume(false);
 }
 
@@ -634,6 +644,7 @@ lem share_slice_prefix_as_chunk<T, Chunk>(k: lifetime_t, t: thread_id_t, s: *[T]
     req [_](<[T]>.share(k, t, s)) &*& is_array_of::<T, Chunk>(n) == true &*& n <= s.len();
     ens [_](<Chunk>.share(k, t, (strip_pointer_metadata(s as pointer) as *T) as *Chunk));
 {
+    // https://github.com/verifast/verifast/pull/1048
     assume(false);
 }
 
@@ -641,6 +652,7 @@ lem full_borrow_slice_prefix_as_chunk<T, Chunk>(k: lifetime_t, t: thread_id_t, s
     req full_borrow(k, <[T]>.full_borrow_content(t, s)) &*& is_array_of::<T, Chunk>(n) == true &*& n <= s.len();
     ens full_borrow(k, <Chunk>.full_borrow_content(t, (strip_pointer_metadata(s as pointer) as *T) as *Chunk));
 {
+    // https://github.com/verifast/verifast/pull/1048
     assume(false);
 }
 
@@ -651,6 +663,7 @@ lem share_slice_as_chunks<T, Chunk>(k: lifetime_t, t: thread_id_t, s: *[T], n: u
         pointer_within_limits((strip_pointer_metadata(s as pointer) as *T) as *Chunk) == true &*&
         pointer_within_limits(((strip_pointer_metadata(s as pointer) as *T) as *Chunk) + new_len) == true;
 {
+    // https://github.com/verifast/verifast/pull/1048
     assume(false);
 }
 
@@ -661,6 +674,7 @@ lem full_borrow_slice_as_chunks<T, Chunk>(k: lifetime_t, t: thread_id_t, s: *[T]
         pointer_within_limits((strip_pointer_metadata(s as pointer) as *T) as *Chunk) == true &*&
         pointer_within_limits(((strip_pointer_metadata(s as pointer) as *T) as *Chunk) + new_len) == true;
 {
+    // https://github.com/verifast/verifast/pull/1048
     assume(false);
 }
 
@@ -671,6 +685,7 @@ lem share_chunks_as_flattened<Elem, Chunk>(k: lifetime_t, t: thread_id_t, s: *[C
         pointer_within_limits((strip_pointer_metadata(s as pointer) as *Chunk) as *Elem) == true &*&
         pointer_within_limits(((strip_pointer_metadata(s as pointer) as *Chunk) as *Elem) + len) == true;
 {
+    // https://github.com/verifast/verifast/pull/1048
     assume(false);
 }
 
@@ -681,6 +696,7 @@ lem full_borrow_chunks_as_flattened<Elem, Chunk>(k: lifetime_t, t: thread_id_t, 
         pointer_within_limits((strip_pointer_metadata(s as pointer) as *Chunk) as *Elem) == true &*&
         pointer_within_limits(((strip_pointer_metadata(s as pointer) as *Chunk) as *Elem) + len) == true;
 {
+    // https://github.com/verifast/verifast/pull/1048
     assume(false);
 }
 
@@ -709,6 +725,7 @@ const unsafe fn copy_witness__VeriFast_wrapper<T: Copy>()
 //@ req true;
 //@ ens is_Copy::<T>() == true;
 //@ on_unwind_ens false;
+// https://github.com/verifast/verifast/issues/1051
 //@ assume_correct
 {
 }
@@ -786,6 +803,7 @@ const unsafe fn slice_index_mut__VeriFast_wrapper<T>(s: &mut [T], i: usize) -> &
 //@ req 0 <= i &*& i < s.len();
 //@ ens result == (strip_pointer_metadata(s as pointer) as *T) + i;
 //@ on_unwind_ens false;
+// https://github.com/verifast/verifast/issues/1056
 //@ assume_correct
 {
     &mut s[i]
@@ -795,6 +813,7 @@ unsafe fn slice_range__VeriFast_wrapper<R: RangeBounds<usize>>(src: R, len: usiz
 //@ req thread_token(?t) &*& (<R>.own)(t, src);
 //@ ens thread_token(t) &*& 0 <= result.start &*& result.start <= result.end &*& result.end <= len;
 //@ on_unwind_ens false;
+// https://github.com/verifast/verifast/issues/1056
 //@ assume_correct
 {
     slice::range(src, ..len)
@@ -806,6 +825,7 @@ where
 //@ req thread_token(?t) &*& [?q]lifetime_token(?a);
 //@ ens thread_token(t) &*& [q]lifetime_token(a) &*& [_](<[T]>.share(a, t, result));
 //@ on_unwind_ens false;
+// https://github.com/verifast/verifast/issues/1056
 //@ assume_correct
 {
     s
@@ -817,6 +837,7 @@ where
 //@ req thread_token(?t) &*& [?q]lifetime_token(?a);
 //@ ens thread_token(t) &*& [q]lifetime_token(a) &*& full_borrow(a, <[T]>.full_borrow_content(t, result));
 //@ on_unwind_ens false;
+// https://github.com/verifast/verifast/issues/1056
 //@ assume_correct
 {
     return s;
@@ -832,6 +853,7 @@ where
 //@ req thread_token(?t) &*& *same_bucket |-> ?sb0 &*& (<F>.own)(t, sb0) &*& *x |-> ?vx &*& (<T>.own)(t, vx) &*& *p |-> ?vp &*& (<T>.own)(t, vp);
 //@ ens thread_token(t) &*& *same_bucket |-> ?sb1 &*& (<F>.own)(t, sb1) &*& *x |-> ?vx1 &*& (<T>.own)(t, vx1) &*& *p |-> ?vp1 &*& (<T>.own)(t, vp1);
 //@ on_unwind_ens false;
+// https://github.com/verifast/verifast/issues/1056
 //@ assume_correct
 {
     same_bucket(x, p)
@@ -6879,6 +6901,7 @@ const unsafe fn checked_mul_or_panic__VeriFast_wrapper(a: usize, b: usize) -> us
 //@ req true;
 //@ ens result == a * b &*& a * b <= usize::MAX;
 //@ on_unwind_ens false;
+// https://github.com/verifast/verifast/issues/1056
 //@ assume_correct
 {
     match a.checked_mul(b) {
@@ -7549,6 +7572,7 @@ unsafe fn slice_index_shared__VeriFast_wrapper<T>(s: &[T], i: usize) -> &T
 //@ req [?f]((strip_pointer_metadata(s as pointer) as *T)[..s.len()] |-> ?elems) &*& 0 <= i &*& i < s.len();
 //@ ens [f]((strip_pointer_metadata(s as pointer) as *T)[..s.len()] |-> elems) &*& [f](*result |-> nth(i, elems)) &*& result == (strip_pointer_metadata(s as pointer) as *T) + i;
 //@ on_unwind_ens false;
+// https://github.com/verifast/verifast/issues/1056
 //@ assume_correct
 {
     &s[i]
@@ -7558,6 +7582,7 @@ unsafe fn clone_disjoint_index__VeriFast_wrapper<I: GetDisjointMutIndex>(s: &[I]
 //@ req thread_token(?t) &*& [?f]((strip_pointer_metadata(s as pointer) as *I)[..s.len()] |-> ?elems) &*& 0 <= i &*& i < s.len();
 //@ ens thread_token(t) &*& [f]((strip_pointer_metadata(s as pointer) as *I)[..s.len()] |-> elems) &*& result == nth(i, elems);
 //@ on_unwind_ens false;
+// https://github.com/verifast/verifast/issues/1056
 //@ assume_correct
 {
     unsafe { s.get_unchecked(i).clone() }

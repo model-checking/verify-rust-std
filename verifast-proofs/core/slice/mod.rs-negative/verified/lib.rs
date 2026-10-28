@@ -221,6 +221,7 @@ pub mod ptr {
     //@ req pointer_within_limits(p) == true &*& a > 0;
     //@ ens 0 <= result &*& result <= usize::MAX &*& (result == usize::MAX || ((p + result) as usize) % a == 0);
     //@ on_unwind_ens false;
+    // https://github.com/verifast/verifast/issues/1056
     //@ assume_correct
     {
         p.align_offset(a)
@@ -243,6 +244,7 @@ pub mod ptr {
     //@ req true;
     //@ ens result == mk_slice::<T>(data, len);
     //@ on_unwind_ens false;
+    // https://github.com/verifast/verifast/issues/1056
     //@ assume_correct
     {
         core::ptr::slice_from_raw_parts(data, len)
@@ -253,6 +255,7 @@ pub mod ptr {
     //@ req true;
     //@ ens result == mk_slice::<T>(data, len);
     //@ on_unwind_ens false;
+    // https://github.com/verifast/verifast/issues/1056
     //@ assume_correct
     {
         core::ptr::slice_from_raw_parts_mut(data, len)
@@ -267,6 +270,7 @@ pub mod ptr {
     //@ req *x |-> ?vx &*& opt_pointsto::<T>(?same, x, y, vx, ?vy);
     //@ ens *x |-> vy &*& if same { true } else { *y |-> vx };
     //@ on_unwind_ens false;
+    // https://github.com/verifast/verifast/issues/1056
     //@ assume_correct
     {
         unsafe { core::ptr::swap(x, y) }
@@ -277,6 +281,7 @@ pub mod ptr {
     //@ req x[..count] |-> ?vs1 &*& y[..count] |-> ?vs2;
     //@ ens x[..count] |-> vs2 &*& y[..count] |-> vs1;
     //@ on_unwind_ens false;
+    // https://github.com/verifast/verifast/issues/1056
     //@ assume_correct
     {
         unsafe { core::ptr::swap_nonoverlapping(x, y, count) }
@@ -430,6 +435,7 @@ where
 //@ req thread_token(?t) &*& [_](<[T]>.share(?k, t, slice)) &*& *f |-> ?f0 &*& (<F>.own)(t, f0) &*& index < slice.len();
 //@ ens thread_token(t) &*& *f |-> ?f1 &*& (<F>.own)(t, f1);
 //@ on_unwind_ens false;
+// https://github.com/verifast/verifast/issues/1056
 //@ assume_correct
 {
     f(unsafe { slice.get_unchecked(index) })

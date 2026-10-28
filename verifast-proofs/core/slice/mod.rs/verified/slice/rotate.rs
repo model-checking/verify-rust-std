@@ -7,6 +7,7 @@ const unsafe fn uninit_buf__VeriFast_wrapper<BufType, T>() -> MaybeUninit<(BufTy
 //@ req true;
 //@ ens true;
 //@ on_unwind_ens false;
+// https://github.com/verifast/verifast/issues/1056
 //@ assume_correct
 {
     MaybeUninit::<(BufType, [T; 0])>::uninit()
@@ -18,6 +19,7 @@ const unsafe fn uninit_buf_as_mut_ptr__VeriFast_wrapper<BufType, T>(
 //@ req *rawarray |-> ?v;
 //@ ens *rawarray |-> v &*& result == rawarray as *mut (BufType, [T; 0]);
 //@ on_unwind_ens false;
+// https://github.com/verifast/verifast/issues/1056
 //@ assume_correct
 {
     rawarray.as_mut_ptr()
@@ -27,6 +29,7 @@ const unsafe fn ptr_replace__VeriFast_wrapper<T>(dst: *mut T, src: T) -> T
 //@ req *dst |-> ?v;
 //@ ens *dst |-> src &*& result == v;
 //@ on_unwind_ens false;
+// https://github.com/verifast/verifast/issues/1056
 //@ assume_correct
 {
     unsafe { dst.replace(src) }
@@ -54,6 +57,7 @@ lem rawarray_to_buf<T>(rawarray: *std::mem::MaybeUninit<([usize; 32], [T; 0])>, 
     req *rawarray |-> ?_ &*& buf == rawarray as *T &*& 0 <= k &*& 0 < std::mem::size_of::<T>() &*& k * std::mem::size_of::<T>() <= std::mem::size_of(typeid([usize; 32]));
     ens buf[..k] |-> _ &*& rawarray_rest::<T>(rawarray, k);
 {
+    // https://github.com/verifast/verifast/issues/1053
     assume(false);
 }
 
@@ -61,6 +65,7 @@ lem buf_to_rawarray<T>(rawarray: *std::mem::MaybeUninit<([usize; 32], [T; 0])>, 
     req buf[..k] |-> _ &*& rawarray_rest::<T>(rawarray, k);
     ens *rawarray |-> ?_;
 {
+    // https://github.com/verifast/verifast/issues/1053
     assume(false);
 }
 @*/
