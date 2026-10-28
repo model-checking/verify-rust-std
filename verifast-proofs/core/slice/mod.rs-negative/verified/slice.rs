@@ -7428,24 +7428,237 @@ pred regions_owned<T, I>(t: thread_id_t, p: *T, idxs: list<I>) =
         cons(idx, idxs0) => (p + region_start::<I>(idx))[..region_len::<I>(idx)] |-> ?es &*& foreach(es, own::<T>(t)) &*& regions_owned::<T, I>(t, p, idxs0)
     };
 
-// The elements of `p[..len]` that lie outside the regions of `idxs`.
-pred slice_rest_owned<T, I>(t: thread_id_t, p: *T, len: usize, idxs: list<I>);
+// `i` lies in one of the regions of `idxs`.
+fix in_some_region<I>(i: usize, idxs: list<I>) -> bool {
+    match idxs {
+        nil => false,
+        cons(idx, idxs0) => (region_start::<I>(idx) <= i && i < region_start::<I>(idx) + region_len::<I>(idx)) || in_some_region::<I>(i, idxs0),
+    }
+}
 
-// Separation-logic bookkeeping: pairwise-disjoint, in-bounds regions can be carved out of the element
-// array and put back. Axiomatized because a proof needs a representation of an array with an
-// unordered set of holes; each step is `array_split`/`foreach_split` at a region boundary.
+// The elements `p[i..len]` that lie outside the regions of `idxs`, one by one.
+pred rest_elems<T, I>(t: thread_id_t, p: *T, len: usize, idxs: list<I>, i: usize) =
+    pointer_within_limits(p + i) == true &*&
+    if len <= i {
+        true
+    } else {
+        (if in_some_region::<I>(i, idxs) { true } else { *(p + i) |-> ?v &*& own::<T>(t)(v) }) &*&
+        rest_elems::<T, I>(t, p, len, idxs, i + 1)
+    };
+
+// The rest-elements, together with the facts that justify putting the regions back (they are pure,
+// so keeping them here saves the callers of `uncarve_regions` from re-establishing them).
+pred slice_rest_owned<T, I>(t: thread_id_t, p: *T, len: usize, idxs: list<I>) =
+    rest_elems::<T, I>(t, p, len, idxs, 0) &*& 0 <= len &*& all_in_bounds::<I>(idxs, len) == true &*& all_pairwise_disjoint::<I>(idxs) == true;
+
+lem array_to_rest_elems<T, I>(t: thread_id_t, p: *T, len: usize, i: usize)
+    req (p + i)[..len - i] |-> ?es &*& foreach(es, own::<T>(t)) &*& 0 <= i &*& i <= len;
+    ens rest_elems::<T, I>(t, p, len, nil, i);
+{
+    open array(p + i, len - i, es);
+    if len <= i {
+        open foreach(es, own::<T>(t));
+        close rest_elems::<T, I>(t, p, len, nil, i);
+    } else {
+        open foreach(es, own::<T>(t));
+        array_to_rest_elems::<T, I>(t, p, len, i + 1);
+        close rest_elems::<T, I>(t, p, len, nil, i);
+    }
+}
+
+lem rest_elems_to_array<T, I>(t: thread_id_t, p: *T, len: usize, i: usize)
+    req rest_elems::<T, I>(t, p, len, nil, i) &*& 0 <= i &*& i <= len;
+    ens (p + i)[..len - i] |-> ?es &*& foreach(es, own::<T>(t));
+{
+    open rest_elems::<T, I>(t, p, len, nil, i);
+    if len <= i {
+        close array(p + i, 0, nil);
+        close foreach(nil, own::<T>(t));
+    } else {
+        rest_elems_to_array::<T, I>(t, p, len, i + 1);
+        assert (p + i + 1)[..len - i - 1] |-> ?es0;
+        assert *(p + i) |-> ?v;
+        close array(p + i, len - i, cons(v, es0));
+        close foreach(cons(v, es0), own::<T>(t));
+    }
+}
+
+// An index of `h`'s region lies in no region of a list that `h` does not overlap.
+lem not_in_regions_of_disjoint<I>(h: I, tl: list<I>, j: usize)
+    req none_overlapping_after::<I>(h, tl) == true &*& region_start::<I>(h) <= j &*& j < region_start::<I>(h) + region_len::<I>(h);
+    ens in_some_region::<I>(j, tl) == false;
+{
+    match tl {
+        nil => {}
+        cons(x, tl0) => {
+            GetDisjointMutIndex_not_overlapping_disjoint::<I>(x, h);
+            not_in_regions_of_disjoint::<I>(h, tl0, j);
+        }
+    }
+}
+
+// Beyond the end of `h`'s region, adding `h` to the hole list changes nothing.
+lem rest_elems_cons_outside<T, I>(t: thread_id_t, p: *T, len: usize, tl: list<I>, h: I, i: usize)
+    req rest_elems::<T, I>(t, p, len, tl, i) &*& region_start::<I>(h) + region_len::<I>(h) <= i;
+    ens rest_elems::<T, I>(t, p, len, cons(h, tl), i);
+{
+    open rest_elems::<T, I>(t, p, len, tl, i);
+    if len <= i {
+    } else {
+        rest_elems_cons_outside::<T, I>(t, p, len, tl, h, i + 1);
+    }
+    close rest_elems::<T, I>(t, p, len, cons(h, tl), i);
+}
+
+lem rest_elems_uncons_outside<T, I>(t: thread_id_t, p: *T, len: usize, tl: list<I>, h: I, i: usize)
+    req rest_elems::<T, I>(t, p, len, cons(h, tl), i) &*& region_start::<I>(h) + region_len::<I>(h) <= i;
+    ens rest_elems::<T, I>(t, p, len, tl, i);
+{
+    open rest_elems::<T, I>(t, p, len, cons(h, tl), i);
+    if len <= i {
+    } else {
+        rest_elems_uncons_outside::<T, I>(t, p, len, tl, h, i + 1);
+    }
+    close rest_elems::<T, I>(t, p, len, tl, i);
+}
+
+// Carve the part of `h`'s region at or after `i` (with `start <= i <= end`) out of the
+// rest-elements of `tl`.
+lem carve_one_in<T, I>(t: thread_id_t, p: *T, len: usize, tl: list<I>, h: I, i: usize)
+    req rest_elems::<T, I>(t, p, len, tl, i) &*& none_overlapping_after::<I>(h, tl) == true &*&
+        region_start::<I>(h) <= i &*& i <= region_start::<I>(h) + region_len::<I>(h) &*& region_start::<I>(h) + region_len::<I>(h) <= len;
+    ens rest_elems::<T, I>(t, p, len, cons(h, tl), i) &*&
+        (p + i)[..region_start::<I>(h) + region_len::<I>(h) - i] |-> ?es &*& foreach(es, own::<T>(t));
+{
+    let s = region_start::<I>(h);
+    let e = s + region_len::<I>(h);
+    if i == e {
+        open rest_elems::<T, I>(t, p, len, tl, i);
+        close rest_elems::<T, I>(t, p, len, tl, i);
+        rest_elems_cons_outside::<T, I>(t, p, len, tl, h, i);
+        close array(p + i, 0, nil);
+        close foreach(nil, own::<T>(t));
+    } else {
+        open rest_elems::<T, I>(t, p, len, tl, i);
+        not_in_regions_of_disjoint::<I>(h, tl, i);
+        carve_one_in::<T, I>(t, p, len, tl, h, i + 1);
+        assert *(p + i) |-> ?v;
+        assert (p + i + 1)[..e - i - 1] |-> ?es0;
+        close array(p + i, e - i, cons(v, es0));
+        close foreach(cons(v, es0), own::<T>(t));
+        close rest_elems::<T, I>(t, p, len, cons(h, tl), i);
+    }
+}
+
+// Same, starting before the region (`i <= start`).
+lem carve_one<T, I>(t: thread_id_t, p: *T, len: usize, tl: list<I>, h: I, i: usize)
+    req rest_elems::<T, I>(t, p, len, tl, i) &*& none_overlapping_after::<I>(h, tl) == true &*&
+        0 <= i &*& i <= region_start::<I>(h) &*& 0 <= region_len::<I>(h) &*& region_start::<I>(h) + region_len::<I>(h) <= len;
+    ens rest_elems::<T, I>(t, p, len, cons(h, tl), i) &*&
+        (p + region_start::<I>(h))[..region_len::<I>(h)] |-> ?es &*& foreach(es, own::<T>(t));
+{
+    let s = region_start::<I>(h);
+    if i == s {
+        carve_one_in::<T, I>(t, p, len, tl, h, i);
+    } else {
+        open rest_elems::<T, I>(t, p, len, tl, i);
+        carve_one::<T, I>(t, p, len, tl, h, i + 1);
+        close rest_elems::<T, I>(t, p, len, cons(h, tl), i);
+    }
+}
+
+// Put the part of `h`'s region at or after `i` (`start <= i <= end`) back. Elements that another
+// region of `tl` also claims, or that lie beyond `len`, are surplus and are leaked.
+lem uncarve_one_in<T, I>(t: thread_id_t, p: *T, len: usize, tl: list<I>, h: I, i: usize)
+    req rest_elems::<T, I>(t, p, len, cons(h, tl), i) &*& region_start::<I>(h) <= i &*& i <= region_start::<I>(h) + region_len::<I>(h) &*&
+        (p + i)[..region_start::<I>(h) + region_len::<I>(h) - i] |-> ?es &*& foreach(es, own::<T>(t));
+    ens rest_elems::<T, I>(t, p, len, tl, i);
+{
+    let s = region_start::<I>(h);
+    let e = s + region_len::<I>(h);
+    if i == e {
+        leak array(_, _, _);
+        leak foreach(_, _);
+        rest_elems_uncons_outside::<T, I>(t, p, len, tl, h, i);
+    } else {
+        open rest_elems::<T, I>(t, p, len, cons(h, tl), i);
+        if len <= i {
+            leak array(_, _, _);
+            leak foreach(_, _);
+            close rest_elems::<T, I>(t, p, len, tl, i);
+        } else {
+            open array(p + i, e - i, es);
+            open foreach(es, own::<T>(t));
+            if in_some_region::<I>(i, tl) {
+                leak *(p + i) |-> _;
+                leak own::<T>(t)(_);
+            }
+            uncarve_one_in::<T, I>(t, p, len, tl, h, i + 1);
+            close rest_elems::<T, I>(t, p, len, tl, i);
+        }
+    }
+}
+
+// Same, starting before the region (`i <= start`).
+lem uncarve_one<T, I>(t: thread_id_t, p: *T, len: usize, tl: list<I>, h: I, i: usize)
+    req rest_elems::<T, I>(t, p, len, cons(h, tl), i) &*& 0 <= i &*& i <= region_start::<I>(h) &*&
+        (p + region_start::<I>(h))[..region_len::<I>(h)] |-> ?es &*& foreach(es, own::<T>(t));
+    ens rest_elems::<T, I>(t, p, len, tl, i);
+{
+    let s = region_start::<I>(h);
+    if i == s {
+        uncarve_one_in::<T, I>(t, p, len, tl, h, i);
+    } else {
+        open rest_elems::<T, I>(t, p, len, cons(h, tl), i);
+        if len <= i {
+            leak array(_, _, _);
+            leak foreach(_, _);
+            close rest_elems::<T, I>(t, p, len, tl, i);
+        } else {
+            uncarve_one::<T, I>(t, p, len, tl, h, i + 1);
+            close rest_elems::<T, I>(t, p, len, tl, i);
+        }
+    }
+}
+
 lem carve_regions<T, I>(t: thread_id_t, p: *T, len: usize, idxs: list<I>)
     req p[..len] |-> ?es &*& foreach(es, own::<T>(t)) &*& all_in_bounds::<I>(idxs, len) == true &*& all_pairwise_disjoint::<I>(idxs) == true;
     ens regions_owned::<T, I>(t, p, idxs) &*& slice_rest_owned::<T, I>(t, p, len, idxs);
 {
-    assume(false);
+    match idxs {
+        nil => {
+            array_to_rest_elems::<T, I>(t, p, len, 0);
+            close regions_owned::<T, I>(t, p, nil);
+            close slice_rest_owned::<T, I>(t, p, len, nil);
+        }
+        cons(h, tl) => {
+            carve_regions::<T, I>(t, p, len, tl);
+            open slice_rest_owned::<T, I>(t, p, len, tl);
+            GetDisjointMutIndex_in_bounds_region::<I>(h, len);
+            carve_one::<T, I>(t, p, len, tl, h, 0);
+            close regions_owned::<T, I>(t, p, cons(h, tl));
+            close slice_rest_owned::<T, I>(t, p, len, cons(h, tl));
+        }
+    }
 }
 
 lem uncarve_regions<T, I>(t: thread_id_t, p: *T, len: usize, idxs: list<I>)
     req regions_owned::<T, I>(t, p, idxs) &*& slice_rest_owned::<T, I>(t, p, len, idxs);
     ens p[..len] |-> ?es &*& foreach(es, own::<T>(t));
 {
-    assume(false);
+    open regions_owned::<T, I>(t, p, idxs);
+    open slice_rest_owned::<T, I>(t, p, len, idxs);
+    match idxs {
+        nil => {
+            rest_elems_to_array::<T, I>(t, p, len, 0);
+        }
+        cons(h, tl) => {
+            GetDisjointMutIndex_in_bounds_region::<I>(h, len);
+            uncarve_one::<T, I>(t, p, len, tl, h, 0);
+            close slice_rest_owned::<T, I>(t, p, len, tl);
+            uncarve_regions::<T, I>(t, p, len, tl);
+        }
+    }
 }
 
 // `<Output>.full_borrow_content` of the reference `get_unchecked_mut` returns for `idx` is exactly
