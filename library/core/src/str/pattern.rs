@@ -89,6 +89,19 @@ impl<T: ?Sized> SearcherLoopContract for T {
     }
 }
 
+/// `str::is_char_boundary` of `$i` for the `$len` bytes at `$p`, with casts and
+/// intrinsics only, for the type invariants that loop invariants call.
+#[cfg(kani)]
+macro_rules! kani_boundary {
+    ($p:expr, $len:expr, $i:expr) => {
+        $i == 0
+            || $i == $len
+            // SAFETY: the read is guarded by `< len`.
+            || ($i < $len
+                && unsafe { *crate::intrinsics::arith_offset($p, $i as isize) } as i8 >= -0x40)
+    };
+}
+
 // Pattern
 
 /// A string pattern.
@@ -524,16 +537,7 @@ impl SearcherLoopContract for CharSearcher<'_> {
         let p = self.haystack as *const str as *const u8;
         let len: usize = crate::intrinsics::ptr_metadata(self.haystack as *const str);
         let (f, fb) = (self.finger, self.finger_back);
-        // SAFETY: both reads are guarded by `< len`.
-        let f_ok = f == 0
-            || f == len
-            || (f < len
-                && unsafe { *crate::intrinsics::arith_offset(p, f as isize) } as i8 >= -0x40);
-        let fb_ok = fb == 0
-            || fb == len
-            || (fb < len
-                && unsafe { *crate::intrinsics::arith_offset(p, fb as isize) } as i8 >= -0x40);
-        f <= fb && fb <= len && f_ok && fb_ok
+        f <= fb && fb <= len && kani_boundary!(p, len, f) && kani_boundary!(p, len, fb)
     }
     fn kani_fwd_cursor(&self) -> *const [u8] {
         crate::ptr::slice_from_raw_parts(&raw const self.finger as *const u8, size_of::<usize>())
@@ -856,22 +860,13 @@ macro_rules! multi_char_eq_inv {
         let f = s.char_indices.front_offset;
         let (start, end) = s.char_indices.iter.iter.$parts();
         let b = crate::intrinsics::wrapping_sub(end as usize, p as usize);
-        // SAFETY: both reads are guarded by `< len`.
-        let f_ok = f == 0
-            || f == len
-            || (f < len
-                && unsafe { *crate::intrinsics::arith_offset(p, f as isize) } as i8 >= -0x40);
-        let b_ok = b == 0
-            || b == len
-            || (b < len
-                && unsafe { *crate::intrinsics::arith_offset(p, b as isize) } as i8 >= -0x40);
         // SAFETY: `arith_offset` is a wrapping offset, never UB.
         f <= b
             && b <= len
             && start == unsafe { crate::intrinsics::arith_offset(p, f as isize) }
             && end == unsafe { crate::intrinsics::arith_offset(p, b as isize) }
-            && f_ok
-            && b_ok
+            && kani_boundary!(p, len, f)
+            && kani_boundary!(p, len, b)
     }};
 }
 
@@ -2397,7 +2392,8 @@ pub mod verify {
 ///   move of the iterator where upstream moves it per byte. Where upstream
 ///   reads a byte with `unwrap_unchecked`, the models assert that it is there,
 ///   so a decode that does not start on a char boundary is still caught.
-///   `check_*_model_matches_upstream` shows the models only add assumptions.
+///   `check_decoder_models_match_upstream` shows the models only add
+///   assumptions.
 /// * `<slice::Iter<T>>::len` (assumption 1): the upstream body on the raw
 ///   pointers, which keeps its UB checks.
 ///   `check_iter_len_model_matches_upstream` shows it returns what upstream
@@ -2534,7 +2530,10 @@ pub mod verify_char_searcher {
             if let Some((start, _)) = ghost_range(s) {
                 kani::assume(utf8_ok_at(start));
             }
-            let x = *s.first()?;
+            if s.is_empty() {
+                return None;
+            }
+            let x = s[0];
             let n = if x < 128 {
                 1
             } else if x < 0xE0 {
@@ -2566,28 +2565,34 @@ pub mod verify_char_searcher {
             if let Some((_, end)) = ghost_range(s) {
                 kani::assume(end < 1 || utf8_ok_at(end - 1));
             }
-            let w = *s.last()?;
-            if w < 128 {
-                *self = s[..len - 1].iter();
-                return Some(w as u32);
+            if len == 0 {
+                return None;
             }
-            assert!(len >= 2);
-            let z = s[len - 2];
-            let n = if !utf8_is_cont_byte(z) {
-                2
+            let w = s[len - 1];
+            let n = if w < 128 {
+                1
             } else {
-                assert!(len >= 3);
-                if !utf8_is_cont_byte(s[len - 3]) {
-                    3
+                assert!(len >= 2);
+                if !utf8_is_cont_byte(s[len - 2]) {
+                    2
                 } else {
-                    assert!(len >= 4);
-                    4
+                    assert!(len >= 3);
+                    if !utf8_is_cont_byte(s[len - 3]) {
+                        3
+                    } else {
+                        assert!(len >= 4);
+                        4
+                    }
                 }
             };
+            let z = if n >= 2 { s[len - 2] } else { 0 };
             let y = if n >= 3 { s[len - 3] } else { 0 };
             let x = if n >= 4 { s[len - 4] } else { 0 };
             *self = s[..len - n].iter();
             // ---- upstream arithmetic, `utf8_first_byte` / `utf8_acc_cont_byte` inlined ----
+            if n == 1 {
+                return Some(w as u32);
+            }
             let mut ch = match n {
                 2 => (z & (0x7F >> 2)) as u32,
                 3 => (y & (0x7F >> 3)) as u32,
@@ -2633,7 +2638,8 @@ pub mod verify_char_searcher {
         }
     }
 
-    /// Model of `memchr` (assumption 1): some index of `x` in `text`, or `None`.
+    /// Model of `memchr` and `memrchr` (assumption 1): some index of `x` in
+    /// `text`, or `None`.
     fn model_memchr(x: u8, text: &[u8]) -> Option<usize> {
         if kani::any() {
             return None;
@@ -2641,11 +2647,6 @@ pub mod verify_char_searcher {
         let i: usize = kani::any();
         kani::assume(i < text.len() && text[i] == x);
         Some(i)
-    }
-
-    /// Model of `memrchr` (assumption 1): some index of `x` in `text`, or `None`.
-    fn model_memrchr(x: u8, text: &[u8]) -> Option<usize> {
-        model_memchr(x, text)
     }
 
     /// Model of the byte-wise slice equality `compare_bytes(lhs, rhs, size) == 0`
@@ -2673,35 +2674,31 @@ pub mod verify_char_searcher {
         kani::any()
     }
 
+    /// `len` elements from CBMC's `malloc` model (dangling if `len == 0`).
+    fn any_alloc<T>(len: usize) -> *const T {
+        if len == 0 {
+            return crate::ptr::NonNull::dangling().as_ptr();
+        }
+        // SAFETY: CBMC's `malloc` model.
+        let p = unsafe { malloc(len * size_of::<T>()) } as *const T;
+        kani::assume(!p.is_null());
+        p
+    }
+
     /// A character set of symbolic length. Its contents are never read (see
     /// `model_contains`).
     fn any_char_slice() -> &'static [char] {
         let len: usize = kani::any();
         kani::assume(len <= MAX_ALLOCATION_BYTES / 4);
-        let p: *const char = if len == 0 {
-            crate::ptr::NonNull::<char>::dangling().as_ptr()
-        } else {
-            // SAFETY: CBMC's `malloc` model.
-            let p = unsafe { malloc(len * 4) } as *const char;
-            kani::assume(!p.is_null());
-            p
-        };
-        // SAFETY: `p` is valid for `len` chars; they are never read.
-        unsafe { crate::slice::from_raw_parts(p, len) }
+        // SAFETY: valid for `len` chars; they are never read.
+        unsafe { crate::slice::from_raw_parts(any_alloc(len), len) }
     }
 
     /// Symbolic length, arbitrary contents: no validity assumption at all.
     fn any_haystack() -> &'static str {
         let len: usize = kani::any();
         kani::assume(len <= MAX_ALLOCATION_BYTES);
-        let p: *const u8 = if len == 0 {
-            crate::ptr::NonNull::<u8>::dangling().as_ptr()
-        } else {
-            // SAFETY: CBMC's `malloc` model.
-            let p = unsafe { malloc(len) };
-            kani::assume(!p.is_null());
-            p
-        };
+        let p = any_alloc(len);
         unsafe { GHOST = (p, len) };
         // SAFETY: `p` is valid for `len` reads; UTF-8 validity is imported
         // where it is relied on (see the module documentation).
@@ -2740,13 +2737,13 @@ pub mod verify_char_searcher {
     }
 
     /// The returned range is in bounds and on char boundaries (safety
-    /// property 2), and `C` still holds.
-    fn check_result(s: &CharSearcher<'_>, range: Option<(usize, usize)>) {
+    /// property 2), and `C` still holds (`inv`).
+    fn check_result(haystack: &str, range: Option<(usize, usize)>, inv: bool) {
         if let Some((a, b)) = range {
-            assert!(a <= b && b <= s.haystack.len());
-            assert!(s.haystack.is_char_boundary(a) && s.haystack.is_char_boundary(b));
+            assert!(a <= b && b <= haystack.len());
+            assert!(haystack.is_char_boundary(a) && haystack.is_char_boundary(b));
         }
-        assert!(char_searcher_inv(s));
+        assert!(inv);
     }
 
     fn step_range(step: SearchStep) -> Option<(usize, usize)> {
@@ -2788,7 +2785,7 @@ pub mod verify_char_searcher {
     fn check_char_searcher_next_reject() {
         let mut s = any_char_searcher(any_haystack());
         let r = s.next_reject();
-        check_result(&s, r);
+        check_result(s.haystack, r, char_searcher_inv(&s));
         kani::cover(r.is_some_and(|(_, b)| b > 4096), "a reject far into the haystack");
         kani::cover(r.is_none(), "searched to the end");
     }
@@ -2798,7 +2795,7 @@ pub mod verify_char_searcher {
     fn check_char_searcher_next_reject_back() {
         let mut s = any_char_searcher(any_haystack());
         let r = s.next_reject_back();
-        check_result(&s, r);
+        check_result(s.haystack, r, char_searcher_inv(&s));
         kani::cover(r.is_some_and(|(a, _)| a > 4096), "a reject far into the haystack");
         kani::cover(r.is_none(), "searched to the start");
     }
@@ -2816,13 +2813,13 @@ pub mod verify_char_searcher {
             // The match starts at a lead byte: its sequence ends on a boundary.
             kani::assume(utf8_ok_at(a));
         }
-        check_result(&s, r);
+        check_result(s.haystack, r, char_searcher_inv(&s));
         kani::cover(r.is_some_and(|(_, b)| b > 4096), "a match far into the haystack");
         kani::cover(r.is_none(), "searched to the end");
     }
 
     #[kani::proof]
-    #[kani::stub(crate::slice::memchr::memrchr, model_memrchr)]
+    #[kani::stub(crate::slice::memchr::memrchr, model_memchr)]
     #[kani::stub(
         <u8 as crate::slice::cmp::SlicePartialEq<u8>>::equal_same_length,
         model_equal_same_length
@@ -2834,7 +2831,7 @@ pub mod verify_char_searcher {
             // The match starts at a lead byte: its sequence ends on a boundary.
             kani::assume(utf8_ok_at(a));
         }
-        check_result(&s, r);
+        check_result(s.haystack, r, char_searcher_inv(&s));
         kani::cover(r.is_some_and(|(a, _)| a > 4096), "a match far into the haystack");
         kani::cover(r.is_none(), "searched to the start");
     }
@@ -2843,7 +2840,7 @@ pub mod verify_char_searcher {
     /// input they return what upstream returns and consume the same bytes.
     #[kani::proof]
     #[kani::unwind(6)]
-    fn check_next_code_point_model_matches_upstream() {
+    fn check_decoder_models_match_upstream() {
         let bytes: [u8; 4] = kani::any();
         let n: usize = kani::any_where(|n| *n >= 1 && *n <= 4);
         let s = &bytes[..n];
@@ -2853,17 +2850,6 @@ pub mod verify_char_searcher {
         let ra = unsafe { model_next_code_point(&mut a) };
         let rb = unsafe { crate::str::validations::next_code_point(&mut b) };
         assert!(ra == rb && a.as_slice().len() == b.as_slice().len());
-        kani::cover(n == 4 && ra.is_some(), "a 4-byte character");
-    }
-
-    #[kani::proof]
-    #[kani::unwind(6)]
-    fn check_next_code_point_reverse_model_matches_upstream() {
-        let bytes: [u8; 4] = kani::any();
-        let n: usize = kani::any_where(|n| *n >= 1 && *n <= 4);
-        let s = &bytes[..n];
-        kani::assume(crate::str::from_utf8(s).is_ok());
-        unsafe { GHOST = (s.as_ptr(), n) };
         let (mut a, mut b) = (s.iter(), s.iter());
         let ra = unsafe { model_next_code_point_reverse(&mut a) };
         let rb = unsafe { crate::str::validations::next_code_point_reverse(&mut b) };
@@ -2926,18 +2912,6 @@ pub mod verify_char_searcher {
         MultiCharEqSearcher { char_eq, haystack, char_indices }
     }
 
-    /// As `check_result`, for `MultiCharEqSearcher`.
-    fn check_multi_char_eq_result<C: MultiCharEq>(
-        s: &MultiCharEqSearcher<'_, C>,
-        range: Option<(usize, usize)>,
-    ) {
-        if let Some((a, b)) = range {
-            assert!(a <= b && b <= s.haystack.len());
-            assert!(s.haystack.is_char_boundary(a) && s.haystack.is_char_boundary(b));
-        }
-        assert!(s.kani_ok());
-    }
-
     /// The proofs for one `MultiCharEq` instance, through the searcher that
     /// wraps it: creation establishes `C` (criterion 1); `next` / `next_back`
     /// meet their contracts from any state that satisfies `C` (criteria 2 and
@@ -2989,7 +2963,7 @@ pub mod verify_char_searcher {
                     let $set: [char; 2] = kani::any();
                     let mut s = $wrapper(any_multi_char_eq_searcher(any_haystack(), $eq));
                     let r = s.next_match();
-                    check_multi_char_eq_result(&s.0, r);
+                    check_result(s.0.haystack, r, s.0.kani_ok());
                     kani::cover(r.is_some_and(|(_, b)| b > 4096), "a match far into the haystack");
                     kani::cover(r.is_none(), "searched to the end");
                 }
@@ -3000,7 +2974,7 @@ pub mod verify_char_searcher {
                     let $set: [char; 2] = kani::any();
                     let mut s = $wrapper(any_multi_char_eq_searcher(any_haystack(), $eq));
                     let r = s.next_reject();
-                    check_multi_char_eq_result(&s.0, r);
+                    check_result(s.0.haystack, r, s.0.kani_ok());
                     kani::cover(r.is_some_and(|(_, b)| b > 4096), "a reject far into the haystack");
                     kani::cover(r.is_none(), "searched to the end");
                 }
@@ -3011,7 +2985,7 @@ pub mod verify_char_searcher {
                     let $set: [char; 2] = kani::any();
                     let mut s = $wrapper(any_multi_char_eq_searcher(any_haystack(), $eq));
                     let r = s.next_match_back();
-                    check_multi_char_eq_result(&s.0, r);
+                    check_result(s.0.haystack, r, s.0.kani_ok());
                     kani::cover(r.is_some_and(|(a, _)| a > 4096), "a match far into the haystack");
                     kani::cover(r.is_none(), "searched to the start");
                 }
@@ -3022,7 +2996,7 @@ pub mod verify_char_searcher {
                     let $set: [char; 2] = kani::any();
                     let mut s = $wrapper(any_multi_char_eq_searcher(any_haystack(), $eq));
                     let r = s.next_reject_back();
-                    check_multi_char_eq_result(&s.0, r);
+                    check_result(s.0.haystack, r, s.0.kani_ok());
                     kani::cover(r.is_some_and(|(a, _)| a > 4096), "a reject far into the haystack");
                     kani::cover(r.is_none(), "searched to the start");
                 }
