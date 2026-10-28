@@ -2393,10 +2393,15 @@ pub mod verify {
 /// # Models
 ///
 /// * `next_code_point{,_reverse}` (assumption 2): assume the local rule where
-///   the decode starts, then the upstream body with its helpers inlined. The
-///   `unwrap_unchecked`s stay checked, so a decode that does not start on a
-///   char boundary is still caught. `check_*_model_matches_upstream` shows the
-///   models only add assumptions.
+///   the decode starts, then the upstream arithmetic on the bytes, with one
+///   move of the iterator where upstream moves it per byte. Where upstream
+///   reads a byte with `unwrap_unchecked`, the models assert that it is there,
+///   so a decode that does not start on a char boundary is still caught.
+///   `check_*_model_matches_upstream` shows the models only add assumptions.
+/// * `<slice::Iter<T>>::len` (assumption 1): the upstream body on the raw
+///   pointers, which keeps its UB checks.
+///   `check_iter_len_model_matches_upstream` shows it returns what upstream
+///   returns.
 /// * `memchr` / `memrchr` (assumption 1): return a matching index, or `None`.
 ///   This allows more behaviors than the real functions (`None` while a match
 ///   exists, a match that is not the first/last), which is sound for safety.
@@ -2493,89 +2498,139 @@ pub mod verify_char_searcher {
         }
     }
 
-    /// The range of the ghost haystack a byte iterator still covers.
-    trait GhostRange {
-        fn ghost_range(&self) -> Option<(usize, usize)>;
-    }
-    impl<I: ?Sized> GhostRange for I {
-        default fn ghost_range(&self) -> Option<(usize, usize)> {
-            None
-        }
-    }
-    impl GhostRange for Iter<'_, u8> {
-        fn ghost_range(&self) -> Option<(usize, usize)> {
-            let rest = self.as_slice();
-            let (base, len) = unsafe { GHOST };
-            let start = (rest.as_ptr() as usize).wrapping_sub(base as usize);
-            let end = start.wrapping_add(rest.len());
-            (start <= end && end <= len).then_some((start, end))
-        }
+    /// The range of the ghost haystack that `s` covers.
+    fn ghost_range(s: &[u8]) -> Option<(usize, usize)> {
+        let (base, len) = unsafe { GHOST };
+        let start = (s.as_ptr() as usize).wrapping_sub(base as usize);
+        let end = start.wrapping_add(s.len());
+        (start <= end && end <= len).then_some((start, end))
     }
 
     const CONT_MASK: u8 = 0b0011_1111;
 
-    /// Model of `next_code_point`: the local rule where the decode starts,
-    /// then the upstream body.
-    unsafe fn model_next_code_point<'a, I: Iterator<Item = &'a u8>>(bytes: &mut I) -> Option<u32> {
-        // `&*bytes`: `bytes.ghost_range()` would pick the blanket impl for `&mut I`
-        if let Some((start, _)) = GhostRange::ghost_range(&*bytes) {
-            kani::assume(utf8_ok_at(start));
+    /// The decoder models, for the byte iterator of a `Chars`: the only one the
+    /// searchers decode from.
+    trait Decode {
+        fn decode(&mut self) -> Option<u32>;
+        fn decode_back(&mut self) -> Option<u32>;
+    }
+    impl<I: ?Sized> Decode for I {
+        default fn decode(&mut self) -> Option<u32> {
+            panic!("the decoder models only decode from `slice::Iter<u8>`")
         }
-        // ---- upstream body, `utf8_first_byte` / `utf8_acc_cont_byte` inlined ----
-        let x = *bytes.next()?;
-        if x < 128 {
-            return Some(x as u32);
+        default fn decode_back(&mut self) -> Option<u32> {
+            panic!("the decoder models only decode from `slice::Iter<u8>`")
         }
-        let init = (x & (0x7F >> 2)) as u32;
-        // SAFETY: as upstream.
-        let y = unsafe { *bytes.next().unwrap_unchecked() };
-        let mut ch = (init << 6) | (y & CONT_MASK) as u32;
-        if x >= 0xE0 {
-            // SAFETY: as upstream.
-            let z = unsafe { *bytes.next().unwrap_unchecked() };
-            let y_z = (((y & CONT_MASK) as u32) << 6) | (z & CONT_MASK) as u32;
-            ch = init << 12 | y_z;
-            if x >= 0xF0 {
-                // SAFETY: as upstream.
-                let w = unsafe { *bytes.next().unwrap_unchecked() };
-                ch = (init & 7) << 18 | (y_z << 6) | (w & CONT_MASK) as u32;
-            }
-        }
-        Some(ch)
     }
 
-    /// Model of `next_code_point_reverse`: the local rule at the last byte,
-    /// where the decode starts, then the upstream body.
+    /// The upstream decoders, reading the bytes from the slice the iterator has
+    /// left and moving the iterator once. Upstream moves it once per byte, and
+    /// the step contracts check every move against their write set, at the
+    /// cost of a copy of the set. Where upstream reads a byte with
+    /// `unwrap_unchecked`, these assert that it is there.
+    impl Decode for Iter<'_, u8> {
+        fn decode(&mut self) -> Option<u32> {
+            let s = self.as_slice();
+            if let Some((start, _)) = ghost_range(s) {
+                kani::assume(utf8_ok_at(start));
+            }
+            let x = *s.first()?;
+            let n = if x < 128 {
+                1
+            } else if x < 0xE0 {
+                2
+            } else if x < 0xF0 {
+                3
+            } else {
+                4
+            };
+            assert!(n <= s.len());
+            let y = if n >= 2 { s[1] } else { 0 };
+            let z = if n >= 3 { s[2] } else { 0 };
+            let w = if n >= 4 { s[3] } else { 0 };
+            *self = s[n..].iter();
+            // ---- upstream arithmetic, `utf8_first_byte` / `utf8_acc_cont_byte` inlined ----
+            let init = (x & (0x7F >> 2)) as u32;
+            let y_z = (((y & CONT_MASK) as u32) << 6) | (z & CONT_MASK) as u32;
+            Some(match n {
+                1 => x as u32,
+                2 => (init << 6) | (y & CONT_MASK) as u32,
+                3 => init << 12 | y_z,
+                _ => (init & 7) << 18 | (y_z << 6) | (w & CONT_MASK) as u32,
+            })
+        }
+
+        fn decode_back(&mut self) -> Option<u32> {
+            let s = self.as_slice();
+            let len = s.len();
+            if let Some((_, end)) = ghost_range(s) {
+                kani::assume(end < 1 || utf8_ok_at(end - 1));
+            }
+            let w = *s.last()?;
+            if w < 128 {
+                *self = s[..len - 1].iter();
+                return Some(w as u32);
+            }
+            assert!(len >= 2);
+            let z = s[len - 2];
+            let n = if !utf8_is_cont_byte(z) {
+                2
+            } else {
+                assert!(len >= 3);
+                if !utf8_is_cont_byte(s[len - 3]) {
+                    3
+                } else {
+                    assert!(len >= 4);
+                    4
+                }
+            };
+            let y = if n >= 3 { s[len - 3] } else { 0 };
+            let x = if n >= 4 { s[len - 4] } else { 0 };
+            *self = s[..len - n].iter();
+            // ---- upstream arithmetic, `utf8_first_byte` / `utf8_acc_cont_byte` inlined ----
+            let mut ch = match n {
+                2 => (z & (0x7F >> 2)) as u32,
+                3 => (y & (0x7F >> 3)) as u32,
+                _ => (((x & (0x7F >> 4)) as u32) << 6) | (y & CONT_MASK) as u32,
+            };
+            if n >= 3 {
+                ch = (ch << 6) | (z & CONT_MASK) as u32;
+            }
+            Some((ch << 6) | (w & CONT_MASK) as u32)
+        }
+    }
+
+    /// Model of `next_code_point` (assumption 2): the local rule where the
+    /// decode starts, then the upstream decode.
+    unsafe fn model_next_code_point<'a, I: Iterator<Item = &'a u8>>(bytes: &mut I) -> Option<u32> {
+        Decode::decode(bytes)
+    }
+
+    /// Model of `next_code_point_reverse` (assumption 2): the local rule at the
+    /// last byte, where the decode starts, then the upstream decode.
     unsafe fn model_next_code_point_reverse<'a, I>(bytes: &mut I) -> Option<u32>
     where
         I: DoubleEndedIterator<Item = &'a u8>,
     {
-        if let Some((_, end)) = GhostRange::ghost_range(&*bytes) {
-            kani::assume(end < 1 || utf8_ok_at(end - 1));
+        Decode::decode_back(bytes)
+    }
+
+    /// Model of `<slice::Iter<T> as ExactSizeIterator>::len` (assumption 1):
+    /// the upstream body, with the raw pointer `offset_from_unsigned` that
+    /// `NonNull::offset_from_unsigned` wraps. That keeps its UB checks and
+    /// drops the contract around the wrapper, which costs a copy of the write
+    /// set per call in the step contracts.
+    fn model_iter_len<'a, T>(it: &Iter<'a, T>) -> usize
+    where
+        'a: 'a, // early-bound, like the lifetime of the impl
+    {
+        let (ptr, end) = it.kani_raw_parts();
+        if size_of::<T>() == 0 {
+            end.addr()
+        } else {
+            // SAFETY: as upstream, `ptr <= end` in the same allocation.
+            unsafe { end.offset_from_unsigned(ptr) }
         }
-        // ---- upstream body, `utf8_first_byte` / `utf8_acc_cont_byte` inlined ----
-        let w = match *bytes.next_back()? {
-            next_byte if next_byte < 128 => return Some(next_byte as u32),
-            back_byte => back_byte,
-        };
-        let mut ch;
-        // SAFETY: as upstream.
-        let z = unsafe { *bytes.next_back().unwrap_unchecked() };
-        ch = (z & (0x7F >> 2)) as u32;
-        if utf8_is_cont_byte(z) {
-            // SAFETY: as upstream.
-            let y = unsafe { *bytes.next_back().unwrap_unchecked() };
-            ch = (y & (0x7F >> 3)) as u32;
-            if utf8_is_cont_byte(y) {
-                // SAFETY: as upstream.
-                let x = unsafe { *bytes.next_back().unwrap_unchecked() };
-                ch = (x & (0x7F >> 4)) as u32;
-                ch = (ch << 6) | (y & CONT_MASK) as u32;
-            }
-            ch = (ch << 6) | (z & CONT_MASK) as u32;
-        }
-        ch = (ch << 6) | (w & CONT_MASK) as u32;
-        Some(ch)
     }
 
     /// Model of `memchr` (assumption 1): some index of `x` in `text`, or `None`.
@@ -2712,6 +2767,7 @@ pub mod verify_char_searcher {
 
     #[kani::proof_for_contract(<CharSearcher as Searcher>::next)]
     #[kani::stub(crate::str::validations::next_code_point, model_next_code_point)]
+    #[kani::stub(<crate::slice::Iter<u8> as crate::iter::ExactSizeIterator>::len, model_iter_len)]
     fn check_char_searcher_next() {
         let mut s = any_char_searcher(any_haystack());
         let r = step_range(s.next());
@@ -2720,6 +2776,7 @@ pub mod verify_char_searcher {
 
     #[kani::proof_for_contract(<CharSearcher as ReverseSearcher>::next_back)]
     #[kani::stub(crate::str::validations::next_code_point_reverse, model_next_code_point_reverse)]
+    #[kani::stub(<crate::slice::Iter<u8> as crate::iter::ExactSizeIterator>::len, model_iter_len)]
     fn check_char_searcher_next_back() {
         let mut s = any_char_searcher(any_haystack());
         let r = step_range(s.next_back());
@@ -2829,6 +2886,17 @@ pub mod verify_char_searcher {
         }
     }
 
+    /// The `len` model returns what upstream returns.
+    #[kani::proof]
+    fn check_iter_len_model_matches_upstream() {
+        let bytes: [u8; 8] = kani::any();
+        let mut it = kani::slice::any_slice_of_array(&bytes).iter();
+        if kani::any() {
+            it.next();
+        }
+        assert!(model_iter_len(&it) == it.len());
+    }
+
     /// The slice equality model returns what upstream returns.
     #[kani::proof]
     #[kani::unwind(5)]
@@ -2892,6 +2960,7 @@ pub mod verify_char_searcher {
 
                 #[kani::proof_for_contract(<MultiCharEqSearcher<$c> as Searcher>::next)]
                 #[kani::stub(crate::str::validations::next_code_point, model_next_code_point)]
+                #[kani::stub(<crate::slice::Iter<u8> as crate::iter::ExactSizeIterator>::len, model_iter_len)]
                 #[kani::stub(<[char]>::contains, model_contains)]
                 fn check_next() {
                     let $set: [char; 2] = kani::any();
@@ -2905,6 +2974,7 @@ pub mod verify_char_searcher {
                     crate::str::validations::next_code_point_reverse,
                     model_next_code_point_reverse
                 )]
+                #[kani::stub(<crate::slice::Iter<u8> as crate::iter::ExactSizeIterator>::len, model_iter_len)]
                 #[kani::stub(<[char]>::contains, model_contains)]
                 fn check_next_back() {
                     let $set: [char; 2] = kani::any();

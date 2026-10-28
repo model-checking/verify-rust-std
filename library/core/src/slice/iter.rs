@@ -170,7 +170,7 @@ impl<T> AsRef<[T]> for Iter<'_, T> {
 
 #[cfg(kani)]
 impl<T> Iter<'_, T> {
-    /// `(ptr, end_or_len)`, read without calls, for the contracts in
+    /// `(ptr, end_or_len)`, read without calls, for the proofs in
     /// `str::pattern`.
     pub(crate) fn kani_raw_parts(&self) -> (*const T, *const T) {
         // SAFETY: `NonNull<T>` is a transparent `*const T`.
