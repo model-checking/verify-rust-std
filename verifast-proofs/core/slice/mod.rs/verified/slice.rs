@@ -1390,12 +1390,12 @@ impl<T> [T] {
     //@ ens thread_token(t) &*& [q]lifetime_token('a) &*& if self.len() < n { result == std::option::Option::None &*& full_borrow('a, <[T]>.full_borrow_content(t, self)) } else { result == std::option::Option::Some(?r) &*& full_borrow('a, <Chunk>.full_borrow_content(t, r)) &*& r == (strip_pointer_metadata(self as pointer) as *T) as *Chunk };
     //@ on_unwind_ens false;
     {
-        if self.len() < n { //~ignore_ref_creation
+        if self.len() < n {
             None
         } else {
             //@ full_borrow_slice_prefix_as_chunk::<T, Chunk>('a, t, self, n);
-            let ptr = self.as_mut_ptr(); //~ignore_ref_creation
-            Some(unsafe { &mut *(ptr as *mut Chunk) }) //~ignore_ref_creation
+            let ptr = self.as_mut_ptr();
+            Some(unsafe { &mut *(ptr as *mut Chunk) })
         }
     }
 
@@ -1419,8 +1419,8 @@ impl<T> [T] {
     {
         let Some((first, tail)) = self.split_at_mut_checked(n) else { return None };
         //@ full_borrow_slice_prefix_as_chunk::<T, Chunk>('a, t, first, n);
-        let ptr = first.as_mut_ptr(); //~ignore_ref_creation
-        Some((unsafe { &mut *(ptr as *mut Chunk) }, tail)) //~ignore_ref_creation
+        let ptr = first.as_mut_ptr();
+        Some((unsafe { &mut *(ptr as *mut Chunk) }, tail))
     }
 
     const unsafe fn split_last_chunk_proof__VeriFast_wrapper<'a, Chunk>(&'a self, n: usize) -> Option<(&'a [T], &'a Chunk)>
@@ -1442,11 +1442,11 @@ impl<T> [T] {
     //@ ens thread_token(t) &*& [q]lifetime_token('a) &*& if self.len() < n { result == std::option::Option::None &*& full_borrow('a, <[T]>.full_borrow_content(t, self)) } else { result == std::option::Option::Some(?p) &*& full_borrow('a, <[T]>.full_borrow_content(t, p.0)) &*& full_borrow('a, <Chunk>.full_borrow_content(t, p.1)) &*& p.0.len() == self.len() - n };
     //@ on_unwind_ens false;
     {
-        let Some(index) = self.len().checked_sub(n) else { return None }; //~ignore_ref_creation
+        let Some(index) = self.len().checked_sub(n) else { return None };
         let (init, last) = self.split_at_mut(index);
         //@ full_borrow_slice_prefix_as_chunk::<T, Chunk>('a, t, last, n);
-        let ptr = last.as_mut_ptr(); //~ignore_ref_creation
-        Some((init, unsafe { &mut *(ptr as *mut Chunk) })) //~ignore_ref_creation
+        let ptr = last.as_mut_ptr();
+        Some((init, unsafe { &mut *(ptr as *mut Chunk) }))
     }
 
     const unsafe fn last_chunk_proof__VeriFast_wrapper<'a, Chunk>(&'a self, n: usize) -> Option<&'a Chunk>
@@ -1465,12 +1465,12 @@ impl<T> [T] {
     //@ ens thread_token(t) &*& [q]lifetime_token('a) &*& if self.len() < n { result == std::option::Option::None &*& full_borrow('a, <[T]>.full_borrow_content(t, self)) } else { result == std::option::Option::Some(?r) &*& full_borrow('a, <Chunk>.full_borrow_content(t, r)) &*& r == ((strip_pointer_metadata(self as pointer) as *T) + (self.len() - n)) as *Chunk };
     //@ on_unwind_ens false;
     {
-        let Some(index) = self.len().checked_sub(n) else { return None }; //~ignore_ref_creation
+        let Some(index) = self.len().checked_sub(n) else { return None };
         let (_, last) = self.split_at_mut(index);
         //@ leak full_borrow('a, _);
         //@ full_borrow_slice_prefix_as_chunk::<T, Chunk>('a, t, last, n);
-        let ptr = last.as_mut_ptr(); //~ignore_ref_creation
-        Some(unsafe { &mut *(ptr as *mut Chunk) }) //~ignore_ref_creation
+        let ptr = last.as_mut_ptr();
+        Some(unsafe { &mut *(ptr as *mut Chunk) })
     }
 
     /// Returns a reference to an element or subslice depending on the type of
@@ -1626,7 +1626,7 @@ impl<T> [T] {
         // SAFETY: the caller must uphold the safety requirements for `get_unchecked_mut`;
         // the slice is dereferenceable because `self` is a safe reference.
         // The returned pointer is safe because impls of `SliceIndex` have to guarantee that it is.
-        unsafe { &mut *index.get_unchecked_mut(self) } //~ignore_ref_creation
+        unsafe { &mut *index.get_unchecked_mut(self) }
     }
 
     /// Returns a raw pointer to the slice's buffer.
@@ -2680,10 +2680,10 @@ impl<T> [T] {
             "slice::as_chunks_unchecked requires `N != 0` and the slice to split exactly into `N`-element chunks",
             (n: usize = n, len: usize = self.len()) => n != 0 && len.is_multiple_of(n)
         );
-        let self_len = self.len(); //~ignore_ref_creation
+        let self_len = self.len();
         //@ div_rem_nonneg(self_len, n);
         let new_len = unsafe { exact_div_usize__VeriFast_wrapper(self_len, n) };
-        let ptr = self.as_mut_ptr(); //~ignore_ref_creation
+        let ptr = self.as_mut_ptr();
         //@ full_borrow_slice_as_chunks::<T, Chunk>(k, t, self, n, new_len);
         unsafe { from_raw_parts_mut(ptr as *mut Chunk, new_len) }
     }
@@ -2697,7 +2697,7 @@ impl<T> [T] {
     //@ on_unwind_ens false;
     {
         assert!(n != 0, "chunk size must be non-zero");
-        let self_len = self.len(); //~ignore_ref_creation
+        let self_len = self.len();
         //@ chunk_round_down_facts(self_len, n);
         let len_rounded_down = self_len / n * n;
         let (multiple_of_n, remainder) = unsafe { self.split_at_mut_unchecked(len_rounded_down) };
@@ -5053,12 +5053,12 @@ impl<T> [T] {
         //
         // Duplicate, advance r. End of slice. Split at w.
 
-        let len = self.len(); //~ignore_ref_creation
+        let len = self.len();
         if len <= 1 {
-            return (self, unsafe { empty_mut_slice_arg__VeriFast_wrapper(&mut []) }); //~ignore_ref_creation
+            return (self, unsafe { empty_mut_slice_arg__VeriFast_wrapper(&mut []) });
         }
 
-        let ptr = self.as_mut_ptr(); //~ignore_ref_creation
+        let ptr = self.as_mut_ptr();
         let mut next_read: usize = 1;
         let mut next_write: usize = 1;
 
@@ -5091,13 +5091,13 @@ impl<T> [T] {
                 let prev_ptr_write = ptr.add(next_write - 1);
                 //@ array_extract_two_own::<T>(t, ptr, next_write - 1, next_read, len);
                 let sb_ref = &mut same_bucket;
-                if !call_same_bucket__VeriFast_wrapper(&mut *ptr_read, &mut *prev_ptr_write, sb_ref) { //~ignore_ref_creation
+                if !call_same_bucket__VeriFast_wrapper(&mut *ptr_read, &mut *prev_ptr_write, sb_ref) {
                     //@ array_insert_two_own::<T>(t, ptr, next_write - 1, next_read, len);
                     if next_read != next_write {
                         //@ ptr_range_split_limits::<T>(prev_ptr_write, len - (next_write - 1), 1);
                         let ptr_write = prev_ptr_write.add(1);
                         //@ array_extract_two_own::<T>(t, ptr, next_write, next_read, len);
-                        mem::swap(&mut *ptr_read, &mut *ptr_write); //~ignore_ref_creation
+                        mem::swap(&mut *ptr_read, &mut *ptr_write);
                         //@ array_insert_two_own::<T>(t, ptr, next_write, next_read, len);
                     }
                     next_write += 1;
@@ -5184,9 +5184,9 @@ impl<T> [T] {
     //@ ens thread_token(t) &*& (strip_pointer_metadata(self as pointer) as *T)[..self.len()] |-> ?elems1 &*& foreach(elems1, own::<T>(t));
     //@ on_unwind_ens false;
     {
-        assert!(mid <= self.len()); //~ignore_ref_creation
-        let k = self.len() - mid; //~ignore_ref_creation
-        let p = self.as_mut_ptr(); //~ignore_ref_creation
+        assert!(mid <= self.len());
+        let k = self.len() - mid;
+        let p = self.as_mut_ptr();
 
         // SAFETY: The range `[p.add(mid) - mid, p.add(mid) + k)` is trivially
         // valid for reading and writing, as required by `ptr_rotate`.
@@ -5236,9 +5236,9 @@ impl<T> [T] {
     //@ ens thread_token(t) &*& (strip_pointer_metadata(self as pointer) as *T)[..self.len()] |-> ?elems1 &*& foreach(elems1, own::<T>(t));
     //@ on_unwind_ens false;
     {
-        assert!(k <= self.len()); //~ignore_ref_creation
-        let mid = self.len() - k; //~ignore_ref_creation
-        let p = self.as_mut_ptr(); //~ignore_ref_creation
+        assert!(k <= self.len());
+        let mid = self.len() - k;
+        let p = self.as_mut_ptr();
 
         // SAFETY: The range `[p.add(mid) - mid, p.add(mid) + k)` is trivially
         // valid for reading and writing, as required by `ptr_rotate`.
@@ -5825,8 +5825,8 @@ impl<T> [T] {
     }
 
     unsafe fn align_to_offsets_proof__VeriFast_wrapper<U>(&self) -> (usize, usize)
-    //@ req self.len() * std::mem::size_of::<T>() <= isize::MAX &*& std::mem::size_of::<T>() > 0 &*& std::mem::size_of::<U>() > 0;
-    //@ ens 0 <= result.0 &*& result.0 <= isize::MAX &*& 0 <= result.1 &*& result.1 <= self.len() &*& result.0 * std::mem::size_of::<U>() == (self.len() - result.1) * std::mem::size_of::<T>();
+    //@ req self.len() * std::mem::size_of::<T>() <= isize::MAX &*& pointer_within_limits(strip_pointer_metadata(self as pointer) as *T) == true &*& pointer_within_limits((strip_pointer_metadata(self as pointer) as *T) + self.len()) == true &*& std::mem::size_of::<T>() > 0 &*& std::mem::size_of::<U>() > 0;
+    //@ ens 0 <= result.0 &*& result.0 <= isize::MAX &*& 0 <= result.1 &*& result.1 <= self.len() &*& result.0 * std::mem::size_of::<U>() == (self.len() - result.1) * std::mem::size_of::<T>() &*& result.0 * std::mem::size_of::<U>() <= isize::MAX &*& pointer_within_limits((strip_pointer_metadata(self as pointer) as *U) + result.0) == true;
     //@ on_unwind_ens false;
     {
         let gcd: usize = unsafe { Self::gcd_proof__VeriFast_wrapper(size_of::<T>(), size_of::<U>()) };
@@ -5860,6 +5860,11 @@ impl<T> [T] {
         //@ mul_assoc(q * ts, us, gcd);
         //@ mul_assoc(us, q, ts);
         //@ mul_assoc(ts, q, us);
+        // us_len * size_of::<U>() == (len - ts_len) * size_of::<T>() <= len * size_of::<T>() <= isize::MAX,
+        // and the end of the middle run, `self as *U + us_len`, is the same address as `self as *T + (len - ts_len)`,
+        // which `ptr_range_split_limits` places within limits.
+        //@ mul_mono_l(self.len() - ts_len, self.len(), std::mem::size_of::<T>());
+        //@ ptr_range_split_limits::<T>(strip_pointer_metadata(self as pointer) as *T, self.len(), self.len() - ts_len);
         (us_len, ts_len)
     }
 
@@ -6056,7 +6061,7 @@ impl<T> [T] {
         if U::IS_ZST || T::IS_ZST {
             // handle ZSTs specially, which is – don't handle them at all.
             unsafe {
-                let res = (&mut *self, empty_mut_slice_arg__VeriFast_wrapper::<'a, U>(&mut []), empty_mut_slice_arg__VeriFast_wrapper::<'a, T>(&mut [])); //~ignore_ref_creation
+                let res = (&mut *self, empty_mut_slice_arg__VeriFast_wrapper::<'a, U>(&mut []), empty_mut_slice_arg__VeriFast_wrapper::<'a, T>(&mut []));
                 return res;
             }
         }
@@ -6065,7 +6070,7 @@ impl<T> [T] {
 
         // First, find at what point do we split between the first and 2nd slice. Easy with
         // ptr.align_offset.
-        let ptr = self.as_ptr(); //~ignore_ref_creation
+        let ptr = self.as_ptr();
         // SAFETY: Here we are ensuring we will use aligned pointers for U for the
         // rest of the method. This is done by passing a pointer to &[T] with an
         // alignment targeted for U.
@@ -6074,18 +6079,18 @@ impl<T> [T] {
         // a size that is a power of two (since it comes from the alignment for U),
         // satisfying its safety constraints.
         let offset = unsafe { crate::ptr::align_offset(ptr, align_of::<U>()) };
-        if offset > self.len() { //~ignore_ref_creation
+        if offset > self.len() {
             unsafe {
-                let res = (&mut *self, empty_mut_slice_arg__VeriFast_wrapper::<'a, U>(&mut []), empty_mut_slice_arg__VeriFast_wrapper::<'a, T>(&mut [])); //~ignore_ref_creation
+                let res = (&mut *self, empty_mut_slice_arg__VeriFast_wrapper::<'a, U>(&mut []), empty_mut_slice_arg__VeriFast_wrapper::<'a, T>(&mut []));
                 res
             }
         } else {
             let (left, rest) = self.split_at_mut(offset);
             //@ slice_full_borrow_inv::<T>(q, a, t, rest);
-            let (us_len, ts_len) = rest.align_to_offsets::<U>(); //~ignore_ref_creation
+            let (us_len, ts_len) = rest.align_to_offsets::<U>();
             //@ leak <(usize, usize)>.own(_, _);
-            let rest_len = rest.len(); //~ignore_ref_creation
-            let mut_ptr = rest.as_mut_ptr(); //~ignore_ref_creation
+            let rest_len = rest.len();
+            let mut_ptr = rest.as_mut_ptr();
             //@ ptr_range_split_limits::<T>(mut_ptr, rest_len, rest_len - ts_len);
             // `offset == left.len() <= isize::MAX < usize::MAX`, so `align_offset` did not fail and `mut_ptr == ptr + offset` is aligned for `U`.
             //@ slice_full_borrow_inv::<T>(q, a, t, left);
@@ -6929,7 +6934,7 @@ impl<T> [T] {
     //@ on_unwind_ens false;
     {
         //@ slice_full_borrow_inv::<T>(q, 'a, t, self);
-        let self_len = self.len(); //~ignore_ref_creation
+        let self_len = self.len();
         let len = if Elem::IS_ZST {
             unsafe { checked_mul_or_panic__VeriFast_wrapper(self_len, n) }
         } else {
@@ -6937,7 +6942,7 @@ impl<T> [T] {
             //@ flatten_non_zst_no_overflow::<Elem, T>('a, t, self, n);
             unsafe { self_len.unchecked_mul(n) }
         };
-        let ptr = self.as_mut_ptr(); //~ignore_ref_creation
+        let ptr = self.as_mut_ptr();
         //@ full_borrow_chunks_as_flattened::<Elem, T>('a, t, self, n, len);
         unsafe { from_raw_parts_mut(ptr as *mut Elem, len) }
     }
@@ -8080,7 +8085,7 @@ where
 //@ ens thread_token(t) &*& [q]lifetime_token('a) &*& [f]((strip_pointer_metadata(indices as pointer) as *I)[..indices.len()] |-> elems) &*& match result { Result::Ok(u) => disjoint_mut_borrows::<P, T, I, O>('a, t, out_ptr, strip_pointer_metadata(slice_ref as pointer) as *T, elems), Result::Err(e) => full_borrow('a, <[T]>.full_borrow_content(t, slice_ref)) &*& out_ptr[..indices.len()] |-> _ };
 //@ on_unwind_ens false;
 {
-    let len = slice_ref.len(); //~ignore_ref_creation
+    let len = slice_ref.len();
     let check = unsafe { get_disjoint_check_valid_proof__VeriFast_wrapper(indices, len) };
     match check {
         Ok(()) => {
