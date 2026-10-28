@@ -789,8 +789,9 @@ ens thread_token(t) &*&
 {
     //@ let ptr_a = strip_pointer_metadata(a as pointer) as *T;
     //@ let ptr_b = strip_pointer_metadata(b as pointer) as *T;
-    debug_assert!(a.len() == n);
-    debug_assert!(b.len() == n);
+    // The two `debug_assert!(a.len() == n)` / `debug_assert!(b.len() == n)` of `revswap` are omitted here:
+    // `cfg!(debug_assertions)` is false in this build, so their bodies are dead code to VeriFast
+    // (the only `-allow_dead_code` reports of the proof); `a.len() == n` and `b.len() == n` are preconditions.
 
     //@ let k = begin_lifetime();
     //@ close slice_full_borrow_content::<T>(t, a)();
@@ -834,23 +835,17 @@ ens thread_token(t) &*&
             ptr_a[..n] |-> ?cur_a &*& foreach(cur_a, own::<T>(t)) &*&
             ptr_b[..n] |-> ?cur_b &*& foreach(cur_b, own::<T>(t));
         @*/
-        let pa = unsafe { slice_index_mut__VeriFast_wrapper(a1, i) };
-        let pb = unsafe { slice_index_mut__VeriFast_wrapper(b1, n - 1 - i) };
+        // `&mut a[i]` / `&mut b[n - 1 - i]` of `revswap`, as element pointers into the two arrays (the bounds
+        // `i < n`, `n - 1 - i < n` are the loop invariant; `revswap`'s index operations are panicking checks).
+        //@ ptr_range_split_limits::<T>(ptr_a, n, i);
+        //@ ptr_range_split_limits::<T>(ptr_b, n, n - 1 - i);
+        let pa: *mut T = unsafe { a1.as_mut_ptr().add(i) };
+        let pb: *mut T = unsafe { b1.as_mut_ptr().add(n - 1 - i) };
         //@ array_swap_elems(t, ptr_a, i, ptr_b, n - 1 - i, n);
-        mem::swap(pa, pb);
+        mem::swap(unsafe { &mut *pa }, unsafe { &mut *pb });
         //@ array_unswap_elems(t, ptr_a, i, ptr_b, n - 1 - i, n, cur_a, cur_b);
         i += 1;
     }
-}
-
-const unsafe fn slice_index_mut__VeriFast_wrapper<T>(s: &mut [T], i: usize) -> &mut T
-//@ req 0 <= i &*& i < s.len();
-//@ ens result == (strip_pointer_metadata(s as pointer) as *T) + i;
-//@ on_unwind_ens false;
-// https://github.com/verifast/verifast/issues/1056
-//@ assume_correct
-{
-    &mut s[i]
 }
 
 unsafe fn slice_range__VeriFast_wrapper<R: RangeBounds<usize>>(src: R, len: usize) -> Range<usize>
@@ -7919,19 +7914,10 @@ lem take_plus_one<t>(n: i32, xs: list<t>)
 }
 @*/
 
-// Pointer arithmetic only: the reference returned is the address of element `i`. The ownership of
-// that element is obtained by the caller from its array fraction (`array_extract_elem_frac`), so this
-// specification produces no permission.
-unsafe fn slice_index_shared__VeriFast_wrapper<T>(s: &[T], i: usize) -> &T
-//@ req 0 <= i &*& i < s.len();
-//@ ens result == (strip_pointer_metadata(s as pointer) as *T) + i;
-//@ on_unwind_ens false;
-// https://github.com/verifast/verifast/issues/1056
-//@ assume_correct
-{
-    &s[i]
-}
-
+// `GetDisjointMutIndex` is sealed (`impl(self)`): its only implementors are `usize`, `Range<usize>`,
+// `RangeInclusive<usize>`, `range::Range<usize>` and `range::RangeInclusive<usize>`, all of which derive
+// `Clone` field-wise, so `clone` is the identity on values and `result == nth(i, elems)` is exact for
+// every type this wrapper can be instantiated with (a foreign `I` cannot implement the trait).
 unsafe fn clone_disjoint_index__VeriFast_wrapper<I: GetDisjointMutIndex>(s: &[I], i: usize) -> I
 //@ req thread_token(?t) &*& [?f]((strip_pointer_metadata(s as pointer) as *I)[..s.len()] |-> ?elems) &*& 0 <= i &*& i < s.len();
 //@ ens thread_token(t) &*& [f]((strip_pointer_metadata(s as pointer) as *I)[..s.len()] |-> elems) &*& result == nth(i, elems);
@@ -7973,6 +7959,7 @@ unsafe fn get_disjoint_check_valid_proof__VeriFast_wrapper<I: GetDisjointMutInde
 //@ on_unwind_ens false;
 {
     let n = indices.len();
+    let base: *const I = indices.as_ptr();
     //@ let p = strip_pointer_metadata(indices as pointer) as *I;
     let mut i = 0;
     loop {
@@ -7980,9 +7967,15 @@ unsafe fn get_disjoint_check_valid_proof__VeriFast_wrapper<I: GetDisjointMutInde
         if !(i < n) {
             break;
         }
+        // `indices[i]` as a reference created from the raw element address under the aliasing protocol
+        // (`precreate_ref` / `init_ref_readonly` / `end_ref_readonly`), instead of a trusted indexing wrapper.
         //@ array_extract_elem_frac::<I>(p, i);
-        let idx = unsafe { slice_index_shared__VeriFast_wrapper(indices, i) };
-        let in_bounds = idx.is_in_bounds(len); //~ignore_ref_creation
+        //@ points_to_limits::<I>(p + i);
+        let idx_ptr = unsafe { base.add(i) };
+        //@ let idx_ref = precreate_ref(idx_ptr);
+        //@ init_ref_readonly(idx_ref, 1/2);
+        let in_bounds = GetDisjointMutIndex::is_in_bounds(unsafe { &*idx_ptr }, len);
+        //@ end_ref_readonly(idx_ref);
         //@ array_insert_elem_frac::<I>(p, i, n, elems);
         if !in_bounds {
             return Err(GetDisjointMutError::IndexOutOfBounds);
@@ -7995,9 +7988,17 @@ unsafe fn get_disjoint_check_valid_proof__VeriFast_wrapper<I: GetDisjointMutInde
             }
             //@ array_extract_elem_frac::<I>(p, i);
             //@ array_extract_elem_frac::<I>(p, j);
-            let idx_i = unsafe { slice_index_shared__VeriFast_wrapper(indices, i) };
-            let idx_j = unsafe { slice_index_shared__VeriFast_wrapper(indices, j) };
-            let ov = idx_i.is_overlapping(idx_j); //~ignore_ref_creation
+            //@ points_to_limits::<I>(p + i);
+            //@ points_to_limits::<I>(p + j);
+            let idx_i_ptr = unsafe { base.add(i) };
+            let idx_j_ptr = unsafe { base.add(j) };
+            //@ let idx_i_ref = precreate_ref(idx_i_ptr);
+            //@ init_ref_readonly(idx_i_ref, 1/2);
+            //@ let idx_j_ref = precreate_ref(idx_j_ptr);
+            //@ init_ref_readonly(idx_j_ref, 1/2);
+            let ov = GetDisjointMutIndex::is_overlapping(unsafe { &*idx_i_ptr }, unsafe { &*idx_j_ptr });
+            //@ end_ref_readonly(idx_j_ref);
+            //@ end_ref_readonly(idx_i_ref);
             //@ array_insert_elem_frac::<I>(p, j, i, take(i, elems));
             //@ array_insert_elem_frac::<I>(p, i, n, elems);
             if ov {

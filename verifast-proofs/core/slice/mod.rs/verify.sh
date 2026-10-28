@@ -63,7 +63,7 @@ SYSROOT="$(cd "$SYSROOT_REL" && pwd)"
 SYSROOT_LIB="$SYSROOT/lib/rustlib/$HOST_TRIPLE/lib"
 RUSTC_ARGS="--crate-type lib --edition=2024 --extern core=$SYSROOT_LIB/libcore_noslice.rlib --extern safety=$SYSROOT_LIB/libsafety.$DYLIB_EXT -L dependency=$SYSROOT_LIB -Z force-unstable-if-unmarked -A warnings"
 
-verifast -rustc_args "$RUSTC_ARGS" -extern_spec std=core.rsspec -skip_specless_fns -ignore_unwind_paths -allow_assume -allow_ignore_ref_creation -allow_dead_code verified/lib.rs
+verifast -rustc_args "$RUSTC_ARGS" -extern_spec std=core.rsspec -skip_specless_fns -ignore_unwind_paths -allow_assume -allow_ignore_ref_creation verified/lib.rs
 refinement-checker --rustc-args "$RUSTC_ARGS" original/lib.rs verified/lib.rs > /dev/null
 if ! diff original/slice.rs ../../../../library/core/src/slice/mod.rs; then
   echo "::error title=Please run verifast-proofs/patch-verifast-proofs.sh::Some VeriFast proofs are out of date; please chdir to verifast-proofs and run patch-verifast-proofs.sh to update them."
