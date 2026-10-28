@@ -202,6 +202,40 @@ lem array_insert_elem<T>(ptr: *T, i: usize, len: usize, elems: list<T>)
     append_take_cons_drop_update(elems, i, v);
 }
 
+lem update_nth_id<t>(i: i32, xs: list<t>)
+    req 0 <= i &*& i < length(xs);
+    ens update(i, nth(i, xs), xs) == xs;
+{
+    match xs {
+        nil => {}
+        cons(h, tl) => {
+            if i == 0 {
+            } else {
+                update_nth_id(i - 1, tl);
+            }
+        }
+    }
+}
+
+lem array_extract_elem_frac<T>(ptr: *T, i: usize)
+    req [?f](ptr[..?len] |-> ?elems) &*& 0 <= i &*& i < len;
+    ens [f](ptr[..i] |-> take(i, elems)) &*& [f](*(ptr + i) |-> nth(i, elems)) &*& [f]((ptr + i + 1)[..len - i - 1] |-> drop(i + 1, elems));
+{
+    array_split(ptr, i);
+    drop_n_plus_one(i, elems);
+    open [f]array(ptr + i, len - i, drop(i, elems));
+}
+
+lem array_insert_elem_frac<T>(ptr: *T, i: usize, len: usize, elems: list<T>)
+    req [?f](ptr[..i] |-> take(i, elems)) &*& [f](*(ptr + i) |-> nth(i, elems)) &*& [f]((ptr + i + 1)[..len - i - 1] |-> drop(i + 1, elems)) &*& 0 <= i &*& i < len &*& length(elems) == len;
+    ens [f](ptr[..len] |-> elems);
+{
+    close [f]array(ptr + i, len - i, cons(nth(i, elems), drop(i + 1, elems)));
+    array_join(ptr);
+    append_take_cons_drop_update(elems, i, nth(i, elems));
+    update_nth_id(i, elems);
+}
+
 lem close_slice_pair_own<'a, T>(t: thread_id_t, v: (&'a [T], &'a [T]))
     req [_](<[T]>.share('a, t, v.0)) &*& [_](<[T]>.share('a, t, v.1));
     ens <(&'a [T], &'a [T])>.own(t, v);
@@ -633,10 +667,19 @@ lem array_insert_two_own<T>(t: thread_id_t, ptr: *T, i: usize, j: usize, len: us
     foreach_append(update(i, vi, take(j, elems)), cons(vj, drop(j + 1, elems)));
 }
 
-fix is_array_of<T, Chunk>(n: usize) -> bool {
-    0 <= n &&
-    std::mem::size_of::<Chunk>() == n * std::mem::size_of::<T>() &&
-    std::mem::align_of::<Chunk>() == std::mem::align_of::<T>()
+// `Chunk` is `[T; n]`, or a type with the same layout *and* validity invariant as `[T; n]`
+// (`Simd<T, n>`, `#[repr(simd)]` over `[T; n]`). Abstract on purpose: a type that merely has the
+// layout of `[T; n]` (say, a `bool` for `[u8; 1]`) must not satisfy it, because the chunk lemmas below
+// reinterpret ownership of `n` `T`s as ownership of a `Chunk`. It is established only at the
+// (const-generic, transcribed) call sites, where `Chunk` is literally `[T; N]` or `Simd<T, N>`.
+fix is_array_of<T, Chunk>(n: usize) -> bool;
+
+lem is_array_of_layout<T, Chunk>(n: usize)
+    req is_array_of::<T, Chunk>(n) == true;
+    ens 0 <= n &*& std::mem::size_of::<Chunk>() == n * std::mem::size_of::<T>() &*& std::mem::align_of::<Chunk>() == std::mem::align_of::<T>();
+{
+    // Layout of `[T; n]` (and of `#[repr(simd)]` `Simd<T, n>`), see the Rust reference.
+    assume(false);
 }
 
 
@@ -704,6 +747,7 @@ lem flatten_non_zst_no_overflow<Elem, Chunk>(k: lifetime_t, t: thread_id_t, s: *
     req is_array_of::<Elem, Chunk>(n) == true &*& std::mem::size_of::<Elem>() > 0 &*& s.len() * std::mem::size_of::<Chunk>() <= isize::MAX;
     ens s.len() * n <= usize::MAX;
 {
+    is_array_of_layout::<Elem, Chunk>(n);
     mul_mono_l(1, std::mem::size_of::<Elem>(), n);
     mul_mono_l(n, std::mem::size_of::<Chunk>(), s.len());
 }
@@ -6179,6 +6223,7 @@ impl<T> [T] {
     //@ ens thread_token(t) &*& [q]lifetime_token('a) &*& [_](<[T]>.share('a, t, result.0)) &*& [_](<[SimdVec]>.share('a, t, result.1)) &*& [_](<[T]>.share('a, t, result.2));
     //@ on_unwind_ens false;
     {
+        //@ is_array_of_layout::<T, Chunk>(lanes);
         assert!(size_of::<SimdVec>() == size_of::<Chunk>());
         unsafe { self.align_to() }
     }
@@ -6192,6 +6237,7 @@ impl<T> [T] {
     //@ ens thread_token(t) &*& [q]lifetime_token('a) &*& full_borrow('a, <[T]>.full_borrow_content(t, result.0)) &*& full_borrow('a, <[SimdVec]>.full_borrow_content(t, result.1)) &*& full_borrow('a, <[T]>.full_borrow_content(t, result.2));
     //@ on_unwind_ens false;
     {
+        //@ is_array_of_layout::<T, Chunk>(lanes);
         assert!(size_of::<SimdVec>() == size_of::<Chunk>());
         unsafe { self.align_to_mut() }
     }
@@ -7330,6 +7376,34 @@ fix all_pairwise_disjoint<I>(xs: list<I>) -> bool {
     }
 }
 
+lem all_in_bounds_nth<I>(xs: list<I>, i: i32, len: usize)
+    req all_in_bounds::<I>(xs, len) == true &*& 0 <= i &*& i < length(xs);
+    ens std::slice::GetDisjointMutIndex_in_bounds::<I>(nth(i, xs), len) == true;
+{
+    match xs {
+        nil => {}
+        cons(h, tl) => {
+            if i == 0 {
+            } else {
+                all_in_bounds_nth::<I>(tl, i - 1, len);
+            }
+        }
+    }
+}
+
+// Safety precondition of the sealed `SliceIndex<[T]>::get_unchecked{,_mut}` impl for `Range<usize>`, as
+// documented on `get_unchecked` ("the index must be within the bounds of the slice"), so that the
+// contracts of `get_unchecked` / `get_unchecked_mut` are usable at that index type as well as at
+// `usize` (`core.rsspec`). The other index types (`RangeTo`, `RangeFrom`, `RangeFull`,
+// `RangeInclusive`, `core::range::*`) cannot be named in VeriFast 26.10's ghost language, so the
+// contract is not usable at those types from within this proof.
+lem Range_SliceIndex_in_bounds<T>(r: std::ops::Range<usize>, slice: *[T])
+    req 0 <= r.start &*& r.start <= r.end &*& r.end <= slice.len();
+    ens std::slice::SliceIndex_in_bounds::<std::ops::Range<usize>, [T]>(r, slice);
+{
+    assume(false);
+}
+
 lem all_in_bounds_snoc<I>(xs: list<I>, i: i32, len: usize)
     req 0 <= i &*& i < length(xs) &*& all_in_bounds::<I>(take(i, xs), len) == true &*& std::slice::GetDisjointMutIndex_in_bounds::<I>(nth(i, xs), len) == true;
     ens all_in_bounds::<I>(take(i + 1, xs), len) == true;
@@ -7419,6 +7493,65 @@ lem GetDisjointMutIndex_not_overlapping_disjoint<I>(a: I, b: I)
     ens region_start::<I>(a) + region_len::<I>(a) <= region_start::<I>(b) || region_start::<I>(b) + region_len::<I>(b) <= region_start::<I>(a);
 {
     assume(false);
+}
+
+// Definition of the region model at each concrete index type. These are the meaning of the abstract
+// fixpoints `region_start`, `region_len`, `GetDisjointMutIndex_in_bounds`, `GetDisjointMutIndex_overlapping`
+// at `usize` and `Range<usize>` (VeriFast 26.10's ghost language has no declaration of `RangeInclusive` or of `core::range::*`, so those impls stay specless); the two generic axioms above are checked
+// against them (`in_bounds_region_*`, `not_overlapping_disjoint_*`), and the `is_in_bounds` /
+// `is_overlapping` implementations below are verified against `GetDisjointMutIndex_in_bounds` /
+// `GetDisjointMutIndex_overlapping` through them. An empty region is normalized to `[0, 0)` so that
+// disjointness of non-overlapping ranges holds without an in-bounds hypothesis.
+lem usize_region_model(i: usize, len: usize, j: usize)
+    req true;
+    ens region_start::<usize>(i) == i &*& region_len::<usize>(i) == 1 &*&
+        std::slice::GetDisjointMutIndex_in_bounds::<usize>(i, len) == (0 <= i && i < len) &*&
+        std::slice::GetDisjointMutIndex_overlapping::<usize>(i, j) == (i == j);
+{
+    assume(false);
+}
+
+lem Range_region_model(r: std::ops::Range<usize>, len: usize, r2: std::ops::Range<usize>)
+    req true;
+    ens region_start::<std::ops::Range<usize>>(r) == (if r.end <= r.start { 0 } else { r.start }) &*&
+        region_len::<std::ops::Range<usize>>(r) == (if r.end <= r.start { 0 } else { r.end - r.start }) &*&
+        std::slice::GetDisjointMutIndex_in_bounds::<std::ops::Range<usize>>(r, len) == (0 <= r.start && r.start <= r.end && r.end <= len) &*&
+        std::slice::GetDisjointMutIndex_overlapping::<std::ops::Range<usize>>(r, r2) == (r.start < r2.end && r2.start < r.end);
+{
+    assume(false);
+}
+
+// The two generic region axioms hold at each defined type.
+lem in_bounds_region_usize(i: usize, len: usize)
+    req std::slice::GetDisjointMutIndex_in_bounds::<usize>(i, len) == true;
+    ens 0 <= region_start::<usize>(i) &*& 0 <= region_len::<usize>(i) &*& region_start::<usize>(i) + region_len::<usize>(i) <= len;
+{
+    usize_region_model(i, len, i);
+}
+
+lem not_overlapping_disjoint_usize(a: usize, b: usize)
+    req std::slice::GetDisjointMutIndex_overlapping::<usize>(a, b) == false;
+    ens region_start::<usize>(a) + region_len::<usize>(a) <= region_start::<usize>(b) || region_start::<usize>(b) + region_len::<usize>(b) <= region_start::<usize>(a);
+{
+    usize_region_model(a, 0, b);
+    usize_region_model(b, 0, a);
+}
+
+lem in_bounds_region_Range(r: std::ops::Range<usize>, len: usize)
+    req std::slice::GetDisjointMutIndex_in_bounds::<std::ops::Range<usize>>(r, len) == true;
+    ens 0 <= region_start::<std::ops::Range<usize>>(r) &*& 0 <= region_len::<std::ops::Range<usize>>(r) &*& region_start::<std::ops::Range<usize>>(r) + region_len::<std::ops::Range<usize>>(r) <= len;
+{
+    Range_region_model(r, len, r);
+}
+
+// (`0 <= a.start`, `0 <= b.start`: the fields are `usize` values; VeriFast's ghost integers do not carry
+// that bound, so it is a hypothesis here.)
+lem not_overlapping_disjoint_Range(a: std::ops::Range<usize>, b: std::ops::Range<usize>)
+    req std::slice::GetDisjointMutIndex_overlapping::<std::ops::Range<usize>>(a, b) == false &*& 0 <= a.start &*& 0 <= b.start;
+    ens region_start::<std::ops::Range<usize>>(a) + region_len::<std::ops::Range<usize>>(a) <= region_start::<std::ops::Range<usize>>(b) || region_start::<std::ops::Range<usize>>(b) + region_len::<std::ops::Range<usize>>(b) <= region_start::<std::ops::Range<usize>>(a);
+{
+    Range_region_model(a, 0, b);
+    Range_region_model(b, 0, a);
 }
 
 // Ownership of the element regions denoted by `idxs`, in list order.
@@ -7781,9 +7914,12 @@ lem take_plus_one<t>(n: i32, xs: list<t>)
 }
 @*/
 
+// Pointer arithmetic only: the reference returned is the address of element `i`. The ownership of
+// that element is obtained by the caller from its array fraction (`array_extract_elem_frac`), so this
+// specification produces no permission.
 unsafe fn slice_index_shared__VeriFast_wrapper<T>(s: &[T], i: usize) -> &T
-//@ req [?f]((strip_pointer_metadata(s as pointer) as *T)[..s.len()] |-> ?elems) &*& 0 <= i &*& i < s.len();
-//@ ens [f]((strip_pointer_metadata(s as pointer) as *T)[..s.len()] |-> elems) &*& [f](*result |-> nth(i, elems)) &*& result == (strip_pointer_metadata(s as pointer) as *T) + i;
+//@ req 0 <= i &*& i < s.len();
+//@ ens result == (strip_pointer_metadata(s as pointer) as *T) + i;
 //@ on_unwind_ens false;
 // https://github.com/verifast/verifast/issues/1056
 //@ assume_correct
@@ -7812,7 +7948,7 @@ where
 // Raw-pointer semantics of the sealed `SliceIndex::get_unchecked_mut` impls: the reference written to
 // slot `i` points at `idx`'s region. No ownership of the slice is needed to compute and store it; the
 // ownership transfer to the returned references happens in `get_disjoint_unchecked_mut`'s proof.
-//@ req *(out_ptr + i) |-> _ &*& 0 <= i;
+//@ req *(out_ptr + i) |-> _ &*& 0 <= i &*& std::slice::GetDisjointMutIndex_in_bounds::<I>(idx, slice.len()) == true;
 //@ ens *(out_ptr + i) |-> region_ptr::<P, T, I, O>(strip_pointer_metadata(slice as pointer) as *T, idx);
 //@ on_unwind_ens false;
 //@ assume_correct
@@ -7839,9 +7975,10 @@ unsafe fn get_disjoint_check_valid_proof__VeriFast_wrapper<I: GetDisjointMutInde
         if !(i < n) {
             break;
         }
+        //@ array_extract_elem_frac::<I>(p, i);
         let idx = unsafe { slice_index_shared__VeriFast_wrapper(indices, i) };
         let in_bounds = idx.is_in_bounds(len); //~ignore_ref_creation
-        //@ leak [f]points_to::<I>(idx, nth(i, elems));
+        //@ array_insert_elem_frac::<I>(p, i, n, elems);
         if !in_bounds {
             return Err(GetDisjointMutError::IndexOutOfBounds);
         }
@@ -7851,11 +7988,13 @@ unsafe fn get_disjoint_check_valid_proof__VeriFast_wrapper<I: GetDisjointMutInde
             if !(j < i) {
                 break;
             }
+            //@ array_extract_elem_frac::<I>(p, i);
+            //@ array_extract_elem_frac::<I>(p, j);
             let idx_i = unsafe { slice_index_shared__VeriFast_wrapper(indices, i) };
             let idx_j = unsafe { slice_index_shared__VeriFast_wrapper(indices, j) };
             let ov = idx_i.is_overlapping(idx_j); //~ignore_ref_creation
-            //@ leak [f]points_to::<I>(idx_i, nth(i, elems));
-            //@ leak [f]points_to::<I>(idx_j, nth(j, elems));
+            //@ array_insert_elem_frac::<I>(p, j, i, take(i, elems));
+            //@ array_insert_elem_frac::<I>(p, i, n, elems);
             if ov {
                 return Err(GetDisjointMutError::OverlappingIndices);
             }
@@ -7897,6 +8036,7 @@ where
         }
         let idx = unsafe { clone_disjoint_index__VeriFast_wrapper(indices, i) };
         //@ open array_(out_ptr + i, n - i, _);
+        //@ all_in_bounds_nth::<I>(elems, i, len);
         unsafe {
             write_disjoint_mut_elem__VeriFast_wrapper::<T, I, O, P>(slice, idx, out_ptr, i);
         }
@@ -7977,12 +8117,47 @@ pub impl(self) unsafe trait GetDisjointMutIndex: Clone {
 // SAFETY: We implement `is_in_bounds()` and `is_overlapping()` correctly.
 unsafe impl GetDisjointMutIndex for usize {
     #[inline]
-    fn is_in_bounds(&self, len: usize) -> bool {
+    fn is_in_bounds(&self, len: usize) -> bool
+    //@ req [?f](*self |-> ?v);
+    //@ ens [f](*self |-> v) &*& result == std::slice::GetDisjointMutIndex_in_bounds::<usize>(v, len);
+    //@ on_unwind_ens false;
+    /*@
+    safety_proof {
+        assert [?q]lifetime_token(?k);
+        open_frac_borrow(k, usize_full_borrow_content(_t, self), q);
+        open [?f]usize_full_borrow_content(_t, self)();
+        call();
+        close [f]usize_full_borrow_content(_t, self)();
+        close_frac_borrow(f, usize_full_borrow_content(_t, self));
+    }
+    @*/
+    {
+        //@ usize_region_model(v, len, v);
         *self < len
     }
 
     #[inline]
-    fn is_overlapping(&self, other: &Self) -> bool {
+    fn is_overlapping(&self, other: &Self) -> bool
+    //@ req [?f1](*self |-> ?v1) &*& [?f2](*other |-> ?v2);
+    //@ ens [f1](*self |-> v1) &*& [f2](*other |-> v2) &*& result == std::slice::GetDisjointMutIndex_overlapping::<usize>(v1, v2);
+    //@ on_unwind_ens false;
+    /*@
+    safety_proof {
+        assert [_]frac_borrow(?k1, usize_full_borrow_content(_t, self)) &*& [?q1]lifetime_token(k1);
+        assert [_]frac_borrow(?k2, usize_full_borrow_content(_t, other)) &*& [?q2]lifetime_token(k2);
+        open_frac_borrow(k1, usize_full_borrow_content(_t, self), q1);
+        open [?f1]usize_full_borrow_content(_t, self)();
+        open_frac_borrow(k2, usize_full_borrow_content(_t, other), q2);
+        open [?f2]usize_full_borrow_content(_t, other)();
+        call();
+        close [f2]usize_full_borrow_content(_t, other)();
+        close_frac_borrow(f2, usize_full_borrow_content(_t, other));
+        close [f1]usize_full_borrow_content(_t, self)();
+        close_frac_borrow(f1, usize_full_borrow_content(_t, self));
+    }
+    @*/
+    {
+        //@ usize_region_model(v1, 0, v2);
         *self == *other
     }
 }
