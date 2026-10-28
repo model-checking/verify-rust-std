@@ -6153,7 +6153,9 @@ mod verify {
                     None => assert!(len < $n),
                 }
                 match s.last_chunk::<$n>() {
-                    Some(c) => assert!(len >= $n && c.as_ptr() == unsafe { s.as_ptr().add(len - $n) }),
+                    Some(c) => {
+                        assert!(len >= $n && c.as_ptr() == unsafe { s.as_ptr().add(len - $n) })
+                    }
                     None => assert!(len < $n),
                 }
                 match s.split_first_chunk::<$n>() {
@@ -6269,7 +6271,8 @@ mod verify {
         let indices: [usize; 3] = kani::any();
         let r = get_disjoint_check_valid(&indices, len);
         let in_bounds = indices.iter().all(|i| *i < len);
-        let disjoint = indices[0] != indices[1] && indices[0] != indices[2] && indices[1] != indices[2];
+        let disjoint =
+            indices[0] != indices[1] && indices[0] != indices[2] && indices[1] != indices[2];
         assert!(r.is_ok() == (in_bounds && disjoint));
     }
 }
