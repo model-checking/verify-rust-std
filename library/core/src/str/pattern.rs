@@ -68,7 +68,8 @@ pub(crate) trait SearcherLoopContract {
     /// The bytes a backward step (`next_back`) writes.
     fn kani_back_cursor(&self) -> *const [u8];
     /// The bytes of the pattern's own state that a step may write (a stateful
-    /// predicate).
+    /// predicate). None by default: Kani checks every write against `modifies`
+    /// and `loop_modifies`, so a pattern that writes more fails its proofs.
     fn kani_pred_state(&self) -> *const [u8];
 }
 
@@ -907,36 +908,6 @@ impl<C: MultiCharEq> SearcherLoopContract for MultiCharEqSearcher<'_, C> {
         self.kani_fwd_cursor()
     }
     default fn kani_pred_state(&self) -> *const [u8] {
-        crate::ptr::slice_from_raw_parts(&raw const self.char_eq as *const u8, size_of::<C>())
-    }
-}
-
-// A set of characters has no state of its own: `matches` only reads it.
-#[cfg(kani)]
-impl<const N: usize> SearcherLoopContract for MultiCharEqSearcher<'_, [char; N]> {
-    fn kani_pred_state(&self) -> *const [u8] {
-        crate::ptr::slice_from_raw_parts(&raw const self.char_eq as *const u8, 0)
-    }
-}
-
-#[cfg(kani)]
-impl<const N: usize> SearcherLoopContract for MultiCharEqSearcher<'_, &[char; N]> {
-    fn kani_pred_state(&self) -> *const [u8] {
-        crate::ptr::slice_from_raw_parts(&raw const self.char_eq as *const u8, 0)
-    }
-}
-
-#[cfg(kani)]
-impl SearcherLoopContract for MultiCharEqSearcher<'_, &[char]> {
-    fn kani_pred_state(&self) -> *const [u8] {
-        crate::ptr::slice_from_raw_parts(&raw const self.char_eq as *const u8, 0)
-    }
-}
-
-// Nor does a function pointer: a call through it does not write it.
-#[cfg(kani)]
-impl SearcherLoopContract for MultiCharEqSearcher<'_, fn(char) -> bool> {
-    fn kani_pred_state(&self) -> *const [u8] {
         crate::ptr::slice_from_raw_parts(&raw const self.char_eq as *const u8, 0)
     }
 }
@@ -2429,7 +2400,8 @@ pub mod verify {
 /// * `memchr` / `memrchr` (assumption 1): return a matching index, or `None`.
 ///   This allows more behaviors than the real functions (`None` while a match
 ///   exists, a match that is not the first/last), which is sound for safety.
-/// * slice equality of bytes (assumption 1): a recursive byte comparison in
+/// * slice equality of bytes (assumption 1): a byte by byte comparison of at
+///   most 4 bytes (asserted: the searchers compare the encoding of a char) in
 ///   place of `compare_bytes`. `check_slice_eq_model_matches_upstream` shows it
 ///   returns what upstream returns.
 /// * `<[char]>::contains` (assumption 1): any result. The searchers use only
@@ -2622,21 +2594,22 @@ pub mod verify_char_searcher {
     }
 
     /// Model of the byte-wise slice equality `compare_bytes(lhs, rhs, size) == 0`
-    /// (assumption 1). It recurses instead of looping: CBMC 6.11 rejects writes
-    /// to the locals of a contract-less loop in a callee of a contracted loop
-    /// (kani#4790, fixed after 6.11), which also rules out the `memcmp` builtin.
+    /// (assumption 1), for the at most 4 bytes of a char's encoding. It has no
+    /// loop: CBMC 6.11 rejects writes to the locals of a contract-less loop in a
+    /// callee of a contracted loop (kani#4790, fixed after 6.11), which also
+    /// rules out the `memcmp` builtin.
     unsafe fn model_equal_same_length<A, B>(lhs: *const A, rhs: *const B, len: usize) -> bool {
         // SAFETY: as upstream, both are readable for `len` elements.
         let size = unsafe { crate::intrinsics::unchecked_mul(len, crate::mem::size_of::<A>()) };
+        assert!(size <= 4);
+        let (l, r) = (lhs as *const u8, rhs as *const u8);
         // SAFETY: as above, both are readable for `size` bytes.
-        unsafe { bytes_equal(lhs as *const u8, rhs as *const u8, size) }
-    }
-
-    /// # Safety
-    /// `lhs` and `rhs` are readable for `n` bytes.
-    unsafe fn bytes_equal(lhs: *const u8, rhs: *const u8, n: usize) -> bool {
-        // SAFETY: if `n > 0`, the first byte and the `n - 1` after it are readable.
-        n == 0 || unsafe { *lhs == *rhs && bytes_equal(lhs.add(1), rhs.add(1), n - 1) }
+        unsafe {
+            (size < 1 || *l == *r)
+                && (size < 2 || *l.add(1) == *r.add(1))
+                && (size < 3 || *l.add(2) == *r.add(2))
+                && (size < 4 || *l.add(3) == *r.add(3))
+        }
     }
 
     /// Model of `<[T]>::contains` (assumption 1): any result. The searchers use
@@ -2773,10 +2746,7 @@ pub mod verify_char_searcher {
         kani::cover(r.is_none(), "searched to the start");
     }
 
-    // `unwind(5)`: the needle comparison compares `utf8_size <= 4` bytes; the
-    // search loop itself has a contract and is not unwound.
     #[kani::proof]
-    #[kani::unwind(5)]
     #[kani::stub(crate::slice::memchr::memchr, model_memchr)]
     #[kani::stub(
         <u8 as crate::slice::cmp::SlicePartialEq<u8>>::equal_same_length,
@@ -2794,9 +2764,7 @@ pub mod verify_char_searcher {
         kani::cover(r.is_none(), "searched to the end");
     }
 
-    // `unwind(5)`: as for `next_match`.
     #[kani::proof]
-    #[kani::unwind(5)]
     #[kani::stub(crate::slice::memchr::memrchr, model_memrchr)]
     #[kani::stub(
         <u8 as crate::slice::cmp::SlicePartialEq<u8>>::equal_same_length,
@@ -3026,6 +2994,15 @@ pub mod verify_char_searcher {
         extern "rust-call" fn call_mut(&mut self, _: (char,)) -> bool {
             self.0 = !self.0;
             kani::any()
+        }
+    }
+
+    impl SearcherLoopContract for MultiCharEqSearcher<'_, Toggle> {
+        fn kani_pred_state(&self) -> *const [u8] {
+            crate::ptr::slice_from_raw_parts(
+                &raw const self.char_eq as *const u8,
+                size_of::<Toggle>(),
+            )
         }
     }
 }
