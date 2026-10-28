@@ -1881,15 +1881,15 @@ impl<T> [T] {
         /*@
         if a == b {
             array_extract_elem(ptr, a);
-            close ptr::opt_pointsto::<T>(true, ptr + a, ptr + b, nth(a, elems), _);
+            close std::ptr::opt_pointsto::<T>(true, ptr + a, ptr + b, nth(a, elems), _);
         } else if a < b {
             array_extract_elem(ptr, b);
             array_extract_elem(ptr, a);
-            close ptr::opt_pointsto::<T>(false, ptr + a, ptr + b, nth(a, elems), _);
+            close std::ptr::opt_pointsto::<T>(false, ptr + a, ptr + b, nth(a, elems), _);
         } else {
             array_extract_elem(ptr, a);
             array_extract_elem(ptr, b);
-            close ptr::opt_pointsto::<T>(false, ptr + a, ptr + b, nth(a, elems), _);
+            close std::ptr::opt_pointsto::<T>(false, ptr + a, ptr + b, nth(a, elems), _);
         }
         @*/
         // SAFETY: caller has to guarantee that `a < self.len()` and `b < self.len()`

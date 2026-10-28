@@ -231,16 +231,6 @@ pub mod ptr {
         core::ptr::slice_from_raw_parts_mut(data, len)
     }
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_stable(feature = "const_swap", since = "1.85.0")]
-    pub const unsafe fn swap<T>(x: *mut T, y: *mut T) {
-        unsafe { core::ptr::swap(x, y) }
-    }
-    #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_stable(feature = "const_swap", since = "1.85.0")]
-    pub const unsafe fn swap_nonoverlapping<T>(x: *mut T, y: *mut T, count: usize) {
-        unsafe { core::ptr::swap_nonoverlapping(x, y, count) }
-    }
-    #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
     pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
         unsafe { core::ptr::copy(src, dst, count) }

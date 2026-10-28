@@ -261,32 +261,6 @@ pub mod ptr {
         core::ptr::slice_from_raw_parts_mut(data, len)
     }
     /*@
-    pred opt_pointsto<T>(same: bool, x: *T, y: *T, vx: T; vy: T) =
-        if same { x == y &*& vy == vx } else { *y |-> vy };
-    @*/
-    #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_stable(feature = "const_swap", since = "1.85.0")]
-    pub const unsafe fn swap<T>(x: *mut T, y: *mut T)
-    //@ req *x |-> ?vx &*& opt_pointsto::<T>(?same, x, y, vx, ?vy);
-    //@ ens *x |-> vy &*& if same { true } else { *y |-> vx };
-    //@ on_unwind_ens false;
-    // https://github.com/verifast/verifast/issues/1056
-    //@ assume_correct
-    {
-        unsafe { core::ptr::swap(x, y) }
-    }
-    #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_stable(feature = "const_swap", since = "1.85.0")]
-    pub const unsafe fn swap_nonoverlapping<T>(x: *mut T, y: *mut T, count: usize)
-    //@ req x[..count] |-> ?vs1 &*& y[..count] |-> ?vs2;
-    //@ ens x[..count] |-> vs2 &*& y[..count] |-> vs1;
-    //@ on_unwind_ens false;
-    // https://github.com/verifast/verifast/issues/1056
-    //@ assume_correct
-    {
-        unsafe { core::ptr::swap_nonoverlapping(x, y, count) }
-    }
-    /*@
     pred copy_context<T>(base: *T, len: usize, src_idx: usize, dst_idx: usize, count: usize, elems: list<T>) =
         base[..len] |-> elems &*&
         0 <= count &*&

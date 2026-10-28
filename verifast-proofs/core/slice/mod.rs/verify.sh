@@ -48,57 +48,9 @@ if [ ! -f "$SYSROOT_LIB_REL/libcore_noslice.rlib" ] || [ ! -f "$SYSROOT_LIB_REL/
   ln -s "$RUST_SRC/stdarch" "$SYSROOT_REL/core_src/stdarch"
   ln -s "$RUST_SRC/portable-simd" "$SYSROOT_REL/core_src/portable-simd"
   cp -R "$RUST_SRC/core/src" "$CORE_SRC_TMP/src"
-  python3 - "$CORE_SRC_TMP/src" << 'PYEOF'
-import sys, os
-
-src_dir = sys.argv[1]
-
-# 1. Make RangeInclusive fields pub in ops/range.rs
-p = os.path.join(src_dir, "ops/range.rs")
-s = open(p).read()
-s = s.replace("pub(crate) start: Idx,", '#[stable(feature = "rust1", since = "1.0.0")] pub start: Idx,')
-s = s.replace("pub(crate) end: Idx,", '#[stable(feature = "rust1", since = "1.0.0")] pub end: Idx,')
-s = s.replace("pub(crate) exhausted: bool,", '#[stable(feature = "rust1", since = "1.0.0")] pub exhausted: bool,')
-open(p, "w").write(s)
-
-# 2. Make new() pub in slice/iter.rs and slice/iter/macros.rs
-for rel in ["slice/iter.rs", "slice/iter/macros.rs"]:
-    p = os.path.join(src_dir, rel)
-    s = open(p).read()
-    s = s.replace("pub(super) const fn new(", '#[stable(feature = "rust1", since = "1.0.0")] #[rustc_const_stable(feature = "rust1", since = "1.0.0")] pub const fn new(')
-    s = s.replace("pub(crate) const fn new(", '#[stable(feature = "rust1", since = "1.0.0")] #[rustc_const_stable(feature = "rust1", since = "1.0.0")] pub const fn new(')
-    s = s.replace("pub(super) fn new(", '#[stable(feature = "rust1", since = "1.0.0")] pub fn new(')
-    s = s.replace("pub(crate) fn new(", '#[stable(feature = "rust1", since = "1.0.0")] pub fn new(')
-    open(p, "w").write(s)
-
-# 3. In slice/mod.rs and slice/raw.rs, comment out #[lang = "slice_len_fn"] and #[rustc_diagnostic_item
-for rel in ["slice/mod.rs", "slice/raw.rs"]:
-    p = os.path.join(src_dir, rel)
-    s = open(p).read()
-    s = s.replace('#[lang = "slice_len_fn"]', '// #[lang = "slice_len_fn"]')
-    s = s.replace('#[rustc_diagnostic_item =', '// #[rustc_diagnostic_item =')
-    open(p, "w").write(s)
-
-# 4. In slice/mod.rs, make inherent methods on [T], [u8], [[T; N]] pub(crate)
-p = os.path.join(src_dir, "slice/mod.rs")
-lines = open(p).readlines()
-in_slice_impl = False
-brace_depth = 0
-out = []
-for line in lines:
-    stripped = line.strip()
-    if stripped.startswith("impl") and ("[T]" in stripped or "[u8]" in stripped or "[[T; N]]" in stripped) and " for " not in stripped:
-        in_slice_impl = True
-    if in_slice_impl:
-        brace_depth += line.count("{") - line.count("}")
-        if line.startswith("    pub const fn ") or line.startswith("    pub fn ") or line.startswith("    pub const unsafe fn ") or line.startswith("    pub unsafe fn "):
-            line = line.replace("    pub ", "    pub(crate) ", 1)
-        if brace_depth <= 0 and "{" not in line and "}" in line:
-            in_slice_impl = False
-            brace_depth = 0
-    out.append(line)
-open(p, "w").write("".join(out))
-PYEOF
+  # The four visibility/attribute edits that let the slice sources compile as a separate
+  # crate against this `core` (listed in README.md, "Sysroot").
+  patch -p1 -d "$CORE_SRC_TMP/src" < core-sysroot.patch
   "$RUSTC" --crate-name core --edition=2024 "$CORE_SRC_TMP/src/lib.rs" --crate-type lib \
     -C embed-bitcode=no -Z force-unstable-if-unmarked -A warnings \
     -L dependency="$SYSROOT_LIB_REL" \
