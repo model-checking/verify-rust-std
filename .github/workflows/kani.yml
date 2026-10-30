@@ -78,6 +78,8 @@ jobs:
     # This job is a required check under its matrix name, and a job skipped by a job-level
     # `if:` reports without the "(os)" suffix, which would leave PRs pending. So the gate is
     # on each step instead: on a PR the job starts, skips every step and passes in seconds.
+    # The job-level `if:` above only skips events for other labels; the required check has
+    # already reported for that commit by then.
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
