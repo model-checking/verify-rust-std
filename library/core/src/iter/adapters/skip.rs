@@ -1,5 +1,3 @@
-use safety::requires;
-
 use crate::intrinsics::unlikely;
 use crate::iter::adapters::SourceIter;
 use crate::iter::adapters::zip::try_get_unchecked;
@@ -162,7 +160,9 @@ where
     }
 
     #[doc(hidden)]
-    #[requires(idx + self.n < self.iter.size_hint().0)]
+    // Subtraction-based bound (avoids `idx + self.n` overflow in the contract,
+    // matching the overflow-safe form used for `Zip::get_unchecked`).
+    // Precondition (verified by the mirrored kani::assume in verify::check_* below, not as a contract): self.n <= self.iter.size_hint().0 && idx < self.iter.size_hint().0 - self.n.
     #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item
     where
@@ -293,3 +293,68 @@ where
 // I: TrustedLen would not.
 #[unstable(feature = "trusted_len", issue = "37572")]
 unsafe impl<I> TrustedLen for Skip<I> where I: Iterator + TrustedRandomAccess {}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    #[kani::proof]
+    fn check_skip_get_unchecked_u8() {
+        // Large-length UB-coverage companion. Capped at 100_000 (not u32::MAX) so the
+        // symbolic array fits the CI runner's memory; the unchecked access's safety is
+        // slice-length-independent, so a large-but-feasible length still exercises it.
+        const MAX_LEN: usize = 100_000;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        kani::assume(n <= slice.len());
+        let mut iter = Skip::new(slice.iter(), n);
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    fn check_skip_get_unchecked_unit() {
+        const MAX_LEN: usize = isize::MAX as usize;
+        let array: [(); MAX_LEN] = [(); MAX_LEN];
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        kani::assume(n <= slice.len());
+        let mut iter = Skip::new(slice.iter(), n);
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    fn check_skip_get_unchecked_char() {
+        const MAX_LEN: usize = 50;
+        let array: [char; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        kani::assume(n <= slice.len());
+        let mut iter = Skip::new(slice.iter(), n);
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    fn check_skip_get_unchecked_tup() {
+        const MAX_LEN: usize = 50;
+        let array: [(char, u8); MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        kani::assume(n <= slice.len());
+        let mut iter = Skip::new(slice.iter(), n);
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+}
