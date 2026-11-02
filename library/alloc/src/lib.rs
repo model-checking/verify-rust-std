@@ -90,6 +90,7 @@
 // Library features:
 // tidy-alphabetical-start
 #![cfg_attr(kani, feature(kani))]
+#![cfg_attr(kani, feature(str_split_remainder, str_split_whitespace_remainder))]
 #![cfg_attr(not(no_global_oom_handling), feature(string_replace_in_place))]
 #![feature(allocator_ext)]
 #![feature(array_into_iter_constructors)]
