@@ -2104,6 +2104,515 @@ unsafe fn small_slice_eq(x: &[u8], y: &[u8]) -> bool {
 #[unstable(feature = "kani", issue = "none")]
 pub mod verify {
     use super::*;
+    use crate::str::CharIndices;
+    use crate::ub_checks::Invariant;
+
+    // Challenge 20: type invariants for the two char-Searcher cores, plus
+    // criterion-1 (creation establishes the invariant) harnesses.
+
+    impl Invariant for CharSearcher<'_> {
+        /// Safety invariant of a `CharSearcher`: the forward/backward cursors
+        /// stay ordered and on UTF-8 char boundaries of `haystack`, and the
+        /// cached needle encoding matches re-encoding `needle` fresh.
+        fn is_safe(&self) -> bool {
+            let size = self.utf8_size();
+            let mut buf = [0u8; 4];
+            let encoded_len = self.needle.encode_utf8(&mut buf).len();
+
+            self.finger <= self.finger_back
+                && self.finger_back <= self.haystack.len()
+                && self.haystack.is_char_boundary(self.finger)
+                && self.haystack.is_char_boundary(self.finger_back)
+                && size <= 4
+                && size == encoded_len
+                // Byte-wise, not `==` on slices: avoids a CBMC memcmp loop.
+                && (size < 1 || self.utf8_encoded[0] == buf[0])
+                && (size < 2 || self.utf8_encoded[1] == buf[1])
+                && (size < 3 || self.utf8_encoded[2] == buf[2])
+                && (size < 4 || self.utf8_encoded[3] == buf[3])
+        }
+    }
+
+    impl<C: MultiCharEq> Invariant for MultiCharEqSearcher<'_, C> {
+        /// Safety invariant: the `char_indices` cursor is an in-bounds,
+        /// char-boundary-aligned `[front, back)` window of `haystack`,
+        /// modeled through its public `offset`/`as_str` view (no access to
+        /// its private state). `CharIndices` is double-ended: `next_back`
+        /// shrinks the window from the back without moving `offset()`, so
+        /// `back` is derived relationally (`offset() + as_str().len()`)
+        /// rather than assumed to sit at `haystack.len()`.
+        fn is_safe(&self) -> bool {
+            let front = self.char_indices.offset();
+            let back = front + self.char_indices.as_str().len();
+            front <= back
+                && back <= self.haystack.len()
+                && self.haystack.is_char_boundary(front)
+                && self.haystack.is_char_boundary(back)
+        }
+    }
+
+    /// A symbolic valid-UTF-8 `&str` of length in `[0, 5]` bytes, built
+    /// constructively from symbolic `char`s via `encode_utf8`, so every width
+    /// class (1-4 bytes) is reachable. The haystack is the only `&str` these
+    /// harnesses decode; a real `&str` is always valid UTF-8, so this is the
+    /// faithful input domain. `buf` carries slack past the 5-byte cap so the
+    /// final `encode_utf8` always has room.
+    fn symbolic_utf8_str(buf: &mut [u8; 8]) -> &str {
+        let mut len = 0usize;
+        for _ in 0..5 {
+            if kani::any() {
+                break; // symbolic early stop -> variable length
+            }
+            let c: char = kani::any();
+            let w = c.len_utf8();
+            if len + w > 5 {
+                break; // keep the str <= 5 bytes
+            }
+            c.encode_utf8(&mut buf[len..]);
+            len += w;
+        }
+        // SAFETY: bytes were written only by `encode_utf8` of real `char`s, so
+        // `buf[..len]` is valid UTF-8 by construction.
+        unsafe { core::str::from_utf8_unchecked(&buf[..len]) }
+    }
+
+    // Criterion 1: constructing a `CharSearcher` via the real `char` Pattern
+    // path establishes the invariant.
+    #[kani::proof]
+    fn check_cs_invariant_at_creation() {
+        let mut buf = [0u8; 8];
+        let haystack = symbolic_utf8_str(&mut buf);
+        let needle: char = kani::any();
+        let s = needle.into_searcher(haystack);
+        kani::cover(true, "ch20 cs creation reachable");
+        kani::assert(s.is_safe(), "CharSearcher: C established at creation");
+    }
+
+    // Criterion 1: constructing a `MultiCharEqSearcher` via the `[char; N]`
+    // Pattern path (its `CharArraySearcher` wrapper's `.0`) establishes the
+    // invariant.
+    #[kani::proof]
+    fn check_mces_invariant_at_creation() {
+        let mut buf = [0u8; 8];
+        let haystack = symbolic_utf8_str(&mut buf);
+        let wrapper = ['a', 'b'].into_searcher(haystack);
+        kani::cover(true, "ch20 mces creation reachable");
+        kani::assert(wrapper.0.is_safe(), "MultiCharEqSearcher: C established at creation");
+    }
+
+    // Challenge 20: criterion-2 (C implies the P2 safety property — returned
+    // ranges lie on UTF-8 char boundaries) and criterion-3 (C is preserved)
+    // for the six target methods on both cores, bounded to a 5-byte haystack;
+    // method harnesses use `unwind(7)` = 5 content bytes plus loop
+    // entry/exit slack.
+
+    /// Independently-written naive last-occurrence byte scan: a
+    /// `#[kani::stub]` replacement for `memchr::memrchr` inside
+    /// `CharSearcher::next_match_back`, licensed by Challenge-20 assumption 1
+    /// (the `slice` module is functionally correct). `memchr` needs no stub —
+    /// its `cfg(kani)` path is already a naive loop, so `next_match` runs the
+    /// real body — but `memrchr`'s only body is the word-at-a-time
+    /// `memrchr_aligned`, whose raw word reads overflow CBMC's object budget
+    /// at this bound; this scan stands in for it.
+    fn stub_memrchr(x: u8, text: &[u8]) -> Option<usize> {
+        let mut i = text.len();
+        while i > 0 {
+            i -= 1;
+            if text[i] == x {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Always-panics stand-in for `memchr::memrchr`, used only by the
+    /// falsifier below (D10 stub-soundness protocol): if `#[kani::stub]`
+    /// were silently failing to substitute at `next_match_back`'s call site,
+    /// nothing would panic and the `#[kani::should_panic]` harness would
+    /// FAIL instead of PASS — so a PASS here proves the stub genuinely
+    /// reaches that call site, i.e. `stub_memrchr` above masks nothing.
+    fn panicking_memrchr_stub(_x: u8, _text: &[u8]) -> Option<usize> {
+        panic!("ch20 stub falsifier: memrchr call site reached");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(7)]
+    #[kani::stub(crate::slice::memchr::memrchr, panicking_memrchr_stub)]
+    fn check_memrchr_stub_falsifier() {
+        let mut buf = [0u8; 8];
+        let mut s = kani_any_char_searcher(&mut buf);
+        let _ = s.next_match_back();
+    }
+
+    /// Arbitrary-`C`-state builder for a bounded (<= 5-byte) `CharSearcher`:
+    /// independently symbolic `finger`/`finger_back`/`needle` over a symbolic
+    /// valid-UTF-8 haystack, filtered to invariant-satisfying states.
+    fn kani_any_char_searcher<'a>(buf: &'a mut [u8; 8]) -> CharSearcher<'a> {
+        let haystack = symbolic_utf8_str(buf);
+        let needle: char = kani::any();
+        let mut utf8_encoded = [0u8; 4];
+        let utf8_size = needle.encode_utf8(&mut utf8_encoded).len() as u8;
+        let finger: usize = kani::any();
+        let finger_back: usize = kani::any();
+        let s = CharSearcher { haystack, finger, finger_back, needle, utf8_size, utf8_encoded };
+        kani::assume(s.is_safe());
+        s
+    }
+
+    /// Arbitrary-`C`-state builder for a bounded `MultiCharEqSearcher<[char;
+    /// 2]>`: a symbolic `char_indices` cursor offset over a symbolic
+    /// valid-UTF-8 haystack, filtered to invariant-satisfying states.
+    fn kani_any_multi_char_eq_searcher<'a>(
+        buf: &'a mut [u8; 8],
+    ) -> MultiCharEqSearcher<'a, [char; 2]> {
+        let haystack = symbolic_utf8_str(buf);
+        let char_eq: [char; 2] = [kani::any(), kani::any()];
+        let offset: usize = kani::any();
+        let suffix = haystack.get(offset..);
+        kani::assume(suffix.is_some());
+        let char_indices = CharIndices { front_offset: offset, iter: suffix.unwrap().chars() };
+        let s = MultiCharEqSearcher { char_eq, haystack, char_indices };
+        kani::assume(s.is_safe());
+        s
+    }
+
+    /// Asserts a `SearchStep`'s byte range, if any, is a well-formed,
+    /// in-bounds, char-boundary-aligned span of `haystack` (criterion 2's
+    /// P2 property).
+    fn assert_step_on_boundaries(haystack: &str, step: SearchStep) {
+        let (a, b) = match step {
+            SearchStep::Match(a, b) | SearchStep::Reject(a, b) => (a, b),
+            SearchStep::Done => return,
+        };
+        kani::assert(a <= b, "ch20 P2: range start <= end");
+        kani::assert(b <= haystack.len(), "ch20 P2: range end in bounds");
+        kani::assert(haystack.is_char_boundary(a), "ch20 P2: range start on boundary");
+        kani::assert(haystack.is_char_boundary(b), "ch20 P2: range end on boundary");
+    }
+
+    /// Same as `assert_step_on_boundaries`, for the `Option<(usize,
+    /// usize)>` shape returned by `next_match`/`next_match_back`/
+    /// `next_reject`/`next_reject_back`.
+    fn assert_range_on_boundaries(haystack: &str, range: Option<(usize, usize)>) {
+        if let Some((a, b)) = range {
+            kani::assert(a <= b, "ch20 P2: range start <= end");
+            kani::assert(b <= haystack.len(), "ch20 P2: range end in bounds");
+            kani::assert(haystack.is_char_boundary(a), "ch20 P2: range start on boundary");
+            kani::assert(haystack.is_char_boundary(b), "ch20 P2: range end on boundary");
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_cs_next() {
+        let mut buf = [0u8; 8];
+        let mut s = kani_any_char_searcher(&mut buf);
+        let haystack = s.haystack();
+        let step = s.next();
+        assert_step_on_boundaries(haystack, step);
+        kani::assert(s.is_safe(), "ch20 cs_next: C preserved");
+        match step {
+            SearchStep::Match(..) => kani::cover(true, "ch20 cs_next: match reachable"),
+            SearchStep::Reject(..) => kani::cover(true, "ch20 cs_next: reject reachable"),
+            SearchStep::Done => kani::cover(true, "ch20 cs_next: done reachable"),
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_cs_next_match() {
+        let mut buf = [0u8; 8];
+        let mut s = kani_any_char_searcher(&mut buf);
+        let haystack = s.haystack();
+        let m = s.next_match();
+        assert_range_on_boundaries(haystack, m);
+        kani::assert(s.is_safe(), "ch20 cs_next_match: C preserved");
+        match m {
+            Some(_) => kani::cover(true, "ch20 cs_next_match: match reachable"),
+            None => kani::cover(true, "ch20 cs_next_match: none reachable"),
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_cs_next_back() {
+        let mut buf = [0u8; 8];
+        let mut s = kani_any_char_searcher(&mut buf);
+        let haystack = s.haystack();
+        let step = s.next_back();
+        assert_step_on_boundaries(haystack, step);
+        kani::assert(s.is_safe(), "ch20 cs_next_back: C preserved");
+        match step {
+            SearchStep::Match(..) => kani::cover(true, "ch20 cs_next_back: match reachable"),
+            SearchStep::Reject(..) => kani::cover(true, "ch20 cs_next_back: reject reachable"),
+            SearchStep::Done => kani::cover(true, "ch20 cs_next_back: done reachable"),
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    #[kani::stub(crate::slice::memchr::memrchr, stub_memrchr)]
+    fn check_cs_next_match_back() {
+        let mut buf = [0u8; 8];
+        let mut s = kani_any_char_searcher(&mut buf);
+        let haystack = s.haystack();
+        let m = s.next_match_back();
+        assert_range_on_boundaries(haystack, m);
+        kani::assert(s.is_safe(), "ch20 cs_next_match_back: C preserved");
+        match m {
+            Some(_) => kani::cover(true, "ch20 cs_next_match_back: match reachable"),
+            None => kani::cover(true, "ch20 cs_next_match_back: none reachable"),
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_cs_next_reject() {
+        let mut buf = [0u8; 8];
+        let mut s = kani_any_char_searcher(&mut buf);
+        let haystack = s.haystack();
+        let r = s.next_reject();
+        assert_range_on_boundaries(haystack, r);
+        kani::assert(s.is_safe(), "ch20 cs_next_reject: C preserved");
+        match r {
+            Some(_) => kani::cover(true, "ch20 cs_next_reject: reject reachable"),
+            None => kani::cover(true, "ch20 cs_next_reject: none reachable"),
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_cs_next_reject_back() {
+        let mut buf = [0u8; 8];
+        let mut s = kani_any_char_searcher(&mut buf);
+        let haystack = s.haystack();
+        let r = s.next_reject_back();
+        assert_range_on_boundaries(haystack, r);
+        kani::assert(s.is_safe(), "ch20 cs_next_reject_back: C preserved");
+        match r {
+            Some(_) => kani::cover(true, "ch20 cs_next_reject_back: reject reachable"),
+            None => kani::cover(true, "ch20 cs_next_reject_back: none reachable"),
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_mces_next() {
+        let mut buf = [0u8; 8];
+        let mut s = kani_any_multi_char_eq_searcher(&mut buf);
+        let haystack = s.haystack();
+        let step = s.next();
+        assert_step_on_boundaries(haystack, step);
+        kani::assert(s.is_safe(), "ch20 mces_next: C preserved");
+        match step {
+            SearchStep::Match(..) => kani::cover(true, "ch20 mces_next: match reachable"),
+            SearchStep::Reject(..) => kani::cover(true, "ch20 mces_next: reject reachable"),
+            SearchStep::Done => kani::cover(true, "ch20 mces_next: done reachable"),
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_mces_next_back() {
+        let mut buf = [0u8; 8];
+        let mut s = kani_any_multi_char_eq_searcher(&mut buf);
+        let haystack = s.haystack();
+        let step = s.next_back();
+        assert_step_on_boundaries(haystack, step);
+        kani::assert(s.is_safe(), "ch20 mces_next_back: C preserved");
+        match step {
+            SearchStep::Match(..) => kani::cover(true, "ch20 mces_next_back: match reachable"),
+            SearchStep::Reject(..) => kani::cover(true, "ch20 mces_next_back: reject reachable"),
+            SearchStep::Done => kani::cover(true, "ch20 mces_next_back: done reachable"),
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_mces_next_match() {
+        let mut buf = [0u8; 8];
+        let mut s = kani_any_multi_char_eq_searcher(&mut buf);
+        let haystack = s.haystack();
+        let m = s.next_match();
+        assert_range_on_boundaries(haystack, m);
+        kani::assert(s.is_safe(), "ch20 mces_next_match: C preserved");
+        match m {
+            Some(_) => kani::cover(true, "ch20 mces_next_match: match reachable"),
+            None => kani::cover(true, "ch20 mces_next_match: none reachable"),
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_mces_next_match_back() {
+        let mut buf = [0u8; 8];
+        let mut s = kani_any_multi_char_eq_searcher(&mut buf);
+        let haystack = s.haystack();
+        let m = s.next_match_back();
+        assert_range_on_boundaries(haystack, m);
+        kani::assert(s.is_safe(), "ch20 mces_next_match_back: C preserved");
+        match m {
+            Some(_) => kani::cover(true, "ch20 mces_next_match_back: match reachable"),
+            None => kani::cover(true, "ch20 mces_next_match_back: none reachable"),
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_mces_next_reject() {
+        let mut buf = [0u8; 8];
+        let mut s = kani_any_multi_char_eq_searcher(&mut buf);
+        let haystack = s.haystack();
+        let r = s.next_reject();
+        assert_range_on_boundaries(haystack, r);
+        kani::assert(s.is_safe(), "ch20 mces_next_reject: C preserved");
+        match r {
+            Some(_) => kani::cover(true, "ch20 mces_next_reject: reject reachable"),
+            None => kani::cover(true, "ch20 mces_next_reject: none reachable"),
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_mces_next_reject_back() {
+        let mut buf = [0u8; 8];
+        let mut s = kani_any_multi_char_eq_searcher(&mut buf);
+        let haystack = s.haystack();
+        let r = s.next_reject_back();
+        assert_range_on_boundaries(haystack, r);
+        kani::assert(s.is_safe(), "ch20 mces_next_reject_back: C preserved");
+        match r {
+            Some(_) => kani::cover(true, "ch20 mces_next_reject_back: reject reachable"),
+            None => kani::cover(true, "ch20 mces_next_reject_back: none reachable"),
+        }
+    }
+
+    // Challenge 20: the four wrapper Searchers (CharArray, CharArrayRef,
+    // CharSlice, CharPredicate) carry no logic of their own -- each is a newtype
+    // over a `MultiCharEqSearcher<'_, C>` whose six methods delegate verbatim
+    // through the `searcher_methods!` macro. The harnesses above machine-check the inner
+    // core; these harnesses confirm the macro forwards to the inner method and
+    // preserves the invariant, per witness type `C` (`[char; N]`, `&[char; N]`,
+    // `&[char]`, `F: FnMut`) in both directions (`next`/`next_back`). The four
+    // match/reject methods forward through the identical macro arm, so one
+    // SearchStep method per direction exercises the delegation; a per-method
+    // chain overflows CBMC's object-bits-12 budget for no added coverage. This
+    // is a completeness delta, not a rigor delta.
+
+    /// Arbitrary-state `MultiCharEqSearcher<'a, C>` for a caller-supplied
+    /// `char_eq`, so each wrapper's witness type can be seeded: symbolic
+    /// `char_indices` cursor over a symbolic valid-UTF-8 haystack, filtered to
+    /// invariant-satisfying states.
+    fn kani_any_mces_generic<'a, C: MultiCharEq>(
+        buf: &'a mut [u8; 8],
+        char_eq: C,
+    ) -> MultiCharEqSearcher<'a, C> {
+        let haystack = symbolic_utf8_str(buf);
+        let offset: usize = kani::any();
+        let suffix = haystack.get(offset..);
+        kani::assume(suffix.is_some());
+        let char_indices = CharIndices { front_offset: offset, iter: suffix.unwrap().chars() };
+        let s = MultiCharEqSearcher { char_eq, haystack, char_indices };
+        kani::assume(s.is_safe());
+        s
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_chararray_delegation() {
+        let mut buf = [0u8; 8];
+        let mut w = CharArraySearcher(kani_any_mces_generic(&mut buf, [kani::any(), kani::any()]));
+        let haystack = w.haystack();
+        assert_step_on_boundaries(haystack, w.next());
+        kani::assert(w.0.is_safe(), "ch20 chararray next: C preserved");
+        kani::cover(true, "ch20 chararray next: reachable");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_chararray_delegation_back() {
+        let mut buf = [0u8; 8];
+        let mut w = CharArraySearcher(kani_any_mces_generic(&mut buf, [kani::any(), kani::any()]));
+        let haystack = w.haystack();
+        assert_step_on_boundaries(haystack, w.next_back());
+        kani::assert(w.0.is_safe(), "ch20 chararray next_back: C preserved");
+        kani::cover(true, "ch20 chararray next_back: reachable");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_chararrayref_delegation() {
+        let arr: [char; 2] = [kani::any(), kani::any()];
+        let mut buf = [0u8; 8];
+        let mut w = CharArrayRefSearcher(kani_any_mces_generic(&mut buf, &arr));
+        let haystack = w.haystack();
+        assert_step_on_boundaries(haystack, w.next());
+        kani::assert(w.0.is_safe(), "ch20 chararrayref next: C preserved");
+        kani::cover(true, "ch20 chararrayref next: reachable");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_chararrayref_delegation_back() {
+        let arr: [char; 2] = [kani::any(), kani::any()];
+        let mut buf = [0u8; 8];
+        let mut w = CharArrayRefSearcher(kani_any_mces_generic(&mut buf, &arr));
+        let haystack = w.haystack();
+        assert_step_on_boundaries(haystack, w.next_back());
+        kani::assert(w.0.is_safe(), "ch20 chararrayref next_back: C preserved");
+        kani::cover(true, "ch20 chararrayref next_back: reachable");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_charslice_delegation() {
+        let arr: [char; 2] = [kani::any(), kani::any()];
+        let mut buf = [0u8; 8];
+        let mut w = CharSliceSearcher(kani_any_mces_generic(&mut buf, &arr[..]));
+        let haystack = w.haystack();
+        assert_step_on_boundaries(haystack, w.next());
+        kani::assert(w.0.is_safe(), "ch20 charslice next: C preserved");
+        kani::cover(true, "ch20 charslice next: reachable");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_charslice_delegation_back() {
+        let arr: [char; 2] = [kani::any(), kani::any()];
+        let mut buf = [0u8; 8];
+        let mut w = CharSliceSearcher(kani_any_mces_generic(&mut buf, &arr[..]));
+        let haystack = w.haystack();
+        assert_step_on_boundaries(haystack, w.next_back());
+        kani::assert(w.0.is_safe(), "ch20 charslice next_back: C preserved");
+        kani::cover(true, "ch20 charslice next_back: reachable");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_charpredicate_delegation() {
+        let target: char = kani::any();
+        let mut buf = [0u8; 8];
+        let mut w =
+            CharPredicateSearcher(kani_any_mces_generic(&mut buf, move |c: char| c == target));
+        let haystack = w.haystack();
+        assert_step_on_boundaries(haystack, w.next());
+        kani::assert(w.0.is_safe(), "ch20 charpredicate next: C preserved");
+        kani::cover(true, "ch20 charpredicate next: reachable");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_charpredicate_delegation_back() {
+        let target: char = kani::any();
+        let mut buf = [0u8; 8];
+        let mut w =
+            CharPredicateSearcher(kani_any_mces_generic(&mut buf, move |c: char| c == target));
+        let haystack = w.haystack();
+        assert_step_on_boundaries(haystack, w.next_back());
+        kani::assert(w.0.is_safe(), "ch20 charpredicate next_back: C preserved");
+        kani::cover(true, "ch20 charpredicate next_back: reachable");
+    }
 
     #[cfg(all(kani, target_arch = "x86_64"))] // only called on x86
     #[kani::proof]
