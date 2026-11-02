@@ -2,6 +2,13 @@ name: Kani
 
 on:
   workflow_dispatch:
+  # Called by kani-autoharness-request.yml when a PR has the run-autoharness label.
+  workflow_call:
+    inputs:
+      autoharness:
+        description: Run only the autoharness and metrics jobs
+        type: boolean
+        default: false
   merge_group:
   pull_request:
     branches: [ main ]
@@ -18,6 +25,8 @@ defaults:
 jobs:
   check-kani-on-std:
     name: Verify std library (partition ${{ matrix.partition }})
+    # When called for autoharness only, the partitions already ran for this commit.
+    if: ${{ !inputs.autoharness }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -67,6 +76,13 @@ jobs:
    
   kani_autoharness:
     name: Verify std library using autoharness
+    # Autoharness, Metrics, List, Analyzer and Build JSON run only in the merge queue, on
+    # workflow_dispatch, or on PRs with the run-autoharness label, through
+    # kani-autoharness-request.yml (#730): they cost about 5
+    # runner-hours per run and decide how long a PR waits.
+    # This job is a required check under its matrix name, and a job skipped by a job-level
+    # `if:` reports without the "(os)" suffix, which would leave PRs pending. So the gate is
+    # on each step instead: on a PR the job starts, skips every step and passes in seconds.
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -80,7 +96,7 @@ jobs:
 
     steps:
       - name: Remove unnecessary software to free up disk space
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness)
         run: |
           # inspired by https://github.com/easimon/maximize-build-space/blob/master/action.yml
           df -h
@@ -89,6 +105,7 @@ jobs:
 
       # Step 1: Check out the repository
       - name: Checkout Repository
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness
         uses: actions/checkout@v4
         with:
           submodules: true
@@ -107,6 +124,7 @@ jobs:
       #   Unicode tables were regenerated (nightly-2026-09-25) they exceed the 10m
       #   timeout on macOS and the ubuntu runner died while verifying them.
       - name: Run Kani Verification
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness
         run: |
           scripts/run-kani.sh --run autoharness --kani-args \
             --include-pattern "<(.+)[[:space:]]as[[:space:]](.+)>::disjoint_bitor" \
@@ -219,6 +237,7 @@ jobs:
           gzip autoharness-verification.log
 
       - name: Upload Autoharness Verification Log
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-autoharness-verification.log.gz
@@ -229,6 +248,7 @@ jobs:
 
   run_kani_metrics:
     name: Kani Metrics
+    if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -299,6 +319,7 @@ jobs:
 
   run-log-analysis:
     name: Build JSON from logs
+    if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness
     needs: [run_kani_metrics, kani_autoharness]
     runs-on: ${{ matrix.os }}
     strategy:
@@ -351,6 +372,7 @@ jobs:
 
   run-kani-list:
     name: Kani List
+    if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness
     runs-on: ubuntu-latest
     steps:
       - name: Remove unnecessary software to free up disk space
@@ -396,6 +418,7 @@ jobs:
 
   run-autoharness-analyzer:
     name: Kani Autoharness Analyzer
+    if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness
     runs-on: ubuntu-latest
     steps:
       # Step 1: Check out the repository
