@@ -251,9 +251,9 @@ use crate::intrinsics::AtomicOrdering as AO;
 #[cfg(kani)]
 use crate::kani;
 use crate::mem::transmute;
-use crate::{fmt, intrinsics};
 #[cfg(kani)]
 use crate::ub_checks;
+use crate::{fmt, intrinsics};
 
 #[unstable(
     feature = "atomic_internals",
@@ -1458,8 +1458,6 @@ impl AtomicBool {
         note = "renamed to `try_update` for consistency",
         suggestion = "try_update"
     )]
-    #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
-    #[cfg_attr(kani, kani::modifies(self))]
     pub fn fetch_update<F>(
         &self,
         set_order: Ordering,
@@ -1524,8 +1522,6 @@ impl AtomicBool {
     #[cfg(target_has_atomic = "8")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
-    #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
-    #[cfg_attr(kani, kani::modifies(self))]
     pub fn try_update(
         &self,
         set_order: Ordering,
@@ -1589,8 +1585,6 @@ impl AtomicBool {
     #[cfg(target_has_atomic = "8")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
-    #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
-    #[cfg_attr(kani, kani::modifies(self))]
     pub fn update(
         &self,
         set_order: Ordering,
@@ -2297,8 +2291,6 @@ impl<T> AtomicPtr<T> {
         note = "renamed to `try_update` for consistency",
         suggestion = "try_update"
     )]
-    #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
-    #[cfg_attr(kani, kani::modifies(self))]
     pub fn fetch_update<F>(
         &self,
         set_order: Ordering,
@@ -2372,8 +2364,6 @@ impl<T> AtomicPtr<T> {
     #[cfg(target_has_atomic = "ptr")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
-    #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
-    #[cfg_attr(kani, kani::modifies(self))]
     pub fn try_update(
         &self,
         set_order: Ordering,
@@ -2442,8 +2432,6 @@ impl<T> AtomicPtr<T> {
     #[cfg(target_has_atomic = "ptr")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
-    #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
-    #[cfg_attr(kani, kani::modifies(self))]
     pub fn update(
         &self,
         set_order: Ordering,
@@ -3817,8 +3805,6 @@ macro_rules! atomic_int {
                 note = "renamed to `try_update` for consistency",
                 suggestion = "try_update"
             )]
-            #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
-            #[cfg_attr(kani, kani::modifies(self))]
             pub fn fetch_update<F>(&self,
                                    set_order: Ordering,
                                    fetch_order: Ordering,
@@ -3880,8 +3866,6 @@ macro_rules! atomic_int {
             #[cfg(any($cfg_cas, doc))]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
-            #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
-            #[cfg_attr(kani, kani::modifies(self))]
             pub fn try_update(
                 &self,
                 set_order: Ordering,
@@ -3949,8 +3933,6 @@ macro_rules! atomic_int {
             #[cfg(any($cfg_cas, doc))]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
-            #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
-            #[cfg_attr(kani, kani::modifies(self))]
             pub fn update(
                 &self,
                 set_order: Ordering,
@@ -5141,22 +5123,31 @@ mod verify {
         }
     }
 
+    // Use the concrete Atomic<T> type in proof targets: Kani's contract resolver
+    // does not resolve methods through the AtomicBool/AtomicPtr/integer aliases.
+    // Calls below still exercise the corresponding public aliases.
     // Part 1: from_ptr.
     #[cfg(target_has_atomic_load_store = "8")]
-    #[kani::proof_for_contract(AtomicBool::from_ptr)]
+    #[kani::proof_for_contract(Atomic::<bool>::from_ptr)]
     pub fn harness_atomic_bool_from_ptr() {
-        let mut buf: [bool; 100] = kani::any();
-        let offset = kani::any_where(|offset: &usize| *offset < 100);
-        let ptr = buf.as_mut_ptr().wrapping_add(offset);
+        // Arbitrary bool arrays use a MaybeUninit array internally, whose layout
+        // is unsupported by uninit-checks. Use independent symbolic bytes instead;
+        // from_ptr's preconditions retain only valid bool values at the chosen offset.
+        let mut buf: [u8; 100] = kani::any();
+        let ptr = ptr_at_offset::<bool>(&mut buf);
 
         let _ = unsafe { AtomicBool::from_ptr(ptr) };
+        let byte = unsafe { ptr.cast::<u8>().read() };
+        assert!(byte <= 1);
+        kani::cover(byte == 0, "AtomicBool::from_ptr: false is reachable");
+        kani::cover(byte == 1, "AtomicBool::from_ptr: true is reachable");
         kani::cover(true, "AtomicBool::from_ptr: reached after call");
     }
 
     // Harnesses for integer Atomic*::from_ptr functions.
     macro_rules! from_ptr_harness {
         ($name:ident, $atomic:ty, $value:ty) => {
-            #[kani::proof_for_contract(<$atomic>::from_ptr)]
+            #[kani::proof_for_contract(Atomic::<$value>::from_ptr)]
             pub fn $name() {
                 let mut buf: [u8; 100] = kani::any();
                 let ptr = ptr_at_offset::<$value>(&mut buf);
@@ -5189,10 +5180,13 @@ mod verify {
     from_ptr_harness!(harness_atomic_u128_from_ptr, AtomicU128, u128);
 
     // Harnesses for AtomicPtr::from_ptr.
+    // Kani matches this selector against the generic impl's definition path.
+    // `T` names its type parameter, not the concrete pointee used by the proof;
+    // each harness call below still instantiates the requested $pointee.
     macro_rules! atomic_ptr_from_ptr_harness {
         ($name:ident, $pointee:ty) => {
             #[cfg(target_has_atomic_load_store = "ptr")]
-            #[kani::proof_for_contract(AtomicPtr::<$pointee>::from_ptr)]
+            #[kani::proof_for_contract(Atomic::<*mut T>::from_ptr)]
             pub fn $name() {
                 // The stored pointer is arbitrary; the outer pointer targets valid local storage.
                 let mut value = kani::any::<usize>() as *mut $pointee;
@@ -5212,16 +5206,17 @@ mod verify {
     atomic_ptr_from_ptr_harness!(harness_atomic_ptr_from_ptr_u8_3, [u8; 3]);
 
     // Part 2: unsafe atomic helpers.
-    // Harnesses for atomic_store.
+    // Harnesses for ordinary (non-volatile) atomic_store and atomic_load.
+    // Volatile accesses have separate safety requirements and are not covered here.
     macro_rules! store_harness {
         ($name:ident, $atomic:ty, $value:ty) => {
-            #[kani::proof_for_contract(atomic_store::<$value>)]
+            #[kani::proof_for_contract(atomic_store::<$value, false>)]
             pub fn $name() {
                 let initial: $value = kani::any();
                 let storage = <$atomic>::new(initial);
                 let val: $value = kani::any();
 
-                unsafe { atomic_store(storage.as_ptr(), val, any_ordering()) };
+                unsafe { atomic_store::<$value, false>(storage.as_ptr(), val, any_ordering()) };
                 kani::cover(true, "atomic_store: reached after call");
             }
         };
@@ -5254,25 +5249,27 @@ mod verify {
 
     // Pointer harnesses for atomic_store.
     #[cfg(target_has_atomic_load_store = "ptr")]
-    #[kani::proof_for_contract(atomic_store::<*mut u8>)]
+    #[kani::proof_for_contract(atomic_store::<*mut u8, false>)]
     pub fn harness_atomic_store_ptr() {
         let initial = kani::any::<usize>() as *mut u8;
         let storage = AtomicPtr::<u8>::new(initial);
         let val = kani::any::<usize>() as *mut u8;
 
-        unsafe { atomic_store(storage.as_ptr(), val, any_ordering()) };
+        unsafe { atomic_store::<*mut u8, false>(storage.as_ptr(), val, any_ordering()) };
         kani::cover(true, "atomic_store: reached after call");
     }
 
     // Harnesses for atomic_load.
     macro_rules! load_harness {
         ($name:ident, $atomic:ty, $value:ty) => {
-            #[kani::proof_for_contract(atomic_load::<$value>)]
+            #[kani::proof_for_contract(atomic_load::<$value, false>)]
             pub fn $name() {
                 let initial: $value = kani::any();
                 let storage = <$atomic>::new(initial);
 
-                let _ = unsafe { atomic_load(storage.as_ptr().cast_const(), any_ordering()) };
+                let _ = unsafe {
+                    atomic_load::<$value, false>(storage.as_ptr().cast_const(), any_ordering())
+                };
                 kani::cover(true, "atomic_load: reached after call");
             }
         };
@@ -5306,12 +5303,13 @@ mod verify {
 
     // Pointer harness for atomic_load.
     #[cfg(target_has_atomic_load_store = "ptr")]
-    #[kani::proof_for_contract(atomic_load::<*mut u8>)]
+    #[kani::proof_for_contract(atomic_load::<*mut u8, false>)]
     pub fn harness_atomic_load_ptr_u8() {
         let initial = kani::any::<usize>() as *mut u8;
         let storage = AtomicPtr::<u8>::new(initial);
 
-        let _ = unsafe { atomic_load(storage.as_ptr().cast_const(), any_ordering()) };
+        let _ =
+            unsafe { atomic_load::<*mut u8, false>(storage.as_ptr().cast_const(), any_ordering()) };
         kani::cover(true, "atomic_load: reached after call");
     }
 
@@ -5847,14 +5845,14 @@ mod verify {
     // Harnesses for load and store methods of atomic types, with safe abstractions.
     macro_rules! safe_load_store_harness {
         ($load_name:ident, $store_name:ident, $atomic:ty, $value:ty) => {
-            #[kani::proof_for_contract(<$atomic>::load)]
+            #[kani::proof_for_contract(Atomic::<$value>::load)]
             pub fn $load_name() {
                 let storage = <$atomic>::new(kani::any::<$value>());
                 let _ = storage.load(any_load_order());
                 kani::cover(true, "safe atomic load: reached after call");
             }
 
-            #[kani::proof_for_contract(<$atomic>::store)]
+            #[kani::proof_for_contract(Atomic::<$value>::store)]
             pub fn $store_name() {
                 let storage = <$atomic>::new(kani::any::<$value>());
                 storage.store(kani::any::<$value>(), any_store_order());
@@ -5891,7 +5889,7 @@ mod verify {
     safe_load_store_harness!(harness_safe_load_usize, harness_safe_store_usize, AtomicUsize, usize);
 
     #[cfg(target_has_atomic_load_store = "ptr")]
-    #[kani::proof_for_contract(AtomicPtr::<u8>::load)]
+    #[kani::proof_for_contract(Atomic::<*mut T>::load)]
     pub fn harness_safe_load_ptr() {
         let storage = AtomicPtr::<u8>::new(kani::any::<usize>() as *mut u8);
         let _ = storage.load(any_load_order());
@@ -5899,7 +5897,7 @@ mod verify {
     }
 
     #[cfg(target_has_atomic_load_store = "ptr")]
-    #[kani::proof_for_contract(AtomicPtr::<u8>::store)]
+    #[kani::proof_for_contract(Atomic::<*mut T>::store)]
     pub fn harness_safe_store_ptr() {
         let storage = AtomicPtr::<u8>::new(kani::any::<usize>() as *mut u8);
         storage.store(kani::any::<usize>() as *mut u8, any_store_order());
@@ -5908,7 +5906,7 @@ mod verify {
 
     macro_rules! safe_compare_exchange_harness {
         ($name:ident, $atomic:ty, $value:ty, $method:ident) => {
-            #[kani::proof_for_contract(<$atomic>::$method)]
+            #[kani::proof_for_contract(Atomic::<$value>::$method)]
             pub fn $name() {
                 let storage = <$atomic>::new(kani::any::<$value>());
                 let _ = storage.$method(
@@ -5937,7 +5935,7 @@ mod verify {
         compare_exchange_weak
     );
     #[cfg(target_has_atomic = "ptr")]
-    #[kani::proof_for_contract(AtomicPtr::<u8>::compare_exchange)]
+    #[kani::proof_for_contract(Atomic::<*mut T>::compare_exchange)]
     pub fn harness_safe_compare_exchange_ptr() {
         let storage = AtomicPtr::<u8>::new(kani::any::<usize>() as *mut u8);
         let _ = storage.compare_exchange(
@@ -5949,7 +5947,7 @@ mod verify {
         kani::cover(true, "safe atomic pointer compare-exchange: reached after call");
     }
     #[cfg(target_has_atomic = "ptr")]
-    #[kani::proof_for_contract(AtomicPtr::<u8>::compare_exchange_weak)]
+    #[kani::proof_for_contract(Atomic::<*mut T>::compare_exchange_weak)]
     pub fn harness_safe_compare_exchange_weak_ptr() {
         let storage = AtomicPtr::<u8>::new(kani::any::<usize>() as *mut u8);
         let _ = storage.compare_exchange_weak(
@@ -6129,98 +6127,160 @@ mod verify {
         compare_exchange_weak
     );
 
+    // Callback-taking methods use ordinary proofs: a callback may legally write to
+    // captured state or other memory, so `modifies(self)` is not a valid general
+    // contract for these APIs. Keep the former ordering precondition explicit in
+    // each harness instead. The callbacks below mutate captured state to exercise
+    // this case; the proofs cover these callbacks, not every possible FnMut.
+    // As with the other harnesses, this is single-threaded verification.
     macro_rules! safe_update_harness {
-        ($name:ident, $atomic:ty, $value:ty, $method:ident, $closure:expr) => {
-            #[kani::proof_for_contract(<$atomic>::$method)]
+        ($name:ident, $atomic:ty, $value:ty, $method:ident) => {
+            #[kani::proof]
+            #[kani::unwind(2)]
             pub fn $name() {
-                let storage = <$atomic>::new(kani::any::<$value>());
-                let _ = storage.$method(Relaxed, any_failure_order(), $closure);
+                let initial: $value = kani::any();
+                let storage = <$atomic>::new(initial);
+                let new: $value = kani::any();
+                let should_update: bool = kani::any();
+                let set_order = any_ordering();
+                let fetch_order = any_ordering();
+                kani::assume(matches!(fetch_order, Relaxed | Acquire | SeqCst));
+                let mut calls = 0u32;
+                let result = storage.$method(set_order, fetch_order, |_| {
+                    calls += 1;
+                    if should_update { Some(new) } else { None }
+                });
+                assert!(calls > 0);
+                assert_eq!(result, if should_update { Ok(initial) } else { Err(initial) });
+                assert_eq!(storage.load(Relaxed), if should_update { new } else { initial });
+                kani::cover(result.is_ok(), "safe atomic update: Some branch completed");
+                kani::cover(result.is_err(), "safe atomic update: None branch completed");
                 kani::cover(true, "safe atomic update: reached after call");
             }
         };
     }
 
     #[cfg(target_has_atomic = "8")]
-    safe_update_harness!(harness_safe_fetch_update_bool, AtomicBool, bool, fetch_update, |_| None);
+    safe_update_harness!(harness_safe_fetch_update_bool, AtomicBool, bool, fetch_update);
     #[cfg(target_has_atomic = "8")]
-    safe_update_harness!(harness_safe_try_update_bool, AtomicBool, bool, try_update, |_| None);
+    safe_update_harness!(harness_safe_try_update_bool, AtomicBool, bool, try_update);
     #[cfg(target_has_atomic = "ptr")]
-    #[kani::proof_for_contract(AtomicPtr::<u8>::fetch_update)]
+    #[kani::proof]
+    #[kani::unwind(2)]
     pub fn harness_safe_fetch_update_ptr() {
-        let storage = AtomicPtr::<u8>::new(kani::any::<usize>() as *mut u8);
-        let _ = storage.fetch_update(Relaxed, any_failure_order(), |_| None);
+        let initial = kani::any::<usize>() as *mut u8;
+        let storage = AtomicPtr::<u8>::new(initial);
+        let new = kani::any::<usize>() as *mut u8;
+        let should_update: bool = kani::any();
+        let set_order = any_ordering();
+        let fetch_order = any_ordering();
+        kani::assume(matches!(fetch_order, Relaxed | Acquire | SeqCst));
+        let mut calls = 0u32;
+        let result = storage.fetch_update(set_order, fetch_order, |_| {
+            calls += 1;
+            if should_update { Some(new) } else { None }
+        });
+        assert!(calls > 0);
+        assert_eq!(result, if should_update { Ok(initial) } else { Err(initial) });
+        assert_eq!(storage.load(Relaxed), if should_update { new } else { initial });
+        kani::cover(result.is_ok(), "safe pointer fetch-update: Some branch completed");
+        kani::cover(result.is_err(), "safe pointer fetch-update: None branch completed");
         kani::cover(true, "safe atomic pointer fetch-update: reached after call");
     }
     #[cfg(target_has_atomic = "ptr")]
-    #[kani::proof_for_contract(AtomicPtr::<u8>::try_update)]
+    #[kani::proof]
+    #[kani::unwind(2)]
     pub fn harness_safe_try_update_ptr() {
-        let storage = AtomicPtr::<u8>::new(kani::any::<usize>() as *mut u8);
-        let _ = storage.try_update(Relaxed, any_failure_order(), |_| None);
+        let initial = kani::any::<usize>() as *mut u8;
+        let storage = AtomicPtr::<u8>::new(initial);
+        let new = kani::any::<usize>() as *mut u8;
+        let should_update: bool = kani::any();
+        let set_order = any_ordering();
+        let fetch_order = any_ordering();
+        kani::assume(matches!(fetch_order, Relaxed | Acquire | SeqCst));
+        let mut calls = 0u32;
+        let result = storage.try_update(set_order, fetch_order, |_| {
+            calls += 1;
+            if should_update { Some(new) } else { None }
+        });
+        assert!(calls > 0);
+        assert_eq!(result, if should_update { Ok(initial) } else { Err(initial) });
+        assert_eq!(storage.load(Relaxed), if should_update { new } else { initial });
+        kani::cover(result.is_ok(), "safe pointer try-update: Some branch completed");
+        kani::cover(result.is_err(), "safe pointer try-update: None branch completed");
         kani::cover(true, "safe atomic pointer try-update: reached after call");
     }
     #[cfg(target_has_atomic = "8")]
-    safe_update_harness!(harness_safe_fetch_update_i8, AtomicI8, i8, fetch_update, |_| None);
+    safe_update_harness!(harness_safe_fetch_update_i8, AtomicI8, i8, fetch_update);
     #[cfg(target_has_atomic = "8")]
-    safe_update_harness!(harness_safe_try_update_i8, AtomicI8, i8, try_update, |_| None);
+    safe_update_harness!(harness_safe_try_update_i8, AtomicI8, i8, try_update);
     #[cfg(target_has_atomic = "8")]
-    safe_update_harness!(harness_safe_fetch_update_u8, AtomicU8, u8, fetch_update, |_| None);
+    safe_update_harness!(harness_safe_fetch_update_u8, AtomicU8, u8, fetch_update);
     #[cfg(target_has_atomic = "8")]
-    safe_update_harness!(harness_safe_try_update_u8, AtomicU8, u8, try_update, |_| None);
+    safe_update_harness!(harness_safe_try_update_u8, AtomicU8, u8, try_update);
     #[cfg(target_has_atomic = "16")]
-    safe_update_harness!(harness_safe_fetch_update_i16, AtomicI16, i16, fetch_update, |_| None);
+    safe_update_harness!(harness_safe_fetch_update_i16, AtomicI16, i16, fetch_update);
     #[cfg(target_has_atomic = "16")]
-    safe_update_harness!(harness_safe_try_update_i16, AtomicI16, i16, try_update, |_| None);
+    safe_update_harness!(harness_safe_try_update_i16, AtomicI16, i16, try_update);
     #[cfg(target_has_atomic = "16")]
-    safe_update_harness!(harness_safe_fetch_update_u16, AtomicU16, u16, fetch_update, |_| None);
+    safe_update_harness!(harness_safe_fetch_update_u16, AtomicU16, u16, fetch_update);
     #[cfg(target_has_atomic = "16")]
-    safe_update_harness!(harness_safe_try_update_u16, AtomicU16, u16, try_update, |_| None);
+    safe_update_harness!(harness_safe_try_update_u16, AtomicU16, u16, try_update);
     #[cfg(target_has_atomic = "32")]
-    safe_update_harness!(harness_safe_fetch_update_i32, AtomicI32, i32, fetch_update, |_| None);
+    safe_update_harness!(harness_safe_fetch_update_i32, AtomicI32, i32, fetch_update);
     #[cfg(target_has_atomic = "32")]
-    safe_update_harness!(harness_safe_try_update_i32, AtomicI32, i32, try_update, |_| None);
+    safe_update_harness!(harness_safe_try_update_i32, AtomicI32, i32, try_update);
     #[cfg(target_has_atomic = "32")]
-    safe_update_harness!(harness_safe_fetch_update_u32, AtomicU32, u32, fetch_update, |_| None);
+    safe_update_harness!(harness_safe_fetch_update_u32, AtomicU32, u32, fetch_update);
     #[cfg(target_has_atomic = "32")]
-    safe_update_harness!(harness_safe_try_update_u32, AtomicU32, u32, try_update, |_| None);
+    safe_update_harness!(harness_safe_try_update_u32, AtomicU32, u32, try_update);
     #[cfg(target_has_atomic = "64")]
-    safe_update_harness!(harness_safe_fetch_update_i64, AtomicI64, i64, fetch_update, |_| None);
+    safe_update_harness!(harness_safe_fetch_update_i64, AtomicI64, i64, fetch_update);
     #[cfg(target_has_atomic = "64")]
-    safe_update_harness!(harness_safe_try_update_i64, AtomicI64, i64, try_update, |_| None);
+    safe_update_harness!(harness_safe_try_update_i64, AtomicI64, i64, try_update);
     #[cfg(target_has_atomic = "64")]
-    safe_update_harness!(harness_safe_fetch_update_u64, AtomicU64, u64, fetch_update, |_| None);
+    safe_update_harness!(harness_safe_fetch_update_u64, AtomicU64, u64, fetch_update);
     #[cfg(target_has_atomic = "64")]
-    safe_update_harness!(harness_safe_try_update_u64, AtomicU64, u64, try_update, |_| None);
+    safe_update_harness!(harness_safe_try_update_u64, AtomicU64, u64, try_update);
     #[cfg(target_has_atomic = "128")]
-    safe_update_harness!(harness_safe_fetch_update_i128, AtomicI128, i128, fetch_update, |_| None);
+    safe_update_harness!(harness_safe_fetch_update_i128, AtomicI128, i128, fetch_update);
     #[cfg(target_has_atomic = "128")]
-    safe_update_harness!(harness_safe_try_update_i128, AtomicI128, i128, try_update, |_| None);
+    safe_update_harness!(harness_safe_try_update_i128, AtomicI128, i128, try_update);
     #[cfg(target_has_atomic = "128")]
-    safe_update_harness!(harness_safe_fetch_update_u128, AtomicU128, u128, fetch_update, |_| None);
+    safe_update_harness!(harness_safe_fetch_update_u128, AtomicU128, u128, fetch_update);
     #[cfg(target_has_atomic = "128")]
-    safe_update_harness!(harness_safe_try_update_u128, AtomicU128, u128, try_update, |_| None);
+    safe_update_harness!(harness_safe_try_update_u128, AtomicU128, u128, try_update);
     #[cfg(target_has_atomic = "ptr")]
-    safe_update_harness!(harness_safe_fetch_update_isize, AtomicIsize, isize, fetch_update, |_| {
-        None
-    });
+    safe_update_harness!(harness_safe_fetch_update_isize, AtomicIsize, isize, fetch_update);
     #[cfg(target_has_atomic = "ptr")]
-    safe_update_harness!(harness_safe_try_update_isize, AtomicIsize, isize, try_update, |_| None);
+    safe_update_harness!(harness_safe_try_update_isize, AtomicIsize, isize, try_update);
     #[cfg(target_has_atomic = "ptr")]
-    safe_update_harness!(harness_safe_fetch_update_usize, AtomicUsize, usize, fetch_update, |_| {
-        None
-    });
+    safe_update_harness!(harness_safe_fetch_update_usize, AtomicUsize, usize, fetch_update);
     #[cfg(target_has_atomic = "ptr")]
-    safe_update_harness!(harness_safe_try_update_usize, AtomicUsize, usize, try_update, |_| None);
+    safe_update_harness!(harness_safe_try_update_usize, AtomicUsize, usize, try_update);
 
     // Kani does not infer a finite bound for this CAS retry loop automatically.
     // An unwind bound of 2 is sufficient for this single-threaded harness under
     // Kani's current atomic intrinsic model.
     macro_rules! safe_update_loop_harness {
         ($name:ident, $atomic:ty, $value:ty) => {
-            #[kani::proof_for_contract(<$atomic>::update)]
+            #[kani::proof]
             #[kani::unwind(2)]
             pub fn $name() {
-                let storage = <$atomic>::new(kani::any::<$value>());
-                let _ = storage.update(Relaxed, any_failure_order(), |x| x);
+                let initial: $value = kani::any();
+                let storage = <$atomic>::new(initial);
+                let new: $value = kani::any();
+                let set_order = any_ordering();
+                let fetch_order = any_ordering();
+                kani::assume(matches!(fetch_order, Relaxed | Acquire | SeqCst));
+                let mut calls = 0u32;
+                let previous = storage.update(set_order, fetch_order, |_| {
+                    calls += 1;
+                    new
+                });
+                assert!(calls > 0);
+                assert_eq!(previous, initial);
+                assert_eq!(storage.load(Relaxed), new);
                 kani::cover(true, "safe atomic update: reached after call");
             }
         };
@@ -6252,13 +6312,24 @@ mod verify {
     #[cfg(target_has_atomic = "ptr")]
     safe_update_loop_harness!(harness_safe_update_usize, AtomicUsize, usize);
 
-    #[cfg(all(target_has_atomic_load_store = "ptr", target_has_atomic = "8"))]
-    #[kani::proof_for_contract(AtomicPtr::<u8>::update)]
+    #[cfg(target_has_atomic = "ptr")]
+    #[kani::proof]
     #[kani::unwind(2)]
     pub fn harness_safe_update_ptr() {
-        let storage = AtomicPtr::<u8>::new(kani::any::<usize>() as *mut u8);
-        let value = kani::any::<usize>() as *mut u8;
-        let _ = storage.update(Relaxed, any_failure_order(), |_| value);
+        let initial = kani::any::<usize>() as *mut u8;
+        let storage = AtomicPtr::<u8>::new(initial);
+        let new = kani::any::<usize>() as *mut u8;
+        let set_order = any_ordering();
+        let fetch_order = any_ordering();
+        kani::assume(matches!(fetch_order, Relaxed | Acquire | SeqCst));
+        let mut calls = 0u32;
+        let previous = storage.update(set_order, fetch_order, |_| {
+            calls += 1;
+            new
+        });
+        assert!(calls > 0);
+        assert_eq!(previous, initial);
+        assert_eq!(storage.load(Relaxed), new);
         kani::cover(true, "safe atomic pointer update: reached after call");
     }
 

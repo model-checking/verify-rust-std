@@ -4692,22 +4692,24 @@ mod verify {
     // the intrinsic documentation, while the contracts encode only the local
     // memory obligations required by the intrinsic calls.
     //
-    // `can_dereference` and `can_write` cover allocation bounds, initialization,
-    // and alignment for `T`. Kani function contracts do not currently expose a predicate for cross-thread
-    // access histories, so the atomic model remains responsible for detecting
-    // data races and mixed-size overlapping atomic accesses in concurrent proofs.
+    // `can_dereference` and `can_write` express local memory requirements for `T`.
+    // Checking initialization through `can_dereference` requires `-Z uninit-checks`.
+    // These single-threaded proofs do not establish the absence of data races or
+    // unsynchronized mixed-size overlapping atomic accesses. The load and store
+    // wrappers cover non-volatile accesses only; volatile accesses have separate
+    // safety requirements.
 
     #[allow(dead_code)]
     #[kani::modifies(dst)]
     #[requires(crate::ub_checks::can_write(dst))]
     unsafe fn atomic_store_wrapper<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, val: T) {
-        unsafe { atomic_store::<T, ORD>(dst, val) }
+        unsafe { atomic_store::<T, ORD, false>(dst, val) }
     }
 
     #[allow(dead_code)]
     #[requires(crate::ub_checks::can_dereference(src))]
     unsafe fn atomic_load_wrapper<T: Copy, const ORD: AtomicOrdering>(src: *const T) -> T {
-        unsafe { atomic_load::<T, ORD>(src) }
+        unsafe { atomic_load::<T, ORD, false>(src) }
     }
 
     #[allow(dead_code)]
