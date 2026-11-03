@@ -2967,10 +2967,14 @@ mod verify {
 
     #[kani::proof]
     pub fn check_into_array() {
-        let data: [i32; SLICE_CAP] = kani::any();
+        // One element more than N, so the slice can be shorter or longer than N.
+        let data: [i32; SLICE_CAP + 1] = kani::any();
         let slice = kani::slice::any_slice_of_array(&data);
         let boxed: Box<[i32]> = Box::from(slice);
         let len = boxed.len();
+        kani::cover(len < SLICE_CAP, "slice shorter than N");
+        kani::cover(len == SLICE_CAP, "slice of length N");
+        kani::cover(len > SLICE_CAP, "slice longer than N");
         match boxed.into_array::<SLICE_CAP>() {
             Ok(_arr) => assert!(len == SLICE_CAP),
             Err(_) => assert!(len != SLICE_CAP),

@@ -871,10 +871,14 @@ mod verify {
 
     #[kani::proof]
     pub fn check_try_from_boxed_slice() {
-        let data: [i32; 2] = kani::any();
+        // One element more than N, so the slice can be shorter or longer than N.
+        let data: [i32; 3] = kani::any();
         let slice = kani::slice::any_slice_of_array(&data);
         let boxed: Box<[i32]> = Box::from(slice);
         let len = boxed.len();
+        kani::cover(len < 2, "slice shorter than N");
+        kani::cover(len == 2, "slice of length N");
+        kani::cover(len > 2, "slice longer than N");
         match Box::<[i32; 2]>::try_from(boxed) {
             Ok(_arr) => assert!(len == 2),
             Err(rest) => assert!(rest.len() != 2),
@@ -883,10 +887,14 @@ mod verify {
 
     #[kani::proof]
     pub fn check_try_from_vec() {
-        let data: [i32; 2] = kani::any();
+        // One element more than N, so the vector can be shorter or longer than N.
+        let data: [i32; 3] = kani::any();
         let slice = kani::slice::any_slice_of_array(&data);
         let vec: Vec<i32> = slice.to_vec();
         let len = vec.len();
+        kani::cover(len < 2, "vector shorter than N");
+        kani::cover(len == 2, "vector of length N");
+        kani::cover(len > 2, "vector longer than N");
         match Box::<[i32; 2]>::try_from(vec) {
             Ok(_arr) => assert!(len == 2),
             Err(rest) => assert!(rest.len() != 2),
