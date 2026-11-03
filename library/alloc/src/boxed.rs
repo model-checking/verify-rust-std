@@ -211,8 +211,9 @@ use core::ub_checks;
 use safety::{ensures, requires};
 
 /// Kani-only: documented Box raw-pointer layout besides “valid `T`”.
-/// `can_dereference` covers aligned/initialized; Box also forbids size > `isize::MAX`.
-/// Allocator provenance is a caller obligation we cannot express.
+/// `can_dereference` covers alignment and the allocation; Box also forbids size > `isize::MAX`.
+/// Kani checks initialization only under `-Z uninit-checks`, which CI does not pass, so
+/// initialization stays a caller obligation, as does allocator provenance, which we cannot express.
 #[cfg(kani)]
 fn box_ptr_fits_box_layout<T: ?Sized>(ptr: *const T) -> bool {
     ub_checks::can_dereference(ptr) && {
@@ -1372,8 +1373,9 @@ impl<T, A: Allocator> Box<[mem::MaybeUninit<T>], A> {
     /// ```
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[inline]
-    // SAFETY: every element must be a valid `T`. Casting `[MaybeUninit<T>]` to
-    // `[T]` and requiring `can_dereference` encodes that for Kani.
+    // SAFETY: every element must be a valid `T`. The contract casts `[MaybeUninit<T>]` to
+    // `[T]` and requires `can_dereference`, but Kani checks initialization only under
+    // `-Z uninit-checks`, which CI does not pass, so initialization stays the caller's obligation.
     #[requires(ub_checks::can_dereference(
         &*self as *const [mem::MaybeUninit<T>] as *const [T]
     ))]
