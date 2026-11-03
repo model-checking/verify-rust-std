@@ -51,7 +51,10 @@ enum State<T, F> {
 /// //   92
 /// ```
 #[stable(feature = "lazy_cell", since = "1.80.0")]
-pub struct LazyCell<T, F = fn() -> T> {
+pub struct LazyCell<
+    #[rustc_assert_variance(invariant)] T,
+    #[rustc_assert_variance(invariant)] F = fn() -> T,
+> {
     state: UnsafeCell<State<T, F>>,
 }
 
@@ -346,7 +349,8 @@ impl<T, F: FnOnce() -> T> DerefMut for LazyCell<T, F> {
 }
 
 #[stable(feature = "lazy_cell", since = "1.80.0")]
-impl<T: Default> Default for LazyCell<T> {
+#[rustc_const_unstable(feature = "const_default", issue = "143894")]
+const impl<T: Default> Default for LazyCell<T> {
     /// Creates a new lazy value using `Default` as the initializing function.
     #[inline]
     fn default() -> LazyCell<T> {
@@ -363,6 +367,16 @@ impl<T: fmt::Debug, F> fmt::Debug for LazyCell<T, F> {
             None => d.field(&format_args!("<uninit>")),
         };
         d.finish()
+    }
+}
+
+#[stable(feature = "from_wrapper_impls", since = "1.96.0")]
+impl<T, F> From<T> for LazyCell<T, F> {
+    /// Constructs a `LazyCell` that starts already initialized
+    /// with the provided value.
+    #[inline]
+    fn from(value: T) -> Self {
+        Self { state: UnsafeCell::new(State::Init(value)) }
     }
 }
 

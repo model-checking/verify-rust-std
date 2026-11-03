@@ -12,9 +12,11 @@ use crate::sys::{unsupported, unsupported_err};
 #[path = "unsupported.rs"]
 mod unsupported_fs;
 pub use unsupported_fs::{
-    DirBuilder, FileTimes, canonicalize, link, readlink, remove_dir_all, rename, rmdir, symlink,
-    unlink,
+    Dir, DirBuilder, FileTimes, canonicalize, link, readlink, remove_dir_all, rename,
+    rename_noreplace, rmdir, symlink, unlink,
 };
+
+pub use crate::sys::fs::common::{ExtraHomeDirs, ExtraMediaDirs};
 
 /// VEXos file descriptor.
 ///
@@ -122,6 +124,12 @@ impl FileType {
     pub fn is_symlink(&self) -> bool {
         // No symlinks in VEXos - entries are either files or directories.
         false
+    }
+}
+
+impl ReadDir {
+    pub fn dir(&self) -> io::Result<Dir> {
+        self.0
     }
 }
 
@@ -339,7 +347,7 @@ impl File {
         false
     }
 
-    pub fn read_buf(&self, cursor: BorrowedCursor<'_>) -> io::Result<()> {
+    pub fn read_buf(&self, cursor: BorrowedCursor<'_, u8>) -> io::Result<()> {
         crate::io::default_read_buf(|b| self.read(b), cursor)
     }
 
@@ -477,6 +485,13 @@ impl Drop for File {
     }
 }
 
+impl Drop for ReadDir {
+    fn drop(&mut self) {
+        // Dummy Drop so that `needs_drop::<ReadDir>()` is true independent of platform.
+        self.0
+    }
+}
+
 pub fn readdir(_p: &Path) -> io::Result<ReadDir> {
     // While there *is* a userspace function for reading file directories,
     // the necessary implementation cannot currently be done cleanly, as
@@ -489,6 +504,10 @@ pub fn readdir(_p: &Path) -> io::Result<ReadDir> {
 }
 
 pub fn set_perm(_p: &Path, _perm: FilePermissions) -> io::Result<()> {
+    unsupported()
+}
+
+pub fn set_perm_nofollow(_p: &Path, _perm: FilePermissions) -> io::Result<()> {
     unsupported()
 }
 
@@ -545,7 +564,7 @@ fn map_fresult(fresult: vex_sdk::FRESULT) -> io::Result<()> {
     match fresult {
         vex_sdk::FRESULT::FR_OK => Ok(()),
         vex_sdk::FRESULT::FR_DISK_ERR => Err(io::const_error!(
-            io::ErrorKind::Uncategorized,
+            io::ErrorKind::InputOutputError,
             "internal function reported an unrecoverable hard error",
         )),
         vex_sdk::FRESULT::FR_INT_ERR => Err(io::const_error!(
@@ -612,7 +631,7 @@ fn map_fresult(fresult: vex_sdk::FRESULT) -> io::Result<()> {
             Err(io::const_error!(io::ErrorKind::OutOfMemory, "not enough memory for the operation"))
         }
         vex_sdk::FRESULT::FR_TOO_MANY_OPEN_FILES => Err(io::const_error!(
-            io::ErrorKind::Uncategorized,
+            io::ErrorKind::TooManyOpenFiles,
             "maximum number of open files has been reached",
         )),
         vex_sdk::FRESULT::FR_INVALID_PARAMETER => {

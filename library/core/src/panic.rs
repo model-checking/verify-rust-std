@@ -1,4 +1,4 @@
-//! Panic support in the standard library.
+//! Panic support in core.
 
 #![stable(feature = "core_panic_info", since = "1.41.0")]
 
@@ -14,7 +14,6 @@ pub use self::panic_info::PanicInfo;
 pub use self::panic_info::PanicMessage;
 #[stable(feature = "catch_unwind", since = "1.9.0")]
 pub use self::unwind_safe::{AssertUnwindSafe, RefUnwindSafe, UnwindSafe};
-use crate::any::Any;
 
 #[doc(hidden)]
 #[unstable(feature = "edition_panic", issue = "none", reason = "use panic!() instead")]
@@ -98,8 +97,9 @@ pub macro unreachable_2021 {
 /// Invokes a closure, aborting if the closure unwinds.
 ///
 /// When compiled with aborting panics, this function is effectively a no-op.
-/// With unwinding panics, an unwind results in another call into the panic
-/// hook followed by a process abort.
+/// With unwinding panics, an unwind that would leave the closure results in another call into the
+/// panic handler / panic hook followed by a process abort. (Locals in the closure get dropped as
+/// usual.) Unwinds that get caught inside the closure still behave as normal.
 ///
 /// # Notes
 ///
@@ -115,34 +115,9 @@ pub macro unreachable_2021 {
 /// to prevent unwinds. However, note that `extern "C" fn` will automatically
 /// convert unwinds to aborts, so using this function isn't necessary for FFI.
 #[unstable(feature = "abort_unwind", issue = "130338")]
-#[rustc_nounwind]
-pub fn abort_unwind<F: FnOnce() -> R, R>(f: F) -> R {
+#[rustc_nounwind] // this attribute does all the actual work here
+pub fn abort_on_unwind<F: FnOnce() -> R, R>(f: F) -> R {
     f()
-}
-
-/// An internal trait used by std to pass data from std to `panic_unwind` and
-/// other panic runtimes. Not intended to be stabilized any time soon, do not
-/// use.
-#[unstable(feature = "std_internals", issue = "none")]
-#[doc(hidden)]
-pub unsafe trait PanicPayload: crate::fmt::Display {
-    /// Take full ownership of the contents.
-    /// The return type is actually `Box<dyn Any + Send>`, but we cannot use `Box` in core.
-    ///
-    /// After this method got called, only some dummy default value is left in `self`.
-    /// Calling this method twice, or calling `get` after calling this method, is an error.
-    ///
-    /// The argument is borrowed because the panic runtime (`__rust_start_panic`) only
-    /// gets a borrowed `dyn PanicPayload`.
-    fn take_box(&mut self) -> *mut (dyn Any + Send);
-
-    /// Just borrow the contents.
-    fn get(&mut self) -> &(dyn Any + Send);
-
-    /// Tries to borrow the contents as `&str`, if possible without doing any allocations.
-    fn as_str(&mut self) -> Option<&str> {
-        None
-    }
 }
 
 /// Helper macro for panicking in a `const fn`.

@@ -1,18 +1,18 @@
 use crate::any::type_name;
 use crate::clone::TrivialClone;
 use crate::marker::Destruct;
-use crate::mem::ManuallyDrop;
+use crate::mem::{ManuallyDrop, transmute_neo};
 use crate::{fmt, intrinsics, ptr, slice};
 
 /// A wrapper type to construct uninitialized instances of `T`.
 ///
 /// # Initialization invariant
 ///
-/// The compiler, in general, assumes that a variable is properly initialized
+/// The compiler, in general, assumes that a variable is [properly initialized or "valid"][validity]
 /// according to the requirements of the variable's type. For example, a variable of
 /// reference type must be aligned and non-null. This is an invariant that must
 /// *always* be upheld, even in unsafe code. As a consequence, zero-initializing a
-/// variable of reference type causes instantaneous [undefined behavior][ub],
+/// variable of reference type causes instantaneous undefined behavior,
 /// no matter whether that reference ever gets used to access memory:
 ///
 /// ```rust,no_run
@@ -53,6 +53,11 @@ use crate::{fmt, intrinsics, ptr, slice};
 /// // The equivalent code with `MaybeUninit<i32>`:
 /// let x: i32 = unsafe { MaybeUninit::uninit().assume_init() }; // undefined behavior! ⚠️
 /// ```
+///
+/// Conversely, sometimes it is okay to not initialize *all* bytes of a `MaybeUninit`
+/// before calling `assume_init`. For instance, padding bytes do not have to be initialized.
+/// See the field-by-field struct initialization example below for a case of that.
+///
 /// On top of that, remember that most types have additional invariants beyond merely
 /// being considered initialized at the type level. For example, a `1`-initialized [`Vec<T>`]
 /// is considered initialized (under the current implementation; this does not constitute
@@ -197,7 +202,12 @@ use crate::{fmt, intrinsics, ptr, slice};
 /// );
 /// ```
 /// [`&raw mut`]: https://doc.rust-lang.org/reference/types/pointer.html#r-type.pointer.raw.constructor
-/// [ub]: ../../reference/behavior-considered-undefined.html
+/// [validity]: ../../reference/behavior-considered-undefined.html#r-undefined.validity
+///
+/// Note that we have not initialized the padding, but that's fine -- it does not have to be
+/// initialized. In fact, even if we had initialized the padding in `uninit`, those bytes would be
+/// lost when copying the result: no matter the contents of the padding bytes in `uninit`, they will
+/// always be uninitialized in `foo`.
 ///
 /// # Layout
 ///
@@ -427,7 +437,8 @@ impl<T> MaybeUninit<T> {
     /// be null.
     ///
     /// Note that if `T` has padding bytes, those bytes are *not* preserved when the
-    /// `MaybeUninit<T>` value is returned from this function, so those bytes will *not* be zeroed.
+    /// `MaybeUninit<T>` value is returned from this function, so those bytes are not
+    /// guaranteed to be zeroed.
     ///
     /// Note that dropping a `MaybeUninit<T>` will never call `T`'s drop code.
     /// It is your responsibility to make sure `T` gets dropped if it got initialized.
@@ -657,11 +668,18 @@ impl<T> MaybeUninit<T> {
     /// # Safety
     ///
     /// It is up to the caller to guarantee that the `MaybeUninit<T>` really is in an initialized
-    /// state. Calling this when the content is not yet fully initialized causes immediate undefined
-    /// behavior. The [type-level documentation][inv] contains more information about
-    /// this initialization invariant.
+    /// state, i.e., a state that is considered ["valid" for type `T`][validity]. Calling this when
+    /// the content is not yet fully initialized causes immediate undefined behavior. The
+    /// [type-level documentation][inv] contains more information about this initialization
+    /// invariant.
+    ///
+    /// It is a common mistake to assume that this function is safe to call on integers because they
+    /// can hold all bit patterns. It is also a common mistake to think that calling this function
+    /// is UB if any byte is uninitialized. Both of these assumptions are wrong. If that is
+    /// surprising to you, please read the [type-level documentation][inv].
     ///
     /// [inv]: #initialization-invariant
+    /// [validity]: ../../reference/behavior-considered-undefined.html#r-undefined.validity
     ///
     /// On top of that, remember that most types have additional invariants beyond merely
     /// being considered initialized at the type level. For example, a `1`-initialized [`Vec<T>`]
@@ -689,12 +707,13 @@ impl<T> MaybeUninit<T> {
     /// *Incorrect* usage of this method:
     ///
     /// ```rust,no_run
+    /// # #![allow(invalid_value)]
     /// use std::mem::MaybeUninit;
     ///
-    /// let x = MaybeUninit::<Vec<u32>>::uninit();
-    /// let x_init = unsafe { x.assume_init() };
-    /// // `x` had not been initialized yet, so this last line caused undefined behavior. ⚠️
+    /// let x: i32 = unsafe { MaybeUninit::uninit().assume_init() }; // undefined behavior! ⚠️
     /// ```
+    ///
+    /// See the [type-level documentation][#examples] for more examples.
     #[stable(feature = "maybe_uninit", since = "1.36.0")]
     #[rustc_const_stable(feature = "const_maybe_uninit_assume_init_by_value", since = "1.59.0")]
     #[inline(always)]
@@ -705,9 +724,9 @@ impl<T> MaybeUninit<T> {
         // This also means that `self` must be a `value` variant.
         unsafe {
             intrinsics::assert_inhabited::<T>();
-            // We do this via a raw ptr read instead of `ManuallyDrop::into_inner` so that there's
+            // We do this via a transmute instead of `ManuallyDrop::into_inner` so that there's
             // no trace of `ManuallyDrop` in Miri's error messages here.
-            (&raw const self.value).cast::<T>().read()
+            transmute_neo(self)
         }
     }
 
@@ -1267,8 +1286,8 @@ impl<T> [MaybeUninit<T>] {
     /// Fills a slice with elements returned by calling a closure for each index.
     ///
     /// This method uses a closure to create new values. If you'd rather `Clone` a given value, use
-    /// [slice::write_filled]. If you want to use the `Default` trait to generate values, you can
-    /// pass [`|_| Default::default()`][Default::default] as the argument.
+    /// [`slice::write_filled`]. If you want to use the `Default` trait to generate values, use
+    /// [`slice::write_default`].
     ///
     /// # Panics
     ///
@@ -1303,6 +1322,73 @@ impl<T> [MaybeUninit<T>] {
 
         // SAFETY: Valid elements have just been written into `this` so it is initialized
         unsafe { self.assume_init_mut() }
+    }
+
+    /// Fills a slice with elements returned by calling [`Default::default`] for each index.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if any call to [`Default::default`] panics.
+    ///
+    /// If such a panic occurs, any elements previously initialized during this operation will be
+    /// dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(maybe_uninit_fill)]
+    /// use std::mem::MaybeUninit;
+    ///
+    /// let mut buf = [const { MaybeUninit::<usize>::uninit() }; 5];
+    /// let initialized = buf.write_default();
+    /// assert_eq!(initialized, &mut [0, 0, 0, 0, 0]);
+    /// ```
+    #[unstable(feature = "maybe_uninit_fill", issue = "117428")]
+    pub fn write_default(&mut self) -> &mut [T]
+    where
+        T: Default,
+    {
+        trait DefaultSpec: Default {
+            fn write_default(buf: &mut [MaybeUninit<Self>]) -> &mut [Self];
+        }
+
+        impl<T: Default> DefaultSpec for T {
+            default fn write_default(buf: &mut [MaybeUninit<Self>]) -> &mut [Self] {
+                buf.write_with(|_| T::default())
+            }
+        }
+
+        macro_rules! spec_default_zero {
+            ($ty:ty) => {
+                impl DefaultSpec for $ty {
+                    fn write_default(buf: &mut [MaybeUninit<Self>]) -> &mut [Self] {
+                        // SAFETY:
+                        // `Default::default` is equivalent to zero-initialization
+                        // for all these types, and this initializes the entire
+                        // slice.
+                        unsafe {
+                            buf.as_mut_ptr().write_bytes(0, buf.len());
+                            buf.assume_init_mut()
+                        }
+                    }
+                }
+            };
+        }
+
+        spec_default_zero!(i8);
+        spec_default_zero!(u8);
+        spec_default_zero!(i16);
+        spec_default_zero!(u16);
+        spec_default_zero!(i32);
+        spec_default_zero!(u32);
+        spec_default_zero!(i64);
+        spec_default_zero!(u64);
+        spec_default_zero!(i128);
+        spec_default_zero!(u128);
+        spec_default_zero!(isize);
+        spec_default_zero!(usize);
+
+        T::write_default(self)
     }
 
     /// Fills a slice with elements yielded by an iterator until either all elements have been
@@ -1529,6 +1615,56 @@ impl<T, const N: usize> MaybeUninit<[T; N]> {
     pub const fn transpose(self) -> [MaybeUninit<T>; N] {
         // SAFETY: T and MaybeUninit<T> have the same layout
         unsafe { intrinsics::transmute_unchecked(self) }
+    }
+}
+
+#[stable(feature = "more_conversion_trait_impls", since = "1.95.0")]
+impl<T, const N: usize> From<[MaybeUninit<T>; N]> for MaybeUninit<[T; N]> {
+    #[inline]
+    fn from(arr: [MaybeUninit<T>; N]) -> Self {
+        arr.transpose()
+    }
+}
+
+#[stable(feature = "more_conversion_trait_impls", since = "1.95.0")]
+impl<T, const N: usize> AsRef<[MaybeUninit<T>; N]> for MaybeUninit<[T; N]> {
+    #[inline]
+    fn as_ref(&self) -> &[MaybeUninit<T>; N] {
+        // SAFETY: T and MaybeUninit<T> have the same layout
+        unsafe { &*ptr::from_ref(self).cast() }
+    }
+}
+
+#[stable(feature = "more_conversion_trait_impls", since = "1.95.0")]
+impl<T, const N: usize> AsRef<[MaybeUninit<T>]> for MaybeUninit<[T; N]> {
+    #[inline]
+    fn as_ref(&self) -> &[MaybeUninit<T>] {
+        AsRef::<[MaybeUninit<T>; N]>::as_ref(self)
+    }
+}
+
+#[stable(feature = "more_conversion_trait_impls", since = "1.95.0")]
+impl<T, const N: usize> AsMut<[MaybeUninit<T>; N]> for MaybeUninit<[T; N]> {
+    #[inline]
+    fn as_mut(&mut self) -> &mut [MaybeUninit<T>; N] {
+        // SAFETY: T and MaybeUninit<T> have the same layout
+        unsafe { &mut *ptr::from_mut(self).cast() }
+    }
+}
+
+#[stable(feature = "more_conversion_trait_impls", since = "1.95.0")]
+impl<T, const N: usize> AsMut<[MaybeUninit<T>]> for MaybeUninit<[T; N]> {
+    #[inline]
+    fn as_mut(&mut self) -> &mut [MaybeUninit<T>] {
+        &mut *AsMut::<[MaybeUninit<T>; N]>::as_mut(self)
+    }
+}
+
+#[stable(feature = "more_conversion_trait_impls", since = "1.95.0")]
+impl<T, const N: usize> From<MaybeUninit<[T; N]>> for [MaybeUninit<T>; N] {
+    #[inline]
+    fn from(arr: MaybeUninit<[T; N]>) -> Self {
+        arr.transpose()
     }
 }
 

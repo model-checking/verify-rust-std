@@ -9,14 +9,15 @@
 // ptr::add in these loops will wrap. And if compiler-builtins is compiled with cfg(ub_checks),
 // this will fail a UB check at runtime.
 //
-// Since this scenario is UB, we are within our rights hit this check and halt execution...
+// Since this scenario is UB, we are within our rights to hit this check and halt execution...
 // But we are also within our rights to try to make it work.
 // We use wrapping_add/wrapping_sub for pointer arithmetic in this module in an attempt to support
 // this use. Of course this is not a guarantee that such use will work, it just means that this
 // crate doing wrapping pointer arithmetic with a method that must not wrap won't be the problem if
 // something does go wrong at runtime.
 use core::ffi::c_int;
-use core::intrinsics::likely;
+
+use crate::support::cold_path;
 
 const WORD_SIZE: usize = core::mem::size_of::<usize>();
 const WORD_MASK: usize = WORD_SIZE - 1;
@@ -34,7 +35,7 @@ const WORD_COPY_THRESHOLD: usize = if 2 * WORD_SIZE > 16 {
     16
 };
 
-#[cfg(feature = "mem-unaligned")]
+#[cfg(mem_unaligned)]
 unsafe fn read_usize_unaligned(x: *const usize) -> usize {
     // Do not use `core::ptr::read_unaligned` here, since it calls `copy_nonoverlapping` which
     // is translated to memcpy in LLVM.
@@ -45,7 +46,7 @@ unsafe fn read_usize_unaligned(x: *const usize) -> usize {
 /// Loads a `T`-sized chunk from `src` into `dst` at offset `offset`, if that does not exceed
 /// `load_sz`. The offset pointers must both be `T`-aligned. Returns the new offset, advanced by the
 /// chunk size if a load happened.
-#[cfg(not(feature = "mem-unaligned"))]
+#[cfg(not(mem_unaligned))]
 #[inline(always)]
 unsafe fn load_chunk_aligned<T: Copy>(
     src: *const usize,
@@ -65,7 +66,7 @@ unsafe fn load_chunk_aligned<T: Copy>(
 /// Load `load_sz` many bytes from `src`, which must be usize-aligned. Acts as if we did a `usize`
 /// read with the out-of-bounds part filled with 0s.
 /// `load_sz` be strictly less than `WORD_SIZE`.
-#[cfg(not(feature = "mem-unaligned"))]
+#[cfg(not(mem_unaligned))]
 #[inline(always)]
 unsafe fn load_aligned_partial(src: *const usize, load_sz: usize) -> usize {
     debug_assert!(load_sz < WORD_SIZE);
@@ -87,7 +88,7 @@ unsafe fn load_aligned_partial(src: *const usize, load_sz: usize) -> usize {
 /// `usize`-aligned. The bytes are returned as the *last* bytes of the return value, i.e., this acts
 /// as if we had done a `usize` read from `src`, with the out-of-bounds part filled with 0s.
 /// `load_sz` be strictly less than `WORD_SIZE`.
-#[cfg(not(feature = "mem-unaligned"))]
+#[cfg(not(mem_unaligned))]
 #[inline(always)]
 unsafe fn load_aligned_end_partial(src: *const usize, load_sz: usize) -> usize {
     debug_assert!(load_sz < WORD_SIZE);
@@ -135,7 +136,7 @@ pub unsafe fn copy_forward(mut dest: *mut u8, mut src: *const u8, mut n: usize) 
 
     /// `n` is in units of bytes, but must be a multiple of the word size and must not be 0.
     /// `src` *must not* be `usize`-aligned.
-    #[cfg(not(feature = "mem-unaligned"))]
+    #[cfg(not(mem_unaligned))]
     #[inline(always)]
     unsafe fn copy_forward_misaligned_words(dest: *mut u8, src: *const u8, n: usize) {
         debug_assert!(n > 0 && n % WORD_SIZE == 0);
@@ -184,7 +185,7 @@ pub unsafe fn copy_forward(mut dest: *mut u8, mut src: *const u8, mut n: usize) 
 
     /// `n` is in units of bytes, but must be a multiple of the word size and must not be 0.
     /// `src` *must not* be `usize`-aligned.
-    #[cfg(feature = "mem-unaligned")]
+    #[cfg(mem_unaligned)]
     #[inline(always)]
     unsafe fn copy_forward_misaligned_words(dest: *mut u8, src: *const u8, n: usize) {
         let mut dest_usize = dest as *mut usize;
@@ -209,9 +210,10 @@ pub unsafe fn copy_forward(mut dest: *mut u8, mut src: *const u8, mut n: usize) 
 
         let n_words = n & !WORD_MASK;
         let src_misalignment = src as usize & WORD_MASK;
-        if likely(src_misalignment == 0) {
+        if src_misalignment == 0 {
             copy_forward_aligned_words(dest, src, n_words);
         } else {
+            cold_path();
             copy_forward_misaligned_words(dest, src, n_words);
         }
         dest = dest.wrapping_add(n_words);
@@ -250,7 +252,7 @@ pub unsafe fn copy_backward(dest: *mut u8, src: *const u8, mut n: usize) {
 
     /// `n` is in units of bytes, but must be a multiple of the word size and must not be 0.
     /// `src` *must not* be `usize`-aligned.
-    #[cfg(not(feature = "mem-unaligned"))]
+    #[cfg(not(mem_unaligned))]
     #[inline(always)]
     unsafe fn copy_backward_misaligned_words(dest: *mut u8, src: *const u8, n: usize) {
         debug_assert!(n > 0 && n % WORD_SIZE == 0);
@@ -299,7 +301,7 @@ pub unsafe fn copy_backward(dest: *mut u8, src: *const u8, mut n: usize) {
 
     /// `n` is in units of bytes, but must be a multiple of the word size and must not be 0.
     /// `src` *must not* be `usize`-aligned.
-    #[cfg(feature = "mem-unaligned")]
+    #[cfg(mem_unaligned)]
     #[inline(always)]
     unsafe fn copy_backward_misaligned_words(dest: *mut u8, src: *const u8, n: usize) {
         let mut dest_usize = dest as *mut usize;
@@ -327,9 +329,10 @@ pub unsafe fn copy_backward(dest: *mut u8, src: *const u8, mut n: usize) {
 
         let n_words = n & !WORD_MASK;
         let src_misalignment = src as usize & WORD_MASK;
-        if likely(src_misalignment == 0) {
+        if src_misalignment == 0 {
             copy_backward_aligned_words(dest, src, n_words);
         } else {
+            cold_path();
             copy_backward_misaligned_words(dest, src, n_words);
         }
         dest = dest.wrapping_sub(n_words);
@@ -368,7 +371,7 @@ pub unsafe fn set_bytes(mut s: *mut u8, c: u8, mut n: usize) {
         }
     }
 
-    if likely(n >= WORD_COPY_THRESHOLD) {
+    if n >= WORD_COPY_THRESHOLD {
         // Align s
         // Because of n >= 2 * WORD_SIZE, dst_misalignment < n
         let misalignment = (s as usize).wrapping_neg() & WORD_MASK;
@@ -380,6 +383,8 @@ pub unsafe fn set_bytes(mut s: *mut u8, c: u8, mut n: usize) {
         set_bytes_words(s, c, n_words);
         s = s.wrapping_add(n_words);
         n -= n_words;
+    } else {
+        cold_path();
     }
     set_bytes_bytes(s, c, n);
 }

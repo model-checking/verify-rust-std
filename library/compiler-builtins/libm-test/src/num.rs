@@ -1,6 +1,7 @@
 //! Helpful numeric operations.
 
 use std::cmp::min;
+use std::fmt;
 use std::ops::RangeInclusive;
 
 use libm::support::Float;
@@ -10,33 +11,9 @@ use crate::{Int, MinInt};
 /// Extension to `libm`'s `Float` trait with methods that are useful for tests but not
 /// needed in `libm` itself.
 pub trait FloatExt: Float {
-    /// The minimum subnormal number.
-    const TINY_BITS: Self::Int = Self::Int::ONE;
-
     /// Retrieve additional constants for this float type.
     fn consts() -> Consts<Self> {
         Consts::new()
-    }
-
-    /// Increment by one ULP, saturating at infinity.
-    fn next_up(self) -> Self {
-        let bits = self.to_bits();
-        if self.is_nan() || bits == Self::INFINITY.to_bits() {
-            return self;
-        }
-
-        let abs = self.abs().to_bits();
-        let next_bits = if abs == Self::Int::ZERO {
-            // Next up from 0 is the smallest subnormal
-            Self::TINY_BITS
-        } else if bits == abs {
-            // Positive: counting up is more positive
-            bits + Self::Int::ONE
-        } else {
-            // Negative: counting down is more positive
-            bits - Self::Int::ONE
-        };
-        Self::from_bits(next_bits)
     }
 
     /// A faster way to effectively call `next_up` `n` times.
@@ -65,27 +42,6 @@ pub trait FloatExt: Float {
         } else {
             // Negative, counting down is more positive
             bits - n
-        };
-        Self::from_bits(next_bits)
-    }
-
-    /// Decrement by one ULP, saturating at negative infinity.
-    fn next_down(self) -> Self {
-        let bits = self.to_bits();
-        if self.is_nan() || bits == Self::NEG_INFINITY.to_bits() {
-            return self;
-        }
-
-        let abs = self.abs().to_bits();
-        let next_bits = if abs == Self::Int::ZERO {
-            // Next up from 0 is the smallest negative subnormal
-            Self::TINY_BITS | Self::SIGN_MASK
-        } else if bits == abs {
-            // Positive: counting down is more negative
-            bits - Self::Int::ONE
-        } else {
-            // Negative: counting up is more negative
-            bits + Self::Int::ONE
         };
         Self::from_bits(next_bits)
     }
@@ -257,15 +213,20 @@ where
 }
 
 /// Returns an iterator of up to `steps` integers evenly distributed.
-pub fn linear_ints(
-    range: RangeInclusive<i32>,
+pub fn linear_ints<I>(
+    range: RangeInclusive<I>,
     steps: u64,
-) -> (impl Iterator<Item = i32> + Clone, u64) {
-    let steps = steps.checked_sub(1).unwrap();
-    let between = u64::from(range.start().abs_diff(*range.end()));
-    let spacing = i32::try_from((between / steps).max(1)).unwrap();
-    let steps = steps.min(between);
-    let mut x: i32 = *range.start();
+) -> (impl Iterator<Item = I> + Clone, u64)
+where
+    I: Int + TryFrom<u128, Error: fmt::Debug>,
+    u128: TryFrom<I::Unsigned, Error: fmt::Debug>,
+{
+    let spaces: u128 = steps.checked_sub(1).unwrap().into();
+    let between = u128::try_from(range.start().abs_diff(*range.end())).expect("out of u128 range");
+    let spacing = I::try_from((between / spaces).max(1)).unwrap();
+    let steps = spaces.min(between);
+    let steps = u64::try_from(steps).expect("> u64::MAX steps");
+    let mut x: I = *range.start();
     (
         (0..=steps).map(move |_| {
             let res = x;
@@ -276,6 +237,11 @@ pub fn linear_ints(
         }),
         steps + 1,
     )
+}
+
+/// `..` as a `RangeInclusive`.
+pub fn full_range<I: MinInt>() -> RangeInclusive<I> {
+    I::MIN..=I::MAX
 }
 
 #[cfg(test)]
