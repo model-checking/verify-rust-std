@@ -57,6 +57,9 @@ use crate::{cmp, fmt};
 /// which loop over `next` / `next_back` of an arbitrary searcher. A searcher
 /// states its type invariant and the cursor each direction moves by
 /// specializing this; the default keeps the whole searcher assignable.
+/// Every searcher without a specialization gets invariant `true` and a havoc
+/// of the whole searcher: sound but coarse, so a proof of another searcher
+/// through these methods (e.g. `StrSearcher`, Challenge 21) specializes this.
 #[cfg(kani)]
 pub(crate) trait SearcherLoopContract {
     /// The type invariant. Called from loop invariants only, so it uses casts
@@ -2376,8 +2379,8 @@ pub mod verify {
 /// # Haystack
 ///
 /// Every harness runs on a haystack of symbolic length (up to the CBMC object
-/// model, as in the accepted VecDeque solution) and arbitrary contents, with no
-/// unwind bound: the loops are discharged by their loop contracts. UTF-8
+/// model, as in #681) and arbitrary contents, with no unwind bound: the loops
+/// are discharged by their loop contracts. UTF-8
 /// validity is never stated as a quantified property. `utf8_ok_at(i)` is the
 /// local rule that every valid UTF-8 string satisfies at every position `i`,
 /// and the harnesses assume it only where a position is consumed: where the
@@ -2420,8 +2423,8 @@ pub mod verify_char_searcher {
     use crate::str::validations::utf8_is_cont_byte;
 
     /// CBMC's object model: with `--object-bits 12` an object has 52 offset
-    /// bits. Same bound as the accepted VecDeque solution. It only excludes
-    /// allocations no real machine could back either.
+    /// bits. Same bound as #681. It only excludes allocations no real machine
+    /// could back either.
     const MAX_ALLOCATION_BYTES: usize = 1 << 48;
 
     unsafe extern "C" {
@@ -2810,7 +2813,10 @@ pub mod verify_char_searcher {
         let mut s = any_char_searcher(any_haystack());
         let r = s.next_match();
         if let Some((a, _)) = r {
-            // The match starts at a lead byte: its sequence ends on a boundary.
+            // Byte `a` is the needle's lead byte, which in valid UTF-8 only
+            // starts a character, so `a` is a boundary by itself. The local
+            // rule there only adds that the sequence ends on one, at `b`. It
+            // holds for every valid haystack, so this assumes no conclusion.
             kani::assume(utf8_ok_at(a));
         }
         check_result(s.haystack, r, char_searcher_inv(&s));
@@ -2828,7 +2834,8 @@ pub mod verify_char_searcher {
         let mut s = any_char_searcher(any_haystack());
         let r = s.next_match_back();
         if let Some((a, _)) = r {
-            // The match starts at a lead byte: its sequence ends on a boundary.
+            // As in `check_char_searcher_next_match`: `a` is a boundary by
+            // itself, and the local rule there adds the one at `b`.
             kani::assume(utf8_ok_at(a));
         }
         check_result(s.haystack, r, char_searcher_inv(&s));
