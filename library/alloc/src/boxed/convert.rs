@@ -808,6 +808,11 @@ mod verify {
     #[derive(Clone)]
     struct CloneCell(u8);
 
+    /// Shows that the assumed precondition does not rule out every execution.
+    fn cover_reached() {
+        kani::cover(true, "non-vacuity witness: reached with the precondition assumed");
+    }
+
     // The challenge table lists `<dyn Error>::downcast_unchecked`. That API
     // does not exist: unchecked downcast lives on `Box<dyn Any (+ Send) (+ Sync)>`.
     // Those impls sit in this module rather than in `Box`'s own, and Kani's
@@ -822,6 +827,7 @@ mod verify {
         let erased: Box<dyn Any> = Box::new(value);
         let boxed = unsafe { erased.downcast_unchecked::<i32>() };
         assert!(*boxed == value);
+        cover_reached();
     }
 
     #[kani::proof_for_contract(Box::<dyn core::any::Any + core::marker::Send + 'static, A>::downcast_unchecked::<i32>)]
@@ -830,6 +836,7 @@ mod verify {
         let erased: Box<dyn Any + Send> = Box::new(value);
         let boxed = unsafe { erased.downcast_unchecked::<i32>() };
         assert!(*boxed == value);
+        cover_reached();
     }
 
     #[kani::proof_for_contract(Box::<dyn core::any::Any + core::marker::Send + core::marker::Sync + 'static, A>::downcast_unchecked::<bool>)]
@@ -838,6 +845,7 @@ mod verify {
         let erased: Box<dyn Any + Send + Sync> = Box::new(value);
         let boxed = unsafe { erased.downcast_unchecked::<bool>() };
         assert!(*boxed == value);
+        cover_reached();
     }
 
     #[kani::proof]
@@ -907,56 +915,81 @@ mod verify {
         let boxed: Box<[u8]> = Box::from(data);
         let arr = unsafe { boxed_slice_as_array_unchecked::<u8, _, 2>(boxed) };
         assert!(arr[0] == data[0] && arr[1] == data[1]);
+        cover_reached();
     }
 
     #[kani::proof]
     pub fn check_downcast_any() {
         let value: i32 = kani::any();
         let ok: Box<dyn Any> = Box::new(value);
-        assert!(ok.downcast::<i32>().is_ok());
+        let ok = ok.downcast::<i32>();
+        kani::cover(ok.is_ok(), "Ok: downcast to the stored type");
+        assert!(ok.is_ok());
         let err: Box<dyn Any> = Box::new(value);
-        assert!(err.downcast::<u8>().is_err());
+        let err = err.downcast::<u8>();
+        kani::cover(err.is_err(), "Err: downcast to another type");
+        assert!(err.is_err());
     }
 
     #[kani::proof]
     pub fn check_downcast_any_send() {
         let value: i32 = kani::any();
         let ok: Box<dyn Any + Send> = Box::new(value);
-        assert!(ok.downcast::<i32>().is_ok());
+        let ok = ok.downcast::<i32>();
+        kani::cover(ok.is_ok(), "Ok: downcast to the stored type");
+        assert!(ok.is_ok());
         let err: Box<dyn Any + Send> = Box::new(value);
-        assert!(err.downcast::<u8>().is_err());
+        let err = err.downcast::<u8>();
+        kani::cover(err.is_err(), "Err: downcast to another type");
+        assert!(err.is_err());
     }
 
     #[kani::proof]
     pub fn check_downcast_any_send_sync() {
         let value: i32 = kani::any();
         let ok: Box<dyn Any + Send + Sync> = Box::new(value);
-        assert!(ok.downcast::<i32>().is_ok());
+        let ok = ok.downcast::<i32>();
+        kani::cover(ok.is_ok(), "Ok: downcast to the stored type");
+        assert!(ok.is_ok());
         let err: Box<dyn Any + Send + Sync> = Box::new(value);
-        assert!(err.downcast::<bool>().is_err());
+        let err = err.downcast::<bool>();
+        kani::cover(err.is_err(), "Err: downcast to another type");
+        assert!(err.is_err());
     }
 
     #[kani::proof]
     pub fn check_downcast_error() {
         let ok: Box<dyn Error> = Box::new(ProbeError(kani::any()));
-        assert!(ok.downcast::<ProbeError>().is_ok());
+        let ok = ok.downcast::<ProbeError>();
+        kani::cover(ok.is_ok(), "Ok: downcast to the stored type");
+        assert!(ok.is_ok());
         let err: Box<dyn Error> = Box::new(ProbeError(0));
-        assert!(err.downcast::<OtherError>().is_err());
+        let err = err.downcast::<OtherError>();
+        kani::cover(err.is_err(), "Err: downcast to another type");
+        assert!(err.is_err());
     }
 
     #[kani::proof]
     pub fn check_downcast_error_send() {
         let ok: Box<dyn Error + Send> = Box::new(ProbeError(kani::any()));
-        assert!(ok.downcast::<ProbeError>().is_ok());
+        let ok = ok.downcast::<ProbeError>();
+        kani::cover(ok.is_ok(), "Ok: downcast to the stored type");
+        assert!(ok.is_ok());
         let err: Box<dyn Error + Send> = Box::new(ProbeError(0));
-        assert!(err.downcast::<OtherError>().is_err());
+        let err = err.downcast::<OtherError>();
+        kani::cover(err.is_err(), "Err: downcast to another type");
+        assert!(err.is_err());
     }
 
     #[kani::proof]
     pub fn check_downcast_error_send_sync() {
         let ok: Box<dyn Error + Send + Sync> = Box::new(ProbeError(kani::any()));
-        assert!(ok.downcast::<ProbeError>().is_ok());
+        let ok = ok.downcast::<ProbeError>();
+        kani::cover(ok.is_ok(), "Ok: downcast to the stored type");
+        assert!(ok.is_ok());
         let err: Box<dyn Error + Send + Sync> = Box::new(ProbeError(0));
-        assert!(err.downcast::<OtherError>().is_err());
+        let err = err.downcast::<OtherError>();
+        kani::cover(err.is_err(), "Err: downcast to another type");
+        assert!(err.is_err());
     }
 }

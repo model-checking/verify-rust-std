@@ -1296,7 +1296,8 @@ impl<T, A: Allocator> Box<mem::MaybeUninit<T>, A> {
     #[inline(always)]
     // TODO: we can no longer attach this contract now that `assume_init` is a `const fn`:
     // Kani's contract instrumentation fails with E0493 because the destructor of the owned
-    // `Box` receiver cannot be evaluated at compile time. Until that works, the
+    // `Box` receiver cannot be evaluated at compile time, see
+    // https://github.com/model-checking/kani/issues/4984. Until that works, the
     // `check_assume_init_{i32,zst,bool}` harnesses in `mod verify` assume the precondition
     // and assert the postcondition around each call.
     // #[requires(ub_checks::can_dereference((&*self as *const mem::MaybeUninit<T>).cast::<T>()))]
@@ -2711,6 +2712,17 @@ mod verify {
         ptr::slice_from_raw_parts_mut(ptr, len)
     }
 
+    /// Shows that the harness reaches both an empty and a full slice.
+    fn cover_slice_len(len: usize) {
+        kani::cover(len == 0, "empty slice");
+        kani::cover(len == SLICE_CAP, "slice of SLICE_CAP elements");
+    }
+
+    /// Shows that the assumed precondition does not rule out every execution.
+    fn cover_reached() {
+        kani::cover(true, "non-vacuity witness: reached with the precondition assumed");
+    }
+
     // ---- required unsafe: assume_init (sized) ----
     // `assume_init` is a `const fn` and cannot carry its contract under Kani (see the TODO
     // on it), so these are plain proofs that mirror the contract: assume the precondition,
@@ -2722,6 +2734,7 @@ mod verify {
         kani::assume(ub_checks::can_dereference((&*slot as *const MaybeUninit<T>).cast::<T>()));
         let boxed = unsafe { slot.assume_init() };
         assert!(ub_checks::can_dereference(&*boxed as *const T));
+        cover_reached();
         boxed
     }
 
@@ -2763,6 +2776,7 @@ mod verify {
         }
         let boxed = unsafe { slot.assume_init() };
         assert!(boxed.len() == len);
+        cover_slice_len(len);
     }
 
     #[kani::proof_for_contract(Box::<[core::mem::MaybeUninit<T>], A>::assume_init)]
@@ -2775,6 +2789,7 @@ mod verify {
         }
         let boxed = unsafe { slot.assume_init() };
         assert!(boxed.len() == len);
+        cover_slice_len(len);
     }
 
     // ---- required unsafe: from_raw ----
@@ -2785,12 +2800,14 @@ mod verify {
         let ptr = Box::into_raw(Box::new(value));
         let boxed = unsafe { Box::from_raw(ptr) };
         assert!(*boxed == value);
+        cover_reached();
     }
 
     #[kani::proof_for_contract(Box::<()>::from_raw)]
     pub fn check_from_raw_zst() {
         let ptr = Box::into_raw(Box::new(()));
         let _boxed = unsafe { Box::from_raw(ptr) };
+        cover_reached();
     }
 
     #[kani::proof_for_contract(Box::<[u8]>::from_raw)]
@@ -2802,6 +2819,7 @@ mod verify {
         let ptr = Box::into_raw(boxed);
         let boxed = unsafe { Box::<[u8]>::from_raw(ptr) };
         assert!(boxed.len() == len);
+        cover_slice_len(len);
     }
 
     // ---- required unsafe: from_non_null ----
@@ -2812,12 +2830,14 @@ mod verify {
         let ptr = Box::into_non_null(Box::new(value));
         let boxed = unsafe { Box::from_non_null(ptr) };
         assert!(*boxed == value);
+        cover_reached();
     }
 
     #[kani::proof_for_contract(Box::<()>::from_non_null)]
     pub fn check_from_non_null_zst() {
         let ptr = Box::into_non_null(Box::new(()));
         let _boxed = unsafe { Box::from_non_null(ptr) };
+        cover_reached();
     }
 
     #[kani::proof_for_contract(Box::<[u8]>::from_non_null)]
@@ -2829,6 +2849,7 @@ mod verify {
         let ptr = Box::into_non_null(boxed);
         let boxed = unsafe { Box::<[u8]>::from_non_null(ptr) };
         assert!(boxed.len() == len);
+        cover_slice_len(len);
     }
 
     // ---- required unsafe: from_raw_in ----
@@ -2840,12 +2861,14 @@ mod verify {
         let ptr = alloc_write(value);
         let boxed = unsafe { Box::from_raw_in(ptr, Global) };
         assert!(*boxed == value);
+        cover_reached();
     }
 
     #[kani::proof_for_contract(Box::<(), Global>::from_raw_in)]
     pub fn check_from_raw_in_zst() {
         let ptr = alloc_write(());
         let _boxed = unsafe { Box::from_raw_in(ptr, Global) };
+        cover_reached();
     }
 
     #[kani::proof_for_contract(Box::<[u8], Global>::from_raw_in)]
@@ -2856,6 +2879,7 @@ mod verify {
         let ptr = alloc_write_slice(slice);
         let boxed = unsafe { Box::from_raw_in(ptr, Global) };
         assert!(boxed.len() == len);
+        cover_slice_len(len);
     }
 
     // ---- required unsafe: from_non_null_in ----
@@ -2866,12 +2890,14 @@ mod verify {
         let ptr = NonNull::new(alloc_write(value)).unwrap();
         let boxed = unsafe { Box::from_non_null_in(ptr, Global) };
         assert!(*boxed == value);
+        cover_reached();
     }
 
     #[kani::proof_for_contract(Box::<(), Global>::from_non_null_in)]
     pub fn check_from_non_null_in_zst() {
         let ptr = NonNull::new(alloc_write(())).unwrap();
         let _boxed = unsafe { Box::from_non_null_in(ptr, Global) };
+        cover_reached();
     }
 
     #[kani::proof_for_contract(Box::<[u8], Global>::from_non_null_in)]
@@ -2882,6 +2908,7 @@ mod verify {
         let ptr = NonNull::new(alloc_write_slice(slice)).unwrap();
         let boxed = unsafe { Box::from_non_null_in(ptr, Global) };
         assert!(boxed.len() == len);
+        cover_slice_len(len);
     }
 
     // ---- safe functions with unsafe bodies ----
@@ -2930,6 +2957,7 @@ mod verify {
         let len = kani::any_where(|n: &usize| *n <= SLICE_CAP);
         let slot: Box<[MaybeUninit<i32>]> = Box::new_uninit_slice(len);
         assert!(slot.len() == len);
+        cover_slice_len(len);
     }
 
     #[kani::proof]
@@ -2941,6 +2969,7 @@ mod verify {
         for i in 0..len {
             assert!(boxed[i] == 0);
         }
+        cover_slice_len(len);
     }
 
     #[kani::proof]
@@ -2950,6 +2979,7 @@ mod verify {
         let slot = Box::<[i32]>::try_new_uninit_slice(len).expect("alloc");
         assert!(slot.len() == len);
         assert!(Box::<[u64]>::try_new_uninit_slice(usize::MAX).is_err());
+        cover_slice_len(len);
     }
 
     #[kani::proof]
@@ -2963,6 +2993,7 @@ mod verify {
             assert!(boxed[i] == 0);
         }
         assert!(Box::<[u64]>::try_new_zeroed_slice(usize::MAX).is_err());
+        cover_slice_len(len);
     }
 
     #[kani::proof]
@@ -2987,6 +3018,7 @@ mod verify {
         let len = kani::any_where(|n: &usize| *n <= SLICE_CAP);
         let slot: Box<[MaybeUninit<i32>], _> = Box::new_uninit_slice_in(len, Global);
         assert!(slot.len() == len);
+        cover_slice_len(len);
     }
 
     #[kani::proof]
@@ -2999,6 +3031,7 @@ mod verify {
         for i in 0..len {
             assert!(boxed[i] == 0);
         }
+        cover_slice_len(len);
     }
 
     #[kani::proof]
@@ -3007,6 +3040,7 @@ mod verify {
         let len = kani::any_where(|n: &usize| *n <= SLICE_CAP);
         let slot = Box::<[i32]>::try_new_uninit_slice_in(len, Global).expect("alloc");
         assert!(slot.len() == len);
+        cover_slice_len(len);
     }
 
     #[kani::proof]
@@ -3015,6 +3049,7 @@ mod verify {
         let len = kani::any_where(|n: &usize| *n <= SLICE_CAP);
         let slot = Box::<[u8]>::try_new_zeroed_slice_in(len, Global).expect("alloc");
         assert!(slot.len() == len);
+        cover_slice_len(len);
     }
 
     #[kani::proof]
