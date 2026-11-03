@@ -134,6 +134,7 @@ where
 
     #[inline]
     #[requires(idx < self.iter.size_hint().0)]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> B
     where
         Self: TrustedRandomAccessNoCoerce,
@@ -230,4 +231,56 @@ where
 unsafe impl<I: InPlaceIterable, F> InPlaceIterable for Map<I, F> {
     const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
     const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Harnesses for `__iterator_get_unchecked` for Map.
+    macro_rules! generate_map_get_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(
+                                        <Map<
+                                            crate::ops::Range<usize>,
+                                            fn(usize) -> ($ty, usize, usize),
+                                        > as crate::iter::Iterator>::__iterator_get_unchecked
+                                    )]
+            pub fn $name() {
+                let len: usize = kani::any();
+                let idx: usize = kani::any();
+                let value: $ty = kani::any();
+                let initial_calls: usize = kani::any();
+                let mut calls = initial_calls;
+                let mut iter = Map::new(0..len, move |position| {
+                    calls = calls.wrapping_add(1);
+                    (value, position, calls)
+                });
+                let _ = unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
+                kani::cover(idx == 0, "first element");
+                kani::cover(idx > 0 && idx < len - 1, "interior element");
+                kani::cover(idx == len - 1, "last element");
+                kani::cover(initial_calls == usize::MAX, "wrapping closure state");
+                kani::cover(
+                    len == usize::MAX && idx == len - 1,
+                    "last element at the maximum logical length",
+                );
+            }
+        };
+    }
+
+    generate_map_get_unchecked_harness!(harness_map_get_unchecked_i8, i8);
+    generate_map_get_unchecked_harness!(harness_map_get_unchecked_i16, i16);
+    generate_map_get_unchecked_harness!(harness_map_get_unchecked_i32, i32);
+    generate_map_get_unchecked_harness!(harness_map_get_unchecked_i64, i64);
+    generate_map_get_unchecked_harness!(harness_map_get_unchecked_i128, i128);
+    generate_map_get_unchecked_harness!(harness_map_get_unchecked_u8, u8);
+    generate_map_get_unchecked_harness!(harness_map_get_unchecked_u16, u16);
+    generate_map_get_unchecked_harness!(harness_map_get_unchecked_u32, u32);
+    generate_map_get_unchecked_harness!(harness_map_get_unchecked_u64, u64);
+    generate_map_get_unchecked_harness!(harness_map_get_unchecked_u128, u128);
+    generate_map_get_unchecked_harness!(harness_map_get_unchecked_array, [u8; 4]);
+    generate_map_get_unchecked_harness!(harness_map_get_unchecked_bool, bool);
+    generate_map_get_unchecked_harness!(harness_map_get_unchecked_unit, ());
 }
