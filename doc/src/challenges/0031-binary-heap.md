@@ -11,15 +11,24 @@
 
 ## Goal
 
-Verify the safety of `BinaryHeap` functions in (library/alloc/src/collections/binary_heap/mod.rs).
+Verify the safety of `BinaryHeap` functions in [binary_heap/mod.rs](https://github.com/model-checking/verify-rust-std/blob/main/library/alloc/src/collections/binary_heap/mod.rs).
 
 ## Motivation
 
 `BinaryHeap` is the priority queue of the standard library. To keep its elements in heap order, it moves them with raw pointer reads and copies, at positions chosen by comparing elements with `Ord`. `Ord` is safe code written by users and can return any result, so these moves must be safe even when the comparisons are inconsistent.
 
-### Success Criteria
+## Description
 
-Verify the safety of the following functions in (library/alloc/src/collections/binary_heap/mod.rs):
+This challenge verifies the safety of `BinaryHeap`'s sift functions, `PeekMut`, the `TrustedLen` sorted iterators, and the safe methods built on them. The sifts move elements through `Hole`, which reads one element out with `ptr::read`, copies others into the gap with `ptr::copy_nonoverlapping` at positions chosen by `Ord`, and writes the element back in `Drop`. `PeekMut` shrinks the length to 1 while a `&mut T` to the top element is out.
+
+The other `unsafe impl`s on `IntoIter` (`TrustedFused`, `SourceIter`, `InPlaceIterable`, `AsVecIntoIter`) delegate to `vec::IntoIter` and are out of scope for this challenge.
+
+### Assumptions
+
+* `Vec`'s implementation may be assumed correct, and its existing verified contracts may be reused.
+* A panicking `Ord` is out of scope: solutions need not verify unwinding through `Drop for Hole`.
+
+### Success Criteria
 
 Write and prove the contract for the safety of the following unsafe functions:
 
@@ -40,7 +49,7 @@ Prove that the following implementations of the unsafe trait `TrustedLen` are co
 |TrustedLen for IntoIterSorted|
 |TrustedLen for DrainSorted|
 
-Prove the absence of undefined behavior for following safe abstractions:
+Prove the absence of undefined behavior for the following safe abstractions:
 
 | Function |
 |---------|
@@ -74,6 +83,7 @@ The verification must hold for any implementation of `Ord` for `T`, including on
 All proofs must automatically ensure the absence of the following undefined behaviors [ref](https://github.com/rust-lang/reference/blob/142b2ed77d33f37a9973772bd95e6144ed9dce43/src/behavior-considered-undefined.md):
 
 * Accessing (loading from or storing to) a place that is dangling or based on a misaligned pointer.
+* Invoking undefined behavior via compiler intrinsics.
 * Reading from uninitialized memory except for padding or unions.
 * Producing an invalid value
 
