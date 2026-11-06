@@ -70,7 +70,7 @@ pub(crate) trait SearcherLoopContract {
     fn kani_fwd_cursor(&self) -> *const [u8];
     /// The bytes a backward step (`next_back`) writes.
     fn kani_back_cursor(&self) -> *const [u8];
-    /// The bytes of the pattern's own state that a step may write (a stateful
+    /// The bytes of the pattern's state that a step may write (a stateful
     /// predicate). None by default: Kani checks every write against `modifies`
     /// and `loop_modifies`, so a pattern that writes more fails its proofs.
     fn kani_pred_state(&self) -> *const [u8];
@@ -591,7 +591,6 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
     #[inline]
     fn next_match(&mut self) -> Option<(usize, usize)> {
         // Within the loop `finger` may sit inside a character (see below).
-        #[cfg_attr(kani, kani::loop_modifies(&self.finger))]
         #[safety::loop_invariant(self.finger <= self.finger_back)]
         loop {
             // get the haystack after the last character found
@@ -665,7 +664,6 @@ unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
     fn next_match_back(&mut self) -> Option<(usize, usize)> {
         let haystack = self.haystack.as_bytes();
         // Within the loop `finger_back` may sit inside a character (see below).
-        #[cfg_attr(kani, kani::loop_modifies(&self.finger_back))]
         #[safety::loop_invariant(self.finger <= self.finger_back
             && self.finger_back <= crate::intrinsics::ptr_metadata(self.haystack as *const str))]
         loop {
@@ -2378,9 +2376,10 @@ pub mod verify {
 ///
 /// # Haystack
 ///
-/// Every harness runs on a haystack of symbolic length (up to the CBMC object
-/// model, as in #681) and arbitrary contents, with no unwind bound: the loops
-/// are discharged by their loop contracts. UTF-8
+/// Every harness runs on a haystack of symbolic length (up to
+/// `MAX_ALLOCATION_BYTES`, the limit of CBMC's object model) and arbitrary
+/// contents, with no unwind bound: the loops are discharged by their loop
+/// contracts. UTF-8
 /// validity is never stated as a quantified property. `utf8_ok_at(i)` is the
 /// local rule that every valid UTF-8 string satisfies at every position `i`,
 /// and the harnesses assume it only where a position is consumed: where the
@@ -2413,8 +2412,14 @@ pub mod verify {
 ///
 /// # Predicates
 ///
-/// A predicate returns any result on every call, with no state of its own
-/// (`fn(char) -> bool`) or with state that it writes on every call (`Toggle`).
+/// A predicate without UB cannot change what the searcher reads: the searcher
+/// is mutably borrowed while the predicate runs, so `char_indices` is out of its
+/// reach, and the haystack is a shared `&str`. So safety depends only on its
+/// result, which is any result on every call here. What a predicate writes must
+/// be in the step and loop write sets, which `kani_pred_state` names per type
+/// (empty by default). The instances check these sets with no state
+/// (`fn(char) -> bool`), with state of its own (`Toggle`) and with state behind
+/// a reference (`&mut Toggle`).
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 pub mod verify_char_searcher {
@@ -2422,10 +2427,13 @@ pub mod verify_char_searcher {
     use crate::slice::Iter;
     use crate::str::validations::utf8_is_cont_byte;
 
-    /// CBMC's object model: with `--object-bits 12` an object has 52 offset
-    /// bits. Same bound as #681. It only excludes allocations no real machine
-    /// could back either.
-    const MAX_ALLOCATION_BYTES: usize = 1 << 48;
+    /// The longest haystack whose one-past-the-end pointer CBMC can represent:
+    /// CI's `--object-bits 12` leaves 52 signed offset bits, so offsets reach
+    /// `2^51 - 1` (CBMC's `max_malloc_size` is `2^51`). This bound, not the
+    /// model, excludes longer haystacks. No CBMC proof reaches them, and none
+    /// here depends on the value: lengths stay symbolic, and the searchers only
+    /// compare them and form indices within them.
+    const MAX_ALLOCATION_BYTES: usize = (1 << 51) - 1;
 
     unsafe extern "C" {
         /// CBMC's `malloc` model (`-Z c-ffi`): `core` has no allocator, and a
@@ -2791,6 +2799,7 @@ pub mod verify_char_searcher {
         check_result(s.haystack, r, char_searcher_inv(&s));
         kani::cover(r.is_some_and(|(_, b)| b > 4096), "a reject far into the haystack");
         kani::cover(r.is_none(), "searched to the end");
+        kani::cover(s.haystack.len() == MAX_ALLOCATION_BYTES, "the largest haystack");
     }
 
     #[kani::proof]
@@ -2928,13 +2937,13 @@ pub mod verify_char_searcher {
     /// contract havocs. The set itself is abstracted (`model_contains`), so no
     /// loop is unwound anywhere.
     macro_rules! multi_char_eq_proofs {
-        ($m:ident, $wrapper:ident, $c:ty, |$set:ident| $eq:expr) => {
+        ($m:ident, $wrapper:ident, $c:ty, |$set:tt: $t:ty| $eq:expr) => {
             mod $m {
                 use super::*;
 
                 #[kani::proof]
                 fn check_into_searcher() {
-                    let $set: [char; 2] = kani::any();
+                    let $set: $t = kani::any();
                     let s = $eq.into_searcher(any_haystack());
                     assert!(s.0.kani_ok());
                 }
@@ -2944,7 +2953,7 @@ pub mod verify_char_searcher {
                 #[kani::stub(<crate::slice::Iter<u8> as crate::iter::ExactSizeIterator>::len, model_iter_len)]
                 #[kani::stub(<[char]>::contains, model_contains)]
                 fn check_next() {
-                    let $set: [char; 2] = kani::any();
+                    let $set: $t = kani::any();
                     let mut s = $wrapper(any_multi_char_eq_searcher(any_haystack(), $eq));
                     let r = step_range(s.next());
                     kani::cover(r.is_some_and(|(_, b)| b > 4096), "a step far into the haystack");
@@ -2958,7 +2967,7 @@ pub mod verify_char_searcher {
                 #[kani::stub(<crate::slice::Iter<u8> as crate::iter::ExactSizeIterator>::len, model_iter_len)]
                 #[kani::stub(<[char]>::contains, model_contains)]
                 fn check_next_back() {
-                    let $set: [char; 2] = kani::any();
+                    let $set: $t = kani::any();
                     let mut s = $wrapper(any_multi_char_eq_searcher(any_haystack(), $eq));
                     let r = step_range(s.next_back());
                     kani::cover(r.is_some_and(|(a, _)| a > 4096), "a step far into the haystack");
@@ -2967,7 +2976,7 @@ pub mod verify_char_searcher {
                 #[kani::proof]
                 #[kani::stub_verified(<MultiCharEqSearcher<$c> as Searcher>::next)]
                 fn check_next_match() {
-                    let $set: [char; 2] = kani::any();
+                    let $set: $t = kani::any();
                     let mut s = $wrapper(any_multi_char_eq_searcher(any_haystack(), $eq));
                     let r = s.next_match();
                     check_result(s.0.haystack, r, s.0.kani_ok());
@@ -2978,7 +2987,7 @@ pub mod verify_char_searcher {
                 #[kani::proof]
                 #[kani::stub_verified(<MultiCharEqSearcher<$c> as Searcher>::next)]
                 fn check_next_reject() {
-                    let $set: [char; 2] = kani::any();
+                    let $set: $t = kani::any();
                     let mut s = $wrapper(any_multi_char_eq_searcher(any_haystack(), $eq));
                     let r = s.next_reject();
                     check_result(s.0.haystack, r, s.0.kani_ok());
@@ -2989,7 +2998,7 @@ pub mod verify_char_searcher {
                 #[kani::proof]
                 #[kani::stub_verified(<MultiCharEqSearcher<$c> as ReverseSearcher>::next_back)]
                 fn check_next_match_back() {
-                    let $set: [char; 2] = kani::any();
+                    let $set: $t = kani::any();
                     let mut s = $wrapper(any_multi_char_eq_searcher(any_haystack(), $eq));
                     let r = s.next_match_back();
                     check_result(s.0.haystack, r, s.0.kani_ok());
@@ -3000,7 +3009,7 @@ pub mod verify_char_searcher {
                 #[kani::proof]
                 #[kani::stub_verified(<MultiCharEqSearcher<$c> as ReverseSearcher>::next_back)]
                 fn check_next_reject_back() {
-                    let $set: [char; 2] = kani::any();
+                    let $set: $t = kani::any();
                     let mut s = $wrapper(any_multi_char_eq_searcher(any_haystack(), $eq));
                     let r = s.next_reject_back();
                     check_result(s.0.haystack, r, s.0.kani_ok());
@@ -3011,27 +3020,32 @@ pub mod verify_char_searcher {
         };
     }
 
-    // `N` only sets the size of the set value: the set is never read.
-    multi_char_eq_proofs!(char_array, CharArraySearcher, [char; 2], |set| set);
-    multi_char_eq_proofs!(char_array_ref, CharArrayRefSearcher, &[char; 2], |set| &set);
-    multi_char_eq_proofs!(char_slice, CharSliceSearcher, &[char], |set| {
-        let _ = set;
-        any_char_slice()
-    });
+    // The verified methods use the set only through `matches`, for arrays
+    // `<[char]>::contains`, so `model_contains`: `N` changes only the layout.
+    // Kani cannot quantify over `N`. `N = 2` and the zero-sized `N = 0` cover
+    // both layouts under the same abstraction.
+    multi_char_eq_proofs!(char_array, CharArraySearcher, [char; 2], |a: [char; 2]| a);
+    multi_char_eq_proofs!(char_array_0, CharArraySearcher, [char; 0], |a: [char; 0]| a);
+    multi_char_eq_proofs!(char_array_ref, CharArrayRefSearcher, &[char; 2], |a: [char; 2]| &a);
+    multi_char_eq_proofs!(char_array_ref_0, CharArrayRefSearcher, &[char; 0], |a: [char; 0]| &a);
+    multi_char_eq_proofs!(char_slice, CharSliceSearcher, &[char], |_: ()| any_char_slice());
     // Any predicate result on every call.
-    multi_char_eq_proofs!(char_predicate, CharPredicateSearcher, fn(char) -> bool, |set| {
-        let _ = set;
+    multi_char_eq_proofs!(char_predicate, CharPredicateSearcher, fn(char) -> bool, |_: ()| {
         (|_| kani::any()) as fn(char) -> bool
     });
     // A predicate that also writes state of its own (inside `char_eq`).
-    multi_char_eq_proofs!(char_predicate_state, CharPredicateSearcher, Toggle, |set| {
-        let _ = set;
+    multi_char_eq_proofs!(char_predicate_state, CharPredicateSearcher, Toggle, |_: ()| {
         Toggle(kani::any())
     });
+    // A predicate that writes state behind a reference (a `&mut` capture).
+    multi_char_eq_proofs!(char_predicate_ref, CharPredicateSearcher, &mut Toggle, |_: ()| {
+        // SAFETY: a fresh one-byte allocation, and every byte is a valid `Toggle`.
+        unsafe { &mut *any_alloc::<Toggle>(1).cast_mut() }
+    });
 
-    /// A predicate with state: it flips a flag on every call, like a `move`
+    /// A predicate with state: it changes the state on every call, like a
     /// closure that updates a capture, and returns any result.
-    struct Toggle(bool);
+    struct Toggle(u8);
 
     impl FnOnce<(char,)> for Toggle {
         type Output = bool;
@@ -3052,6 +3066,15 @@ pub mod verify_char_searcher {
         fn kani_pred_state(&self) -> *const [u8] {
             crate::ptr::slice_from_raw_parts(
                 &raw const self.char_eq as *const u8,
+                size_of::<Toggle>(),
+            )
+        }
+    }
+
+    impl SearcherLoopContract for MultiCharEqSearcher<'_, &mut Toggle> {
+        fn kani_pred_state(&self) -> *const [u8] {
+            crate::ptr::slice_from_raw_parts(
+                &raw const *self.char_eq as *const u8,
                 size_of::<Toggle>(),
             )
         }
