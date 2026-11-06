@@ -1149,7 +1149,12 @@ mod verify {
     }
 
     // pub const unsafe fn from_ptr<'a>(ptr: *const c_char) -> &'a CStr
+    // The stub: this harness reaches `CharSearcher::next_match` only through
+    // panic formatting, where it never runs. Its loop contract would make Kani
+    // apply loop contracts here, and CBMC 6.11 then rejects the loop of its
+    // built-in `strlen` (fixed by diffblue/cbmc#9164).
     #[kani::proof_for_contract(CStr::from_ptr)]
+    #[kani::stub(<crate::str::pattern::CharSearcher as crate::str::pattern::Searcher>::next_match, any_match)]
     #[kani::unwind(33)]
     fn check_from_ptr_contract() {
         const MAX_SIZE: usize = 32;
@@ -1159,6 +1164,14 @@ mod verify {
         unsafe {
             CStr::from_ptr(ptr);
         }
+    }
+
+    // `'a: 'a` makes `'a` early-bound, like the lifetime of the impl.
+    fn any_match<'a>(_: &mut crate::str::pattern::CharSearcher<'a>) -> Option<(usize, usize)>
+    where
+        'a: 'a,
+    {
+        kani::any()
     }
 
     // pub const fn is_empty(&self) -> bool
