@@ -16,6 +16,8 @@ mod validations;
 use self::pattern::{DoubleEndedSearcher, Pattern, ReverseSearcher, Searcher};
 use crate::char::{self, EscapeDebugExtArgs};
 use crate::hint::assert_unchecked;
+#[cfg(kani)]
+use crate::kani;
 use crate::range::Range;
 use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
@@ -421,6 +423,9 @@ impl str {
     #[stable(feature = "round_char_boundary", since = "1.91.0")]
     #[rustc_const_stable(feature = "round_char_boundary", since = "1.91.0")]
     #[inline]
+    #[cfg_attr(kani, kani::requires(crate::str::pattern::verify::nearby_boundary(self, index, false)))]
+    #[cfg_attr(kani, kani::ensures(|result| crate::str::pattern::verify::boundary_result(self, index, *result, false)))]
+    #[cfg_attr(kani, kani::modifies())]
     pub const fn floor_char_boundary(&self, index: usize) -> usize {
         if index >= self.len() {
             return self.len();
@@ -478,6 +483,9 @@ impl str {
     #[stable(feature = "round_char_boundary", since = "1.91.0")]
     #[rustc_const_stable(feature = "round_char_boundary", since = "1.91.0")]
     #[inline]
+    #[cfg_attr(kani, kani::requires(crate::str::pattern::verify::nearby_boundary(self, index, true)))]
+    #[cfg_attr(kani, kani::ensures(|result| crate::str::pattern::verify::boundary_result(self, index, *result, true)))]
+    #[cfg_attr(kani, kani::modifies())]
     pub const fn ceil_char_boundary(&self, index: usize) -> usize {
         if index >= self.len() {
             self.len()
