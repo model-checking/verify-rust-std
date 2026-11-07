@@ -1834,6 +1834,9 @@ macro_rules! uint_impl {
                       without modifying the original"]
         #[inline]
         #[track_caller]
+        #[ensures(|result: &u32| {
+            self > 0 && imp::int_log10::verify::log2_correct(self as u128, *result)
+        })]
         pub const fn ilog2(self) -> u32 {
             if let Some(log) = self.checked_ilog2() {
                 log
@@ -1859,6 +1862,9 @@ macro_rules! uint_impl {
                       without modifying the original"]
         #[inline]
         #[track_caller]
+        #[ensures(|result: &u32| {
+            self > 0 && imp::int_log10::verify::log10_correct(self as u128, *result)
+        })]
         pub const fn ilog10(self) -> u32 {
             if let Some(log) = self.checked_ilog10() {
                 log
@@ -1957,6 +1963,10 @@ macro_rules! uint_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result: &Option<u32>| match result {
+            Some(log) => self > 0 && imp::int_log10::verify::log2_correct(self as u128, *log),
+            None => self == 0,
+        })]
         pub const fn checked_ilog2(self) -> Option<u32> {
             match NonZero::new(self) {
                 Some(x) => Some(x.ilog2()),
@@ -1978,6 +1988,10 @@ macro_rules! uint_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result: &Option<u32>| match result {
+            Some(log) => self > 0 && imp::int_log10::verify::log10_correct(self as u128, *log),
+            None => self == 0,
+        })]
         pub const fn checked_ilog10(self) -> Option<u32> {
             match NonZero::new(self) {
                 Some(x) => Some(x.ilog10()),
@@ -4411,4 +4425,53 @@ macro_rules! uint_impl {
             unsafe { T::unchecked_cast_from(self) }
         }
     }
+}
+
+#[unstable(feature = "kani", issue = "none")]
+#[cfg(kani)]
+mod verify {
+    use crate::kani;
+    use crate::num::imp::int_log10::verify::check_integer_logarithm;
+
+    check_integer_logarithm!(u8, checked_ilog2, checked_ilog2_u8);
+    check_integer_logarithm!(u8, checked_ilog10, checked_ilog10_u8);
+    check_integer_logarithm!(u8, ilog2, ilog2_u8, positive);
+    check_integer_logarithm!(u8, ilog10, ilog10_u8, positive);
+    check_integer_logarithm!(u8, ilog2, ilog2_u8_nonpositive, panic);
+    check_integer_logarithm!(u8, ilog10, ilog10_u8_nonpositive, panic);
+
+    check_integer_logarithm!(u16, checked_ilog2, checked_ilog2_u16);
+    check_integer_logarithm!(u16, checked_ilog10, checked_ilog10_u16);
+    check_integer_logarithm!(u16, ilog2, ilog2_u16, positive);
+    check_integer_logarithm!(u16, ilog10, ilog10_u16, positive);
+    check_integer_logarithm!(u16, ilog2, ilog2_u16_nonpositive, panic);
+    check_integer_logarithm!(u16, ilog10, ilog10_u16_nonpositive, panic);
+
+    check_integer_logarithm!(u32, checked_ilog2, checked_ilog2_u32);
+    check_integer_logarithm!(u32, checked_ilog10, checked_ilog10_u32);
+    check_integer_logarithm!(u32, ilog2, ilog2_u32, positive);
+    check_integer_logarithm!(u32, ilog10, ilog10_u32, positive);
+    check_integer_logarithm!(u32, ilog2, ilog2_u32_nonpositive, panic);
+    check_integer_logarithm!(u32, ilog10, ilog10_u32_nonpositive, panic);
+
+    check_integer_logarithm!(u64, checked_ilog2, checked_ilog2_u64);
+    check_integer_logarithm!(u64, checked_ilog10, checked_ilog10_u64);
+    check_integer_logarithm!(u64, ilog2, ilog2_u64, positive);
+    check_integer_logarithm!(u64, ilog10, ilog10_u64, positive);
+    check_integer_logarithm!(u64, ilog2, ilog2_u64_nonpositive, panic);
+    check_integer_logarithm!(u64, ilog10, ilog10_u64_nonpositive, panic);
+
+    check_integer_logarithm!(u128, checked_ilog2, checked_ilog2_u128);
+    check_integer_logarithm!(u128, checked_ilog10, checked_ilog10_u128);
+    check_integer_logarithm!(u128, ilog2, ilog2_u128, positive);
+    check_integer_logarithm!(u128, ilog10, ilog10_u128, positive);
+    check_integer_logarithm!(u128, ilog2, ilog2_u128_nonpositive, panic);
+    check_integer_logarithm!(u128, ilog10, ilog10_u128_nonpositive, panic);
+
+    check_integer_logarithm!(usize, checked_ilog2, checked_ilog2_usize);
+    check_integer_logarithm!(usize, checked_ilog10, checked_ilog10_usize);
+    check_integer_logarithm!(usize, ilog2, ilog2_usize, positive);
+    check_integer_logarithm!(usize, ilog10, ilog10_usize, positive);
+    check_integer_logarithm!(usize, ilog2, ilog2_usize_nonpositive, panic);
+    check_integer_logarithm!(usize, ilog10, ilog10_usize_nonpositive, panic);
 }

@@ -2120,6 +2120,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result: &u32| imp::int_log10::verify::log2_correct(self.get() as u128, *result))]
         pub const fn ilog2(self) -> u32 {
             Self::BITS - 1 - self.leading_zeros()
         }
@@ -2149,6 +2150,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result: &u32| imp::int_log10::verify::log10_correct(self.get() as u128, *result))]
         pub const fn ilog10(self) -> u32 {
             imp::int_log10::$Int(self)
         }
@@ -5231,4 +5233,32 @@ mod verify {
         u128::MAX - 0xFFFFu128,
         u128::MAX
     );
+
+    mod logarithms {
+        use crate::kani;
+        use crate::num::NonZero;
+
+        macro_rules! check_logarithms {
+            ($($int:ident),+ $(,)?) => {$(
+                mod $int {
+                    use super::*;
+
+                    #[kani::proof_for_contract(NonZero::<crate::primitive::$int>::ilog2)]
+                    fn ilog2() {
+                        let n: NonZero<crate::primitive::$int> = kani::any();
+                        let _ = n.ilog2();
+                        kani::cover(true, "nonzero logarithm returns");
+                    }
+
+                    #[kani::proof_for_contract(NonZero::<crate::primitive::$int>::ilog10)]
+                    fn ilog10() {
+                        let n: NonZero<crate::primitive::$int> = kani::any();
+                        let _ = n.ilog10();
+                        kani::cover(true, "nonzero logarithm returns");
+                    }
+                }
+            )+};
+        }
+        check_logarithms!(u8, u16, u32, u64, u128, usize);
+    }
 }
