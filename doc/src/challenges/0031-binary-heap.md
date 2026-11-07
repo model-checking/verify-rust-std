@@ -70,9 +70,13 @@ Prove the absence of undefined behavior for the following safe abstractions:
 |DrainSorted::next|
 |Drop for Hole|
 
+`peek_mut` must also be safe when the `PeekMut` is leaked after `deref_mut` (for example with `mem::forget`): the heap keeps length 1 and later operations on the heap must remain safe. Leaking the other elements is acceptable.
+
 The unsafe functions `from_raw_vec` and `as_mut_slice` require callers to keep the contents a max-heap. This is a correctness requirement, not a safety one, so the functions above must be safe even when the contents are not a max-heap.
 
 The verification must be unbounded---it must hold for heaps of arbitrary length.
+
+For zero-sized `T`, heaps can exceed `isize::MAX` elements and the child-index arithmetic in the sift loops can overflow (see the FIXME in `sift_down_range`). An overflow panic there is acceptable.
 
 The verification must hold for generic type `T` (what satisfies this clause is to be decided in [issue #734](https://github.com/model-checking/verify-rust-std/issues/734)).
 
