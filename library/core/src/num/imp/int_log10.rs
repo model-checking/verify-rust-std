@@ -192,9 +192,9 @@ pub(in crate::num) const fn panic_for_nonpositive_argument() -> ! {
     panic!("argument of integer logarithm must be positive")
 }
 
-#[unstable(feature = "kani", issue = "none")]
 #[cfg(kani)]
-mod verify {
+#[unstable(feature = "kani", issue = "none")]
+pub mod verify {
     use crate::kani;
     use crate::num::NonZero;
 

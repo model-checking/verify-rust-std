@@ -4211,9 +4211,9 @@ macro_rules! int_impl {
     }
 }
 
-#[unstable(feature = "kani", issue = "none")]
 #[cfg(kani)]
-mod verify {
+#[unstable(feature = "kani", issue = "none")]
+pub mod verify {
     use crate::kani;
     use crate::num::imp::int_log10::verify::check_integer_logarithm;
 

@@ -3047,9 +3047,9 @@ nonzero_integer! {
     reversed = "0x6a2c48091e6a2c48",
 }
 
-#[unstable(feature = "kani", issue = "none")]
 #[cfg(kani)]
-mod verify {
+#[unstable(feature = "kani", issue = "none")]
+pub mod verify {
     use super::*;
 
     macro_rules! nonzero_check {
@@ -5234,31 +5234,26 @@ mod verify {
         u128::MAX
     );
 
-    mod logarithms {
-        use crate::kani;
-        use crate::num::NonZero;
-
-        macro_rules! check_logarithms {
-            ($($int:ident),+ $(,)?) => {$(
-                mod $int {
-                    use super::*;
-
-                    #[kani::proof_for_contract(NonZero::<crate::primitive::$int>::ilog2)]
-                    fn ilog2() {
-                        let n: NonZero<crate::primitive::$int> = kani::any();
-                        let _ = n.ilog2();
-                        kani::cover(true, "nonzero logarithm returns");
-                    }
-
-                    #[kani::proof_for_contract(NonZero::<crate::primitive::$int>::ilog10)]
-                    fn ilog10() {
-                        let n: NonZero<crate::primitive::$int> = kani::any();
-                        let _ = n.ilog10();
-                        kani::cover(true, "nonzero logarithm returns");
-                    }
-                }
-            )+};
-        }
-        check_logarithms!(u8, u16, u32, u64, u128, usize);
+    macro_rules! nonzero_check_logarithm {
+        ($int:ty, $method:ident, $harness:ident) => {
+            #[kani::proof_for_contract(NonZero::<$int>::$method)]
+            fn $harness() {
+                let n: NonZero<$int> = kani::any();
+                let _ = n.$method();
+                kani::cover(true, "nonzero logarithm returns");
+            }
+        };
     }
+    nonzero_check_logarithm!(u8, ilog2, nonzero_check_ilog2_u8);
+    nonzero_check_logarithm!(u8, ilog10, nonzero_check_ilog10_u8);
+    nonzero_check_logarithm!(u16, ilog2, nonzero_check_ilog2_u16);
+    nonzero_check_logarithm!(u16, ilog10, nonzero_check_ilog10_u16);
+    nonzero_check_logarithm!(u32, ilog2, nonzero_check_ilog2_u32);
+    nonzero_check_logarithm!(u32, ilog10, nonzero_check_ilog10_u32);
+    nonzero_check_logarithm!(u64, ilog2, nonzero_check_ilog2_u64);
+    nonzero_check_logarithm!(u64, ilog10, nonzero_check_ilog10_u64);
+    nonzero_check_logarithm!(u128, ilog2, nonzero_check_ilog2_u128);
+    nonzero_check_logarithm!(u128, ilog10, nonzero_check_ilog10_u128);
+    nonzero_check_logarithm!(usize, ilog2, nonzero_check_ilog2_usize);
+    nonzero_check_logarithm!(usize, ilog10, nonzero_check_ilog10_usize);
 }
