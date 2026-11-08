@@ -27,7 +27,7 @@ jobs:
     name: Verify std library (partition ${{ matrix.partition }})
     # When called for autoharness only, the partitions already ran for this commit.
     if: ${{ !inputs.autoharness }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -83,7 +83,7 @@ jobs:
     # This job is a required check under its matrix name, and a job skipped by a job-level
     # `if:` reports without the "(os)" suffix, which would leave PRs pending. So the gate is
     # on each step instead: on a PR the job starts, skips every step and passes in seconds.
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -249,7 +249,7 @@ jobs:
   run_kani_metrics:
     name: Kani Metrics
     if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -321,7 +321,7 @@ jobs:
     name: Build JSON from logs
     if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness
     needs: [run_kani_metrics, kani_autoharness]
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -373,7 +373,7 @@ jobs:
   run-kani-list:
     name: Kani List
     if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Remove unnecessary software to free up disk space
         run: |
@@ -419,7 +419,7 @@ jobs:
   run-autoharness-analyzer:
     name: Kani Autoharness Analyzer
     if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # Step 1: Check out the repository
       - name: Checkout Repository

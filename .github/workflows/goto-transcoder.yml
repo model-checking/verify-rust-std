@@ -20,7 +20,7 @@ defaults:
 jobs:
   verify-rust-std:
     name: Verify contracts with goto-transcoder
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # Step 1: Check out the repository
       - name: Checkout Repository

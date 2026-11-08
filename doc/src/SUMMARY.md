@@ -46,3 +46,4 @@
   - [27: Verify atomically reference-counted Cell implementation](./challenges/0027-arc.md)
   - [28: Verify float to decimal conversion module](./challenges/0028-flt2dec.md)
   - [29: Safety of `boxed`](./challenges/0029-boxed.md)
+  - [30: Safety and Correctness of Integer Logarithms](./challenges/0030-integer-logarithms.md)
