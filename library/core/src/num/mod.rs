@@ -2432,4 +2432,55 @@ mod verify {
 
         assert_eq!(result, num1 as i128);
     }
+
+    mod logarithms {
+        macro_rules! check_logarithm {
+            ($method:ident, $checked_method:ident; $($ty:ident),+) => {
+                mod $method {$(
+                    mod $ty {
+                        use crate::kani;
+
+                        #[kani::proof_for_contract($ty::$checked_method)]
+                        fn checked() {
+                            let _ = kani::any::<$ty>().$checked_method();
+                        }
+
+                        #[kani::proof_for_contract($ty::$method)]
+                        fn positive_returns_log() {
+                            let value: $ty = kani::any();
+                            kani::assume(value > 0);
+                            kani::cover(
+                                true,
+                                "non-vacuity witness: the assumed input space is non-empty",
+                            );
+                            let _ = value.$method();
+                        }
+
+                        #[kani::proof]
+                        #[kani::should_panic]
+                        fn nonpositive_panics() {
+                            let value: $ty = kani::any();
+                            kani::assume(value <= 0);
+                            kani::cover(
+                                true,
+                                "non-vacuity witness: the assumed input space is non-empty",
+                            );
+                            let _ = value.$method();
+                            // Not `kani::assert`: `should_panic` would accept that as the panic.
+                            kani::safety_check(false, "returned for a nonpositive input");
+                        }
+                    }
+                )+}
+            };
+        }
+
+        check_logarithm! {
+            ilog2, checked_ilog2;
+            i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize
+        }
+        check_logarithm! {
+            ilog10, checked_ilog10;
+            i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize
+        }
+    }
 }
