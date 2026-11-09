@@ -47,3 +47,4 @@
   - [28: Verify float to decimal conversion module](./challenges/0028-flt2dec.md)
   - [29: Safety of `boxed`](./challenges/0029-boxed.md)
   - [30: Safety and Correctness of Integer Logarithms](./challenges/0030-integer-logarithms.md)
+  - [31: Verify the safety of `BinaryHeap` functions](./challenges/0031-binary-heap.md)
