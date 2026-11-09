@@ -2120,7 +2120,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
-        #[ensures(|result: &u32| imp::int_log10::verify::log2_correct(self.get() as u128, *result))]
+        #[ensures(|result: &u32| imp::int_log10::log2_correct(self.get() as u128, *result))]
         pub const fn ilog2(self) -> u32 {
             Self::BITS - 1 - self.leading_zeros()
         }
@@ -2150,7 +2150,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
-        #[ensures(|result: &u32| imp::int_log10::verify::log10_correct(self.get() as u128, *result))]
+        #[ensures(|result: &u32| imp::int_log10::log10_correct(self.get() as u128, *result))]
         pub const fn ilog10(self) -> u32 {
             imp::int_log10::$Int(self)
         }
@@ -3047,10 +3047,11 @@ nonzero_integer! {
     reversed = "0x6a2c48091e6a2c48",
 }
 
-#[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
-pub mod verify {
+#[cfg(kani)]
+mod verify {
     use super::*;
+    use crate::num::imp::int_log10::check_logarithms;
 
     macro_rules! nonzero_check {
         ($t:ty, $nonzero_type:ty, $nonzero_check_new_unchecked_for:ident) => {
@@ -5234,26 +5235,13 @@ pub mod verify {
         u128::MAX
     );
 
-    macro_rules! nonzero_check_logarithm {
-        ($int:ty, $method:ident, $harness:ident) => {
-            #[kani::proof_for_contract(NonZero::<$int>::$method)]
-            fn $harness() {
-                let n: NonZero<$int> = kani::any();
-                let _ = n.$method();
-                kani::cover(true, "nonzero logarithm returns");
-            }
+    macro_rules! nonzero_check_logarithms {
+        ($($int:ident),+) => {
+            check_logarithms! { $(
+                ${concat(nonzero_check_ilog2_, $int)}: NonZero::<$int>::ilog2 => NonZero<$int>;
+                ${concat(nonzero_check_ilog10_, $int)}: NonZero::<$int>::ilog10 => NonZero<$int>;
+            )+ }
         };
     }
-    nonzero_check_logarithm!(u8, ilog2, nonzero_check_ilog2_u8);
-    nonzero_check_logarithm!(u8, ilog10, nonzero_check_ilog10_u8);
-    nonzero_check_logarithm!(u16, ilog2, nonzero_check_ilog2_u16);
-    nonzero_check_logarithm!(u16, ilog10, nonzero_check_ilog10_u16);
-    nonzero_check_logarithm!(u32, ilog2, nonzero_check_ilog2_u32);
-    nonzero_check_logarithm!(u32, ilog10, nonzero_check_ilog10_u32);
-    nonzero_check_logarithm!(u64, ilog2, nonzero_check_ilog2_u64);
-    nonzero_check_logarithm!(u64, ilog10, nonzero_check_ilog10_u64);
-    nonzero_check_logarithm!(u128, ilog2, nonzero_check_ilog2_u128);
-    nonzero_check_logarithm!(u128, ilog10, nonzero_check_ilog10_u128);
-    nonzero_check_logarithm!(usize, ilog2, nonzero_check_ilog2_usize);
-    nonzero_check_logarithm!(usize, ilog10, nonzero_check_ilog10_usize);
+    nonzero_check_logarithms!(u8, u16, u32, u64, u128, usize);
 }
