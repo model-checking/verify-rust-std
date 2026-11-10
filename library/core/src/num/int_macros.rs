@@ -3514,6 +3514,9 @@ macro_rules! int_impl {
                       without modifying the original"]
         #[inline]
         #[track_caller]
+        #[ensures(|result: &u32| {
+            self > 0 && imp::int_log10::log2_correct(self as u128, *result)
+        })]
         pub const fn ilog2(self) -> u32 {
             if let Some(log) = self.checked_ilog2() {
                 log
@@ -3539,6 +3542,9 @@ macro_rules! int_impl {
                       without modifying the original"]
         #[inline]
         #[track_caller]
+        #[ensures(|result: &u32| {
+            self > 0 && imp::int_log10::log10_correct(self as u128, *result)
+        })]
         pub const fn ilog10(self) -> u32 {
             if let Some(log) = self.checked_ilog10() {
                 log
@@ -3593,6 +3599,10 @@ macro_rules! int_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result: &Option<u32>| match result {
+            Some(log) => self > 0 && imp::int_log10::log2_correct(self as u128, *log),
+            None => self <= 0,
+        })]
         pub const fn checked_ilog2(self) -> Option<u32> {
             if self <= 0 {
                 None
@@ -3617,6 +3627,10 @@ macro_rules! int_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result: &Option<u32>| match result {
+            Some(log) => self > 0 && imp::int_log10::log10_correct(self as u128, *log),
+            None => self <= 0,
+        })]
         pub const fn checked_ilog10(self) -> Option<u32> {
             imp::int_log10::$ActualT(self as $ActualT)
         }
@@ -4195,4 +4209,13 @@ macro_rules! int_impl {
             unsafe { T::unchecked_cast_from(self) }
         }
     }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use crate::kani;
+    use crate::num::imp::int_log10::{check_integer_logarithms, check_logarithms};
+
+    check_integer_logarithms!(i8, i16, i32, i64, i128, isize);
 }

@@ -2120,6 +2120,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result: &u32| imp::int_log10::log2_correct(self.get() as u128, *result))]
         pub const fn ilog2(self) -> u32 {
             Self::BITS - 1 - self.leading_zeros()
         }
@@ -2149,6 +2150,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result: &u32| imp::int_log10::log10_correct(self.get() as u128, *result))]
         pub const fn ilog10(self) -> u32 {
             imp::int_log10::$Int(self)
         }
@@ -3049,6 +3051,7 @@ nonzero_integer! {
 #[cfg(kani)]
 mod verify {
     use super::*;
+    use crate::num::imp::int_log10::check_logarithms;
 
     macro_rules! nonzero_check {
         ($t:ty, $nonzero_type:ty, $nonzero_check_new_unchecked_for:ident) => {
@@ -5231,4 +5234,14 @@ mod verify {
         u128::MAX - 0xFFFFu128,
         u128::MAX
     );
+
+    macro_rules! nonzero_check_logarithms {
+        ($($int:ident),+) => {
+            check_logarithms! { $(
+                ${concat(nonzero_check_ilog2_, $int)}: NonZero::<$int>::ilog2 => NonZero<$int>;
+                ${concat(nonzero_check_ilog10_, $int)}: NonZero::<$int>::ilog10 => NonZero<$int>;
+            )+ }
+        };
+    }
+    nonzero_check_logarithms!(u8, u16, u32, u64, u128, usize);
 }
