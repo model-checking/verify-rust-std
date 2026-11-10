@@ -1,0 +1,19 @@
+# Runs the autoharness and Kani metrics jobs on a PR that has the run-autoharness label, so a
+# contributor can see those results before the merge queue (#730). This is a separate workflow
+# so that adding a label never starts a new run of kani.yml: GitHub reads required checks from
+# the latest run, and a label-only run would leave the partitions "expected".
+name: Kani autoharness on request
+
+on:
+  pull_request:
+    branches: [ main ]
+    types: [labeled, synchronize, reopened]
+
+jobs:
+  autoharness:
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'run-autoharness') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'run-autoharness')
+    uses: ./.github/workflows/kani.yml
+    with:
+      autoharness: true
