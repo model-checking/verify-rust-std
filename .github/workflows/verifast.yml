@@ -18,7 +18,7 @@ defaults:
 jobs:
   check-verifast-on-std:
     name: Verify std library
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     
     steps:
       - name: Checkout Repository
@@ -29,7 +29,7 @@ jobs:
 
   notify-btj:
     name: Notify @btj
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: check-verifast-on-std
     if: failure()
     permissions:

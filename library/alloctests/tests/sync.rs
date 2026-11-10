@@ -58,6 +58,7 @@ impl Drop for AllocCanary<'_> {
 
 #[test]
 #[cfg_attr(target_os = "emscripten", ignore)]
+#[cfg_attr(target_os = "wasi", ignore)]
 fn manually_share_arc() {
     let v = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     let arc_v = Arc::new(v);
@@ -454,6 +455,7 @@ fn test_ptr_eq() {
 
 #[test]
 #[cfg_attr(target_os = "emscripten", ignore)]
+#[cfg_attr(target_os = "wasi", ignore)]
 fn test_weak_count_locked() {
     let mut a = Arc::new(atomic::AtomicBool::new(false));
     let a2 = a.clone();
@@ -469,8 +471,6 @@ fn test_weak_count_locked() {
     while !a2.load(SeqCst) {
         let n = Arc::weak_count(&a2);
         assert!(n < 2, "bad weak count: {}", n);
-        #[cfg(miri)] // Miri's scheduler does not guarantee liveness, and thus needs this hint.
-        std::hint::spin_loop();
     }
     t.join().unwrap();
 }

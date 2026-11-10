@@ -66,6 +66,7 @@ libm_helper! {
         (fn exp(x: f32) -> (f32);                   => expf);
         (fn exp10(x: f32) -> (f32);                 => exp10f);
         (fn exp2(x: f32) -> (f32);                  => exp2f);
+        (fn exp2m1(x: f32) -> (f32);                => exp2m1f);
         (fn expm1(x: f32) -> (f32);                 => expm1f);
         (fn fabs(x: f32) -> (f32);                  => fabsf);
         (fn fdim(x: f32, y: f32) -> (f32);          => fdimf);
@@ -132,6 +133,7 @@ libm_helper! {
         (fn exp(x: f64) -> (f64);                   => exp);
         (fn exp10(x: f64) -> (f64);                 => exp10);
         (fn exp2(x: f64) -> (f64);                  => exp2);
+        (fn exp2m1(x: f64) -> (f64);                => exp2m1);
         (fn expm1(x: f64) -> (f64);                 => expm1);
         (fn fabs(x: f64) -> (f64);                  => fabs);
         (fn fdim(x: f64, y: f64) -> (f64);          => fdim);
@@ -195,6 +197,7 @@ libm_helper! {
         (fn fabs(x: f16) -> (f16);                  => fabsf16);
         (fn fdim(x: f16, y: f16) -> (f16);          => fdimf16);
         (fn floor(x: f16) -> (f16);                 => floorf16);
+        (fn fma(x: f16, y: f16, z: f16) -> (f16);   => fmaf16);
         (fn fmax(x: f16, y: f16) -> (f16);          => fmaxf16);
         (fn fmaximum_num(x: f16, y: f16) -> (f16);  => fmaximum_numf16);
         (fn fmaximumf16(x: f16, y: f16) -> (f16);   => fmaximumf16);
@@ -202,6 +205,8 @@ libm_helper! {
         (fn fminimum(x: f16, y: f16) -> (f16);      => fminimumf16);
         (fn fminimum_num(x: f16, y: f16) -> (f16);  => fminimum_numf16);
         (fn fmod(x: f16, y: f16) -> (f16);          => fmodf16);
+        (fn frexp(x: f16) -> (f16, i32);            => frexpf16);
+        (fn ilogb(x: f16) -> (i32);                 => ilogbf16);
         (fn ldexp(x: f16, n: i32) -> (f16);         => ldexpf16);
         (fn rint(x: f16) -> (f16);                  => rintf16);
         (fn round(x: f16) -> (f16);                 => roundf16);
@@ -231,6 +236,8 @@ libm_helper! {
         (fn fminimum(x: f128, y: f128) -> (f128);      => fminimumf128);
         (fn fminimum_num(x: f128, y: f128) -> (f128);  => fminimum_numf128);
         (fn fmod(x: f128, y: f128) -> (f128);       => fmodf128);
+        (fn frexp(x: f128) -> (f128, i32);            => frexpf128);
+        (fn ilogb(x: f128) -> (i32);                 => ilogbf128);
         (fn ldexp(x: f128, n: i32) -> (f128);       => ldexpf128);
         (fn rint(x: f128) -> (f128);                => rintf128);
         (fn round(x: f128) -> (f128);               => roundf128);

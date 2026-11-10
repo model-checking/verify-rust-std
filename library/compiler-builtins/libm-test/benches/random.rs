@@ -69,7 +69,7 @@ where
         use anyhow::Context;
         use libm_test::CheckOutput;
 
-        if cfg!(x86_no_sse) && musl_extra.skip_on_i586 {
+        if cfg!(x86_no_sse2) && musl_extra.skip_on_i586 {
             break;
         }
 
@@ -126,7 +126,9 @@ libm_macros::for_each_function! {
         exp10 | exp10f | exp2 | exp2f => (true, Some(musl_math_sys::MACRO_FN_NAME)),
 
         // Musl does not provide `f16` and `f128` functions, as well as a handful of others
-        fmaximum
+        exp2m1
+        | exp2m1f
+        | fmaximum
         | fmaximum_num
         | fmaximum_numf
         | fmaximumf
@@ -137,7 +139,8 @@ libm_macros::for_each_function! {
         | roundeven
         | roundevenf
         | ALL_F16
-        | ALL_F128 => (false, None),
+        | ALL_F128
+        | ALL_BUILTINS => (false, None),
 
         // By default we never skip (false) and always have a musl function available
         _ => (false, Some(musl_math_sys::MACRO_FN_NAME))

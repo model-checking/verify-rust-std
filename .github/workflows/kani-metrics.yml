@@ -15,7 +15,7 @@ jobs:
       contents: write
       pull-requests: write
     if: github.repository == 'model-checking/verify-rust-std'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     
     steps:
     - name: Remove unnecessary software to free up disk space

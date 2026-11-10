@@ -1,6 +1,6 @@
 use super::key::{Key, LazyKey, get, set};
 use super::{abort_on_dtor_unwind, guard};
-use crate::alloc::{self, GlobalAlloc, Layout, System};
+use crate::alloc::{GlobalAlloc, Layout, System};
 use crate::cell::Cell;
 use crate::marker::PhantomData;
 use crate::mem::ManuallyDrop;
@@ -20,8 +20,12 @@ pub macro thread_local_inner {
 
     // used to generate the `LocalKey` value for `thread_local!`.
     (@key $t:ty, $($(#[$($align_attr:tt)*])+)?, $init:expr) => {{
+        // We intentionally have an argument-position `'static` lifetime so that elided lifetimes in `$t`
+        // become `'static` like they do for `const`s and `static`s, including in the other two
+        // `thread_local!` implementations.
+        #[allow(mismatched_lifetime_syntaxes)]
         #[inline]
-        fn __rust_std_internal_init_fn() -> $t { $init }
+        fn __rust_std_internal_init_fn(_lifetime_elision: $crate::marker::PhantomData<&'static ()>) -> $t { $init }
 
         // NOTE: this cannot import `LocalKey` or `Storage` with a `use` because that can shadow
         // user provided type or type alias with a matching name. Please update the shadowing test
@@ -43,7 +47,7 @@ pub macro thread_local_inner {
                     final_align
                 }>
                     = $crate::thread::local_impl::Storage::new();
-                __RUST_STD_INTERNAL_VAL.get(__rust_std_internal_init, __rust_std_internal_init_fn)
+                __RUST_STD_INTERNAL_VAL.get(__rust_std_internal_init, || __rust_std_internal_init_fn($crate::marker::PhantomData))
             })
         }
     }},
@@ -62,25 +66,7 @@ pub macro thread_local_inner {
     // by translating it into a `cfg`ed block and recursing.
     // https://doc.rust-lang.org/reference/conditional-compilation.html#railroad-ConfigurationPredicate
 
-    (@align $final_align:ident, cfg_attr(true, $($cfg_rhs:tt)*) $(, $($attr_rest:tt)+)?) => {
-        #[cfg(true)]
-        {
-            $crate::thread::local_impl::thread_local_inner!(@align $final_align, $($cfg_rhs)*);
-        }
-
-        $($crate::thread::local_impl::thread_local_inner!(@align $final_align, $($attr_rest)+);)?
-    },
-
-    (@align $final_align:ident, cfg_attr(false, $($cfg_rhs:tt)*) $(, $($attr_rest:tt)+)?) => {
-        #[cfg(false)]
-        {
-            $crate::thread::local_impl::thread_local_inner!(@align $final_align, $($cfg_rhs)*);
-        }
-
-        $($crate::thread::local_impl::thread_local_inner!(@align $final_align, $($attr_rest)+);)?
-    },
-
-    (@align $final_align:ident, cfg_attr($cfg_pred:meta, $($cfg_rhs:tt)*) $(, $($attr_rest:tt)+)?) => {
+    (@align $final_align:ident, cfg_attr($cfg_pred:expr, $($cfg_rhs:tt)*) $(, $($attr_rest:tt)+)?) => {
         #[cfg($cfg_pred)]
         {
             $crate::thread::local_impl::thread_local_inner!(@align $final_align, $($cfg_rhs)*);
@@ -121,13 +107,14 @@ struct AlignedSystemBox<T: 'static, const ALIGN: usize> {
 impl<T: 'static, const ALIGN: usize> AlignedSystemBox<T, ALIGN> {
     #[inline]
     fn new(v: Value<T>) -> Self {
-        let layout = Layout::new::<Value<T>>().align_to(ALIGN).unwrap();
+        let layout = rtunwrap!(Ok, Layout::new::<Value<T>>().align_to(ALIGN));
 
         // We use the System allocator here to avoid interfering with a potential
         // Global allocator using thread-local storage.
         let ptr: *mut Value<T> = (unsafe { System.alloc(layout) }).cast();
         let Some(ptr) = NonNull::new(ptr) else {
-            alloc::handle_alloc_error(layout);
+            // Do not call the alloc error hook here. It may allocate!
+            rtabort!("Allocation failure");
         };
         unsafe { ptr.write(v) };
         Self { ptr }
@@ -157,7 +144,7 @@ impl<T: 'static, const ALIGN: usize> Deref for AlignedSystemBox<T, ALIGN> {
 impl<T: 'static, const ALIGN: usize> Drop for AlignedSystemBox<T, ALIGN> {
     #[inline]
     fn drop(&mut self) {
-        let layout = Layout::new::<Value<T>>().align_to(ALIGN).unwrap();
+        let layout = rtunwrap!(Ok, Layout::new::<Value<T>>().align_to(ALIGN));
 
         unsafe {
             let unwind_result = catch_unwind(AssertUnwindSafe(|| self.ptr.drop_in_place()));
@@ -180,6 +167,7 @@ impl<T: 'static, const ALIGN: usize> Storage<T, ALIGN> {
     ///
     /// The resulting pointer may not be used after reentrant inialialization
     /// or thread destruction has occurred.
+    #[inline]
     pub fn get(&'static self, i: Option<&mut Option<T>>, f: impl FnOnce() -> T) -> *const T {
         let key = self.key.force();
         let ptr = unsafe { get(key) as *mut Value<T> };
@@ -196,6 +184,7 @@ impl<T: 'static, const ALIGN: usize> Storage<T, ALIGN> {
     /// # Safety
     /// * `key` must be the result of calling `self.key.force()`
     /// * `ptr` must be the current value associated with `key`.
+    #[cold]
     unsafe fn try_initialize(
         key: Key,
         ptr: *mut Value<T>,

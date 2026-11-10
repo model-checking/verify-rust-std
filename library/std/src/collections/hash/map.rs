@@ -1,13 +1,12 @@
 #[cfg(test)]
 mod tests;
 
-use hashbrown::hash_map as base;
+use hashbrown::hash_map::{self as base, RustcOccupiedError};
 
 use self::Entry::*;
 use crate::alloc::{Allocator, Global};
 use crate::borrow::Borrow;
 use crate::collections::{TryReserveError, TryReserveErrorKind};
-use crate::error::Error;
 use crate::fmt::{self, Debug};
 use crate::hash::{BuildHasher, Hash, RandomState};
 use crate::iter::FusedIterator;
@@ -20,7 +19,7 @@ use crate::ops::Index;
 /// reasonable best-effort is made to generate this seed from a high quality,
 /// secure source of randomness provided by the host without blocking the
 /// program. Because of this, the randomness of the seed depends on the output
-/// quality of the system's random number coroutine when the seed is created.
+/// quality of the system's random number generator when the seed is created.
 /// In particular, seeds generated when the system's entropy pool is abnormally
 /// low such as during system boot may be of a lower quality.
 ///
@@ -240,7 +239,6 @@ use crate::ops::Index;
 /// static RANDOM_MAP: LazyLock<Mutex<HashMap<String, Vec<i32>>>> =
 ///     LazyLock::new(|| Mutex::new(HashMap::new()));
 /// ```
-
 #[cfg_attr(not(test), rustc_diagnostic_item = "HashMap")]
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_insignificant_dtor]
@@ -248,7 +246,7 @@ pub struct HashMap<
     K,
     V,
     S = RandomState,
-    #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A: Allocator = Global,
 > {
     base: base::HashMap<K, V, S, A>,
 }
@@ -301,12 +299,15 @@ impl<K, V, A: Allocator> HashMap<K, V, RandomState, A> {
     /// # Examples
     ///
     /// ```
+    /// # #![feature(allocator_ext)]
     /// use std::collections::HashMap;
-    /// let mut map: HashMap<&str, i32> = HashMap::new();
+    /// use std::alloc::Global;
+    ///
+    /// let map: HashMap<i32, i32> = HashMap::new_in(Global);
     /// ```
     #[inline]
     #[must_use]
-    #[unstable(feature = "allocator_api", issue = "32838")]
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")]
     pub fn new_in(alloc: A) -> Self {
         HashMap::with_hasher_in(Default::default(), alloc)
     }
@@ -321,12 +322,15 @@ impl<K, V, A: Allocator> HashMap<K, V, RandomState, A> {
     /// # Examples
     ///
     /// ```
+    /// # #![feature(allocator_ext)]
     /// use std::collections::HashMap;
-    /// let mut map: HashMap<&str, i32> = HashMap::with_capacity(10);
+    /// use std::alloc::Global;
+    ///
+    /// let map: HashMap<i32, i32> = HashMap::with_capacity_in(10, Global);
     /// ```
     #[inline]
     #[must_use]
-    #[unstable(feature = "allocator_api", issue = "32838")]
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")]
     pub fn with_capacity_in(capacity: usize, alloc: A) -> Self {
         HashMap::with_capacity_and_hasher_in(capacity, Default::default(), alloc)
     }
@@ -357,6 +361,7 @@ impl<K, V, S> HashMap<K, V, S> {
     /// map.insert(1, 2);
     /// ```
     #[inline]
+    #[must_use]
     #[stable(feature = "hashmap_build_hasher", since = "1.7.0")]
     #[rustc_const_stable(feature = "const_collections_with_hasher", since = "1.85.0")]
     pub const fn with_hasher(hash_builder: S) -> HashMap<K, V, S> {
@@ -389,6 +394,7 @@ impl<K, V, S> HashMap<K, V, S> {
     /// map.insert(1, 2);
     /// ```
     #[inline]
+    #[must_use]
     #[stable(feature = "hashmap_build_hasher", since = "1.7.0")]
     pub fn with_capacity_and_hasher(capacity: usize, hasher: S) -> HashMap<K, V, S> {
         HashMap { base: base::HashMap::with_capacity_and_hasher(capacity, hasher) }
@@ -408,8 +414,21 @@ impl<K, V, S, A: Allocator> HashMap<K, V, S, A> {
     ///
     /// The `hash_builder` passed should implement the [`BuildHasher`] trait for
     /// the `HashMap` to be useful, see its documentation for details.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_ext)]
+    /// use std::alloc::Global;
+    /// use std::collections::HashMap;
+    /// use std::hash::RandomState;
+    ///
+    /// let s = RandomState::new();
+    /// let map: HashMap<i32, i32> = HashMap::with_hasher_in(s, Global);
+    /// ```
     #[inline]
-    #[unstable(feature = "allocator_api", issue = "32838")]
+    #[must_use]
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")]
     pub fn with_hasher_in(hash_builder: S, alloc: A) -> Self {
         HashMap { base: base::HashMap::with_hasher_in(hash_builder, alloc) }
     }
@@ -429,8 +448,20 @@ impl<K, V, S, A: Allocator> HashMap<K, V, S, A> {
     /// The `hasher` passed should implement the [`BuildHasher`] trait for
     /// the `HashMap` to be useful, see its documentation for details.
     ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_ext)]
+    /// use std::alloc::Global;
+    /// use std::collections::HashMap;
+    /// use std::hash::RandomState;
+    ///
+    /// let s = RandomState::new();
+    /// let map: HashMap<i32, i32> = HashMap::with_capacity_and_hasher_in(10, s, Global);
+    /// ```
     #[inline]
-    #[unstable(feature = "allocator_api", issue = "32838")]
+    #[must_use]
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")]
     pub fn with_capacity_and_hasher_in(capacity: usize, hash_builder: S, alloc: A) -> Self {
         HashMap { base: base::HashMap::with_capacity_and_hasher_in(capacity, hash_builder, alloc) }
     }
@@ -461,15 +492,16 @@ impl<K, V, S, A: Allocator> HashMap<K, V, S, A> {
     /// ```
     /// use std::collections::HashMap;
     ///
-    /// let map = HashMap::from([
+    /// let map: HashMap<&str, i32> = HashMap::from([
     ///     ("a", 1),
     ///     ("b", 2),
     ///     ("c", 3),
     /// ]);
     ///
-    /// for key in map.keys() {
-    ///     println!("{key}");
-    /// }
+    /// let mut values: Vec<_> = map.keys().copied().collect();
+    /// values.sort();
+    ///
+    /// assert_eq!(values, vec!["a", "b", "c"]);
     /// ```
     ///
     /// # Performance
@@ -523,15 +555,16 @@ impl<K, V, S, A: Allocator> HashMap<K, V, S, A> {
     /// ```
     /// use std::collections::HashMap;
     ///
-    /// let map = HashMap::from([
+    /// let map: HashMap<&str, i32> = HashMap::from([
     ///     ("a", 1),
     ///     ("b", 2),
     ///     ("c", 3),
     /// ]);
     ///
-    /// for val in map.values() {
-    ///     println!("{val}");
-    /// }
+    /// let mut values: Vec<_> = map.values().copied().collect();
+    /// values.sort();
+    ///
+    /// assert_eq!(values, vec![1, 2, 3]);
     /// ```
     ///
     /// # Performance
@@ -559,12 +592,12 @@ impl<K, V, S, A: Allocator> HashMap<K, V, S, A> {
     /// ]);
     ///
     /// for val in map.values_mut() {
-    ///     *val = *val + 10;
+    ///     *val += 10;
     /// }
     ///
-    /// for val in map.values() {
-    ///     println!("{val}");
-    /// }
+    /// assert_eq!(map.get("a"), Some(&11));
+    /// assert_eq!(map.get("b"), Some(&12));
+    /// assert_eq!(map.get("c"), Some(&13));
     /// ```
     ///
     /// # Performance
@@ -624,9 +657,13 @@ impl<K, V, S, A: Allocator> HashMap<K, V, S, A> {
     ///     ("c", 3),
     /// ]);
     ///
-    /// for (key, val) in map.iter() {
-    ///     println!("key: {key} val: {val}");
+    /// let mut count = 0;
+    ///
+    /// for (_key, _val) in map.iter() {
+    ///     count += 1;
     /// }
+    ///
+    /// assert_eq!(count, 3);
     /// ```
     ///
     /// # Performance
@@ -659,9 +696,9 @@ impl<K, V, S, A: Allocator> HashMap<K, V, S, A> {
     ///     *val *= 2;
     /// }
     ///
-    /// for (key, val) in &map {
-    ///     println!("key: {key} val: {val}");
-    /// }
+    /// assert_eq!(map.get("a"), Some(&2));
+    /// assert_eq!(map.get("b"), Some(&4));
+    /// assert_eq!(map.get("c"), Some(&6));
     /// ```
     ///
     /// # Performance
@@ -1300,7 +1337,7 @@ where
     /// a mutable reference to the value in the entry.
     ///
     /// If the map already had this key present, nothing is updated, and
-    /// an error containing the occupied entry and the value is returned.
+    /// an error containing the occupied entry, key, and the value is returned.
     ///
     /// # Examples
     ///
@@ -1317,13 +1354,16 @@ where
     /// let err = map.try_insert(37, "b").unwrap_err();
     /// assert_eq!(err.entry.key(), &37);
     /// assert_eq!(err.entry.get(), &"a");
+    /// assert_eq!(err.key, 37);
     /// assert_eq!(err.value, "b");
     /// ```
     #[unstable(feature = "map_try_insert", issue = "82766")]
     pub fn try_insert(&mut self, key: K, value: V) -> Result<&mut V, OccupiedError<'_, K, V, A>> {
-        match self.entry(key) {
-            Occupied(entry) => Err(OccupiedError { entry, value }),
-            Vacant(entry) => Ok(entry.insert(value)),
+        match self.base.rustc_try_insert(key, value) {
+            Result::Ok(value) => Ok(value),
+            Result::Err(RustcOccupiedError { entry, key, value, .. }) => {
+                Err(OccupiedError { entry: OccupiedEntry { base: entry }, key, value })
+            }
         }
     }
 
@@ -1417,7 +1457,7 @@ where
             return false;
         }
 
-        self.iter().all(|(key, value)| other.get(key).map_or(false, |v| *value == *v))
+        self.iter().all(|(key, value)| other.get(key).is_some_and(|v| *value == *v))
     }
 }
 
@@ -1445,7 +1485,7 @@ where
 
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_const_unstable(feature = "const_default", issue = "143894")]
-impl<K, V, S> const Default for HashMap<K, V, S>
+const impl<K, V, S> Default for HashMap<K, V, S>
 where
     S: [const] Default,
 {
@@ -1620,7 +1660,7 @@ impl<K, V> Default for IterMut<'_, K, V> {
 pub struct IntoIter<
     K,
     V,
-    #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A: Allocator = Global,
 > {
     base: base::IntoIter<K, V, A>,
 }
@@ -1758,7 +1798,7 @@ pub struct Drain<
     'a,
     K: 'a,
     V: 'a,
-    #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A: Allocator = Global,
 > {
     base: base::Drain<'a, K, V, A>,
 }
@@ -1795,7 +1835,7 @@ pub struct ExtractIf<
     K,
     V,
     F,
-    #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A: Allocator = Global,
 > {
     base: base::ExtractIf<'a, K, V, F, A>,
 }
@@ -1852,7 +1892,7 @@ impl<K, V> Default for ValuesMut<'_, K, V> {
 pub struct IntoKeys<
     K,
     V,
-    #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A: Allocator = Global,
 > {
     inner: IntoIter<K, V, A>,
 }
@@ -1886,7 +1926,7 @@ impl<K, V> Default for IntoKeys<K, V> {
 pub struct IntoValues<
     K,
     V,
-    #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A: Allocator = Global,
 > {
     inner: IntoIter<K, V, A>,
 }
@@ -1910,7 +1950,7 @@ pub enum Entry<
     'a,
     K: 'a,
     V: 'a,
-    #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A: Allocator = Global,
 > {
     /// An occupied entry.
     #[stable(feature = "rust1", since = "1.0.0")]
@@ -1938,7 +1978,7 @@ pub struct OccupiedEntry<
     'a,
     K: 'a,
     V: 'a,
-    #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A: Allocator = Global,
 > {
     base: base::RustcOccupiedEntry<'a, K, V, A>,
 }
@@ -1960,7 +2000,7 @@ pub struct VacantEntry<
     'a,
     K: 'a,
     V: 'a,
-    #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A: Allocator = Global,
 > {
     base: base::RustcVacantEntry<'a, K, V, A>,
 }
@@ -1974,16 +2014,19 @@ impl<K: Debug, V, A: Allocator> Debug for VacantEntry<'_, K, V, A> {
 
 /// The error returned by [`try_insert`](HashMap::try_insert) when the key already exists.
 ///
-/// Contains the occupied entry, and the value that was not inserted.
+/// Contains the occupied entry, key, and the value that was not inserted.
 #[unstable(feature = "map_try_insert", issue = "82766")]
+#[non_exhaustive]
 pub struct OccupiedError<
     'a,
     K: 'a,
     V: 'a,
-    #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A: Allocator = Global,
 > {
     /// The entry in the map that was already occupied.
     pub entry: OccupiedEntry<'a, K, V, A>,
+    /// The key which was not inserted, because the entry was already occupied.
+    pub key: K,
     /// The value which was not inserted, because the entry was already occupied.
     pub value: V,
 }
@@ -1993,27 +2036,12 @@ impl<K: Debug, V: Debug, A: Allocator> Debug for OccupiedError<'_, K, V, A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OccupiedError")
             .field("key", self.entry.key())
+            .field("uninserted_key", &self.key)
             .field("old_value", self.entry.get())
             .field("new_value", &self.value)
             .finish_non_exhaustive()
     }
 }
-
-#[unstable(feature = "map_try_insert", issue = "82766")]
-impl<'a, K: Debug, V: Debug, A: Allocator> fmt::Display for OccupiedError<'a, K, V, A> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "failed to insert {:?}, key {:?} already exists with value {:?}",
-            self.value,
-            self.entry.key(),
-            self.entry.get(),
-        )
-    }
-}
-
-#[unstable(feature = "map_try_insert", issue = "82766")]
-impl<'a, K: Debug, V: Debug, A: Allocator> Error for OccupiedError<'a, K, V, A> {}
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<'a, K, V, S, A: Allocator> IntoIterator for &'a HashMap<K, V, S, A> {
@@ -2509,9 +2537,42 @@ impl<'a, K, V, A: Allocator> Entry<'a, K, V, A> {
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn or_insert_with<F: FnOnce() -> V>(self, default: F) -> &'a mut V {
+        self.or_try_insert_with(|| Result::<_, !>::Ok(default())).unwrap()
+    }
+
+    /// Ensures a value is in the entry by inserting the result of a fallible default function
+    /// if empty, and returns a mutable reference to the value in the entry.
+    ///
+    /// This method works identically to [`or_insert_with`] except that the default function
+    /// should return a `Result` and, in the case of an error, the error is propagated.
+    ///
+    /// [`or_insert_with`]: Self::or_insert_with
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(try_entry)]
+    /// # fn main() -> Result<(), std::num::ParseIntError> {
+    /// use std::collections::HashMap;
+    ///
+    /// let mut map: HashMap<&str, usize> = HashMap::new();
+    /// let value = "42";
+    ///
+    /// map.entry("poneyland").or_try_insert_with(|| value.parse())?;
+    ///
+    /// assert_eq!(map["poneyland"], 42);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    #[unstable(feature = "try_entry", issue = "157354")]
+    pub fn or_try_insert_with<F: FnOnce() -> Result<V, E>, E>(
+        self,
+        default: F,
+    ) -> Result<&'a mut V, E> {
         match self {
-            Occupied(entry) => entry.into_mut(),
-            Vacant(entry) => entry.insert(default()),
+            Occupied(entry) => Ok(entry.into_mut()),
+            Vacant(entry) => Ok(entry.insert(default()?)),
         }
     }
 
@@ -2536,11 +2597,44 @@ impl<'a, K, V, A: Allocator> Entry<'a, K, V, A> {
     #[inline]
     #[stable(feature = "or_insert_with_key", since = "1.50.0")]
     pub fn or_insert_with_key<F: FnOnce(&K) -> V>(self, default: F) -> &'a mut V {
+        self.or_try_insert_with_key(|k| Result::<_, !>::Ok(default(k))).into_ok()
+    }
+
+    /// Ensures a value is in the entry by inserting, if empty, the result of the default function.
+    /// This method allows for generating key-derived values for insertion by providing the default
+    /// function a reference to the key that was moved during the `entry(key)` method call.
+    ///
+    /// This method works identically to [`or_insert_with_key`] except that the default function
+    /// should return a `Result` and, in the case of an error, the error is propagated.
+    ///
+    /// [`or_insert_with_key`]: Self::or_insert_with_key
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(try_entry)]
+    /// # fn main() -> Result<(), std::num::ParseIntError> {
+    /// use std::collections::HashMap;
+    ///
+    /// let mut map: HashMap<&str, usize> = HashMap::new();
+    ///
+    /// map.entry("42").or_try_insert_with_key(|key| key.parse())?;
+    ///
+    /// assert_eq!(map["42"], 42);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    #[unstable(feature = "try_entry", issue = "157354")]
+    pub fn or_try_insert_with_key<F: FnOnce(&K) -> Result<V, E>, E>(
+        self,
+        default: F,
+    ) -> Result<&'a mut V, E> {
         match self {
-            Occupied(entry) => entry.into_mut(),
+            Occupied(entry) => Ok(entry.into_mut()),
             Vacant(entry) => {
-                let value = default(entry.key());
-                entry.insert(value)
+                let value = default(entry.key())?;
+                Ok(entry.insert(value))
             }
         }
     }
@@ -2916,7 +3010,7 @@ where
     ///
     /// If the iterator produces any pairs with equal keys,
     /// all but one of the corresponding values will be dropped.
-    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> HashMap<K, V, S> {
+    fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> HashMap<K, V, S> {
         let mut map = HashMap::with_hasher(Default::default());
         map.extend(iter);
         map
@@ -2933,7 +3027,7 @@ where
     A: Allocator,
 {
     #[inline]
-    fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
+    fn extend<I: IntoIterator<Item = (K, V)>>(&mut self, iter: I) {
         self.base.extend(iter)
     }
 
@@ -2957,7 +3051,7 @@ where
     A: Allocator,
 {
     #[inline]
-    fn extend<T: IntoIterator<Item = (&'a K, &'a V)>>(&mut self, iter: T) {
+    fn extend<I: IntoIterator<Item = (&'a K, &'a V)>>(&mut self, iter: I) {
         self.base.extend(iter)
     }
 

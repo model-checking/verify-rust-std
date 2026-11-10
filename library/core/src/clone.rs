@@ -36,7 +36,13 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
+use safety::{ensures, requires};
+
+#[cfg(kani)]
+use crate::kani;
 use crate::marker::{Destruct, PointeeSized};
+#[cfg(kani)]
+use crate::ub_checks;
 
 mod uninit;
 
@@ -275,7 +281,7 @@ pub const trait Clone: Sized {
 // lifetime-dependent. Therefore, if `TrivialClone` is implemented for any lifetime,
 // its invariant holds whenever `Clone` is implemented, even if the actual
 // `TrivialClone` bound would not be satisfied because of lifetime bounds.
-#[rustc_unsafe_specialization_marker]
+#[unsafe(rustc_allow_lifetime_dependent_specialization)]
 // If `#[derive(Clone, Clone, Copy)]` is written, there will be multiple
 // implementations of `TrivialClone`. To keep it from appearing in error
 // messages, make it a `#[marker]` trait.
@@ -288,6 +294,107 @@ pub const unsafe trait TrivialClone: [const] Clone {}
 #[allow_internal_unstable(core_intrinsics, derive_clone_copy_internals, trivial_clone)]
 pub macro Clone($item:item) {
     /* compiler built-in */
+}
+
+/// A trait for types whose [`Clone`] operation creates another alias to the same
+/// logical resource or shared state.
+///
+/// `Share` refines the meaning of [`Clone`] for types where cloning a value
+/// creates another handle, reference, or alias to the same logical resource or
+/// shared state, rather than an independent owned value. The distinction is
+/// semantic, not operational: `Share` does not mean merely that cloning is
+/// cheap, constant-time, allocation-free, or convenient.
+///
+/// `Share` is a third way to think about creating another usable value:
+///
+/// * [`Copy`] may duplicate a value implicitly.
+/// * [`Clone`] explicitly creates another value.
+/// * `Share` explicitly creates another value that aliases the same underlying
+///   logical resource or shared state.
+///
+/// `Share` is not a replacement for either [`Copy`] or [`Clone`], and neither
+/// trait implies it. For example, integers are [`Copy`] but not `Share`, because
+/// copying an integer creates an independent value. Likewise, not every cheap
+/// [`Clone`] implementation is `Share`.
+///
+/// Shared references, `Rc<T>`, `Arc<T>`, `Sender<T>`, and `SyncSender<T>` are
+/// examples of types that can be shared this way. Types such as `Vec<T>`,
+/// `String`, `Box<T>`, owned collections, and similar owned values are not
+/// `Share`, even though they implement [`Clone`], because cloning them creates
+/// independent owned storage or value ownership. Mutable references (`&mut T`)
+/// are neither `Clone` nor `Share`, because you cannot have two active at once.
+///
+/// Calling [`share`](Share::share) is equivalent to calling [`clone`](Clone::clone)
+/// for implementors, but communicates that the resulting value aliases the same
+/// underlying resource. The `share` method is final, so implementors should
+/// define the operation through [`Clone::clone`] and implement `Share` only when
+/// those cloning semantics are clone-as-alias semantics.
+///
+/// # Examples
+///
+/// ```
+/// #![feature(share_trait)]
+///
+/// use std::cell::Cell;
+/// use std::clone::Share;
+/// use std::rc::Rc;
+/// use std::sync::{
+///     Arc,
+///     atomic::{AtomicUsize, Ordering},
+/// };
+///
+/// let value = 1;
+/// let reference = &value;
+/// assert!(std::ptr::eq(reference, reference.share()));
+///
+/// let rc = Rc::new(Cell::new(2));
+/// let shared_rc = rc.share();
+/// assert!(Rc::ptr_eq(&rc, &shared_rc));
+/// shared_rc.set(3);
+/// assert_eq!(rc.get(), 3);
+///
+/// let arc = Arc::new(AtomicUsize::new(4));
+/// let shared_arc = arc.share();
+/// assert!(Arc::ptr_eq(&arc, &shared_arc));
+/// shared_arc.store(5, Ordering::Relaxed);
+/// assert_eq!(arc.load(Ordering::Relaxed), 5);
+/// ```
+///
+/// ```
+/// #![feature(share_trait)]
+///
+/// use std::clone::Share;
+/// use std::sync::mpsc::{channel, sync_channel};
+///
+/// let (sender, receiver) = channel();
+/// let shared_sender = sender.share();
+/// sender.send(1).unwrap();
+/// shared_sender.send(2).unwrap();
+///
+/// let mut received = [receiver.recv().unwrap(), receiver.recv().unwrap()];
+/// received.sort();
+/// assert_eq!(received, [1, 2]);
+///
+/// let (sync_sender, sync_receiver) = sync_channel(2);
+/// let shared_sync_sender = sync_sender.share();
+/// sync_sender.send(3).unwrap();
+/// shared_sync_sender.send(4).unwrap();
+///
+/// let mut received = [sync_receiver.recv().unwrap(), sync_receiver.recv().unwrap()];
+/// received.sort();
+/// assert_eq!(received, [3, 4]);
+/// ```
+#[unstable(feature = "share_trait", issue = "156756")]
+pub trait Share: Clone {
+    /// Creates another alias to the same underlying resource or shared state.
+    ///
+    /// This is equivalent to calling [`Clone::clone`]. Use `share` at call
+    /// sites to make aliasing intent explicit; implementors define this
+    /// operation through [`Clone::clone`], not by overriding this method.
+    #[unstable(feature = "share_trait", issue = "156756")]
+    final fn share(&self) -> Self {
+        Clone::clone(self)
+    }
 }
 
 /// Trait for objects whose [`Clone`] impl is lightweight (e.g. reference-counted)
@@ -576,6 +683,28 @@ unsafe impl CloneToUninit for str {
 #[unstable(feature = "clone_to_uninit", issue = "126799")]
 unsafe impl CloneToUninit for crate::ffi::CStr {
     #[cfg_attr(debug_assertions, track_caller)]
+    // Safety contract: the trait's documented obligation is that `dest` is
+    // valid for writes of `size_of_val(self)` bytes — for a `CStr` exactly
+    // its nul-terminated view; alignment is 1, so trivial. That is precisely
+    // the region this function writes.
+    #[cfg_attr(kani, kani::modifies(core::ptr::slice_from_raw_parts_mut(dest, self.to_bytes_with_nul().len())))]
+    #[requires(ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dest, self.to_bytes_with_nul().len())))]
+    // `dest` must not overlap `self`: writing there would mutate bytes that
+    // `&self` holds as immutable (the copy is a `copy_nonoverlapping`).
+    #[requires(ub_checks::maybe_is_nonoverlapping(
+        self.as_ptr() as *const (),
+        dest as *const (),
+        1,
+        self.to_bytes_with_nul().len(),
+    ))]
+    // On return, the written bytes are byte-for-byte the source's
+    // nul-terminated view, so `*dest` is a valid `CStr` — the trait's
+    // "leaves `*dest` a valid value of `Self`" promise.
+    #[ensures(|_: &()| {
+        let n = self.to_bytes_with_nul().len();
+        // SAFETY: the body has just initialized `n` bytes at `dest`.
+        unsafe { core::slice::from_raw_parts(dest as *const u8, n) == self.to_bytes_with_nul() }
+    })]
     unsafe fn clone_to_uninit(&self, dest: *mut u8) {
         // SAFETY: For now, CStr is just a #[repr(trasnsparent)] [c_char] with some invariants.
         // And we can cast [c_char] to [u8] on all supported platforms (see: to_bytes_with_nul).
@@ -585,8 +714,8 @@ unsafe impl CloneToUninit for crate::ffi::CStr {
     }
 }
 
-#[unstable(feature = "bstr", issue = "134915")]
-unsafe impl CloneToUninit for crate::bstr::ByteStr {
+#[unstable(feature = "byte_str", issue = "134915")]
+unsafe impl CloneToUninit for crate::byte_str::ByteStr {
     #[inline]
     #[cfg_attr(debug_assertions, track_caller)]
     unsafe fn clone_to_uninit(&self, dst: *mut u8) {
@@ -601,7 +730,7 @@ unsafe impl CloneToUninit for crate::bstr::ByteStr {
 /// are implemented in `traits::SelectionContext::copy_clone_conditions()`
 /// in `rustc_trait_selection`.
 mod impls {
-    use super::TrivialClone;
+    use super::{Share, TrivialClone};
     use crate::marker::PointeeSized;
 
     macro_rules! impl_clone {
@@ -609,7 +738,7 @@ mod impls {
             $(
                 #[stable(feature = "rust1", since = "1.0.0")]
                 #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
-                impl const Clone for $t {
+                const impl Clone for $t {
                     #[inline(always)]
                     fn clone(&self) -> Self {
                         *self
@@ -619,7 +748,7 @@ mod impls {
                 #[doc(hidden)]
                 #[unstable(feature = "trivial_clone", issue = "none")]
                 #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
-                unsafe impl const TrivialClone for $t {}
+                const unsafe impl TrivialClone for $t {}
             )*
         }
     }
@@ -631,9 +760,9 @@ mod impls {
         bool char
     }
 
-    #[unstable(feature = "never_type", issue = "35121")]
+    #[stable(feature = "never_type", since = "1.100.0")]
     #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
-    impl const Clone for ! {
+    const impl Clone for ! {
         #[inline]
         fn clone(&self) -> Self {
             *self
@@ -643,11 +772,11 @@ mod impls {
     #[doc(hidden)]
     #[unstable(feature = "trivial_clone", issue = "none")]
     #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
-    unsafe impl const TrivialClone for ! {}
+    const unsafe impl TrivialClone for ! {}
 
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
-    impl<T: PointeeSized> const Clone for *const T {
+    const impl<T: PointeeSized> Clone for *const T {
         #[inline(always)]
         fn clone(&self) -> Self {
             *self
@@ -657,11 +786,11 @@ mod impls {
     #[doc(hidden)]
     #[unstable(feature = "trivial_clone", issue = "none")]
     #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
-    unsafe impl<T: PointeeSized> const TrivialClone for *const T {}
+    const unsafe impl<T: PointeeSized> TrivialClone for *const T {}
 
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
-    impl<T: PointeeSized> const Clone for *mut T {
+    const impl<T: PointeeSized> Clone for *mut T {
         #[inline(always)]
         fn clone(&self) -> Self {
             *self
@@ -671,12 +800,12 @@ mod impls {
     #[doc(hidden)]
     #[unstable(feature = "trivial_clone", issue = "none")]
     #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
-    unsafe impl<T: PointeeSized> const TrivialClone for *mut T {}
+    const unsafe impl<T: PointeeSized> TrivialClone for *mut T {}
 
     /// Shared references can be cloned, but mutable references *cannot*!
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
-    impl<T: PointeeSized> const Clone for &T {
+    const impl<T: PointeeSized> Clone for &T {
         #[inline(always)]
         #[rustc_diagnostic_item = "noop_method_clone"]
         fn clone(&self) -> Self {
@@ -687,9 +816,102 @@ mod impls {
     #[doc(hidden)]
     #[unstable(feature = "trivial_clone", issue = "none")]
     #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
-    unsafe impl<T: PointeeSized> const TrivialClone for &T {}
+    const unsafe impl<T: PointeeSized> TrivialClone for &T {}
+
+    #[unstable(feature = "share_trait", issue = "156756")]
+    impl<T: PointeeSized> Share for &T {}
 
     /// Shared references can be cloned, but mutable references *cannot*!
     #[stable(feature = "rust1", since = "1.0.0")]
     impl<T: PointeeSized> !Clone for &mut T {}
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::ffi::CStr;
+    use crate::ub_checks::Invariant;
+
+    // Build an arbitrary valid `&CStr` via the safe `from_bytes_until_nul`
+    // (mirrors the private helper of the same name in `c_str`'s verify module).
+    fn arbitrary_cstr(slice: &[u8]) -> &CStr {
+        // At a minimum, the slice has a null terminator to form a valid CStr.
+        kani::assume(slice.len() > 0 && slice[slice.len() - 1] == 0);
+        let result = CStr::from_bytes_until_nul(slice);
+        // Given the assumption, from_bytes_until_nul should never fail.
+        assert!(result.is_ok());
+        let c_str = result.unwrap();
+        assert!(c_str.is_safe());
+        c_str
+    }
+
+    // unsafe impl CloneToUninit for CStr  (criterion 4)
+    //
+    // `proof_for_contract` assumes the preconditions (a writable `dest` of
+    // `n = to_bytes_with_nul().len()` bytes that does not overlap `self`),
+    // runs the real body, and verifies the `ensures`/`modifies` plus the UB
+    // checks for the internal `copy_nonoverlapping`. The source and `dest`
+    // share one buffer and `dest` may sit anywhere in it, so the overlapping
+    // placements are excluded only by the non-overlap precondition. Beyond
+    // the contract, the harness asserts that reconstructing a `&CStr` over
+    // the written bytes upholds the safety invariant — cloning a valid
+    // `CStr` yields a valid `CStr`.
+    #[kani::proof_for_contract(<CStr as CloneToUninit>::clone_to_uninit)]
+    #[kani::unwind(33)]
+    fn check_clone_to_uninit_cstr() {
+        const SIZE: usize = 32;
+        let mut buf: [u8; SIZE] = kani::any();
+        // Source and destination both come from this one pointer.
+        let base: *mut u8 = buf.as_mut_ptr();
+
+        // Source: any slice of `buf` that holds a valid `CStr`.
+        let src_off: usize = kani::any_where(|&o: &usize| o < SIZE);
+        let src_len: usize = kani::any_where(|&l: &usize| l >= 1 && l <= SIZE - src_off);
+        // SAFETY: `src_off + src_len <= SIZE`, so the slice lies within `buf`.
+        let slice: &[u8] = unsafe { core::slice::from_raw_parts(base.add(src_off), src_len) };
+        let c_str = arbitrary_cstr(slice);
+        let n = c_str.to_bytes_with_nul().len();
+
+        // Destination: anywhere in the same buffer.
+        let dst_off: usize = kani::any_where(|&o: &usize| o < SIZE);
+        // SAFETY: `dst_off < SIZE`, so `dest` points into `buf`.
+        let dest: *mut u8 = unsafe { base.add(dst_off) };
+
+        // SAFETY: the contract's preconditions (writable, non-overlapping;
+        // alignment is 1) are assumed by `proof_for_contract`.
+        unsafe {
+            c_str.clone_to_uninit(dest);
+        }
+
+        // The destination holds the source's nul-terminated view exactly
+        // (also pinned by the contract's `ensures`).
+        let written = unsafe { core::slice::from_raw_parts(dest as *const u8, n) };
+        assert_eq!(written, c_str.to_bytes_with_nul());
+
+        // Criterion 4: the written bytes reinterpreted as `&CStr` uphold the
+        // safety invariant.
+        let cloned: &CStr = unsafe { &*(written as *const [u8] as *const CStr) };
+        assert!(cloned.is_safe());
+
+        // Non-vacuity: neither the contract nor the invariant check is
+        // exercised only vacuously, and `dest` on either side of the source
+        // survives the non-overlap precondition.
+        kani::cover(
+            n == 1,
+            "non-vacuity: cloning an empty CStr (lone nul terminator) is reachable",
+        );
+        kani::cover(
+            n > 1,
+            "non-vacuity: cloning a non-empty CStr (content before the nul) is reachable",
+        );
+        kani::cover(
+            dst_off + n <= src_off,
+            "non-vacuity: dest before the source in the shared buffer is reachable",
+        );
+        kani::cover(
+            dst_off >= src_off + n,
+            "non-vacuity: dest after the source in the shared buffer is reachable",
+        );
+    }
 }

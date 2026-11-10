@@ -129,12 +129,13 @@ impl TcpListener {
             0,
         ) {
             if receive_request.raw[0] != 0 {
-                // error case
-                if receive_request.raw[1] == NetError::TimedOut as u8 {
+                // Error case — code lives at byte 4 (where the send path
+                // also reads it). Byte 1 is part of the marker header.
+                if receive_request.raw[4] == NetError::TimedOut as u8 {
                     return Err(io::const_error!(io::ErrorKind::TimedOut, "accept timed out"));
-                } else if receive_request.raw[1] == NetError::WouldBlock as u8 {
+                } else if receive_request.raw[4] == NetError::WouldBlock as u8 {
                     return Err(io::const_error!(io::ErrorKind::WouldBlock, "accept would block"));
-                } else if receive_request.raw[1] == NetError::LibraryError as u8 {
+                } else if receive_request.raw[4] == NetError::LibraryError as u8 {
                     return Err(io::const_error!(io::ErrorKind::Other, "library error"));
                 } else {
                     return Err(io::const_error!(io::ErrorKind::Other, "library error"));
@@ -201,6 +202,14 @@ impl TcpListener {
         )
         .or(Err(io::const_error!(io::ErrorKind::InvalidInput, "unexpected return value")))
         .map(|res| res[0] as _)?)
+    }
+
+    pub fn set_hop_limit_v6(&self, hlim: u8) -> io::Result<()> {
+        unimpl!();
+    }
+
+    pub fn hop_limit_v6(&self) -> io::Result<u8> {
+        unimpl!();
     }
 
     pub fn set_only_v6(&self, _: bool) -> io::Result<()> {

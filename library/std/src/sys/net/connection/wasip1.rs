@@ -91,7 +91,7 @@ impl TcpStream {
         self.read_vectored(&mut [IoSliceMut::new(buf)])
     }
 
-    pub fn read_buf(&self, buf: BorrowedCursor<'_>) -> io::Result<()> {
+    pub fn read_buf(&self, buf: BorrowedCursor<'_, u8>) -> io::Result<()> {
         self.socket().as_inner().read_buf(buf)
     }
 
@@ -125,12 +125,12 @@ impl TcpStream {
 
     pub fn shutdown(&self, how: Shutdown) -> io::Result<()> {
         let wasi_how = match how {
-            Shutdown::Read => wasi::SDFLAGS_RD,
-            Shutdown::Write => wasi::SDFLAGS_WR,
-            Shutdown::Both => wasi::SDFLAGS_RD | wasi::SDFLAGS_WR,
+            Shutdown::Read => wasip1::SDFLAGS_RD,
+            Shutdown::Write => wasip1::SDFLAGS_WR,
+            Shutdown::Both => wasip1::SDFLAGS_RD | wasip1::SDFLAGS_WR,
         };
 
-        unsafe { wasi::sock_shutdown(self.socket().as_raw_fd() as _, wasi_how).map_err(err2io) }
+        unsafe { wasip1::sock_shutdown(self.socket().as_raw_fd() as _, wasi_how).map_err(err2io) }
     }
 
     pub fn duplicate(&self) -> io::Result<TcpStream> {
@@ -142,6 +142,14 @@ impl TcpStream {
     }
 
     pub fn linger(&self) -> io::Result<Option<Duration>> {
+        unsupported()
+    }
+
+    pub fn set_keepalive(&self, _: bool) -> io::Result<()> {
+        unsupported()
+    }
+
+    pub fn keepalive(&self) -> io::Result<bool> {
         unsupported()
     }
 
@@ -161,25 +169,34 @@ impl TcpStream {
         unsupported()
     }
 
+    pub fn set_hop_limit_v6(&self, _: u8) -> io::Result<()> {
+        unsupported()
+    }
+
+    pub fn hop_limit_v6(&self) -> io::Result<u8> {
+        unsupported()
+    }
+
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
         unsupported()
     }
 
     pub fn set_nonblocking(&self, state: bool) -> io::Result<()> {
         let fdstat = unsafe {
-            wasi::fd_fdstat_get(self.socket().as_inner().as_raw_fd() as wasi::Fd).map_err(err2io)?
+            wasip1::fd_fdstat_get(self.socket().as_inner().as_raw_fd() as wasip1::Fd)
+                .map_err(err2io)?
         };
 
         let mut flags = fdstat.fs_flags;
 
         if state {
-            flags |= wasi::FDFLAGS_NONBLOCK;
+            flags |= wasip1::FDFLAGS_NONBLOCK;
         } else {
-            flags &= !wasi::FDFLAGS_NONBLOCK;
+            flags &= !wasip1::FDFLAGS_NONBLOCK;
         }
 
         unsafe {
-            wasi::fd_fdstat_set_flags(self.socket().as_inner().as_raw_fd() as wasi::Fd, flags)
+            wasip1::fd_fdstat_set_flags(self.socket().as_inner().as_raw_fd() as wasip1::Fd, flags)
                 .map_err(err2io)
         }
     }
@@ -221,7 +238,7 @@ impl TcpListener {
 
     pub fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
         let fd = unsafe {
-            wasi::sock_accept(self.as_inner().as_inner().as_raw_fd() as _, 0).map_err(err2io)?
+            wasip1::sock_accept(self.as_inner().as_inner().as_raw_fd() as _, 0).map_err(err2io)?
         };
 
         Ok((
@@ -244,6 +261,14 @@ impl TcpListener {
         unsupported()
     }
 
+    pub fn set_hop_limit_v6(&self, _: u8) -> io::Result<()> {
+        unsupported()
+    }
+
+    pub fn hop_limit_v6(&self) -> io::Result<u8> {
+        unsupported()
+    }
+
     pub fn set_only_v6(&self, _: bool) -> io::Result<()> {
         unsupported()
     }
@@ -258,19 +283,20 @@ impl TcpListener {
 
     pub fn set_nonblocking(&self, state: bool) -> io::Result<()> {
         let fdstat = unsafe {
-            wasi::fd_fdstat_get(self.socket().as_inner().as_raw_fd() as wasi::Fd).map_err(err2io)?
+            wasip1::fd_fdstat_get(self.socket().as_inner().as_raw_fd() as wasip1::Fd)
+                .map_err(err2io)?
         };
 
         let mut flags = fdstat.fs_flags;
 
         if state {
-            flags |= wasi::FDFLAGS_NONBLOCK;
+            flags |= wasip1::FDFLAGS_NONBLOCK;
         } else {
-            flags &= !wasi::FDFLAGS_NONBLOCK;
+            flags &= !wasip1::FDFLAGS_NONBLOCK;
         }
 
         unsafe {
-            wasi::fd_fdstat_set_flags(self.socket().as_inner().as_raw_fd() as wasi::Fd, flags)
+            wasip1::fd_fdstat_set_flags(self.socket().as_inner().as_raw_fd() as wasip1::Fd, flags)
                 .map_err(err2io)
         }
     }
@@ -412,6 +438,22 @@ impl UdpSocket {
     }
 
     pub fn ttl(&self) -> io::Result<u32> {
+        unsupported()
+    }
+
+    pub fn set_hop_limit_v6(&self, _: u8) -> io::Result<()> {
+        unsupported()
+    }
+
+    pub fn hop_limit_v6(&self) -> io::Result<u8> {
+        unsupported()
+    }
+
+    pub fn set_multicast_hop_limit_v6(&self, _: u8) -> io::Result<()> {
+        unsupported()
+    }
+
+    pub fn multicast_hop_limit_v6(&self) -> io::Result<u8> {
         unsupported()
     }
 
