@@ -17,7 +17,7 @@ env:
 jobs:
   run-kmir-proofs:
     name: Run KMIR proofs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       container_name: "kmir-${{ github.run_id }}"
 
@@ -37,7 +37,7 @@ jobs:
 
   run-kmir-proofs-negative:
     name: Run KMIR negative proofs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       container_name: "kmir-neg-${{ github.run_id }}"
 
