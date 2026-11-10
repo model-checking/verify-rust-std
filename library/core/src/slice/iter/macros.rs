@@ -80,7 +80,14 @@ macro_rules! iterator {
             #[inline]
             #[cfg_attr(kani, kani::modifies(self))]
             #[safety::requires(!is_empty!(self))]
-            #[safety::ensures(|_| self.is_safe())]
+            #[safety::ensures(|result: &$elem| {
+                (self.is_safe())
+                && (len!(self) == old(len!(self)) - 1)
+                && ({
+                crate::ptr::from_ref(&**result)
+                    == old(self.ptr.as_ptr()).wrapping_add(old(len!(self)) - 1).cast_const()
+            })
+            })]
             unsafe fn next_back_unchecked(&mut self) -> $elem {
                 // SAFETY: the caller promised it's not empty, so
                 // the offsetting is in-bounds and there's an element to return.
@@ -102,7 +109,12 @@ macro_rules! iterator {
             #[inline(always)]
             #[cfg_attr(kani, kani::modifies(self))]
             #[safety::requires(offset <= len!(self))]
-            #[safety::ensures(|_| self.is_safe())]
+            #[safety::ensures(|result| {
+                (self.is_safe())
+                && (len!(self) == old(len!(self)) - offset)
+                && (*result == old(self.ptr))
+                && (self.ptr.as_ptr() == old(self.ptr.as_ptr()).wrapping_add(offset))
+            })]
             unsafe fn post_inc_start(&mut self, offset: usize) -> NonNull<T> {
                 let old = self.ptr;
 
@@ -124,7 +136,11 @@ macro_rules! iterator {
             #[inline(always)]
             #[cfg_attr(kani, kani::modifies(self))]
             #[safety::requires(offset <= len!(self))]
-            #[safety::ensures(|_| self.is_safe())]
+            #[safety::ensures(|result| {
+                (self.is_safe())
+                && (len!(self) == old(len!(self)) - offset)
+                && (result.as_ptr() == self.ptr.as_ptr().wrapping_add(len!(self)))
+            })]
             unsafe fn pre_dec_end(&mut self, offset: usize) -> NonNull<T> {
                 if_zst!(mut self,
                     // SAFETY: By our precondition, `offset` can be at most the
@@ -277,6 +293,26 @@ macro_rules! iterator {
                 let mut acc = init;
                 let mut i = 0;
                 let len = len!(self);
+                #[cfg(kani)]
+                let proof_ptr = self.ptr.as_ptr();
+                // The iterator metadata is unchanged by the loop. Keep the inductive
+                // index bound here; pointer and value validity remain checked at each use.
+                // Framing the element region havocs its bytes. Preserve valid T values
+                // together with the index bound in one invariant (the macro registers one
+                // contract per loop). The validity clause is trivial for all-bit-pattern types.
+                #[cfg_attr(kani, kani::loop_invariant(i < len && (
+                    (const { crate::slice::iter::verify::element_validity_kind::<T>() == 0 })
+                    || unsafe { crate::slice::iter::verify::valid_elements(proof_ptr, len) }
+                )))]
+                // The verification callbacks modify the accumulator and closure state;
+                // only IterMut callbacks may modify slice elements. Explicit framing avoids treating one-past-end pointers
+                // and the iterator's own pointer field as writable objects. Assigns checks
+                // remain enabled: callbacks writing through other captures need more frame
+                // targets before they can be verified with this annotation.
+                #[cfg_attr(kani, kani::loop_modifies(
+                    &i, &acc, &f
+                    $(, crate::ptr::slice_from_raw_parts_mut(proof_ptr as *$mut_ T, len))?
+                ))]
                 loop {
                     // SAFETY: the loop iterates `i in 0..len`, which always is in bounds of
                     // the slice allocation
@@ -301,8 +337,32 @@ macro_rules! iterator {
                 Self: Sized,
                 F: FnMut(Self::Item),
             {
+                #[cfg(kani)]
+                let initial_len = len!(self);
+                #[cfg(kani)]
+                let initial_ptr = self.ptr.as_ptr();
+                #[cfg(kani)]
+                let mut consumed = 0;
+                #[cfg_attr(kani, kani::loop_invariant(unsafe {
+                    crate::slice::iter::verify::iter_state_matches(
+                        &raw const self.ptr, self.end_or_len as *const T,
+                        initial_ptr, initial_len, consumed, 0
+                    )
+                }))]
+                // Give element-writing callbacks the whole initial mutable region. Inferred
+                // targets based on the current element depend on the loop's moving pointer.
+                // Writes through other closure captures need additional frame targets; the
+                // retained-reference harness records that separate limitation explicitly.
+                #[cfg_attr(kani, kani::loop_modifies(
+                    &consumed, &self, &f
+                    $(, crate::ptr::slice_from_raw_parts_mut(initial_ptr as *$mut_ T, initial_len))?
+                ))]
                 while let Some(x) = self.next() {
                     f(x);
+                    #[cfg(kani)]
+                    {
+                        consumed += 1;
+                    }
                 }
             }
 
@@ -384,6 +444,19 @@ macro_rules! iterator {
             {
                 let n = len!(self);
                 let mut i = 0;
+                #[cfg(kani)]
+                let initial_ptr = self.ptr.as_ptr();
+                #[cfg_attr(kani, kani::loop_invariant(unsafe {
+                    crate::slice::iter::verify::iter_state_matches(
+                        &raw const self.ptr, self.end_or_len as *const T, initial_ptr, n, i, 0
+                    )
+                }))]
+                // These proof callbacks modify only the iterator, index, closure state and
+                // (for IterMut) elements. Other captured writes require additional targets.
+                #[cfg_attr(kani, kani::loop_modifies(
+                    &i, &*self, &predicate
+                    $(, crate::ptr::slice_from_raw_parts_mut(initial_ptr as *$mut_ T, n))?
+                ))]
                 while let Some(x) = self.next() {
                     if predicate(x) {
                         // SAFETY: we are guaranteed to be in bounds by the loop invariant:
@@ -406,6 +479,17 @@ macro_rules! iterator {
             {
                 let n = len!(self);
                 let mut i = n;
+                #[cfg(kani)]
+                let initial_ptr = self.ptr.as_ptr();
+                #[cfg_attr(kani, kani::loop_invariant(i <= n && unsafe {
+                    crate::slice::iter::verify::iter_state_matches(
+                        &raw const self.ptr, self.end_or_len as *const T, initial_ptr, n, 0, n - i
+                    )
+                }))]
+                #[cfg_attr(kani, kani::loop_modifies(
+                    &i, &*self, &predicate
+                    $(, crate::ptr::slice_from_raw_parts_mut(initial_ptr as *$mut_ T, n))?
+                ))]
                 while let Some(x) = self.next_back() {
                     i -= 1;
                     if predicate(x) {
