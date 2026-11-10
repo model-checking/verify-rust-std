@@ -97,8 +97,8 @@
 #![feature(async_fn_traits)]
 #![feature(async_iterator)]
 #![feature(borrowed_buf_init)]
-#![feature(bstr)]
-#![feature(bstr_internals)]
+#![feature(byte_str)]
+#![feature(byte_str_internals)]
 #![feature(can_vector)]
 #![feature(case_ignorable)]
 #![feature(cast_maybe_uninit)]
@@ -160,7 +160,6 @@
 #![feature(proc_macro_hygiene)]
 #![feature(ptr_alignment_type)]
 #![feature(ptr_cast_slice)]
-#![feature(ptr_internals)]
 #![feature(ptr_metadata)]
 #![feature(random)]
 #![feature(raw_os_error_ty)]
@@ -189,7 +188,6 @@
 #![feature(ub_checks)]
 #![feature(unicode_internals)]
 #![feature(unsize)]
-#![feature(unwrap_infallible)]
 #![feature(write_all_vectored)]
 #![feature(wtf8_internals)]
 // tidy-alphabetical-end
@@ -212,7 +210,6 @@
 #![feature(min_specialization)]
 #![feature(multiple_supertrait_upcastable)]
 #![feature(negative_impls)]
-#![feature(optimize_attribute)]
 #![feature(rustc_attrs)]
 #![feature(slice_internals)]
 #![feature(staged_api)]
@@ -233,11 +230,24 @@
 // from other crates, but since this can only appear for lang items, it doesn't seem worth fixing.
 #![feature(intra_doc_pointers)]
 
+#[cfg(not(no_rc))]
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use rcs::rc;
+
 // Module with internal macros used by other modules (needs to be included before other modules).
 #[macro_use]
 mod macros;
 
 mod raw_vec;
+
+/// Implementations of reference-counted pointers.
+#[cfg(not(no_rc))]
+mod rcs {
+    pub mod rc;
+
+    #[cfg(all(not(no_sync), target_has_atomic = "ptr"))]
+    pub(crate) mod arc;
+}
 
 // Heaps provided for low-level allocation strategies
 pub mod alloc;
@@ -249,8 +259,8 @@ pub mod alloc;
 // to allow code to have `use boxed::Box;` declarations.
 pub mod borrow;
 pub mod boxed;
-#[unstable(feature = "bstr", issue = "134915")]
-pub mod bstr;
+#[unstable(feature = "byte_str", issue = "134915")]
+pub mod byte_str;
 pub mod collections;
 #[cfg(all(not(no_rc), not(no_sync), not(no_global_oom_handling)))]
 pub mod ffi;
@@ -259,8 +269,6 @@ pub mod intrinsics;
 #[unstable(feature = "alloc_io", issue = "154046")]
 pub mod io;
 pub mod panicking;
-#[cfg(not(no_rc))]
-pub mod rc;
 pub mod slice;
 pub mod str;
 pub mod string;

@@ -36,8 +36,26 @@ cfg_select! {
 
 use netc as c;
 
+// Similarly to reads (see READ_LIMIT), the `send` syscall on most platforms
+// takes a `size_t` length, but returns an `ssize_t` of bytes written. So the
+// actual maximum number of bytes we can send in one call is SSIZE_MAX.
+//
+// On Apple targets however, apparently the 64-bit libc is either buggy or
+// intentionally showing odd behavior by rejecting send calls with a size
+// larger than INT_MAX. So cap the send size to INT_MAX.
+//
+// Meanwhile on QNX, reads/writes/sends larger than INT_MAX return the wrong
+// number of bytes written (eg, writing 2^31 bytes returns (2^64 - 2^31) instead
+// of the correct byte count).
+//
+// On Windows, the relevant syscall takes an `i32` (unlike for read/write!),
+// so we need to clamp to i32::MAX.
 const MAX_SEND_LEN: usize =
-    if cfg!(target_vendor = "apple") { c_int::MAX as usize } else { <wrlen_t>::MAX as usize };
+    cfg_select! {
+        any(target_vendor = "apple", target_os = "nto", target_os = "qnx") => c_int::MAX as usize,
+        target_os = "windows" => i32::MAX as usize,
+        _ => libc::ssize_t::MAX as usize,
+    };
 
 cfg_select! {
     any(
@@ -506,6 +524,31 @@ impl TcpStream {
         Ok(raw as u32)
     }
 
+    pub fn set_hop_limit_v6(&self, limit: u8) -> io::Result<()> {
+        cfg_select! {
+            all(target_os = "wasi", any(target_env = "p2", target_env = "p3")) => {
+                let _ = limit;
+                Err(io::Error::new(ErrorKind::Unsupported, "not supported on this platform"))
+            }
+            _ => unsafe {
+                setsockopt(&self.inner, c::IPPROTO_IPV6, c::IPV6_UNICAST_HOPS, limit as c_int)
+            },
+        }
+    }
+
+    pub fn hop_limit_v6(&self) -> io::Result<u8> {
+        cfg_select! {
+            all(target_os = "wasi", any(target_env = "p2", target_env = "p3")) => {
+                Err(io::Error::new(ErrorKind::Unsupported, "not supported on this platform"))
+            }
+            _ => {
+                let raw: c_int =
+                    unsafe { getsockopt(&self.inner, c::IPPROTO_IPV6, c::IPV6_UNICAST_HOPS)? };
+                Ok(raw as u8)
+            }
+        }
+    }
+
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
         self.inner.take_error()
     }
@@ -634,6 +677,31 @@ impl TcpListener {
         Ok(raw as u32)
     }
 
+    pub fn set_hop_limit_v6(&self, limit: u8) -> io::Result<()> {
+        cfg_select! {
+            all(target_os = "wasi", any(target_env = "p2", target_env = "p3")) => {
+                let _ = limit;
+                Err(io::Error::new(ErrorKind::Unsupported, "not supported on this platform"))
+            }
+            _ => unsafe {
+                setsockopt(&self.inner, c::IPPROTO_IPV6, c::IPV6_UNICAST_HOPS, limit as c_int)
+            },
+        }
+    }
+
+    pub fn hop_limit_v6(&self) -> io::Result<u8> {
+        cfg_select! {
+            all(target_os = "wasi", any(target_env = "p2", target_env = "p3")) => {
+                Err(io::Error::new(ErrorKind::Unsupported, "not supported on this platform"))
+            }
+            _ => {
+                let raw: c_int =
+                    unsafe { getsockopt(&self.inner, c::IPPROTO_IPV6, c::IPV6_UNICAST_HOPS)? };
+                Ok(raw as u8)
+            }
+        }
+    }
+
     pub fn set_only_v6(&self, only_v6: bool) -> io::Result<()> {
         unsafe { setsockopt(&self.inner, c::IPPROTO_IPV6, c::IPV6_V6ONLY, only_v6 as c_int) }
     }
@@ -717,8 +785,6 @@ impl UdpSocket {
         self.inner.peek_from(buf)
     }
 
-    // `MAX_SEND_LEN` is `usize::MAX` off Apple/Windows, where the guard is a no-op.
-    #[allow(clippy::absurd_extreme_comparisons)]
     pub fn send_to(&self, buf: &[u8], dst: &SocketAddr) -> io::Result<usize> {
         if buf.len() > MAX_SEND_LEN {
             return Err(io::Error::from_raw_os_error(c::EMSGSIZE));
@@ -856,6 +922,56 @@ impl UdpSocket {
         Ok(raw as u32)
     }
 
+    pub fn set_hop_limit_v6(&self, limit: u8) -> io::Result<()> {
+        cfg_select! {
+            all(target_os = "wasi", any(target_env = "p2", target_env = "p3")) => {
+                let _ = limit;
+                Err(io::Error::new(ErrorKind::Unsupported, "not supported on this platform"))
+            }
+            _ => unsafe {
+                setsockopt(&self.inner, c::IPPROTO_IPV6, c::IPV6_UNICAST_HOPS, limit as c_int)
+            },
+        }
+    }
+
+    pub fn hop_limit_v6(&self) -> io::Result<u8> {
+        cfg_select! {
+            all(target_os = "wasi", any(target_env = "p2", target_env = "p3")) => {
+                Err(io::Error::new(ErrorKind::Unsupported, "not supported on this platform"))
+            }
+            _ => {
+                let raw: c_int =
+                    unsafe { getsockopt(&self.inner, c::IPPROTO_IPV6, c::IPV6_UNICAST_HOPS)? };
+                Ok(raw as u8)
+            }
+        }
+    }
+
+    pub fn set_multicast_hop_limit_v6(&self, limit: u8) -> io::Result<()> {
+        cfg_select! {
+            all(target_os = "wasi", any(target_env = "p2", target_env = "p3")) => {
+                let _ = limit;
+                Err(io::Error::new(ErrorKind::Unsupported, "not supported on this platform"))
+            }
+            _ => unsafe {
+                setsockopt(&self.inner, c::IPPROTO_IPV6, c::IPV6_MULTICAST_HOPS, limit as c_int)
+            },
+        }
+    }
+
+    pub fn multicast_hop_limit_v6(&self) -> io::Result<u8> {
+        cfg_select! {
+            all(target_os = "wasi", any(target_env = "p2", target_env = "p3")) => {
+                Err(io::Error::new(ErrorKind::Unsupported, "not supported on this platform"))
+            }
+            _ => {
+                let raw: c_int =
+                    unsafe { getsockopt(&self.inner, c::IPPROTO_IPV6, c::IPV6_MULTICAST_HOPS)? };
+                Ok(raw as u8)
+            }
+        }
+    }
+
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
         self.inner.take_error()
     }
@@ -872,8 +988,6 @@ impl UdpSocket {
         self.inner.peek(buf)
     }
 
-    // `MAX_SEND_LEN` is `usize::MAX` off Apple/Windows, where the guard is a no-op.
-    #[allow(clippy::absurd_extreme_comparisons)]
     pub fn send(&self, buf: &[u8]) -> io::Result<usize> {
         if buf.len() > MAX_SEND_LEN {
             return Err(io::Error::from_raw_os_error(c::EMSGSIZE));

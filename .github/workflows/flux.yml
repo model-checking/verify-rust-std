@@ -8,12 +8,12 @@ on:
     branches: [main]
 
 env:
-  FLUX_VERSION: "849ef7c31ce06ec92e211050ac2f5bc8c543896d"
-  FIXPOINT_VERSION: "nightly-2026-07-20"
+  FLUX_VERSION: "1b04d5e6f8247766cfb0f9c6040c2944eb9c87c4"
+  FIXPOINT_VERSION: "nightly"
 
 jobs:
   check-flux-on-core:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:

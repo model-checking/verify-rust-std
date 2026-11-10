@@ -802,7 +802,7 @@ impl String {
         let (chunks, []) = v.as_chunks::<2>() else {
             return Err(FromUtf16Error { kind: FromUtf16ErrorKind::OddBytes });
         };
-        // ignore-tidy-undocumented-unsafe
+        // SAFETY: The aligned part of `v` can be transmuted into a valid u16 slice.
         match (cfg!(target_endian = "little"), unsafe { v.align_to::<u16>() }) {
             (true, ([], v, [])) => Self::from_utf16(v),
             _ => {
@@ -838,7 +838,7 @@ impl String {
     #[cfg(not(no_global_oom_handling))]
     #[stable(feature = "str_from_utf16_endian", since = "1.98.0")]
     pub fn from_utf16le_lossy(v: &[u8]) -> String {
-        // ignore-tidy-undocumented-unsafe
+        // SAFETY: The aligned part of `v` can be transmuted into a valid u16 slice.
         match (cfg!(target_endian = "little"), unsafe { v.align_to::<u16>() }) {
             (true, ([], v, [])) => Self::from_utf16_lossy(v),
             (true, ([], v, [_remainder])) => Self::from_utf16_lossy(v) + "\u{FFFD}",
@@ -877,7 +877,7 @@ impl String {
         let (chunks, []) = v.as_chunks::<2>() else {
             return Err(FromUtf16Error { kind: FromUtf16ErrorKind::OddBytes });
         };
-        // ignore-tidy-undocumented-unsafe
+        // SAFETY: The aligned part of `v` can be transmuted into a valid u16 slice.
         match (cfg!(target_endian = "big"), unsafe { v.align_to::<u16>() }) {
             (true, ([], v, [])) => Self::from_utf16(v),
             _ => {
@@ -913,7 +913,7 @@ impl String {
     #[cfg(not(no_global_oom_handling))]
     #[stable(feature = "str_from_utf16_endian", since = "1.98.0")]
     pub fn from_utf16be_lossy(v: &[u8]) -> String {
-        // ignore-tidy-undocumented-unsafe
+        // SAFETY: The aligned part of `v` can be transmuted into a valid u16 slice.
         match (cfg!(target_endian = "big"), unsafe { v.align_to::<u16>() }) {
             (true, ([], v, [])) => Self::from_utf16_lossy(v),
             (true, ([], v, [_remainder])) => Self::from_utf16_lossy(v) + "\u{FFFD}",
@@ -939,6 +939,10 @@ impl String {
     /// this is to convert the raw pointer, length, and capacity back
     /// into a `String` with the [`from_raw_parts`] function, allowing
     /// the destructor to perform the cleanup.
+    ///
+    /// If `capacity == 0`, then `pointer` may be dangling. Otherwise,
+    /// it will always be valid for reads and writes over `capacity`
+    /// bytes, and point to the start of the string.
     ///
     /// [`from_raw_parts`]: String::from_raw_parts
     ///
@@ -1143,7 +1147,8 @@ impl String {
         let additional: Saturating<usize> = slice.iter().map(|x| Saturating(x.len())).sum();
         self.reserve(additional.0);
         let (ptr, len, cap) = core::mem::take(self).into_raw_parts();
-        // ignore-tidy-undocumented-unsafe
+        // SAFETY: `self` have reserved enough space for strs in `slice`, and we are copying from valid UTF-8 slices.
+        // Therefore all unsafe operations are safe.
         unsafe {
             let mut dst = ptr.add(len);
             for new in slice {
@@ -1532,7 +1537,7 @@ impl String {
     pub fn pop(&mut self) -> Option<char> {
         let ch = self.chars().rev().next()?;
         let newlen = self.len() - ch.len_utf8();
-        // ignore-tidy-undocumented-unsafe
+        // SAFETY: `newlen` is less than old length.
         unsafe {
             self.vec.set_len(newlen);
         }
@@ -1571,7 +1576,11 @@ impl String {
 
         let next = idx + ch.len_utf8();
         let len = self.len();
-        // ignore-tidy-undocumented-unsafe
+        // SAFETY:
+        // * Since `next` is not bigger than `len`, `self.vec.as_ptr().add(next)`
+        //   is valid for reads and `self.vec.as_mut_ptr().add(idx)` is valid for writes.
+        //   Both pointers are valid for `len - next` bytes.
+        // * new length is less than old length.
         unsafe {
             ptr::copy(self.vec.as_ptr().add(next), self.vec.as_mut_ptr().add(idx), len - next);
             self.vec.set_len(len - (next - idx));
@@ -1645,7 +1654,7 @@ impl String {
             len += count;
         }
 
-        // ignore-tidy-undocumented-unsafe
+        // SAFETY: `len` is less than or equal to the original length of the string.
         unsafe {
             self.vec.set_len(len);
         }
@@ -1954,7 +1963,7 @@ impl String {
     pub fn split_off(&mut self, at: usize) -> String {
         assert!(self.is_char_boundary(at));
         let other = self.vec.split_off(at);
-        // ignore-tidy-undocumented-unsafe
+        // SAFETY: `other` contains only valid UTF-8 because `at` is on a `UTF-8` code point boundary.
         unsafe { String::from_utf8_unchecked(other) }
     }
 
@@ -2224,7 +2233,7 @@ impl String {
     #[inline]
     pub fn into_boxed_str(self) -> Box<str> {
         let slice = self.vec.into_boxed_slice();
-        // ignore-tidy-undocumented-unsafe
+        // SAFETY: `slice` contains only valid UTF-8 because `String` is guaranteed to be valid UTF-8.
         unsafe { from_boxed_utf8_unchecked(slice) }
     }
 
@@ -2256,7 +2265,7 @@ impl String {
     #[inline]
     pub fn leak<'a>(self) -> &'a mut str {
         let slice = self.vec.leak();
-        // ignore-tidy-undocumented-unsafe
+        // SAFETY: `slice` contains only valid UTF-8 because `String` is guaranteed to be valid UTF-8.
         unsafe { from_utf8_unchecked_mut(slice) }
     }
 }
@@ -3409,6 +3418,10 @@ impl TryFrom<Vec<u8>> for String {
     }
 }
 
+/// Note that all methods of this trait append to the `String`'s existing
+/// contents; they never truncate or replace what is already there. In
+/// particular, [`fmt::Write::write_str`] uses [`push_str`][String::push_str]
+/// and [`fmt::Write::write_char`] uses [`push`][String::push].
 #[cfg(not(no_global_oom_handling))]
 #[stable(feature = "rust1", since = "1.0.0")]
 impl fmt::Write for String {
@@ -3586,14 +3599,12 @@ unsafe impl Send for Drain<'_> {}
 #[stable(feature = "drain", since = "1.6.0")]
 impl Drop for Drain<'_> {
     fn drop(&mut self) {
-        // ignore-tidy-undocumented-unsafe
-        unsafe {
-            // Use Vec::drain. "Reaffirm" the bounds checks to avoid
-            // panic code being inserted again.
-            let self_vec = (*self.string).as_mut_vec();
-            if self.start <= self.end && self.end <= self_vec.len() {
-                self_vec.drain(self.start..self.end);
-            }
+        // Use Vec::drain. "Reaffirm" the bounds checks to avoid
+        // panic code being inserted again.
+        // SAFETY: We only use the returned Vec to call drain.
+        let self_vec = unsafe { &mut *(*self.string).as_mut_vec() };
+        if self.start <= self.end && self.end <= self_vec.len() {
+            self_vec.drain(self.start..self.end);
         }
     }
 }

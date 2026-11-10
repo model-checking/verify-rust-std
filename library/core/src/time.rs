@@ -292,7 +292,7 @@ impl Duration {
         } else {
             let secs = secs
                 .checked_add((nanos / NANOS_PER_SEC) as u64)
-                .expect("overflow in Duration::new");
+                .expect("adding carry-over seconds from nanoseconds should not exceed u64::MAX");
             let nanos = nanos % NANOS_PER_SEC;
             // SAFETY: nanos % NANOS_PER_SEC < NANOS_PER_SEC, therefore nanos is within the valid range
             Duration { secs, nanos: unsafe { Nanoseconds::new_unchecked(nanos) } }
@@ -317,6 +317,7 @@ impl Duration {
     #[rustc_const_stable(feature = "duration_consts", since = "1.32.0")]
     #[ensures(|duration| duration.is_safe())]
     #[ensures(|duration| duration.secs == secs)]
+    #[ensures(|duration| duration.nanos.as_inner() == 0)]
     pub const fn from_secs(secs: u64) -> Duration {
         Duration { secs, nanos: Nanoseconds::ZERO }
     }
@@ -1372,7 +1373,7 @@ const impl Add for Duration {
 
     #[inline]
     fn add(self, rhs: Duration) -> Duration {
-        self.checked_add(rhs).expect("overflow when adding durations")
+        self.checked_add(rhs).expect("adding durations should not exceed u64::MAX")
     }
 }
 
@@ -1392,7 +1393,7 @@ const impl Sub for Duration {
 
     #[inline]
     fn sub(self, rhs: Duration) -> Duration {
-        self.checked_sub(rhs).expect("overflow when subtracting durations")
+        self.checked_sub(rhs).expect("subtracting durations should not be negative")
     }
 }
 
@@ -1412,7 +1413,7 @@ const impl Mul<u32> for Duration {
 
     #[inline]
     fn mul(self, rhs: u32) -> Duration {
-        self.checked_mul(rhs).expect("overflow when multiplying duration by scalar")
+        self.checked_mul(rhs).expect("multiplying duration by scalar should not exceed u64::MAX")
     }
 }
 
@@ -1444,7 +1445,7 @@ const impl Div<u32> for Duration {
     #[inline]
     #[track_caller]
     fn div(self, rhs: u32) -> Duration {
-        self.checked_div(rhs).expect("divide by zero error when dividing duration by scalar")
+        self.checked_div(rhs).expect("divisor should not be zero")
     }
 }
 
@@ -1464,21 +1465,22 @@ macro_rules! sum_durations {
         let mut total_nanos: u64 = 0;
 
         for entry in $iter {
-            total_secs =
-                total_secs.checked_add(entry.secs).expect("overflow in iter::sum over durations");
+            total_secs = total_secs
+                .checked_add(entry.secs)
+                .expect("sum over duration iterator should not overflow u64::MAX");
             total_nanos = match total_nanos.checked_add(entry.nanos.as_inner() as u64) {
                 Some(n) => n,
                 None => {
                     total_secs = total_secs
                         .checked_add(total_nanos / NANOS_PER_SEC as u64)
-                        .expect("overflow in iter::sum over durations");
+                        .expect("sum over duration iterator should not overflow u64::MAX");
                     (total_nanos % NANOS_PER_SEC as u64) + entry.nanos.as_inner() as u64
                 }
             };
         }
         total_secs = total_secs
             .checked_add(total_nanos / NANOS_PER_SEC as u64)
-            .expect("overflow in iter::sum over durations");
+            .expect("sum over duration iterator should not overflow u64::MAX");
         total_nanos %= NANOS_PER_SEC as u64;
         Duration::new(total_secs, total_nanos as u32)
     }};
