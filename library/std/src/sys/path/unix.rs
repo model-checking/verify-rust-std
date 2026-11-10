@@ -2,14 +2,11 @@ use crate::ffi::OsStr;
 use crate::path::{Path, PathBuf, Prefix};
 use crate::{env, io};
 
-#[inline]
-pub fn is_sep_byte(b: u8) -> bool {
-    b == b'/'
-}
+path_separator_bytes!(b'/');
 
 #[inline]
-pub fn is_verbatim_sep(b: u8) -> bool {
-    b == b'/'
+pub const fn is_verbatim_sep(b: u8) -> bool {
+    is_sep_byte(b)
 }
 
 #[inline]
@@ -18,15 +15,13 @@ pub fn parse_prefix(_: &OsStr) -> Option<Prefix<'_>> {
 }
 
 pub const HAS_PREFIXES: bool = false;
-pub const MAIN_SEP_STR: &str = "/";
-pub const MAIN_SEP: char = '/';
 
 /// Make a POSIX path absolute without changing its semantics.
 pub(crate) fn absolute(path: &Path) -> io::Result<PathBuf> {
     // This is mostly a wrapper around collecting `Path::components`, with
     // exceptions made where this conflicts with the POSIX specification.
-    // See 4.13 Pathname Resolution, IEEE Std 1003.1-2017
-    // https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap04.html#tag_04_13
+    // See 4.16 Pathname Resolution, IEEE Std 1003.1-2024
+    // https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/V1_chap04.html#tag_04_16
 
     // Get the components, skipping the redundant leading "." component if it exists.
     let mut components = path.strip_prefix(".").unwrap_or(path).components();

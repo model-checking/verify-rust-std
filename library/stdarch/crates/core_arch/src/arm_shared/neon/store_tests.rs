@@ -406,6 +406,44 @@ fn test_vst1q_p64() {
     assert_eq!(vals[2], 2);
 }
 
+#[cfg(not(target_arch = "arm64ec"))]
+#[simd_test(enable = "neon,fp16")]
+fn test_vst1_f16() {
+    let mut vals = [0_f16; 5];
+    let a = f16x4::new(1., 2., 3., 4.);
+
+    unsafe {
+        vst1_f16(vals[1..].as_mut_ptr(), a.into());
+    }
+
+    assert_eq!(vals[0], 0.);
+    assert_eq!(vals[1], 1.);
+    assert_eq!(vals[2], 2.);
+    assert_eq!(vals[3], 3.);
+    assert_eq!(vals[4], 4.);
+}
+
+#[cfg(not(target_arch = "arm64ec"))]
+#[simd_test(enable = "neon,fp16")]
+fn test_vst1q_f16() {
+    let mut vals = [0_f16; 9];
+    let a = f16x8::new(1., 2., 3., 4., 5., 6., 7., 8.);
+
+    unsafe {
+        vst1q_f16(vals[1..].as_mut_ptr(), a.into());
+    }
+
+    assert_eq!(vals[0], 0.);
+    assert_eq!(vals[1], 1.);
+    assert_eq!(vals[2], 2.);
+    assert_eq!(vals[3], 3.);
+    assert_eq!(vals[4], 4.);
+    assert_eq!(vals[5], 5.);
+    assert_eq!(vals[6], 6.);
+    assert_eq!(vals[7], 7.);
+    assert_eq!(vals[8], 8.);
+}
+
 #[simd_test(enable = "neon")]
 fn test_vst1_f32() {
     let mut vals = [0_f32; 3];
@@ -434,4 +472,28 @@ fn test_vst1q_f32() {
     assert_eq!(vals[2], 2.);
     assert_eq!(vals[3], 3.);
     assert_eq!(vals[4], 4.);
+}
+
+#[simd_test(enable = "neon")]
+fn test_vst1q_lane_u32_unaligned() {
+    // st1 single-lane stores impose no alignment requirement: write to an odd byte offset.
+    let mut vals = [0_u8; 5];
+    let a = u32x4::new(1, 2, 3, 4);
+    unsafe {
+        vst1q_lane_u32::<2>(vals.as_mut_ptr().add(1) as *mut u32, a.into());
+    }
+    assert_eq!(vals[0], 0);
+    assert_eq!(u32::from_ne_bytes([vals[1], vals[2], vals[3], vals[4]]), 3);
+}
+
+#[simd_test(enable = "neon")]
+fn test_vst1q_lane_u64_unaligned() {
+    let mut vals = [0_u8; 9];
+    let a = u64x2::new(1, 2);
+    unsafe {
+        vst1q_lane_u64::<1>(vals.as_mut_ptr().add(1) as *mut u64, a.into());
+    }
+    assert_eq!(vals[0], 0);
+    let stored: [u8; 8] = vals[1..9].try_into().unwrap();
+    assert_eq!(u64::from_ne_bytes(stored), 2);
 }

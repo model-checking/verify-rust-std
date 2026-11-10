@@ -9,7 +9,7 @@ use crate::os::raw::{c_int, c_short};
 use crate::os::solid::ffi::OsStrExt;
 use crate::path::{Path, PathBuf};
 use crate::sync::Arc;
-pub use crate::sys::fs::common::{Dir, exists};
+pub use crate::sys::fs::common::{Dir, ExtraHomeDirs, ExtraMediaDirs, exists};
 use crate::sys::helpers::ignore_notfound;
 use crate::sys::pal::{abi, error};
 use crate::sys::time::SystemTime;
@@ -156,6 +156,14 @@ pub fn readdir(p: &Path) -> io::Result<ReadDir> {
         .map_err(|e| e.as_io_error())?;
         let inner = Arc::new(InnerReadDir { dirp: dir.assume_init(), root: p.to_owned() });
         Ok(ReadDir { inner })
+    }
+}
+
+impl ReadDir {
+    pub fn dir(&self) -> io::Result<Dir> {
+        let mut options = OpenOptions::new();
+        options.read(true);
+        Dir::open(&self.inner.root, &options)
     }
 }
 
@@ -383,7 +391,7 @@ impl File {
         }
     }
 
-    pub fn read_buf(&self, mut cursor: BorrowedCursor<'_>) -> io::Result<()> {
+    pub fn read_buf(&self, mut cursor: BorrowedCursor<'_, u8>) -> io::Result<()> {
         unsafe {
             let len = cursor.capacity();
             let mut out_num_bytes = MaybeUninit::uninit();
@@ -401,7 +409,7 @@ impl File {
 
             // Safety: `num_bytes_read` bytes were written to the unfilled
             // portion of the buffer
-            cursor.advance_unchecked(num_bytes_read);
+            cursor.advance(num_bytes_read);
 
             Ok(())
         }
@@ -530,7 +538,16 @@ pub fn rename(old: &Path, new: &Path) -> io::Result<()> {
     Ok(())
 }
 
+pub fn rename_noreplace(_old: &Path, _new: &Path) -> io::Result<()> {
+    unsupported()
+}
+
 pub fn set_perm(p: &Path, perm: FilePermissions) -> io::Result<()> {
+    // Solid does not support symlinks
+    set_perm_nofollow(p, perm)
+}
+
+pub fn set_perm_nofollow(p: &Path, perm: FilePermissions) -> io::Result<()> {
     error::SolidError::err_if_negative(unsafe {
         abi::SOLID_FS_Chmod(cstr(p)?.as_ptr(), perm.0.into())
     })

@@ -2,6 +2,15 @@ use crate::cell::Cell;
 use crate::sync as public;
 use crate::sync::once::OnceExclusiveState;
 
+#[cfg(all(
+    target_has_threads,
+    // VEXos is only "target_has_threads" because it allows user interrupt handlers which preempt
+    // the main thread, but they are forbidden from accessing sync primitives (the same as UNIX
+    // signal handlers).
+    not(target_os = "vexos"),
+))]
+compile_error!("Using no_threads implementation on a target with threads");
+
 pub struct Once {
     state: Cell<State>,
 }
@@ -37,6 +46,11 @@ impl Once {
     #[inline]
     pub const fn new() -> Once {
         Once { state: Cell::new(State::Incomplete) }
+    }
+
+    #[inline]
+    pub const fn new_complete() -> Once {
+        Once { state: Cell::new(State::Complete) }
     }
 
     #[inline]

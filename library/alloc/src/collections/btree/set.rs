@@ -10,7 +10,7 @@ use core::ops::{BitAnd, BitOr, BitXor, Bound, RangeBounds, Sub};
 use super::map::{self, BTreeMap, Keys};
 use super::merge_iter::MergeIterInner;
 use super::set_val::SetValZST;
-use crate::alloc::{Allocator, Global};
+use crate::alloc::{AllocatorClone, Global};
 use crate::vec::Vec;
 
 mod entry;
@@ -77,44 +77,44 @@ pub use self::entry::{Entry, OccupiedEntry, VacantEntry};
 #[cfg_attr(not(test), rustc_diagnostic_item = "BTreeSet")]
 pub struct BTreeSet<
     T,
-    #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator + Clone = Global,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A: AllocatorClone = Global,
 > {
     map: BTreeMap<T, SetValZST, A>,
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: Hash, A: Allocator + Clone> Hash for BTreeSet<T, A> {
+impl<T: Hash, A: AllocatorClone> Hash for BTreeSet<T, A> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.map.hash(state)
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: PartialEq, A: Allocator + Clone> PartialEq for BTreeSet<T, A> {
+impl<T: PartialEq, A: AllocatorClone> PartialEq for BTreeSet<T, A> {
     fn eq(&self, other: &BTreeSet<T, A>) -> bool {
         self.map.eq(&other.map)
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: Eq, A: Allocator + Clone> Eq for BTreeSet<T, A> {}
+impl<T: Eq, A: AllocatorClone> Eq for BTreeSet<T, A> {}
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: PartialOrd, A: Allocator + Clone> PartialOrd for BTreeSet<T, A> {
+impl<T: PartialOrd, A: AllocatorClone> PartialOrd for BTreeSet<T, A> {
     fn partial_cmp(&self, other: &BTreeSet<T, A>) -> Option<Ordering> {
         self.map.partial_cmp(&other.map)
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: Ord, A: Allocator + Clone> Ord for BTreeSet<T, A> {
+impl<T: Ord, A: AllocatorClone> Ord for BTreeSet<T, A> {
     fn cmp(&self, other: &BTreeSet<T, A>) -> Ordering {
         self.map.cmp(&other.map)
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: Clone, A: Allocator + Clone> Clone for BTreeSet<T, A> {
+impl<T: Clone, A: AllocatorClone> Clone for BTreeSet<T, A> {
     fn clone(&self) -> Self {
         BTreeSet { map: self.map.clone() }
     }
@@ -153,7 +153,7 @@ impl<T: fmt::Debug> fmt::Debug for Iter<'_, T> {
 #[derive(Debug)]
 pub struct IntoIter<
     T,
-    #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator + Clone = Global,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A: AllocatorClone = Global,
 > {
     iter: super::map::IntoIter<T, SetValZST, A>,
 }
@@ -183,11 +183,11 @@ pub struct Range<'a, T: 'a> {
 pub struct Difference<
     'a,
     T: 'a,
-    #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator + Clone = Global,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A: AllocatorClone = Global,
 > {
     inner: DifferenceInner<'a, T, A>,
 }
-enum DifferenceInner<'a, T: 'a, A: Allocator + Clone> {
+enum DifferenceInner<'a, T: 'a, A: AllocatorClone> {
     Stitch {
         // iterate all of `self` and some of `other`, spotting matches along the way
         self_iter: Iter<'a, T>,
@@ -202,7 +202,7 @@ enum DifferenceInner<'a, T: 'a, A: Allocator + Clone> {
 }
 
 // Explicit Debug impl necessary because of issue #26925
-impl<T: Debug, A: Allocator + Clone> Debug for DifferenceInner<'_, T, A> {
+impl<T: Debug, A: AllocatorClone> Debug for DifferenceInner<'_, T, A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DifferenceInner::Stitch { self_iter, other_iter } => f
@@ -221,7 +221,7 @@ impl<T: Debug, A: Allocator + Clone> Debug for DifferenceInner<'_, T, A> {
 }
 
 #[stable(feature = "collection_debug", since = "1.17.0")]
-impl<T: fmt::Debug, A: Allocator + Clone> fmt::Debug for Difference<'_, T, A> {
+impl<T: fmt::Debug, A: AllocatorClone> fmt::Debug for Difference<'_, T, A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Difference").field(&self.inner).finish()
     }
@@ -257,11 +257,11 @@ impl<T: fmt::Debug> fmt::Debug for SymmetricDifference<'_, T> {
 pub struct Intersection<
     'a,
     T: 'a,
-    #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator + Clone = Global,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A: AllocatorClone = Global,
 > {
     inner: IntersectionInner<'a, T, A>,
 }
-enum IntersectionInner<'a, T: 'a, A: Allocator + Clone> {
+enum IntersectionInner<'a, T: 'a, A: AllocatorClone> {
     Stitch {
         // iterate similarly sized sets jointly, spotting matches along the way
         a: Iter<'a, T>,
@@ -276,7 +276,7 @@ enum IntersectionInner<'a, T: 'a, A: Allocator + Clone> {
 }
 
 // Explicit Debug impl necessary because of issue #26925
-impl<T: Debug, A: Allocator + Clone> Debug for IntersectionInner<'_, T, A> {
+impl<T: Debug, A: AllocatorClone> Debug for IntersectionInner<'_, T, A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             IntersectionInner::Stitch { a, b } => {
@@ -293,7 +293,7 @@ impl<T: Debug, A: Allocator + Clone> Debug for IntersectionInner<'_, T, A> {
 }
 
 #[stable(feature = "collection_debug", since = "1.17.0")]
-impl<T: Debug, A: Allocator + Clone> Debug for Intersection<'_, T, A> {
+impl<T: Debug, A: AllocatorClone> Debug for Intersection<'_, T, A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Intersection").field(&self.inner).finish()
     }
@@ -346,21 +346,22 @@ impl<T> BTreeSet<T> {
     }
 }
 
-impl<T, A: Allocator + Clone> BTreeSet<T, A> {
+impl<T, A: AllocatorClone> BTreeSet<T, A> {
     /// Makes a new `BTreeSet` with a reasonable choice of B.
     ///
     /// # Examples
     ///
     /// ```
     /// # #![allow(unused_mut)]
-    /// # #![feature(allocator_api)]
     /// # #![feature(btreemap_alloc)]
+    ///
     /// use std::collections::BTreeSet;
     /// use std::alloc::Global;
     ///
-    /// let mut set: BTreeSet<i32> = BTreeSet::new_in(Global);
+    /// let set: BTreeSet<i32> = BTreeSet::new_in(Global);
     /// ```
-    #[unstable(feature = "btreemap_alloc", issue = "32838")]
+    #[unstable(feature = "btreemap_alloc", issue = "163177")]
+    #[must_use]
     pub const fn new_in(alloc: A) -> BTreeSet<T, A> {
         BTreeSet { map: BTreeMap::new_in(alloc) }
     }
@@ -899,7 +900,7 @@ impl<T, A: Allocator + Clone> BTreeSet<T, A> {
     where
         T: Ord,
     {
-        self.map.insert(value, SetValZST::default()).is_none()
+        self.map.insert(value, SetValZST).is_none()
     }
 
     /// Adds a value to the set, replacing the existing element, if any, that is
@@ -1479,9 +1480,9 @@ impl<T: Ord> FromIterator<T> for BTreeSet<T> {
     }
 }
 
-impl<T: Ord, A: Allocator + Clone> BTreeSet<T, A> {
+impl<T: Ord, A: AllocatorClone> BTreeSet<T, A> {
     fn from_sorted_iter<I: Iterator<Item = T>>(iter: I, alloc: A) -> BTreeSet<T, A> {
-        let iter = iter.map(|k| (k, SetValZST::default()));
+        let iter = iter.map(|k| (k, SetValZST));
         let map = BTreeMap::bulk_build_from_sorted_iter(iter, alloc);
         BTreeSet { map }
     }
@@ -1515,7 +1516,7 @@ impl<T: Ord, const N: usize> From<[T; N]> for BTreeSet<T> {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T, A: Allocator + Clone> IntoIterator for BTreeSet<T, A> {
+impl<T, A: AllocatorClone> IntoIterator for BTreeSet<T, A> {
     type Item = T;
     type IntoIter = IntoIter<T, A>;
 
@@ -1537,7 +1538,7 @@ impl<T, A: Allocator + Clone> IntoIterator for BTreeSet<T, A> {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<'a, T, A: Allocator + Clone> IntoIterator for &'a BTreeSet<T, A> {
+impl<'a, T, A: AllocatorClone> IntoIterator for &'a BTreeSet<T, A> {
     type Item = &'a T;
     type IntoIter = Iter<'a, T>;
 
@@ -1546,7 +1547,9 @@ impl<'a, T, A: Allocator + Clone> IntoIterator for &'a BTreeSet<T, A> {
     }
 }
 
-/// An iterator produced by calling `extract_if` on BTreeSet.
+/// This `struct` is created by the [`extract_if`] method on [`BTreeSet`].
+///
+/// [`extract_if`]: BTreeSet::extract_if
 #[stable(feature = "btree_extract_if", since = "1.91.0")]
 #[must_use = "iterators are lazy and do nothing unless consumed; \
     use `retain` or `extract_if().for_each(drop)` to remove and discard elements"]
@@ -1555,7 +1558,7 @@ pub struct ExtractIf<
     T,
     R,
     F,
-    #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator + Clone = Global,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A: AllocatorClone = Global,
 > {
     pred: F,
     inner: super::map::ExtractIfInner<'a, T, SetValZST, R>,
@@ -1567,7 +1570,7 @@ pub struct ExtractIf<
 impl<T, R, F, A> fmt::Debug for ExtractIf<'_, T, R, F, A>
 where
     T: fmt::Debug,
-    A: Allocator + Clone,
+    A: AllocatorClone,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ExtractIf")
@@ -1577,7 +1580,7 @@ where
 }
 
 #[stable(feature = "btree_extract_if", since = "1.91.0")]
-impl<T, R, F, A: Allocator + Clone> Iterator for ExtractIf<'_, T, R, F, A>
+impl<T, R, F, A: AllocatorClone> Iterator for ExtractIf<'_, T, R, F, A>
 where
     T: PartialOrd,
     R: RangeBounds<T>,
@@ -1597,7 +1600,7 @@ where
 }
 
 #[stable(feature = "btree_extract_if", since = "1.91.0")]
-impl<T, R, F, A: Allocator + Clone> FusedIterator for ExtractIf<'_, T, R, F, A>
+impl<T, R, F, A: AllocatorClone> FusedIterator for ExtractIf<'_, T, R, F, A>
 where
     T: PartialOrd,
     R: RangeBounds<T>,
@@ -1606,7 +1609,7 @@ where
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: Ord, A: Allocator + Clone> Extend<T> for BTreeSet<T, A> {
+impl<T: Ord, A: AllocatorClone> Extend<T> for BTreeSet<T, A> {
     #[inline]
     fn extend<Iter: IntoIterator<Item = T>>(&mut self, iter: Iter) {
         iter.into_iter().for_each(move |elem| {
@@ -1621,7 +1624,7 @@ impl<T: Ord, A: Allocator + Clone> Extend<T> for BTreeSet<T, A> {
 }
 
 #[stable(feature = "extend_ref", since = "1.2.0")]
-impl<'a, T: 'a + Ord + Copy, A: Allocator + Clone> Extend<&'a T> for BTreeSet<T, A> {
+impl<'a, T: 'a + Ord + Copy, A: AllocatorClone> Extend<&'a T> for BTreeSet<T, A> {
     fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
         self.extend(iter.into_iter().cloned());
     }
@@ -1641,7 +1644,7 @@ impl<T> Default for BTreeSet<T> {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: Ord + Clone, A: Allocator + Clone> Sub<&BTreeSet<T, A>> for &BTreeSet<T, A> {
+impl<T: Ord + Clone, A: AllocatorClone> Sub<&BTreeSet<T, A>> for &BTreeSet<T, A> {
     type Output = BTreeSet<T, A>;
 
     /// Returns the difference of `self` and `rhs` as a new `BTreeSet<T>`.
@@ -1666,7 +1669,7 @@ impl<T: Ord + Clone, A: Allocator + Clone> Sub<&BTreeSet<T, A>> for &BTreeSet<T,
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: Ord + Clone, A: Allocator + Clone> BitXor<&BTreeSet<T, A>> for &BTreeSet<T, A> {
+impl<T: Ord + Clone, A: AllocatorClone> BitXor<&BTreeSet<T, A>> for &BTreeSet<T, A> {
     type Output = BTreeSet<T, A>;
 
     /// Returns the symmetric difference of `self` and `rhs` as a new `BTreeSet<T>`.
@@ -1691,7 +1694,7 @@ impl<T: Ord + Clone, A: Allocator + Clone> BitXor<&BTreeSet<T, A>> for &BTreeSet
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: Ord + Clone, A: Allocator + Clone> BitAnd<&BTreeSet<T, A>> for &BTreeSet<T, A> {
+impl<T: Ord + Clone, A: AllocatorClone> BitAnd<&BTreeSet<T, A>> for &BTreeSet<T, A> {
     type Output = BTreeSet<T, A>;
 
     /// Returns the intersection of `self` and `rhs` as a new `BTreeSet<T>`.
@@ -1716,7 +1719,7 @@ impl<T: Ord + Clone, A: Allocator + Clone> BitAnd<&BTreeSet<T, A>> for &BTreeSet
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: Ord + Clone, A: Allocator + Clone> BitOr<&BTreeSet<T, A>> for &BTreeSet<T, A> {
+impl<T: Ord + Clone, A: AllocatorClone> BitOr<&BTreeSet<T, A>> for &BTreeSet<T, A> {
     type Output = BTreeSet<T, A>;
 
     /// Returns the union of `self` and `rhs` as a new `BTreeSet<T>`.
@@ -1741,7 +1744,7 @@ impl<T: Ord + Clone, A: Allocator + Clone> BitOr<&BTreeSet<T, A>> for &BTreeSet<
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: Debug, A: Allocator + Clone> Debug for BTreeSet<T, A> {
+impl<T: Debug, A: AllocatorClone> Debug for BTreeSet<T, A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_set().entries(self.iter()).finish()
     }
@@ -1806,7 +1809,7 @@ unsafe impl<T> TrustedLen for Iter<'_, T> {}
 impl<T> FusedIterator for Iter<'_, T> {}
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T, A: Allocator + Clone> Iterator for IntoIter<T, A> {
+impl<T, A: AllocatorClone> Iterator for IntoIter<T, A> {
     type Item = T;
 
     fn next(&mut self) -> Option<T> {
@@ -1833,29 +1836,29 @@ impl<T> Default for Iter<'_, T> {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T, A: Allocator + Clone> DoubleEndedIterator for IntoIter<T, A> {
+impl<T, A: AllocatorClone> DoubleEndedIterator for IntoIter<T, A> {
     fn next_back(&mut self) -> Option<T> {
         self.iter.next_back().map(|(k, _)| k)
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T, A: Allocator + Clone> ExactSizeIterator for IntoIter<T, A> {
+impl<T, A: AllocatorClone> ExactSizeIterator for IntoIter<T, A> {
     fn len(&self) -> usize {
         self.iter.len()
     }
 }
 
 #[unstable(feature = "trusted_len", issue = "37572")]
-unsafe impl<T, A: Allocator + Clone> TrustedLen for IntoIter<T, A> {}
+unsafe impl<T, A: AllocatorClone> TrustedLen for IntoIter<T, A> {}
 
 #[stable(feature = "fused", since = "1.26.0")]
-impl<T, A: Allocator + Clone> FusedIterator for IntoIter<T, A> {}
+impl<T, A: AllocatorClone> FusedIterator for IntoIter<T, A> {}
 
 #[stable(feature = "default_iters", since = "1.70.0")]
 impl<T, A> Default for IntoIter<T, A>
 where
-    A: Allocator + Default + Clone,
+    A: AllocatorClone + Default,
 {
     /// Creates an empty `btree_set::IntoIter`.
     ///
@@ -1928,7 +1931,7 @@ impl<T> Default for Range<'_, T> {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T, A: Allocator + Clone> Clone for Difference<'_, T, A> {
+impl<T, A: AllocatorClone> Clone for Difference<'_, T, A> {
     fn clone(&self) -> Self {
         Difference {
             inner: match &self.inner {
@@ -1945,7 +1948,7 @@ impl<T, A: Allocator + Clone> Clone for Difference<'_, T, A> {
     }
 }
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<'a, T: Ord, A: Allocator + Clone> Iterator for Difference<'a, T, A> {
+impl<'a, T: Ord, A: AllocatorClone> Iterator for Difference<'a, T, A> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<&'a T> {
@@ -1967,7 +1970,7 @@ impl<'a, T: Ord, A: Allocator + Clone> Iterator for Difference<'a, T, A> {
             }
             DifferenceInner::Search { self_iter, other_set } => loop {
                 let self_next = self_iter.next()?;
-                if !other_set.contains(&self_next) {
+                if !other_set.contains(self_next) {
                     return Some(self_next);
                 }
             },
@@ -1992,7 +1995,7 @@ impl<'a, T: Ord, A: Allocator + Clone> Iterator for Difference<'a, T, A> {
 }
 
 #[stable(feature = "fused", since = "1.26.0")]
-impl<T: Ord, A: Allocator + Clone> FusedIterator for Difference<'_, T, A> {}
+impl<T: Ord, A: AllocatorClone> FusedIterator for Difference<'_, T, A> {}
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Clone for SymmetricDifference<'_, T> {
@@ -2030,7 +2033,7 @@ impl<'a, T: Ord> Iterator for SymmetricDifference<'a, T> {
 impl<T: Ord> FusedIterator for SymmetricDifference<'_, T> {}
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T, A: Allocator + Clone> Clone for Intersection<'_, T, A> {
+impl<T, A: AllocatorClone> Clone for Intersection<'_, T, A> {
     fn clone(&self) -> Self {
         Intersection {
             inner: match &self.inner {
@@ -2046,7 +2049,7 @@ impl<T, A: Allocator + Clone> Clone for Intersection<'_, T, A> {
     }
 }
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<'a, T: Ord, A: Allocator + Clone> Iterator for Intersection<'a, T, A> {
+impl<'a, T: Ord, A: AllocatorClone> Iterator for Intersection<'a, T, A> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<&'a T> {
@@ -2064,7 +2067,7 @@ impl<'a, T: Ord, A: Allocator + Clone> Iterator for Intersection<'a, T, A> {
             }
             IntersectionInner::Search { small_iter, large_set } => loop {
                 let small_next = small_iter.next()?;
-                if large_set.contains(&small_next) {
+                if large_set.contains(small_next) {
                     return Some(small_next);
                 }
             },
@@ -2087,7 +2090,7 @@ impl<'a, T: Ord, A: Allocator + Clone> Iterator for Intersection<'a, T, A> {
 }
 
 #[stable(feature = "fused", since = "1.26.0")]
-impl<T: Ord, A: Allocator + Clone> FusedIterator for Intersection<'_, T, A> {}
+impl<T: Ord, A: AllocatorClone> FusedIterator for Intersection<'_, T, A> {}
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Clone for Union<'_, T> {
@@ -2152,8 +2155,11 @@ impl<K: Debug> Debug for Cursor<'_, K> {
 /// A `CursorMut` is created with the [`BTreeSet::lower_bound_mut`] and [`BTreeSet::upper_bound_mut`]
 /// methods.
 #[unstable(feature = "btree_cursors", issue = "107540")]
-pub struct CursorMut<'a, K: 'a, #[unstable(feature = "allocator_api", issue = "32838")] A = Global>
-{
+pub struct CursorMut<
+    'a,
+    K: 'a,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A = Global,
+> {
     inner: super::map::CursorMut<'a, K, SetValZST, A>,
 }
 
@@ -2189,7 +2195,7 @@ impl<K: Debug, A> Debug for CursorMut<'_, K, A> {
 pub struct CursorMutKey<
     'a,
     K: 'a,
-    #[unstable(feature = "allocator_api", issue = "32838")] A = Global,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A = Global,
 > {
     inner: super::map::CursorMutKey<'a, K, SetValZST, A>,
 }
@@ -2299,6 +2305,7 @@ impl<'a, T, A> CursorMut<'a, T, A> {
     /// * All elements in the tree must remain in sorted order.
     #[unstable(feature = "btree_cursors", issue = "107540")]
     pub unsafe fn with_mutable_key(self) -> CursorMutKey<'a, T, A> {
+        // ignore-tidy-undocumented-unsafe
         CursorMutKey { inner: unsafe { self.inner.with_mutable_key() } }
     }
 }
@@ -2352,7 +2359,7 @@ impl<'a, T, A> CursorMutKey<'a, T, A> {
     }
 }
 
-impl<'a, T: Ord, A: Allocator + Clone> CursorMut<'a, T, A> {
+impl<'a, T: Ord, A: AllocatorClone> CursorMut<'a, T, A> {
     /// Inserts a new element into the set in the gap that the
     /// cursor is currently pointing to.
     ///
@@ -2368,6 +2375,7 @@ impl<'a, T: Ord, A: Allocator + Clone> CursorMut<'a, T, A> {
     /// * All elements in the tree must remain in sorted order.
     #[unstable(feature = "btree_cursors", issue = "107540")]
     pub unsafe fn insert_after_unchecked(&mut self, value: T) {
+        // SAFETY: Upheld by caller.
         unsafe { self.inner.insert_after_unchecked(value, SetValZST) }
     }
 
@@ -2386,6 +2394,7 @@ impl<'a, T: Ord, A: Allocator + Clone> CursorMut<'a, T, A> {
     /// * All elements in the tree must remain in sorted order.
     #[unstable(feature = "btree_cursors", issue = "107540")]
     pub unsafe fn insert_before_unchecked(&mut self, value: T) {
+        // SAFETY: Upheld by caller.
         unsafe { self.inner.insert_before_unchecked(value, SetValZST) }
     }
 
@@ -2438,7 +2447,7 @@ impl<'a, T: Ord, A: Allocator + Clone> CursorMut<'a, T, A> {
     }
 }
 
-impl<'a, T: Ord, A: Allocator + Clone> CursorMutKey<'a, T, A> {
+impl<'a, T: Ord, A: AllocatorClone> CursorMutKey<'a, T, A> {
     /// Inserts a new element into the set in the gap that the
     /// cursor is currently pointing to.
     ///
@@ -2454,6 +2463,7 @@ impl<'a, T: Ord, A: Allocator + Clone> CursorMutKey<'a, T, A> {
     /// * All elements in the tree must remain in sorted order.
     #[unstable(feature = "btree_cursors", issue = "107540")]
     pub unsafe fn insert_after_unchecked(&mut self, value: T) {
+        // SAFETY: Upheld by caller.
         unsafe { self.inner.insert_after_unchecked(value, SetValZST) }
     }
 
@@ -2472,6 +2482,7 @@ impl<'a, T: Ord, A: Allocator + Clone> CursorMutKey<'a, T, A> {
     /// * All elements in the tree must remain in sorted order.
     #[unstable(feature = "btree_cursors", issue = "107540")]
     pub unsafe fn insert_before_unchecked(&mut self, value: T) {
+        // SAFETY: Upheld by caller.
         unsafe { self.inner.insert_before_unchecked(value, SetValZST) }
     }
 

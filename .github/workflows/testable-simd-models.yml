@@ -19,7 +19,7 @@ defaults:
 jobs:
   testable-simd-models:
     name: Test testable simd models
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     
     steps:
       - name: Checkout Repository

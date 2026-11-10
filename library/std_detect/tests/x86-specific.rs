@@ -1,6 +1,14 @@
 #![cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #![allow(internal_features)]
-#![feature(stdarch_internal, x86_amx_intrinsics, xop_target_feature, movrs_target_feature)]
+#![feature(
+    stdarch_internal,
+    x86_amx_intrinsics,
+    xop_target_feature,
+    movrs_target_feature,
+    clflushopt_target_feature,
+    movdir64b_target_feature,
+    movdiri_target_feature
+)]
 
 #[macro_use]
 extern crate std_detect;
@@ -58,9 +66,12 @@ fn dump() {
     println!("xsaves: {:?}", is_x86_feature_detected!("xsaves"));
     println!("xsavec: {:?}", is_x86_feature_detected!("xsavec"));
     println!("cmpxchg16b: {:?}", is_x86_feature_detected!("cmpxchg16b"));
+    println!("clflushopt: {:?}", is_x86_feature_detected!("clflushopt"));
     println!("adx: {:?}", is_x86_feature_detected!("adx"));
     println!("rtm: {:?}", is_x86_feature_detected!("rtm"));
     println!("movbe: {:?}", is_x86_feature_detected!("movbe"));
+    println!("movdir64b: {:?}", is_x86_feature_detected!("movdir64b"));
+    println!("movdiri: {:?}", is_x86_feature_detected!("movdiri"));
     println!("avxvnni: {:?}", is_x86_feature_detected!("avxvnni"));
     println!("avxvnniint8: {:?}", is_x86_feature_detected!("avxvnniint8"));
     println!("avxneconvert: {:?}", is_x86_feature_detected!("avxneconvert"));
@@ -76,7 +87,6 @@ fn dump() {
     println!("widekl: {:?}", is_x86_feature_detected!("widekl"));
     println!("movrs: {:?}", is_x86_feature_detected!("movrs"));
     println!("amx-fp8: {:?}", is_x86_feature_detected!("amx-fp8"));
-    println!("amx-tf32: {:?}", is_x86_feature_detected!("amx-tf32"));
     println!("amx-avx512: {:?}", is_x86_feature_detected!("amx-avx512"));
     println!("amx-movrs: {:?}", is_x86_feature_detected!("amx-movrs"));
 }

@@ -4,7 +4,7 @@ use crate::fs::TryLockError;
 use crate::hash::{Hash, Hasher};
 use crate::io::{self, BorrowedCursor, IoSlice, IoSliceMut, SeekFrom};
 use crate::path::{Path, PathBuf};
-pub use crate::sys::fs::common::Dir;
+pub use crate::sys::fs::common::{Dir, ExtraHomeDirs, ExtraMediaDirs};
 use crate::sys::time::SystemTime;
 use crate::sys::unsupported;
 
@@ -28,6 +28,25 @@ pub struct FileType(!);
 
 #[derive(Debug)]
 pub struct DirBuilder {}
+
+// Dummy Drops so that `needs_drop::<std::fs::File>()` etc. is true independent of platform,
+// avoiding a portability hazard.
+// The types not listed here are pure data and don’t implement Drop even when real.
+impl Drop for File {
+    fn drop(&mut self) {
+        self.0
+    }
+}
+impl Drop for ReadDir {
+    fn drop(&mut self) {
+        self.0
+    }
+}
+impl Drop for DirEntry {
+    fn drop(&mut self) {
+        self.0
+    }
+}
 
 impl FileAttr {
     pub fn size(&self) -> u64 {
@@ -138,6 +157,12 @@ impl fmt::Debug for FileType {
     }
 }
 
+impl ReadDir {
+    pub fn dir(&self) -> io::Result<Dir> {
+        self.0
+    }
+}
+
 impl fmt::Debug for ReadDir {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0
@@ -236,7 +261,7 @@ impl File {
         self.0
     }
 
-    pub fn read_buf(&self, _cursor: BorrowedCursor<'_>) -> io::Result<()> {
+    pub fn read_buf(&self, _cursor: BorrowedCursor<'_, u8>) -> io::Result<()> {
         self.0
     }
 
@@ -309,7 +334,15 @@ pub fn rename(_old: &Path, _new: &Path) -> io::Result<()> {
     unsupported()
 }
 
+pub fn rename_noreplace(_old: &Path, _new: &Path) -> io::Result<()> {
+    unsupported()
+}
+
 pub fn set_perm(_p: &Path, perm: FilePermissions) -> io::Result<()> {
+    match perm.0 {}
+}
+
+pub fn set_perm_nofollow(_p: &Path, perm: FilePermissions) -> io::Result<()> {
     match perm.0 {}
 }
 

@@ -13,6 +13,7 @@
 #![feature(hasher_prefixfree_extras)]
 #![feature(box_into_inner)]
 #![feature(try_trait_v2)]
+#![feature(trusted_len)]
 
 #![stable(feature = "rust1", since = "1.0.0")]
 

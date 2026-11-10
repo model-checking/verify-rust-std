@@ -16,7 +16,7 @@ use super::helpers::metrics::MetricMap;
 use super::options::{Options, OutputFormat};
 use super::test_result::TestResult;
 use super::time::{TestExecTime, TestSuiteExecTime};
-use super::types::{NamePadding, TestDesc, TestDescAndFn};
+use super::types::{NamePadding, TestDesc, TestDescAndFn, TestList};
 use super::{filter_tests, run_tests, term};
 
 /// Generic wrapper over stdout.
@@ -170,7 +170,7 @@ impl ConsoleTestState {
 }
 
 // List the tests to console, and optionally to logfile. Filters are honored.
-pub(crate) fn list_tests_console(opts: &TestOpts, tests: Vec<TestDescAndFn>) -> io::Result<()> {
+pub(crate) fn list_tests_console(opts: &TestOpts, tests: TestList<'_>) -> io::Result<()> {
     let output = match term::stdout() {
         None => OutputLocation::Raw(io::stdout().lock()),
         Some(t) => OutputLocation::Pretty(t),
@@ -186,7 +186,7 @@ pub(crate) fn list_tests_console(opts: &TestOpts, tests: Vec<TestDescAndFn>) -> 
     let mut st = ConsoleTestDiscoveryState::new(opts)?;
 
     out.write_discovery_start()?;
-    for test in filter_tests(opts, tests).into_iter() {
+    for test in filter_tests(opts, tests) {
         use crate::TestFn::*;
 
         let TestDescAndFn { desc, testfn } = test;
@@ -307,8 +307,13 @@ pub(crate) fn get_formatter(opts: &TestOpts, max_name_len: usize) -> Box<dyn Out
 
 /// A simple console test runner.
 /// Runs provided tests reporting process and results to the stdout.
-pub fn run_tests_console(opts: &TestOpts, tests: Vec<TestDescAndFn>) -> io::Result<bool> {
-    let max_name_len = tests
+pub fn run_tests_console(opts: &TestOpts, tests: TestList<'_>) -> io::Result<bool> {
+    let all_test_len = tests.tests.len();
+    let filtered_tests = filter_tests(opts, tests);
+
+    // Only iterate the filtered tests: only those are actually printed, and also the
+    // full list can be very long and we want to avoid ever iterating that list in Miri.
+    let max_name_len = filtered_tests
         .iter()
         .max_by_key(|t| len_if_padded(t))
         .map(|t| t.desc.name.as_slice().len())
@@ -324,7 +329,7 @@ pub fn run_tests_console(opts: &TestOpts, tests: Vec<TestDescAndFn>) -> io::Resu
         (cfg!(target_family = "wasm") && cfg!(target_os = "unknown")) || cfg!(target_os = "zkvm");
 
     let start_time = (!is_instant_unsupported).then(Instant::now);
-    run_tests(opts, tests, |x| on_test_event(&x, &mut st, &mut *out))?;
+    run_tests(opts, filtered_tests, all_test_len, |x| on_test_event(&x, &mut st, &mut *out))?;
     st.exec_time = start_time.map(|t| TestSuiteExecTime(t.elapsed()));
 
     assert!(opts.fail_fast || st.current_test_count() == st.total);

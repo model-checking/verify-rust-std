@@ -100,7 +100,7 @@ impl Read for StdinRaw {
         handle_ebadf(self.0.read(buf), || Ok(0))
     }
 
-    fn read_buf(&mut self, buf: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf(&mut self, buf: BorrowedCursor<'_, u8>) -> io::Result<()> {
         handle_ebadf(self.0.read_buf(buf), || Ok(()))
     }
 
@@ -120,7 +120,7 @@ impl Read for StdinRaw {
         handle_ebadf(self.0.read_exact(buf), || Err(io::Error::READ_EXACT_EOF))
     }
 
-    fn read_buf_exact(&mut self, buf: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf_exact(&mut self, buf: BorrowedCursor<'_, u8>) -> io::Result<()> {
         if buf.capacity() == 0 {
             return Ok(());
         }
@@ -285,6 +285,7 @@ pub struct Stdin {
 /// ```
 #[must_use = "if unused stdin will immediately unlock"]
 #[stable(feature = "rust1", since = "1.0.0")]
+#[cfg_attr(not(test), rustc_diagnostic_item = "StdinLock")]
 pub struct StdinLock<'a> {
     inner: MutexGuard<'a, BufReader<StdinRaw>>,
 }
@@ -446,7 +447,7 @@ impl Read for Stdin {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.lock().read(buf)
     }
-    fn read_buf(&mut self, buf: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf(&mut self, buf: BorrowedCursor<'_, u8>) -> io::Result<()> {
         self.lock().read_buf(buf)
     }
     fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
@@ -465,7 +466,7 @@ impl Read for Stdin {
     fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
         self.lock().read_exact(buf)
     }
-    fn read_buf_exact(&mut self, cursor: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf_exact(&mut self, cursor: BorrowedCursor<'_, u8>) -> io::Result<()> {
         self.lock().read_buf_exact(cursor)
     }
 }
@@ -475,7 +476,7 @@ impl Read for &Stdin {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.lock().read(buf)
     }
-    fn read_buf(&mut self, buf: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf(&mut self, buf: BorrowedCursor<'_, u8>) -> io::Result<()> {
         self.lock().read_buf(buf)
     }
     fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
@@ -494,7 +495,7 @@ impl Read for &Stdin {
     fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
         self.lock().read_exact(buf)
     }
-    fn read_buf_exact(&mut self, cursor: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf_exact(&mut self, cursor: BorrowedCursor<'_, u8>) -> io::Result<()> {
         self.lock().read_buf_exact(cursor)
     }
 }
@@ -513,7 +514,7 @@ impl Read for StdinLock<'_> {
         self.inner.read(buf)
     }
 
-    fn read_buf(&mut self, buf: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf(&mut self, buf: BorrowedCursor<'_, u8>) -> io::Result<()> {
         self.inner.read_buf(buf)
     }
 
@@ -538,11 +539,13 @@ impl Read for StdinLock<'_> {
         self.inner.read_exact(buf)
     }
 
-    fn read_buf_exact(&mut self, cursor: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf_exact(&mut self, cursor: BorrowedCursor<'_, u8>) -> io::Result<()> {
         self.inner.read_buf_exact(cursor)
     }
 }
 
+#[doc(hidden)]
+#[unstable(feature = "core_io_internals", reason = "exposed only for libstd", issue = "none")]
 impl SpecReadByte for StdinLock<'_> {
     #[inline]
     fn spec_read_byte(&mut self) -> Option<io::Result<u8>> {
@@ -591,9 +594,8 @@ impl fmt::Debug for StdinLock<'_> {
 ///
 /// ### Note: Windows Portability Considerations
 ///
-/// When operating in a console, the Windows implementation of this stream does not support
-/// non-UTF-8 byte sequences. Attempting to write bytes that are not valid UTF-8 will return
-/// an error.
+/// When operating in a console, the Windows implementation of this stream decodes bytes
+/// as UTF-8, replacing malformed sequences with the Unicode replacement character (U+FFFD).
 ///
 /// In a process with a detached console, such as one using
 /// `#![windows_subsystem = "windows"]`, or in a child process spawned from such a process,
@@ -624,9 +626,8 @@ pub struct Stdout {
 ///
 /// ### Note: Windows Portability Considerations
 ///
-/// When operating in a console, the Windows implementation of this stream does not support
-/// non-UTF-8 byte sequences. Attempting to write bytes that are not valid UTF-8 will return
-/// an error.
+/// When operating in a console, the Windows implementation of this stream decodes bytes
+/// as UTF-8, replacing malformed sequences with the Unicode replacement character (U+FFFD).
 ///
 /// In a process with a detached console, such as one using
 /// `#![windows_subsystem = "windows"]`, or in a child process spawned from such a process,
@@ -656,9 +657,8 @@ static STDOUT: OnceLock<ReentrantLock<RefCell<LineWriter<StdoutRaw>>>> = OnceLoc
 ///
 /// ### Note: Windows Portability Considerations
 ///
-/// When operating in a console, the Windows implementation of this stream does not support
-/// non-UTF-8 byte sequences. Attempting to write bytes that are not valid UTF-8 will return
-/// an error.
+/// When operating in a console, the Windows implementation of this stream decodes bytes
+/// as UTF-8, replacing malformed sequences with the Unicode replacement character (U+FFFD).
 ///
 /// In a process with a detached console, such as one using
 /// `#![windows_subsystem = "windows"]`, or in a child process spawned from such a process,
@@ -723,7 +723,7 @@ pub fn stdout() -> Stdout {
 // Flush the data and disable buffering during shutdown
 // by replacing the line writer by one with zero
 // buffering capacity.
-pub fn cleanup() {
+pub(crate) fn cleanup() {
     let mut initialized = false;
     let stdout = STDOUT.get_or_init(|| {
         initialized = true;
@@ -793,7 +793,7 @@ impl Write for Stdout {
     }
     #[inline]
     fn is_write_vectored(&self) -> bool {
-        io::Write::is_write_vectored(&&*self)
+        io::Write::is_write_vectored(&self)
     }
     fn flush(&mut self) -> io::Result<()> {
         (&*self).flush()
@@ -879,9 +879,8 @@ impl fmt::Debug for StdoutLock<'_> {
 ///
 /// ### Note: Windows Portability Considerations
 ///
-/// When operating in a console, the Windows implementation of this stream does not support
-/// non-UTF-8 byte sequences. Attempting to write bytes that are not valid UTF-8 will return
-/// an error.
+/// When operating in a console, the Windows implementation of this stream decodes bytes
+/// as UTF-8, replacing malformed sequences with the Unicode replacement character (U+FFFD).
 ///
 /// In a process with a detached console, such as one using
 /// `#![windows_subsystem = "windows"]`, or in a child process spawned from such a process,
@@ -900,9 +899,8 @@ pub struct Stderr {
 ///
 /// ### Note: Windows Portability Considerations
 ///
-/// When operating in a console, the Windows implementation of this stream does not support
-/// non-UTF-8 byte sequences. Attempting to write bytes that are not valid UTF-8 will return
-/// an error.
+/// When operating in a console, the Windows implementation of this stream decodes bytes
+/// as UTF-8, replacing malformed sequences with the Unicode replacement character (U+FFFD).
 ///
 /// In a process with a detached console, such as one using
 /// `#![windows_subsystem = "windows"]`, or in a child process spawned from such a process,
@@ -921,9 +919,8 @@ pub struct StderrLock<'a> {
 ///
 /// ### Note: Windows Portability Considerations
 ///
-/// When operating in a console, the Windows implementation of this stream does not support
-/// non-UTF-8 byte sequences. Attempting to write bytes that are not valid UTF-8 will return
-/// an error.
+/// When operating in a console, the Windows implementation of this stream decodes bytes
+/// as UTF-8, replacing malformed sequences with the Unicode replacement character (U+FFFD).
 ///
 /// In a process with a detached console, such as one using
 /// `#![windows_subsystem = "windows"]`, or in a child process spawned from such a process,
@@ -1025,7 +1022,7 @@ impl Write for Stderr {
     }
     #[inline]
     fn is_write_vectored(&self) -> bool {
-        io::Write::is_write_vectored(&&*self)
+        io::Write::is_write_vectored(&self)
     }
     fn flush(&mut self) -> io::Result<()> {
         (&*self).flush()
@@ -1194,7 +1191,7 @@ pub(crate) fn attempt_print_to_stderr(args: fmt::Arguments<'_>) {
 
 /// Trait to determine if a descriptor/handle refers to a terminal/tty.
 #[stable(feature = "is_terminal", since = "1.70.0")]
-pub trait IsTerminal: crate::sealed::Sealed {
+pub impl(crate) trait IsTerminal {
     /// Returns `true` if the descriptor/handle refers to a terminal/tty.
     ///
     /// On platforms where Rust does not know how to detect a terminal yet, this will return
@@ -1242,16 +1239,13 @@ pub trait IsTerminal: crate::sealed::Sealed {
     ///
     /// [changes]: io#platform-specific-behavior
     /// [`Stdin`]: crate::io::Stdin
-    #[doc(alias = "isatty")]
+    #[doc(alias = "isatty", alias = "atty")]
     #[stable(feature = "is_terminal", since = "1.70.0")]
     fn is_terminal(&self) -> bool;
 }
 
 macro_rules! impl_is_terminal {
     ($($t:ty),*$(,)?) => {$(
-        #[unstable(feature = "sealed", issue = "none")]
-        impl crate::sealed::Sealed for $t {}
-
         #[stable(feature = "is_terminal", since = "1.70.0")]
         impl IsTerminal for $t {
             #[inline]

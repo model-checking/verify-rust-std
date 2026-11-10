@@ -11,7 +11,6 @@
 pub const WORD_SIZE: usize = size_of::<u32>();
 
 pub mod abi;
-pub mod os;
 
 use crate::io as std_io;
 
@@ -32,5 +31,5 @@ pub fn unsupported_err() -> std_io::Error {
 }
 
 pub fn abort_internal() -> ! {
-    core::intrinsics::abort();
+    core::intrinsics::abort_immediate();
 }
