@@ -1,5 +1,7 @@
 //! This module contains a variety of sort implementations that are optimized for small lengths.
 
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::{self, ManuallyDrop, MaybeUninit};
 use crate::slice::sort::shared::FreezeMarker;
 use crate::{hint, intrinsics, ptr, slice};
@@ -377,6 +379,38 @@ where
 /// types. `is_less` could be a huge function and we want to give the compiler an option to
 /// not inline this function. For the same reasons that this function is very perf critical
 /// it should be in the same module as the functions that use it.
+// Kani's write sets below list only element or destination memory; they cannot express
+// the footprint of an arbitrary FnMut. These contracts and stub_verified uses require
+// comparators that write nowhere else, and only the proved element, comparator, and
+// allocation domains listed in verify.rs. One successful contract proof does not justify
+// a new consumer.
+#[safety::requires(
+    a_pos.checked_mul(size_of::<T>()).is_some_and(|offset| {
+        offset <= isize::MAX as usize
+            && (v_base as isize).checked_add(offset as isize).is_some()
+            && ptr::byte_offset_does_not_wrap(v_base, offset as isize)
+    })
+)]
+#[safety::requires(
+    b_pos.checked_mul(size_of::<T>()).is_some_and(|offset| {
+        offset <= isize::MAX as usize
+            && (v_base as isize).checked_add(offset as isize).is_some()
+            && ptr::byte_offset_does_not_wrap(v_base, offset as isize)
+    })
+)]
+#[safety::requires(
+    crate::ub_checks::same_allocation(v_base, v_base.wrapping_add(a_pos))
+        && crate::ub_checks::same_allocation(v_base, v_base.wrapping_add(b_pos))
+)]
+#[safety::requires(
+    crate::ub_checks::can_dereference(v_base.wrapping_add(a_pos))
+        && crate::ub_checks::can_write(v_base.wrapping_add(a_pos))
+)]
+#[safety::requires(
+    crate::ub_checks::can_dereference(v_base.wrapping_add(b_pos))
+        && crate::ub_checks::can_write(v_base.wrapping_add(b_pos))
+)]
+#[cfg_attr(kani, crate::kani::modifies(v_base.wrapping_add(a_pos), v_base.wrapping_add(b_pos)))]
 unsafe fn swap_if_less<T, F>(v_base: *mut T, a_pos: usize, b_pos: usize, is_less: &mut F)
 where
     F: FnMut(&T, &T) -> bool,
@@ -529,10 +563,47 @@ where
     }
 }
 
+// Contract-only geometry. Return zero for invalid inputs, including equal pointers, so the
+// modifies expression stays total even in a consumer that deliberately violates requires.
+#[cfg(kani)]
+fn insert_tail_contract_len<T>(begin: *mut T, tail: *mut T) -> usize {
+    let elem_size = size_of::<T>();
+    if elem_size == 0 || begin >= tail || !crate::ub_checks::same_allocation(begin, tail) {
+        return 0;
+    }
+    let Some(bytes) = (tail as usize).checked_sub(begin as usize) else {
+        return 0;
+    };
+    if bytes > isize::MAX as usize || bytes % elem_size != 0 {
+        return 0;
+    }
+    (bytes / elem_size).saturating_add(1)
+}
+
 /// Sorts range [begin, tail] assuming [begin, tail) is already sorted.
 ///
 /// # Safety
 /// begin < tail and p must be valid and initialized for all begin <= p <= tail.
+// The Kani callback frame and domain restrictions above swap_if_less also apply here.
+#[safety::requires(
+    begin < tail
+        && insert_tail_contract_len(begin, tail) > 1
+        && crate::ub_checks::can_dereference(ptr::slice_from_raw_parts(
+            begin,
+            insert_tail_contract_len(begin, tail),
+        ))
+        && crate::ub_checks::can_write(ptr::slice_from_raw_parts_mut(
+            begin,
+            insert_tail_contract_len(begin, tail),
+        ))
+)]
+#[cfg_attr(
+    kani,
+    crate::kani::modifies(ptr::slice_from_raw_parts_mut(
+        begin,
+        insert_tail_contract_len(begin, tail)
+    ))
+)]
 unsafe fn insert_tail<T, F: FnMut(&T, &T) -> bool>(begin: *mut T, tail: *mut T, is_less: &mut F) {
     // SAFETY: see individual comments.
     unsafe {
@@ -571,6 +642,9 @@ unsafe fn insert_tail<T, F: FnMut(&T, &T) -> bool>(begin: *mut T, tail: *mut T, 
 }
 
 /// Sort `v` assuming `v[..offset]` is already sorted.
+// The Kani callback frame and domain restrictions above swap_if_less also apply here.
+#[safety::requires(offset != 0 && offset <= v.len())]
+#[cfg_attr(kani, crate::kani::modifies(v))]
 pub fn insertion_sort_shift_left<T, F: FnMut(&T, &T) -> bool>(
     v: &mut [T],
     offset: usize,
@@ -601,8 +675,25 @@ pub fn insertion_sort_shift_left<T, F: FnMut(&T, &T) -> bool>(
     }
 }
 
+#[cfg(kani)]
+fn sort4_contract_regions_disjoint<T>(src: *const T, dst: *mut T) -> bool {
+    let Some(bytes) = size_of::<T>().checked_mul(4) else {
+        return false;
+    };
+    bytes == 0
+        || !crate::ub_checks::same_allocation(src, dst)
+        || (src as usize).abs_diff(dst as usize) >= bytes
+}
+
 /// SAFETY: The caller MUST guarantee that `v_base` is valid for 4 reads and
 /// `dst` is valid for 4 writes. The result will be stored in `dst[0..4]`.
+// The Kani callback frame and domain restrictions above swap_if_less also apply here.
+#[safety::requires(
+    crate::ub_checks::can_dereference(ptr::slice_from_raw_parts(v_base, 4))
+        && crate::ub_checks::can_write(ptr::slice_from_raw_parts_mut(dst, 4))
+        && sort4_contract_regions_disjoint(v_base, dst)
+)]
+#[cfg_attr(kani, crate::kani::modifies(ptr::slice_from_raw_parts_mut(dst, 4)))]
 pub unsafe fn sort4_stable<T, F: FnMut(&T, &T) -> bool>(
     v_base: *const T,
     dst: *mut T,
@@ -739,6 +830,16 @@ unsafe fn merge_down<T, F: FnMut(&T, &T) -> bool>(
     (left_src, right_src, dst)
 }
 
+#[cfg(kani)]
+fn merge_contract_regions_disjoint<T>(src: *const T, dst: *mut T, len: usize) -> bool {
+    let Some(bytes) = size_of::<T>().checked_mul(len) else {
+        return false;
+    };
+    bytes == 0
+        || !crate::ub_checks::same_allocation(src, dst)
+        || (src as usize).abs_diff(dst as usize) >= bytes
+}
+
 /// Merge v assuming v[..len / 2] and v[len / 2..] are sorted.
 ///
 /// Original idea for bi-directional merging by Igor van den Hoven (quadsort),
@@ -751,6 +852,12 @@ unsafe fn merge_down<T, F: FnMut(&T, &T) -> bool>(
 ///
 /// Note that T must be Freeze, the comparison function is evaluated on outdated
 /// temporary 'copies' that may not end up in the final array.
+// The Kani callback frame and domain restrictions above swap_if_less also apply here.
+#[safety::requires(v.len() >= 2)]
+#[safety::requires(crate::ub_checks::can_dereference(v as *const [T]))]
+#[safety::requires(crate::ub_checks::can_write(ptr::slice_from_raw_parts_mut(dst, v.len())))]
+#[safety::requires(merge_contract_regions_disjoint(v.as_ptr(), dst, v.len()))]
+#[cfg_attr(kani, crate::kani::modifies(ptr::slice_from_raw_parts_mut(dst, v.len())))]
 unsafe fn bidirectional_merge<T: FreezeMarker, F: FnMut(&T, &T) -> bool>(
     v: &[T],
     dst: *mut T,
@@ -859,3 +966,8 @@ pub(crate) const fn has_efficient_in_place_swap<T>() -> bool {
     // Heuristic that holds true on all tested 64-bit capable architectures.
     size_of::<T>() <= 8 // size_of::<u64>()
 }
+
+// Bounded SmallSort verification; harnesses are isolated from ordinary Rust builds.
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify;

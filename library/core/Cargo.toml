@@ -44,6 +44,8 @@ check-cfg = [
     'cfg(target_has_reliable_f128_math)',
     'cfg(llvm_enzyme)',
     'cfg(kani)',
+    # Opt-in Kani control/mutant harnesses of the SmallSort proofs; never set by CI.
+    'cfg(kani_smallsort_controls)',
     'cfg(flux)',
     'cfg(rapx)',
     # Prevents use of a static variable for providing platform specific RawOsError
