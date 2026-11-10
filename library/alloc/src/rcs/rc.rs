@@ -5169,11 +5169,7 @@ mod verify {
     gen_assume_init_harness!(harness_rc_assume_init_u128, u128);
     gen_assume_init_harness!(harness_rc_assume_init_unit, ());
     gen_assume_init_harness!(harness_rc_assume_init_array, [u8; 4]);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks supports the mutable cast
-    // from *mut RcInner<bool> to *mut u8 in NonNull::cast. This is a Kani
-    // limitation, not evidence of UB in Rc::assume_init.
-    // gen_assume_init_harness!(harness_rc_assume_init_bool, bool);
+    gen_assume_init_harness!(harness_rc_assume_init_bool, bool);
 
     // Rc<[MaybeUninit<T>]>::assume_init harnesses.
     macro_rules! gen_assume_init_slice_harness {
@@ -5225,8 +5221,8 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem]>::from_raw)]
             pub fn $name() {
-                let array: [$elem; 16] = kani::any();
-                let rc: Rc<[$elem]> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem]> = Rc::from(vec);
                 let ptr: *const [$elem] = Rc::into_raw(rc);
                 let _: Rc<[$elem]> = unsafe { Rc::from_raw(ptr) };
                 kani::cover(
@@ -5247,17 +5243,8 @@ mod verify {
     gen_from_raw_sized_harness!(harness_rc_from_raw_u32, u32);
     gen_from_raw_sized_harness!(harness_rc_from_raw_u64, u64);
     gen_from_raw_sized_harness!(harness_rc_from_raw_u128, u128);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks fixes the Box::new
-    // initialization false positive and supports the *const bool mutable cast
-    // used to recover RcInner<bool>. These tool issues are not evidence of UB
-    // in Rc::from_raw.
-    // gen_from_raw_sized_harness!(harness_rc_from_raw_bool, bool);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks supports the mutable cast
-    // from *const () to *mut RcInner<()>. This is a Kani limitation, not evidence
-    // of UB in Rc::from_raw.
-    // gen_from_raw_sized_harness!(harness_rc_from_raw_unit, ());
+    gen_from_raw_sized_harness!(harness_rc_from_raw_bool, bool);
+    gen_from_raw_sized_harness!(harness_rc_from_raw_unit, ());
     gen_from_raw_sized_harness!(harness_rc_from_raw_array, [u8; 4]);
 
     gen_from_raw_unsized_harness!(harness_rc_from_raw_vec_u8, [u8]);
@@ -5291,8 +5278,8 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem]>::increment_strong_count)]
             pub fn $name() {
-                let array: [$elem; 16] = kani::any();
-                let rc: Rc<[$elem]> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem]> = Rc::from(vec);
                 let ptr: *const [$elem] = Rc::into_raw(rc);
                 unsafe {
                     Rc::<[$elem]>::increment_strong_count(ptr);
@@ -5317,17 +5304,8 @@ mod verify {
     gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_u32, u32);
     gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_u64, u64);
     gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_u128, u128);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks fixes the Box::new
-    // initialization false positive and supports the mutable casts involving
-    // bool and RcInner<bool>. These tool issues are not evidence of UB
-    // in Rc::increment_strong_count.
-    // gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_bool, bool);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks supports the mutable cast
-    // from *const () to *mut RcInner<()>. This is a Kani limitation, not evidence
-    // of UB in Rc::increment_strong_count.
-    // gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_unit, ());
+    gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_bool, bool);
+    gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_unit, ());
     gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_array, [u8; 4]);
 
     gen_increment_strong_count_unsized_harness!(harness_rc_increment_strong_count_vec_u8, [u8]);
@@ -5361,8 +5339,8 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem]>::decrement_strong_count)]
             pub fn $name() {
-                let array: [$elem; 16] = kani::any();
-                let rc: Rc<[$elem]> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem]> = Rc::from(vec);
                 let ptr: *const [$elem] = Rc::into_raw(rc);
                 unsafe {
                     Rc::<[$elem]>::increment_strong_count(ptr);
@@ -5387,16 +5365,8 @@ mod verify {
     gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_u32, u32);
     gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_u64, u64);
     gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_u128, u128);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks supports the mutable cast
-    // from *const bool to *mut RcInner<bool> in Rc::from_raw_in. This is a Kani
-    // limitation, not evidence of UB in Rc::decrement_strong_count.
-    // gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_bool, bool);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks supports the mutable cast
-    // from *const () to *mut RcInner<()> in Rc::from_raw_in. This is a Kani
-    // limitation, not evidence of UB in Rc::decrement_strong_count.
-    // gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_unit, ());
+    gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_bool, bool);
+    gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_unit, ());
     gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_array, [u8; 4]);
 
     gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_vec_u8, [u8]);
@@ -5423,8 +5393,8 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem], Global>::from_raw_in)]
             pub fn $name() {
-                let array: [$elem; 16] = kani::any();
-                let rc: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
                 let (ptr, alloc): (*const [$elem], Global) = Rc::into_raw_with_allocator(rc);
                 let _: Rc<[$elem], Global> = unsafe { Rc::from_raw_in(ptr, alloc) };
                 kani::cover(
@@ -5445,16 +5415,8 @@ mod verify {
     gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_u32, u32);
     gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_u64, u64);
     gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_u128, u128);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks supports the mutable cast
-    // from *const () to *mut RcInner<()>. This is a Kani limitation, not evidence
-    // of UB in Rc::from_raw_in.
-    // gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_unit, ());
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks supports the mutable cast
-    // from *const bool to *mut RcInner<bool>. This is a Kani limitation, not
-    // evidence of UB in Rc::from_raw_in.
-    // gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_bool, bool);
+    gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_unit, ());
+    gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_bool, bool);
     gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_array, [u8; 4]);
 
     gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_vec_u8, [u8]);
@@ -5488,8 +5450,8 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem], Global>::increment_strong_count_in)]
             pub fn $name() {
-                let array: [$elem; 16] = kani::any();
-                let rc: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
                 let (ptr, _alloc): (*const [$elem], Global) = Rc::into_raw_with_allocator(rc);
                 unsafe {
                     Rc::<[$elem], Global>::increment_strong_count_in(ptr, Global);
@@ -5514,17 +5476,8 @@ mod verify {
     gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_u32, u32);
     gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_u64, u64);
     gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_u128, u128);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks fixes the Box::new
-    // initialization false positive and supports the mutable casts involving
-    // bool and RcInner<bool>. These tool issues are not evidence of UB
-    // in Rc::increment_strong_count_in.
-    // gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_bool, bool);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks supports the mutable cast
-    // from *const () to *mut RcInner<()>. This is a Kani limitation, not evidence
-    // of UB in Rc::increment_strong_count_in.
-    // gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_unit, ());
+    gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_bool, bool);
+    gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_unit, ());
     gen_increment_strong_count_in_sized_harness!(
         harness_rc_increment_strong_count_in_array,
         [u8; 4]
@@ -5575,8 +5528,8 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem], Global>::decrement_strong_count_in)]
             pub fn $name() {
-                let array: [$elem; 16] = kani::any();
-                let rc: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
                 let rc2: Rc<[$elem], Global> = rc.clone();
                 let (ptr, alloc): (*const [$elem], Global) = Rc::into_raw_with_allocator(rc2);
                 unsafe {
@@ -5600,16 +5553,8 @@ mod verify {
     gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_u32, u32);
     gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_u64, u64);
     gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_u128, u128);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks supports the mutable cast
-    // from *const bool to *mut RcInner<bool> in Rc::from_raw_in. This is a Kani
-    // limitation, not evidence of UB in Rc::decrement_strong_count_in.
-    // gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_bool, bool);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks supports the mutable cast
-    // from *const () to *mut RcInner<()> in Rc::from_raw_in. This is a Kani
-    // limitation, not evidence of UB in Rc::decrement_strong_count_in.
-    // gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_unit, ());
+    gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_bool, bool);
+    gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_unit, ());
     gen_decrement_strong_count_in_sized_harness!(
         harness_rc_decrement_strong_count_in_array,
         [u8; 4]
@@ -5660,9 +5605,8 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem]>::get_mut_unchecked)]
             pub fn $name() {
-                let array: [$elem; 16] = kani::any();
-                let mut rc: Rc<[$elem]> = Rc::new(array);
-
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let mut rc: Rc<[$elem]> = Rc::from(vec);
                 unsafe {
                     let data: &mut [$elem] = Rc::get_mut_unchecked(&mut rc);
                     kani::cover(
@@ -5687,12 +5631,7 @@ mod verify {
     gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_u32, u32);
     gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_u64, u64);
     gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_u128, u128);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks fixes the Box::new
-    // initialization false positive and supports the mutable cast from
-    // *mut RcInner<bool> to *mut u8 in NonNull::cast. These tool issues are not
-    // evidence of UB in Rc::get_mut_unchecked.
-    // gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_bool, bool);
+    gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_bool, bool);
     gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_unit, ());
     gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_array, [u8; 4]);
 
@@ -5703,61 +5642,56 @@ mod verify {
     gen_get_mut_unchecked_unsized_harness!(harness_rc_get_mut_unchecked_vec_u128, [u128]);
 
     // Rc<dyn Any>::downcast_unchecked harnesses.
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable these harnesses when -Z valid-value-checks supports raw
-    // pointer dereference validity checks for RcInner<dyn Any> in NonNull::as_ref.
-    // Checking the downcast precondition reaches this unsupported trait-object
-    // path. This is a Kani limitation, not evidence of UB in downcast_unchecked.
-    // macro_rules! gen_downcast_unchecked_harness {
-    //     ($name:ident, $ty:ty) => {
-    //         #[kani::proof_for_contract(Rc::<dyn Any, Global>::downcast_unchecked::<$ty>)]
-    //         pub fn $name() {
-    //             let value: $ty = kani::any();
-    //             let rc_dyn: Rc<dyn Any, Global> = Rc::new_in(value, Global);
-    //             let _downcasted: Rc<$ty, Global> = unsafe { rc_dyn.downcast_unchecked::<$ty>() };
-    //             kani::cover(
-    //                 true,
-    //                 "Rc::downcast_unchecked is reachable under its contract preconditions",
-    //             );
-    //         }
-    //     };
-    // }
+    macro_rules! gen_downcast_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Rc::<dyn Any, Global>::downcast_unchecked::<$ty>)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let rc_dyn: Rc<dyn Any, Global> = Rc::new_in(value, Global);
+                let _downcasted: Rc<$ty, Global> = unsafe { rc_dyn.downcast_unchecked::<$ty>() };
+                kani::cover(
+                    true,
+                    "Rc::downcast_unchecked is reachable under its contract preconditions",
+                );
+            }
+        };
+    }
 
-    // macro_rules! gen_downcast_unchecked_vec_harness {
-    //     ($name:ident, $elem:ty) => {
-    //         #[kani::proof_for_contract(Rc::<dyn Any, Global>::downcast_unchecked::<Vec<$elem>>)]
-    //         pub fn $name() {
-    //             let v = verifier_nondet_vec::<$elem>();
-    //             let rc_dyn: Rc<dyn Any, Global> = Rc::new_in(v, Global);
-    //             let _downcasted: Rc<Vec<$elem>, Global> =
-    //                 unsafe { rc_dyn.downcast_unchecked::<Vec<$elem>>() };
-    //             kani::cover(
-    //                 true,
-    //                 "Rc::downcast_unchecked Vec is reachable under its contract preconditions",
-    //             );
-    //         }
-    //     };
-    // }
+    macro_rules! gen_downcast_unchecked_vec_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Rc::<dyn Any, Global>::downcast_unchecked::<Vec<$elem>>)]
+            pub fn $name() {
+                let v = verifier_nondet_vec::<$elem>();
+                let rc_dyn: Rc<dyn Any, Global> = Rc::new_in(v, Global);
+                let _downcasted: Rc<Vec<$elem>, Global> =
+                    unsafe { rc_dyn.downcast_unchecked::<Vec<$elem>>() };
+                kani::cover(
+                    true,
+                    "Rc::downcast_unchecked Vec is reachable under its contract preconditions",
+                );
+            }
+        };
+    }
 
-    // gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_i8, i8);
-    // gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_i16, i16);
-    // gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_i32, i32);
-    // gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_i64, i64);
-    // gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_i128, i128);
-    // gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_u8, u8);
-    // gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_u16, u16);
-    // gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_u32, u32);
-    // gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_u64, u64);
-    // gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_u128, u128);
-    // gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_bool, bool);
-    // gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_unit, ());
-    // gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_array, [u8; 4]);
+    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_i8, i8);
+    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_i16, i16);
+    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_i32, i32);
+    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_i64, i64);
+    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_i128, i128);
+    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_u8, u8);
+    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_u16, u16);
+    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_u32, u32);
+    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_u64, u64);
+    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_u128, u128);
+    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_bool, bool);
+    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_unit, ());
+    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_array, [u8; 4]);
 
-    // gen_downcast_unchecked_vec_harness!(harness_rc_downcast_unchecked_vec_u8, u8);
-    // gen_downcast_unchecked_vec_harness!(harness_rc_downcast_unchecked_vec_u16, u16);
-    // gen_downcast_unchecked_vec_harness!(harness_rc_downcast_unchecked_vec_u32, u32);
-    // gen_downcast_unchecked_vec_harness!(harness_rc_downcast_unchecked_vec_u64, u64);
-    // gen_downcast_unchecked_vec_harness!(harness_rc_downcast_unchecked_vec_u128, u128);
+    gen_downcast_unchecked_vec_harness!(harness_rc_downcast_unchecked_vec_u8, u8);
+    gen_downcast_unchecked_vec_harness!(harness_rc_downcast_unchecked_vec_u16, u16);
+    gen_downcast_unchecked_vec_harness!(harness_rc_downcast_unchecked_vec_u32, u32);
+    gen_downcast_unchecked_vec_harness!(harness_rc_downcast_unchecked_vec_u64, u64);
+    gen_downcast_unchecked_vec_harness!(harness_rc_downcast_unchecked_vec_u128, u128);
 
     // Weak::from_raw harnesses.
     macro_rules! gen_weak_from_raw_sized_harness {
@@ -5778,8 +5712,8 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Weak::<[$elem]>::from_raw)]
             pub fn $name() {
-                let array: [$elem; 16] = kani::any();
-                let strong: Rc<[$elem]> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem]> = Rc::from(vec);
                 let weak: Weak<[$elem]> = Rc::downgrade(&strong);
                 let ptr: *const [$elem] = weak.into_raw();
                 let _recovered: Weak<[$elem]> = unsafe { Weak::from_raw(ptr) };
@@ -5801,17 +5735,8 @@ mod verify {
     gen_weak_from_raw_sized_harness!(harness_weak_from_raw_u32, u32);
     gen_weak_from_raw_sized_harness!(harness_weak_from_raw_u64, u64);
     gen_weak_from_raw_sized_harness!(harness_weak_from_raw_u128, u128);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks fixes the Box
-    // initialization false positive and supports the mutable cast from
-    // *const bool to *mut RcInner<bool> in Weak::from_raw_in. These tool
-    // issues are not evidence of UB in Weak::from_raw.
-    // gen_weak_from_raw_sized_harness!(harness_weak_from_raw_bool, bool);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks supports the mutable cast
-    // from *const () to *mut RcInner<()> in Weak::from_raw_in. This is a Kani
-    // limitation, not evidence of UB in Weak::from_raw.
-    // gen_weak_from_raw_sized_harness!(harness_weak_from_raw_unit, ());
+    gen_weak_from_raw_sized_harness!(harness_weak_from_raw_bool, bool);
+    gen_weak_from_raw_sized_harness!(harness_weak_from_raw_unit, ());
     gen_weak_from_raw_sized_harness!(harness_weak_from_raw_array, [u8; 4]);
 
     gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_vec_u8, [u8]);
@@ -5852,8 +5777,8 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Weak::<[$elem], Global>::from_raw_in)]
             pub fn $name() {
-                let array: [$elem; 16] = kani::any();
-                let strong: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let (ptr, alloc): (*const [$elem], Global) = weak.into_raw_with_allocator();
                 let _recovered: Weak<[$elem], Global> = unsafe { Weak::from_raw_in(ptr, alloc) };
@@ -5875,17 +5800,8 @@ mod verify {
     gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_u32, u32);
     gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_u64, u64);
     gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_u128, u128);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks fixes the Box
-    // initialization false positive and supports the mutable cast from
-    // *const bool to *mut RcInner<bool> in Weak::from_raw_in. These tool
-    // issues are not evidence of UB in Weak::from_raw_in.
-    // gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_bool, bool);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when Kani's -Z valid-value-checks supports the mutable cast
-    // from *const () to *mut RcInner<()> in Weak::from_raw_in. This is a Kani
-    // limitation, not evidence of UB in Weak::from_raw_in.
-    // gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_unit, ());
+    gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_bool, bool);
+    gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_unit, ());
     gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_array, [u8; 4]);
 
     gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_vec_u8, [u8]);
@@ -5946,16 +5862,16 @@ mod verify {
         ($unique:ident, $shared:ident, $weak_present:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $unique() {
-                let array: [$elem; 16] = kani::any();
-                let mut rc: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
                 assert!(Rc::<[$elem], Global>::get_mut(&mut rc).is_some());
                 kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
             }
 
             #[kani::proof]
             pub fn $shared() {
-                let array: [$elem; 16] = kani::any();
-                let mut rc: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
                 let _shared: Rc<[$elem], Global> = Rc::clone(&rc);
                 assert!(Rc::<[$elem], Global>::get_mut(&mut rc).is_none());
                 kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
@@ -5963,8 +5879,8 @@ mod verify {
 
             #[kani::proof]
             pub fn $weak_present() {
-                let array: [$elem; 16] = kani::any();
-                let mut rc: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
                 let _weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
                 assert!(Rc::<[$elem], Global>::get_mut(&mut rc).is_none());
                 kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
@@ -6084,7 +6000,6 @@ mod verify {
     // - unique: fresh `Rc`, direct `make_mut`;
     // - shared: keep one extra strong clone alive before `make_mut`;
     // - weak-present: keep one weak reference alive before `make_mut`.
-    // Only unique harnesses are currently enabled; the copying paths are disabled below.
     // Rc::make_mut harnesses.
     macro_rules! gen_make_mut_sized_harness {
         ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
@@ -6099,38 +6014,29 @@ mod verify {
                 kani::cover(true, "make_mut unique ownership is reachable");
             }
 
-            // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-            // TODO: Re-enable when -Z valid-value-checks supports copy_nonoverlapping.
-            // For these TrivialClone types, the shared make_mut path reaches it via
-            // clone_from_ref_in -> CloneToUninit -> CopySpec. This Kani limitation
-            // is not evidence of UB in Rc::make_mut.
-            // #[kani::proof]
-            // pub fn $shared() {
-            //     let value: $ty = kani::any::<$ty>();
-            //     let mut rc: Rc<$ty, Global> = Rc::new_in(value, Global);
-            //     let _shared: Rc<$ty, Global> = Rc::clone(&rc);
-            //     let result = Rc::<$ty, Global>::make_mut(&mut rc);
-            //     assert!(*result == value);
-            //     kani::cover(true, "make_mut shared result preserves the value");
-            //     assert!(Rc::strong_count(&rc) == 1 && Rc::strong_count(&_shared) == 1);
-            //     kani::cover(true, "make_mut shared ownership is reachable");
-            // }
+            #[kani::proof]
+            pub fn $shared() {
+                let value: $ty = kani::any::<$ty>();
+                let mut rc: Rc<$ty, Global> = Rc::new_in(value, Global);
+                let _shared: Rc<$ty, Global> = Rc::clone(&rc);
+                let result = Rc::<$ty, Global>::make_mut(&mut rc);
+                assert!(*result == value);
+                kani::cover(true, "make_mut shared result preserves the value");
+                assert!(Rc::strong_count(&rc) == 1 && Rc::strong_count(&_shared) == 1);
+                kani::cover(true, "make_mut shared ownership is reachable");
+            }
 
-            // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-            // TODO: Re-enable when -Z valid-value-checks supports copy_nonoverlapping.
-            // The weak-present make_mut path directly moves the payload with a byte
-            // copy. This Kani limitation is not evidence of UB in Rc::make_mut.
-            // #[kani::proof]
-            // pub fn $weak_present() {
-            //     let value: $ty = kani::any::<$ty>();
-            //     let mut rc: Rc<$ty, Global> = Rc::new_in(value, Global);
-            //     let _weak: Weak<$ty, Global> = Rc::downgrade(&rc);
-            //     let result = Rc::<$ty, Global>::make_mut(&mut rc);
-            //     assert!(*result == value);
-            //     kani::cover(true, "make_mut weak-present result preserves the value");
-            //     assert!(_weak.upgrade().is_none());
-            //     kani::cover(true, "make_mut disassociates the weak reference");
-            // }
+            #[kani::proof]
+            pub fn $weak_present() {
+                let value: $ty = kani::any::<$ty>();
+                let mut rc: Rc<$ty, Global> = Rc::new_in(value, Global);
+                let _weak: Weak<$ty, Global> = Rc::downgrade(&rc);
+                let result = Rc::<$ty, Global>::make_mut(&mut rc);
+                assert!(*result == value);
+                kani::cover(true, "make_mut weak-present result preserves the value");
+                assert!(_weak.upgrade().is_none());
+                kani::cover(true, "make_mut disassociates the weak reference");
+            }
         };
     }
 
@@ -6138,12 +6044,8 @@ mod verify {
         ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
             #[kani::proof]
             pub fn $unique() {
-                // Use an array to avoid From<Vec<T>>'s copy_nonoverlapping during setup.
-                // This retains the unique make_mut path at a fixed slice length.
-                // let vec = verifier_nondet_vec_rc::<$elem>();
-                // let mut rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 16] = kani::any();
-                let mut rc: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
                 let len = rc.len();
                 let result = Rc::<[$elem], Global>::make_mut(&mut rc);
                 assert!(result.len() == len);
@@ -6152,40 +6054,31 @@ mod verify {
                 kani::cover(true, "make_mut unique slice ownership is reachable");
             }
 
-            // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-            // TODO: Re-enable when -Z valid-value-checks supports copy_nonoverlapping.
-            // For these TrivialClone types, the shared make_mut path reaches it via
-            // clone_from_ref_in -> CloneToUninit -> CopySpec. This Kani limitation
-            // is not evidence of UB in Rc::make_mut.
-            // #[kani::proof]
-            // pub fn $shared() {
-            //     let vec = verifier_nondet_vec_rc::<$elem>();
-            //     let mut rc: Rc<[$elem], Global> = Rc::from(vec);
-            //     let _shared: Rc<[$elem], Global> = Rc::clone(&rc);
-            //     let len = rc.len();
-            //     let result = Rc::<[$elem], Global>::make_mut(&mut rc);
-            //     assert!(result.len() == len);
-            //     kani::cover(true, "make_mut shared slice preserves length");
-            //     assert!(Rc::strong_count(&rc) == 1 && Rc::strong_count(&_shared) == 1);
-            //     kani::cover(true, "make_mut shared slice ownership is reachable");
-            // }
+            #[kani::proof]
+            pub fn $shared() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
+                let _shared: Rc<[$elem], Global> = Rc::clone(&rc);
+                let len = rc.len();
+                let result = Rc::<[$elem], Global>::make_mut(&mut rc);
+                assert!(result.len() == len);
+                kani::cover(true, "make_mut shared slice preserves length");
+                assert!(Rc::strong_count(&rc) == 1 && Rc::strong_count(&_shared) == 1);
+                kani::cover(true, "make_mut shared slice ownership is reachable");
+            }
 
-            // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-            // TODO: Re-enable when -Z valid-value-checks supports copy_nonoverlapping.
-            // The weak-present make_mut path directly moves the payload with a byte
-            // copy. This Kani limitation is not evidence of UB in Rc::make_mut.
-            // #[kani::proof]
-            // pub fn $weak_present() {
-            //     let vec = verifier_nondet_vec_rc::<$elem>();
-            //     let mut rc: Rc<[$elem], Global> = Rc::from(vec);
-            //     let _weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
-            //     let len = rc.len();
-            //     let result = Rc::<[$elem], Global>::make_mut(&mut rc);
-            //     assert!(result.len() == len);
-            //     kani::cover(true, "make_mut weak-present slice preserves length");
-            //     assert!(_weak.upgrade().is_none());
-            //     kani::cover(true, "make_mut disassociates the slice weak reference");
-            // }
+            #[kani::proof]
+            pub fn $weak_present() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
+                let _weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
+                let len = rc.len();
+                let result = Rc::<[$elem], Global>::make_mut(&mut rc);
+                assert!(result.len() == len);
+                kani::cover(true, "make_mut weak-present slice preserves length");
+                assert!(_weak.upgrade().is_none());
+                kani::cover(true, "make_mut disassociates the slice weak reference");
+            }
         };
     }
 
@@ -6300,152 +6193,142 @@ mod verify {
     // - success case: build `Rc<U>` with `U == T`, coerce to `Rc<dyn Any>`, then downcast::<T>;
     // - failure case: build `Rc<U>` with `U != T` (here `bool`), coerce, then downcast::<T>.
     // Rc<dyn Any>::downcast harnesses.
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable all success/failure harnesses when -Z valid-value-checks
-    // supports raw pointer dereference validity checks for RcInner<dyn Any>
-    // in NonNull::as_ref. The downcast type check reaches this unsupported
-    // trait-object path. This is a Kani limitation, not evidence of UB in downcast.
-    // macro_rules! gen_downcast_harness {
-    //     ($success:ident, $failure:ident, $ty:ty) => {
-    //         #[kani::proof]
-    //         pub fn $success() {
-    //             let value: $ty = kani::any::<$ty>();
-    //             let rc_value: Rc<$ty, Global> = Rc::new_in(value, Global);
-    //             let rc_any: Rc<dyn Any, Global> = rc_value;
-    //             let result = Rc::<dyn Any, Global>::downcast::<$ty>(rc_any);
-    //             assert!(result.is_ok());
-    //             kani::cover(true, "downcast success branch is reachable");
-    //         }
+    macro_rules! gen_downcast_harness {
+        ($success:ident, $failure:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $success() {
+                let value: $ty = kani::any::<$ty>();
+                let rc_value: Rc<$ty, Global> = Rc::new_in(value, Global);
+                let rc_any: Rc<dyn Any, Global> = rc_value;
+                let result = Rc::<dyn Any, Global>::downcast::<$ty>(rc_any);
+                assert!(result.is_ok());
+                kani::cover(true, "downcast success branch is reachable");
+            }
 
-    //         #[kani::proof]
-    //         pub fn $failure() {
-    //             let rc_value: Rc<bool, Global> = Rc::new_in(kani::any::<bool>(), Global);
-    //             let rc_any: Rc<dyn Any, Global> = rc_value;
-    //             let result = Rc::<dyn Any, Global>::downcast::<$ty>(rc_any);
-    //             assert!(result.is_err());
-    //             kani::cover(true, "downcast failure branch is reachable");
-    //         }
-    //     };
-    // }
+            #[kani::proof]
+            pub fn $failure() {
+                let rc_value: Rc<bool, Global> = Rc::new_in(kani::any::<bool>(), Global);
+                let rc_any: Rc<dyn Any, Global> = rc_value;
+                let result = Rc::<dyn Any, Global>::downcast::<$ty>(rc_any);
+                assert!(result.is_err());
+                kani::cover(true, "downcast failure branch is reachable");
+            }
+        };
+    }
 
-    // macro_rules! gen_downcast_vec_harness {
-    //     ($success:ident, $failure:ident, $elem:ty) => {
-    //         #[kani::proof]
-    //         pub fn $success() {
-    //             let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
-    //             let rc_value: Rc<Vec<$elem>, Global> = Rc::new_in(value, Global);
-    //             let rc_any: Rc<dyn Any, Global> = rc_value;
-    //             let result = Rc::<dyn Any, Global>::downcast::<Vec<$elem>>(rc_any);
-    //             assert!(result.is_ok());
-    //             kani::cover(true, "downcast Vec success branch is reachable");
-    //         }
+    macro_rules! gen_downcast_vec_harness {
+        ($success:ident, $failure:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $success() {
+                let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
+                let rc_value: Rc<Vec<$elem>, Global> = Rc::new_in(value, Global);
+                let rc_any: Rc<dyn Any, Global> = rc_value;
+                let result = Rc::<dyn Any, Global>::downcast::<Vec<$elem>>(rc_any);
+                assert!(result.is_ok());
+                kani::cover(true, "downcast Vec success branch is reachable");
+            }
 
-    //         #[kani::proof]
-    //         pub fn $failure() {
-    //             let rc_value: Rc<bool, Global> = Rc::new_in(kani::any::<bool>(), Global);
-    //             let rc_any: Rc<dyn Any, Global> = rc_value;
-    //             let result = Rc::<dyn Any, Global>::downcast::<Vec<$elem>>(rc_any);
-    //             assert!(result.is_err());
-    //             kani::cover(true, "downcast Vec failure branch is reachable");
-    //         }
-    //     };
-    // }
+            #[kani::proof]
+            pub fn $failure() {
+                let rc_value: Rc<bool, Global> = Rc::new_in(kani::any::<bool>(), Global);
+                let rc_any: Rc<dyn Any, Global> = rc_value;
+                let result = Rc::<dyn Any, Global>::downcast::<Vec<$elem>>(rc_any);
+                assert!(result.is_err());
+                kani::cover(true, "downcast Vec failure branch is reachable");
+            }
+        };
+    }
 
-    // gen_downcast_harness!(harness_downcast_i8_success, harness_downcast_i8_failure, i8);
-    // gen_downcast_harness!(harness_downcast_i16_success, harness_downcast_i16_failure, i16);
-    // gen_downcast_harness!(harness_downcast_i32_success, harness_downcast_i32_failure, i32);
-    // gen_downcast_harness!(harness_downcast_i64_success, harness_downcast_i64_failure, i64);
-    // gen_downcast_harness!(harness_downcast_i128_success, harness_downcast_i128_failure, i128);
-    // gen_downcast_harness!(harness_downcast_u8_success, harness_downcast_u8_failure, u8);
-    // gen_downcast_harness!(harness_downcast_u16_success, harness_downcast_u16_failure, u16);
-    // gen_downcast_harness!(harness_downcast_u32_success, harness_downcast_u32_failure, u32);
-    // gen_downcast_harness!(harness_downcast_u64_success, harness_downcast_u64_failure, u64);
-    // gen_downcast_harness!(harness_downcast_u128_success, harness_downcast_u128_failure, u128);
-    // gen_downcast_harness!(harness_downcast_arr4_success, harness_downcast_arr4_failure, [u8; 4]);
-    // gen_downcast_harness!(harness_downcast_unit_success, harness_downcast_unit_failure, ());
+    gen_downcast_harness!(harness_downcast_i8_success, harness_downcast_i8_failure, i8);
+    gen_downcast_harness!(harness_downcast_i16_success, harness_downcast_i16_failure, i16);
+    gen_downcast_harness!(harness_downcast_i32_success, harness_downcast_i32_failure, i32);
+    gen_downcast_harness!(harness_downcast_i64_success, harness_downcast_i64_failure, i64);
+    gen_downcast_harness!(harness_downcast_i128_success, harness_downcast_i128_failure, i128);
+    gen_downcast_harness!(harness_downcast_u8_success, harness_downcast_u8_failure, u8);
+    gen_downcast_harness!(harness_downcast_u16_success, harness_downcast_u16_failure, u16);
+    gen_downcast_harness!(harness_downcast_u32_success, harness_downcast_u32_failure, u32);
+    gen_downcast_harness!(harness_downcast_u64_success, harness_downcast_u64_failure, u64);
+    gen_downcast_harness!(harness_downcast_u128_success, harness_downcast_u128_failure, u128);
+    gen_downcast_harness!(harness_downcast_arr4_success, harness_downcast_arr4_failure, [u8; 4]);
+    gen_downcast_harness!(harness_downcast_unit_success, harness_downcast_unit_failure, ());
 
-    // gen_downcast_vec_harness!(harness_downcast_vec_u8_success, harness_downcast_vec_u8_failure, u8);
-    // gen_downcast_vec_harness!(
-    //     harness_downcast_vec_u16_success,
-    //     harness_downcast_vec_u16_failure,
-    //     u16
-    // );
-    // gen_downcast_vec_harness!(
-    //     harness_downcast_vec_u32_success,
-    //     harness_downcast_vec_u32_failure,
-    //     u32
-    // );
-    // gen_downcast_vec_harness!(
-    //     harness_downcast_vec_u64_success,
-    //     harness_downcast_vec_u64_failure,
-    //     u64
-    // );
-    // gen_downcast_vec_harness!(
-    //     harness_downcast_vec_u128_success,
-    //     harness_downcast_vec_u128_failure,
-    //     u128
-    // );
+    gen_downcast_vec_harness!(harness_downcast_vec_u8_success, harness_downcast_vec_u8_failure, u8);
+    gen_downcast_vec_harness!(
+        harness_downcast_vec_u16_success,
+        harness_downcast_vec_u16_failure,
+        u16
+    );
+    gen_downcast_vec_harness!(
+        harness_downcast_vec_u32_success,
+        harness_downcast_vec_u32_failure,
+        u32
+    );
+    gen_downcast_vec_harness!(
+        harness_downcast_vec_u64_success,
+        harness_downcast_vec_u64_failure,
+        u64
+    );
+    gen_downcast_vec_harness!(
+        harness_downcast_vec_u128_success,
+        harness_downcast_vec_u128_failure,
+        u128
+    );
 
     // Rc::from_box_in harnesses.
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks supports copy_nonoverlapping.
-    // Rc::from_box_in itself copies the payload as bytes into a new RcInner
-    // allocation, so changing harness setup cannot avoid this operation.
-    // This is a Kani limitation, not evidence of UB in Rc::from_box_in.
-    // macro_rules! gen_from_box_in_sized_harness {
-    //     ($name:ident, $ty:ty) => {
-    //         #[kani::proof]
-    //         pub fn $name() {
-    //             let value: $ty = kani::any::<$ty>();
-    //             let src: Box<$ty, Global> = Box::new_in(value, Global);
-    //             let rc = Rc::<$ty, Global>::from_box_in(src);
-    //             assert!(*rc == value);
-    //             kani::cover(true, "from_box_in preserves the value");
-    //             assert!(Rc::strong_count(&rc) == 1);
-    //             kani::cover(true, "from_box_in creates one strong owner");
-    //             assert!(Rc::weak_count(&rc) == 0);
-    //             kani::cover(true, "from_box_in creates no weak owners");
-    //         }
-    //     };
-    // }
+    macro_rules! gen_from_box_in_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any::<$ty>();
+                let src: Box<$ty, Global> = Box::new_in(value, Global);
+                let rc = Rc::<$ty, Global>::from_box_in(src);
+                assert!(*rc == value);
+                kani::cover(true, "from_box_in preserves the value");
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "from_box_in creates one strong owner");
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "from_box_in creates no weak owners");
+            }
+        };
+    }
 
-    // macro_rules! gen_from_box_in_unsized_harness {
-    //     ($name:ident, [$elem:ty]) => {
-    //         #[kani::proof]
-    //         pub fn $name() {
-    //             let vec = verifier_nondet_vec_rc::<$elem>();
-    //             let len = vec.len();
-    //             let src: Box<[$elem], Global> = Box::from(vec);
-    //             let rc = Rc::<[$elem], Global>::from_box_in(src);
-    //             assert!(rc.len() == len);
-    //             kani::cover(true, "from_box_in preserves the slice length");
-    //             assert!(Rc::strong_count(&rc) == 1);
-    //             kani::cover(true, "from_box_in creates one strong slice owner");
-    //             assert!(Rc::weak_count(&rc) == 0);
-    //             kani::cover(true, "from_box_in creates no weak slice owners");
-    //         }
-    //     };
-    // }
+    macro_rules! gen_from_box_in_unsized_harness {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let len = vec.len();
+                let src: Box<[$elem], Global> = Box::from(vec);
+                let rc = Rc::<[$elem], Global>::from_box_in(src);
+                assert!(rc.len() == len);
+                kani::cover(true, "from_box_in preserves the slice length");
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "from_box_in creates one strong slice owner");
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "from_box_in creates no weak slice owners");
+            }
+        };
+    }
 
-    // gen_from_box_in_sized_harness!(harness_from_box_in_i8, i8);
-    // gen_from_box_in_sized_harness!(harness_from_box_in_i16, i16);
-    // gen_from_box_in_sized_harness!(harness_from_box_in_i32, i32);
-    // gen_from_box_in_sized_harness!(harness_from_box_in_i64, i64);
-    // gen_from_box_in_sized_harness!(harness_from_box_in_i128, i128);
-    // gen_from_box_in_sized_harness!(harness_from_box_in_u8, u8);
-    // gen_from_box_in_sized_harness!(harness_from_box_in_u16, u16);
-    // gen_from_box_in_sized_harness!(harness_from_box_in_u32, u32);
-    // gen_from_box_in_sized_harness!(harness_from_box_in_u64, u64);
-    // gen_from_box_in_sized_harness!(harness_from_box_in_u128, u128);
-    // gen_from_box_in_sized_harness!(harness_from_box_in_unit, ());
-    // gen_from_box_in_sized_harness!(harness_from_box_in_arr, [u8; 4]);
-    // gen_from_box_in_sized_harness!(harness_from_box_in_bool, bool);
+    gen_from_box_in_sized_harness!(harness_from_box_in_i8, i8);
+    gen_from_box_in_sized_harness!(harness_from_box_in_i16, i16);
+    gen_from_box_in_sized_harness!(harness_from_box_in_i32, i32);
+    gen_from_box_in_sized_harness!(harness_from_box_in_i64, i64);
+    gen_from_box_in_sized_harness!(harness_from_box_in_i128, i128);
+    gen_from_box_in_sized_harness!(harness_from_box_in_u8, u8);
+    gen_from_box_in_sized_harness!(harness_from_box_in_u16, u16);
+    gen_from_box_in_sized_harness!(harness_from_box_in_u32, u32);
+    gen_from_box_in_sized_harness!(harness_from_box_in_u64, u64);
+    gen_from_box_in_sized_harness!(harness_from_box_in_u128, u128);
+    gen_from_box_in_sized_harness!(harness_from_box_in_unit, ());
+    gen_from_box_in_sized_harness!(harness_from_box_in_arr, [u8; 4]);
+    gen_from_box_in_sized_harness!(harness_from_box_in_bool, bool);
 
-    // gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u8, [u8]);
-    // gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u16, [u16]);
-    // gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u32, [u32]);
-    // gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u64, [u64]);
-    // gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u128, [u128]);
+    gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u8, [u8]);
+    gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u16, [u16]);
+    gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u32, [u32]);
+    gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u64, [u64]);
+    gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u128, [u128]);
 
     // `Weak::as_ptr` has two branches:
     // 1) `is_dangling(ptr)` is true: returns the sentinel pointer itself.
@@ -6490,11 +6373,11 @@ mod verify {
             #[kani::proof]
             pub fn $live() {
                 // Live unsized path: weak points into a real slice allocation.
-                // `Rc::new(array)` creates a real slice allocation.
+                // `Rc::from(vec)` creates a real slice allocation.
                 // `downgrade` references that allocation while `strong` is alive.
                 // So this executes the non-dangling branch.
-                let array: [$elem; 16] = kani::any();
-                let strong: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let ptr: *const [$elem] = Weak::<[$elem], Global>::as_ptr(&weak);
                 assert!(core::ptr::eq(ptr, Rc::as_ptr(&strong)));
@@ -6598,24 +6481,11 @@ mod verify {
         harness_weak_as_ptr_array_dangling,
         [u8; 4]
     );
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks supports the mutable cast from
-    // *mut RcInner<bool> to *mut u8 in NonNull::cast. This is a Kani limitation,
-    // not evidence of UB in Weak::as_ptr.
-    // gen_weak_as_ptr_sized_harness!(
-    //     harness_weak_as_ptr_bool_live,
-    //     harness_weak_as_ptr_bool_dangling,
-    //     bool
-    // );
-
-    // Retain the sentinel-only bool case without constructing a live Rc<bool>.
-    #[kani::proof]
-    pub fn harness_weak_as_ptr_bool_dangling() {
-        let weak: Weak<bool, Global> = Weak::new_in(Global);
-        let ptr: *const bool = Weak::<bool, Global>::as_ptr(&weak);
-        assert!(is_dangling(ptr));
-        kani::cover(true, "Weak::as_ptr returns the dangling sentinel");
-    }
+    gen_weak_as_ptr_sized_harness!(
+        harness_weak_as_ptr_bool_live,
+        harness_weak_as_ptr_bool_dangling,
+        bool
+    );
 
     gen_weak_as_ptr_unsized_harness!(
         harness_weak_as_ptr_vec_u8_live,
@@ -6654,11 +6524,7 @@ mod verify {
     gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_u128_expired, u128);
     gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_unit_expired, ());
     gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_array_expired, [u8; 4]);
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks supports the mutable cast from
-    // *mut RcInner<bool> to *mut u8 in NonNull::cast. This is a Kani limitation,
-    // not evidence of UB in Weak::as_ptr.
-    // gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_bool_expired, bool);
+    gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_bool_expired, bool);
 
     // `Weak::into_raw_with_allocator` itself has no explicit `if/else`,
     // but it calls `Weak::as_ptr()`, whose control flow depends on weak state:
@@ -6719,11 +6585,11 @@ mod verify {
             #[kani::proof]
             pub fn $live() {
                 // Live unsized path: weak points into a real slice allocation.
-                // `Rc::new(array)` creates a real slice allocation.
+                // `Rc::from(vec)` creates a real slice allocation.
                 // `downgrade` references that allocation while `strong` is alive.
                 // So this executes the non-dangling branch.
-                let array: [$elem; 16] = kani::any();
-                let strong: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let expected = Weak::<[$elem], Global>::as_ptr(&weak);
                 assert!(Rc::strong_count(&strong) == 1 && Rc::weak_count(&strong) == 1);
@@ -6839,16 +6705,11 @@ mod verify {
         harness_weak_into_raw_with_allocator_u128_dangling,
         u128
     );
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks supports the mutable cast from
-    // *const () to *mut RcInner<()> in Weak::from_raw_in. The raw roundtrip
-    // reaches this unsupported conversion while recovering the weak token.
-    // This is a Kani limitation, not evidence of UB in into_raw_with_allocator.
-    // gen_weak_into_raw_with_allocator_sized_harness!(
-    //     harness_weak_into_raw_with_allocator_unit_live,
-    //     harness_weak_into_raw_with_allocator_unit_dangling,
-    //     ()
-    // );
+    gen_weak_into_raw_with_allocator_sized_harness!(
+        harness_weak_into_raw_with_allocator_unit_live,
+        harness_weak_into_raw_with_allocator_unit_dangling,
+        ()
+    );
     gen_weak_into_raw_with_allocator_sized_harness!(
         harness_weak_into_raw_with_allocator_arr_live,
         harness_weak_into_raw_with_allocator_arr_dangling,
@@ -6920,28 +6781,18 @@ mod verify {
         harness_weak_into_raw_with_allocator_u128_expired,
         u128
     );
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks supports the mutable cast from
-    // *const () to *mut RcInner<()> in Weak::from_raw_in. The raw roundtrip
-    // reaches this unsupported conversion while recovering the weak token.
-    // This is a Kani limitation, not evidence of UB in into_raw_with_allocator.
-    // gen_weak_into_raw_with_allocator_expired_harness!(
-    //     harness_weak_into_raw_with_allocator_unit_expired,
-    //     ()
-    // );
+    gen_weak_into_raw_with_allocator_expired_harness!(
+        harness_weak_into_raw_with_allocator_unit_expired,
+        ()
+    );
     gen_weak_into_raw_with_allocator_expired_harness!(
         harness_weak_into_raw_with_allocator_arr_expired,
         [u8; 4]
     );
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks supports the mutable cast from
-    // *const bool to *mut RcInner<bool> in Weak::from_raw_in. The raw roundtrip
-    // reaches this unsupported conversion while recovering the weak token.
-    // This is a Kani limitation, not evidence of UB in into_raw_with_allocator.
-    // gen_weak_into_raw_with_allocator_expired_harness!(
-    //     harness_weak_into_raw_with_allocator_bool_expired,
-    //     bool
-    // );
+    gen_weak_into_raw_with_allocator_expired_harness!(
+        harness_weak_into_raw_with_allocator_bool_expired,
+        bool
+    );
 
     // `Weak::upgrade` has three behavior paths:
     // 1) `self.inner()?` returns `None` (dangling sentinel weak): returns `None`.
@@ -7019,8 +6870,8 @@ mod verify {
             #[kani::proof]
             pub fn $live() {
                 // Path (3): downgrade from a live `Rc<[E]>`.
-                let array: [$elem; 16] = kani::any();
-                let strong: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let upgraded = Weak::<[$elem], Global>::upgrade(&weak);
                 assert!(upgraded.is_some());
@@ -7043,8 +6894,8 @@ mod verify {
             #[kani::proof]
             pub fn $strong_zero() {
                 // Path (2): weak points to allocation, then strong owner is dropped.
-                let array: [$elem; 16] = kani::any();
-                let strong: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let expected = Rc::<[$elem], Global>::as_ptr(&strong);
                 drop(strong);
@@ -7147,29 +6998,12 @@ mod verify {
         harness_weak_upgrade_array_dangling,
         [u8; 4]
     );
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable the bool live/strong-zero harnesses when -Z valid-value-checks
-    // supports the mutable cast from *mut RcInner<bool> to *mut u8 in NonNull::cast.
-    // This is a Kani limitation, not evidence of UB in Weak::upgrade.
-    // gen_weak_upgrade_sized_harness!(
-    //     harness_weak_upgrade_bool_live,
-    //     harness_weak_upgrade_bool_strong_zero,
-    //     harness_weak_upgrade_bool_dangling,
-    //     bool
-    // );
-
-    // Retain the sentinel-only bool case without constructing a live Rc<bool>.
-    #[kani::proof]
-    pub fn harness_weak_upgrade_bool_dangling() {
-        let weak: Weak<bool, Global> = Weak::new_in(Global);
-        let ptr = Weak::<bool, Global>::as_ptr(&weak);
-        assert!(is_dangling(ptr));
-        kani::cover(true, "sentinel weak has a dangling pointer");
-
-        let result = Weak::<bool, Global>::upgrade(&weak);
-        assert!(result.is_none());
-        kani::cover(true, "Weak::upgrade sentinel path is reachable");
-    }
+    gen_weak_upgrade_sized_harness!(
+        harness_weak_upgrade_bool_live,
+        harness_weak_upgrade_bool_strong_zero,
+        harness_weak_upgrade_bool_dangling,
+        bool
+    );
 
     gen_weak_upgrade_unsized_harness!(
         harness_weak_upgrade_vec_u8_live,
@@ -7264,10 +7098,8 @@ mod verify {
             #[kani::proof]
             pub fn $some() {
                 // Branch (2): non-dangling unsized weak from live `Rc<[E]>`.
-                // let vec = verifier_nondet_vec_rc::<$elem>();
-                // let strong: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 16] = kani::any();
-                let strong: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let inner = Weak::<[$elem], Global>::inner(&weak);
                 assert!(inner.is_some());
@@ -7293,10 +7125,8 @@ mod verify {
             pub fn $expired() {
                 // The allocation remains valid for the weak control block after the last
                 // strong owner is dropped, so this must not be mistaken for the sentinel.
-                // let vec = verifier_nondet_vec_rc::<$elem>();
-                // let strong: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 16] = kani::any();
-                let strong: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 drop(strong);
                 let ptr = Weak::<[$elem], Global>::as_ptr(&weak);
@@ -7384,27 +7214,12 @@ mod verify {
         harness_weak_inner_array_expired,
         [u8; 4]
     );
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable the bool some/expired harnesses when -Z valid-value-checks
-    // supports the mutable cast from *mut RcInner<bool> to *mut u8 in NonNull::cast.
-    // This is a Kani limitation, not evidence of UB in Weak::inner.
-    // gen_weak_inner_sized_harness!(
-    //     harness_weak_inner_bool_some,
-    //     harness_weak_inner_bool_none,
-    //     harness_weak_inner_bool_expired,
-    //     bool
-    // );
-
-    // Retain the sentinel-only bool case without constructing a live Rc<bool>.
-    #[kani::proof]
-    pub fn harness_weak_inner_bool_none() {
-        let weak: Weak<bool, Global> = Weak::new_in(Global);
-        let ptr = Weak::<bool, Global>::as_ptr(&weak);
-        assert!(is_dangling(ptr));
-        kani::cover(true, "Weak::new_in creates the dangling sentinel");
-        assert!(Weak::<bool, Global>::inner(&weak).is_none());
-        kani::cover(true, "Weak::inner returns None for the dangling sentinel");
-    }
+    gen_weak_inner_sized_harness!(
+        harness_weak_inner_bool_some,
+        harness_weak_inner_bool_none,
+        harness_weak_inner_bool_expired,
+        bool
+    );
     gen_weak_inner_unsized_harness!(
         harness_weak_inner_vec_u8_some,
         harness_weak_inner_vec_u8_none,
@@ -7532,10 +7347,8 @@ mod verify {
             #[kani::proof]
             pub fn $live() {
                 // Build live slice allocation and keep strong owner alive.
-                // let vec = verifier_nondet_vec_rc::<$elem>();
-                // let strong: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 16] = kani::any();
-                let strong: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
                 // Create an explicit weak while the strong owner remains alive.
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let ptr = Weak::<[$elem], Global>::as_ptr(&weak);
@@ -7562,10 +7375,8 @@ mod verify {
             #[kani::proof]
             pub fn $after_drop() {
                 // Create explicit weak from live strong slice owner.
-                // let vec = verifier_nondet_vec_rc::<$elem>();
-                // let strong: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 16] = kani::any();
-                let strong: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 // Drop strong owner first.
                 drop(strong);
@@ -7670,28 +7481,12 @@ mod verify {
         harness_drop_weak_array_dangling,
         [u8; 4]
     );
-    // Observed with Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable the bool live/after-strong-drop harnesses when
-    // -Z valid-value-checks supports the mutable cast from *mut RcInner<bool>
-    // to *mut u8 in NonNull::cast. This is a Kani limitation, not evidence of UB
-    // in Weak::drop.
-    // gen_drop_weak_sized_harness!(
-    //     harness_drop_weak_bool_live,
-    //     harness_drop_weak_bool_after_strong_drop,
-    //     harness_drop_weak_bool_dangling,
-    //     bool
-    // );
-
-    // Retain the sentinel-only bool case without constructing a live Rc<bool>.
-    #[kani::proof]
-    pub fn harness_drop_weak_bool_dangling() {
-        let weak: Weak<bool, Global> = Weak::new_in(Global);
-        let ptr = Weak::<bool, Global>::as_ptr(&weak);
-        assert!(is_dangling(ptr));
-        kani::cover(true, "Weak::drop dangling path receives the sentinel weak");
-        drop(weak);
-        kani::cover(true, "Weak::drop returns immediately for the dangling sentinel");
-    }
+    gen_drop_weak_sized_harness!(
+        harness_drop_weak_bool_live,
+        harness_drop_weak_bool_after_strong_drop,
+        harness_drop_weak_bool_dangling,
+        bool
+    );
     gen_drop_weak_unsized_harness!(
         harness_drop_weak_vec_u8_live,
         harness_drop_weak_vec_u8_after_strong_drop,
@@ -7724,9 +7519,9 @@ mod verify {
     );
 
     // `inc_strong` has two execution paths:
-    // - Non-overflow path: verified by the harnesses below.
-    // - Overflow path: temporarily unverified because the pinned Kani
-    //   version does not support `intrinsics::abort_immediate()`.
+    // - Non-overflow path: the count is incremented normally.
+    // - Overflow path: the count wraps to zero and `abort_immediate()` is reached.
+    // Kani models this abort as an assertion failure, checked with `should_panic`.
     // RcInnerPtr::inc_strong harnesses.
     macro_rules! gen_inc_strong_non_overflow_sized_harness {
         ($name:ident, $ty:ty) => {
@@ -7751,11 +7546,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                // Build an unsized Rc<[T]> from a nondeterministic fixed array.
-                // let vec = verifier_nondet_vec_rc::<$elem>();
-                // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 16] = kani::any();
-                let rc: Rc<[$elem], Global> = Rc::new(array);
+                // Build an unsized Rc<[T]> from a nondet vector.
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
                 let inner = rc.inner();
                 let before = inner.strong();
                 // Same branch target as sized: ordinary increment without overflow.
@@ -7767,6 +7560,22 @@ mod verify {
                 let _ = rc;
             }
         };
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    pub fn harness_inc_strong_overflow_should_panic() {
+        // Start from a valid allocation, then force the pre-state for overflow branch.
+        let rc: Rc<u8, Global> = Rc::new_in(kani::any::<u8>(), Global);
+        let inner = rc.inner();
+        // Force `strong == usize::MAX`, so `wrapping_add(1)` becomes 0.
+        inner.strong_ref().set(usize::MAX);
+        // This must hit the overflow check and abort.
+        assert!(inner.strong() == usize::MAX);
+        kani::cover(true, "inc_strong overflow starts from usize::MAX");
+        inner.inc_strong();
+        // If execution reaches here, overflow branch was not taken as expected.
+        core::mem::forget(rc);
     }
 
     gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_i8, i8);
@@ -7781,11 +7590,7 @@ mod verify {
     gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_u128, u128);
     gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_unit, ());
     gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_array, [u8; 4]);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks supports the mutable cast from
-    // *mut RcInner<bool> to *mut u8 in NonNull::cast during Rc<bool> cleanup.
-    // This is a Kani limitation, not evidence of UB in RcInnerPtr::inc_strong.
-    // gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_bool, bool);
+    gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_bool, bool);
 
     gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_vec_u8, [u8]);
     gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_vec_u16, [u16]);
@@ -7794,9 +7599,9 @@ mod verify {
     gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_vec_u128, [u128]);
 
     // `inc_weak` has two execution paths:
-    // - Non-overflow path: verified by the harnesses below.
-    // - Overflow path: temporarily unverified because the pinned Kani
-    //   version does not support `intrinsics::abort_immediate()`.
+    // - Non-overflow path: the count is incremented normally.
+    // - Overflow path: the count wraps to zero and `abort_immediate()` is reached.
+    // Kani models this abort as an assertion failure, checked with `should_panic`.
     // RcInnerPtr::inc_weak harnesses.
     macro_rules! gen_inc_weak_non_overflow_sized_harness {
         ($name:ident, $ty:ty) => {
@@ -7821,11 +7626,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                // Build `Rc<[T]>` from a nondeterministic fixed array.
-                // let vec = verifier_nondet_vec_rc::<$elem>();
-                // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 16] = kani::any();
-                let rc: Rc<[$elem], Global> = Rc::new(array);
+                // Build `Rc<[T]>` from nondeterministic vector input.
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
                 let inner = rc.inner();
                 let before = inner.weak();
                 // Trigger path (1) on an unsized payload.
@@ -7837,6 +7640,22 @@ mod verify {
                 let _ = rc;
             }
         };
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    pub fn harness_inc_weak_overflow_should_panic() {
+        // Start from a valid allocation and force overflow pre-state.
+        let rc: Rc<u8, Global> = Rc::new_in(kani::any::<u8>(), Global);
+        let inner = rc.inner();
+        // Force `weak == usize::MAX` so `wrapping_add(1)` becomes zero.
+        inner.weak_ref().set(usize::MAX);
+        // Trigger path (2): overflow should abort.
+        assert!(inner.weak() == usize::MAX);
+        kani::cover(true, "inc_weak overflow starts from usize::MAX");
+        inner.inc_weak();
+        // Avoid dropping forged state if panic handling changes.
+        core::mem::forget(rc);
     }
 
     gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_i8, i8);
@@ -7851,11 +7670,7 @@ mod verify {
     gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_u128, u128);
     gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_unit, ());
     gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_array, [u8; 4]);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks supports the mutable cast from
-    // *mut RcInner<bool> to *mut u8 in NonNull::cast during Rc<bool> cleanup.
-    // This is a Kani limitation, not evidence of UB in RcInnerPtr::inc_weak.
-    // gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_bool, bool);
+    gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_bool, bool);
 
     gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_vec_u8, [u8]);
     gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_vec_u16, [u16]);
@@ -7918,12 +7733,7 @@ mod verify {
     gen_uniquerc_into_rc_sized_harness!(harness_uniquerc_into_rc_u32, u32);
     gen_uniquerc_into_rc_sized_harness!(harness_uniquerc_into_rc_u64, u64);
     gen_uniquerc_into_rc_sized_harness!(harness_uniquerc_into_rc_u128, u128);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable after confirming and resolving the reported bool failure.
-    // This harness also reaches Rc<bool> cleanup, where -Z valid-value-checks
-    // has a known unsupported *mut RcInner<bool> to *mut u8 cast in NonNull::cast.
-    // The failure summary alone does not establish UB in UniqueRc::into_rc.
-    // gen_uniquerc_into_rc_sized_harness!(harness_uniquerc_into_rc_bool, bool);
+    gen_uniquerc_into_rc_sized_harness!(harness_uniquerc_into_rc_bool, bool);
     gen_uniquerc_into_rc_sized_harness!(harness_uniquerc_into_rc_unit, ());
     gen_uniquerc_into_rc_sized_harness!(harness_uniquerc_into_rc_array, [u8; 4]);
 
@@ -7968,12 +7778,7 @@ mod verify {
     gen_downgrade_sized_harness!(harness_uniquerc_downgrade_u128, u128);
     gen_downgrade_sized_harness!(harness_uniquerc_downgrade_unit, ());
     gen_downgrade_sized_harness!(harness_uniquerc_downgrade_array, [u8; 4]);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable after confirming and resolving the reported bool failure.
-    // The RcInner<bool> allocation cleanup is subject to Kani's known
-    // -Z valid-value-checks limitation for the mutable cast to *mut u8 in
-    // NonNull::cast. The summary alone does not establish UB in UniqueRc::downgrade.
-    // gen_downgrade_sized_harness!(harness_uniquerc_downgrade_bool, bool);
+    gen_downgrade_sized_harness!(harness_uniquerc_downgrade_bool, bool);
 
     // UniqueRc::deref_mut harnesses.
     macro_rules! gen_deref_mut_sized_harness {
@@ -8018,12 +7823,7 @@ mod verify {
     gen_deref_mut_sized_harness!(harness_uniquerc_deref_mut_u32, u32);
     gen_deref_mut_sized_harness!(harness_uniquerc_deref_mut_u64, u64);
     gen_deref_mut_sized_harness!(harness_uniquerc_deref_mut_u128, u128);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable after confirming and resolving the reported bool failure.
-    // The RcInner<bool> allocation cleanup is subject to Kani's known
-    // -Z valid-value-checks limitation for the mutable cast to *mut u8 in
-    // NonNull::cast. The summary alone does not establish UB in UniqueRc::deref_mut.
-    // gen_deref_mut_sized_harness!(harness_uniquerc_deref_mut_bool, bool);
+    gen_deref_mut_sized_harness!(harness_uniquerc_deref_mut_bool, bool);
     gen_deref_mut_sized_harness!(harness_uniquerc_deref_mut_unit, ());
     gen_deref_mut_sized_harness!(harness_uniquerc_deref_mut_array, [u8; 4]);
 
@@ -8059,12 +7859,7 @@ mod verify {
     gen_deref_sized_harness!(harness_uniquerc_deref_u32, u32);
     gen_deref_sized_harness!(harness_uniquerc_deref_u64, u64);
     gen_deref_sized_harness!(harness_uniquerc_deref_u128, u128);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable after confirming and resolving the reported bool failure.
-    // The RcInner<bool> allocation cleanup is subject to Kani's known
-    // -Z valid-value-checks limitation for the mutable cast to *mut u8 in
-    // NonNull::cast. The summary alone does not establish UB in UniqueRc::deref.
-    // gen_deref_sized_harness!(harness_uniquerc_deref_bool, bool);
+    gen_deref_sized_harness!(harness_uniquerc_deref_bool, bool);
     gen_deref_sized_harness!(harness_uniquerc_deref_unit, ());
     gen_deref_sized_harness!(harness_uniquerc_deref_array, [u8; 4]);
 
@@ -8196,16 +7991,11 @@ mod verify {
         harness_drop_unique_rc_array_weak_present,
         [u8; 4]
     );
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable after confirming and resolving the reported bool failures.
-    // RcInner<bool> deallocation is subject to Kani's known -Z valid-value-checks
-    // limitation for the mutable cast to *mut u8 in NonNull::cast. Full diagnostics
-    // are still needed; the summary alone does not establish UB in UniqueRc::drop.
-    // gen_drop_unique_rc_sized_harness!(
-    //     harness_drop_unique_rc_bool_unique,
-    //     harness_drop_unique_rc_bool_weak_present,
-    //     bool
-    // );
+    gen_drop_unique_rc_sized_harness!(
+        harness_drop_unique_rc_bool_unique,
+        harness_drop_unique_rc_bool_weak_present,
+        bool
+    );
 
     // UniqueRcUninit::new harnesses.
     macro_rules! gen_unique_rc_uninit_new_sized_harness {
@@ -8258,13 +8048,7 @@ mod verify {
     gen_unique_rc_uninit_new_sized_harness!(harness_unique_rc_uninit_new_u128, u128);
     gen_unique_rc_uninit_new_sized_harness!(harness_unique_rc_uninit_new_unit, ());
     gen_unique_rc_uninit_new_sized_harness!(harness_unique_rc_uninit_new_array, [u8; 4]);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable after confirming and resolving the reported bool failure,
-    // checking for Kani's known -Z valid-value-checks limitations. This harness
-    // intentionally allocates uninitialized payload storage and checks writability.
-    // Full diagnostics are needed; the summary alone does not establish UB in
-    // UniqueRcUninit::new.
-    // gen_unique_rc_uninit_new_sized_harness!(harness_unique_rc_uninit_new_bool, bool);
+    gen_unique_rc_uninit_new_sized_harness!(harness_unique_rc_uninit_new_bool, bool);
 
     gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_slice_u8, [u8]);
     gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_slice_u16, [u16]);
@@ -8330,13 +8114,7 @@ mod verify {
     gen_data_ptr_sized_harness!(harness_data_ptr_u128, u128);
     gen_data_ptr_sized_harness!(harness_data_ptr_unit, ());
     gen_data_ptr_sized_harness!(harness_data_ptr_array, [u8; 4]);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks handles raw field addresses during
-    // partial initialization without checking the uninitialized bool payload in
-    // try_allocate_for_layout, and supports the *mut RcInner<bool> to *mut u8 cast
-    // used by data_ptr's byte_add. These tool issues are not evidence of UB in
-    // UniqueRcUninit::data_ptr.
-    // gen_data_ptr_sized_harness!(harness_data_ptr_bool, bool);
+    gen_data_ptr_sized_harness!(harness_data_ptr_bool, bool);
 
     gen_data_ptr_unsized_harness!(harness_data_ptr_slice_u8, [u8]);
     gen_data_ptr_unsized_harness!(harness_data_ptr_slice_u16, [u16]);
@@ -8393,13 +8171,7 @@ mod verify {
     gen_unique_rc_uninit_drop_sized_harness!(harness_unique_rc_uninit_drop_u128, u128);
     gen_unique_rc_uninit_drop_sized_harness!(harness_unique_rc_uninit_drop_unit, ());
     gen_unique_rc_uninit_drop_sized_harness!(harness_unique_rc_uninit_drop_array, [u8; 4]);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks handles raw field addresses during
-    // partial initialization without checking the uninitialized bool payload in
-    // try_allocate_for_layout, and supports the *mut RcInner<bool> to *mut u8 cast
-    // in NonNull::cast during deallocation. These tool issues are not evidence of
-    // UB in UniqueRcUninit::drop, which does not drop the uninitialized payload.
-    // gen_unique_rc_uninit_drop_sized_harness!(harness_unique_rc_uninit_drop_bool, bool);
+    gen_unique_rc_uninit_drop_sized_harness!(harness_unique_rc_uninit_drop_bool, bool);
 
     gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_slice_u8, [u8]);
     gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_slice_u16, [u16]);
@@ -8426,10 +8198,8 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                // let vec = verifier_nondet_vec_rc::<$elem>();
-                // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 16] = kani::any();
-                let rc: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
                 // Call the target function: this harness verifies `Rc::inner` for a slice.
                 let inner = rc.inner();
                 assert!(inner.strong() == 1);
@@ -8451,11 +8221,7 @@ mod verify {
     gen_inner_sized_harness!(harness_inner_u128, u128);
     gen_inner_sized_harness!(harness_inner_unit, ());
     gen_inner_sized_harness!(harness_inner_array, [u8; 4]);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks supports the mutable cast from
-    // *mut RcInner<bool> to *mut u8 in NonNull::cast during Rc<bool> cleanup.
-    // This is a Kani limitation, not evidence of UB in Rc::inner.
-    // gen_inner_sized_harness!(harness_inner_bool, bool);
+    gen_inner_sized_harness!(harness_inner_bool, bool);
 
     gen_inner_unsized_harness!(harness_inner_vec_u8, [u8]);
     gen_inner_unsized_harness!(harness_inner_vec_u16, [u16]);
@@ -8499,10 +8265,8 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                // let vec = verifier_nondet_vec_rc::<$elem>();
-                // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 16] = kani::any();
-                let rc: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
                 let expected_ptr = Rc::as_ptr(&rc);
 
                 // Call the target function: this harness verifies
@@ -8535,11 +8299,7 @@ mod verify {
     gen_into_inner_with_allocator_harness!(harness_into_inner_with_allocator_u128, u128);
     gen_into_inner_with_allocator_harness!(harness_into_inner_with_allocator_unit, ());
     gen_into_inner_with_allocator_harness!(harness_into_inner_with_allocator_array, [u8; 4]);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks supports the mutable cast from
-    // *mut RcInner<bool> to *mut u8 in NonNull::cast during allocation cleanup.
-    // This is a Kani limitation, not evidence of UB in Rc::into_inner_with_allocator.
-    // gen_into_inner_with_allocator_harness!(harness_into_inner_with_allocator_bool, bool);
+    gen_into_inner_with_allocator_harness!(harness_into_inner_with_allocator_bool, bool);
 
     gen_into_inner_with_allocator_unsized_harness!(harness_into_inner_with_allocator_vec_u8, [u8]);
     gen_into_inner_with_allocator_unsized_harness!(
@@ -8589,12 +8349,7 @@ mod verify {
     gen_rc_new_harness!(harness_rc_new_u128, u128);
     gen_rc_new_harness!(harness_rc_new_unit, ());
     gen_rc_new_harness!(harness_rc_new_array_u8_4, [u8; 4]);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks fixes the Box::new initialization
-    // false positive and supports the *mut RcInner<bool> to *mut u8 cast in
-    // NonNull::cast during cleanup. These tool issues are not evidence of UB
-    // in Rc::new.
-    // gen_rc_new_harness!(harness_rc_new_bool, bool);
+    gen_rc_new_harness!(harness_rc_new_bool, bool);
 
     // Rc::new_uninit harnesses.
     macro_rules! gen_rc_new_uninit_harness {
@@ -8780,13 +8535,7 @@ mod verify {
     gen_new_cyclic_in_harness!(harness_new_cyclic_in_u128, u128);
     gen_new_cyclic_in_harness!(harness_new_cyclic_in_unit, ());
     gen_new_cyclic_in_harness!(harness_new_cyclic_in_array, [u8; 4]);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks checks only the initialized
-    // refcount fields accessed by Weak::inner while new_cyclic_in's bool payload
-    // is still uninitialized, and supports the *mut RcInner<bool> to *mut u8 cast
-    // in NonNull::cast during cleanup. These tool issues are not evidence of UB
-    // in Rc::new_cyclic_in.
-    // gen_new_cyclic_in_harness!(harness_new_cyclic_in_bool, bool);
+    gen_new_cyclic_in_harness!(harness_new_cyclic_in_bool, bool);
 
     // Rc::try_new_in harnesses.
     macro_rules! gen_try_new_in_harness {
@@ -8806,12 +8555,6 @@ mod verify {
 
                         assert!(Rc::weak_count(&rc) == 0);
                         kani::cover(true, "try_new_in success starts without explicit weak owners");
-
-                        // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-                        // Verify construction without teardown: validity checks reject
-                        // RcInner<Vec<T>> -> u8 mutable casts during deallocation.
-                        // Drop behavior is exercised by separate harnesses.
-                        mem::forget(rc);
                     }
                     Err(_) => {
                         // Kani does not currently model allocation failure, so the `Err`
@@ -8844,12 +8587,6 @@ mod verify {
                             true,
                             "try_new_in Vec success starts without explicit weak owners",
                         );
-
-                        // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-                        // Verify construction without teardown: validity checks reject
-                        // RcInner<Vec<T>> -> u8 mutable casts during deallocation.
-                        // Drop behavior is exercised by separate harnesses.
-                        mem::forget(rc);
                     }
                     Err(_) => {
                         // Kani does not currently model allocation failure, so the `Err`
@@ -8872,12 +8609,7 @@ mod verify {
     gen_try_new_in_harness!(harness_try_new_in_u128, u128);
     gen_try_new_in_harness!(harness_try_new_in_unit, ());
     gen_try_new_in_harness!(harness_try_new_in_array, [u8; 4]);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable after rechecking the bool harness with teardown skipped.
-    // Its retained model contains an unsupported *mut RcInner<bool> to *mut u8
-    // cast in NonNull::cast during cleanup. This Kani limitation is not evidence
-    // of UB in Rc::try_new_in; the adjusted harness has not been reverified.
-    // gen_try_new_in_harness!(harness_try_new_in_bool, bool);
+    gen_try_new_in_harness!(harness_try_new_in_bool, bool);
 
     gen_try_new_in_vec_harness!(harness_try_new_in_vec_u8, u8);
     gen_try_new_in_vec_harness!(harness_try_new_in_vec_u16, u16);
@@ -9027,11 +8759,7 @@ mod verify {
     gen_pin_in_harness!(harness_pin_in_u128, u128);
     gen_pin_in_harness!(harness_pin_in_unit, ());
     gen_pin_in_harness!(harness_pin_in_array, [u8; 4]);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks supports the mutable cast from
-    // *mut RcInner<bool> to *mut u8 in NonNull::cast during Rc<bool> cleanup.
-    // This is a Kani limitation, not evidence of UB in Rc::pin_in.
-    // gen_pin_in_harness!(harness_pin_in_bool, bool);
+    gen_pin_in_harness!(harness_pin_in_bool, bool);
     gen_pin_in_harness!(harness_pin_in_not_unpin_sentinel, NotUnpinSentinel);
 
     // Rc::new_uninit_slice harnesses.
@@ -9119,17 +8847,11 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                // let vec = verifier_nondet_vec_rc::<$ty>();
-                // let rc: Rc<[$ty]> = Rc::from(vec);
+                let vec = verifier_nondet_vec_rc::<$ty>();
+                let rc: Rc<[$ty]> = Rc::from(vec);
+                // N lies within the helper's possible length range,
+                // so both Ok (len == N) and Err (len != N) are reachable.
                 const N: usize = 4;
-                // Choose fixed array lengths so both Ok and Err remain reachable.
-                let rc: Rc<[$ty]> = if kani::any::<bool>() {
-                    let array: [$ty; N] = kani::any();
-                    Rc::new(array)
-                } else {
-                    let array: [$ty; 16] = kani::any();
-                    Rc::new(array)
-                };
                 let len = rc.len();
                 let expected_data = Rc::as_ptr(&rc) as *const $ty;
 
@@ -9171,13 +8893,7 @@ mod verify {
     gen_into_array_slice_harness!(harness_into_array_slice_u64, u64);
     gen_into_array_slice_harness!(harness_into_array_slice_u128, u128);
     gen_into_array_slice_harness!(harness_into_array_slice_unit, ());
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks fixes Box::new initialization
-    // checks on uninitialized bool arrays and supports the *const [bool; N] to
-    // *mut RcInner<[bool; N]> cast in from_raw_in used by into_array's Ok path,
-    // plus the mutable cast to *mut u8 during cleanup. These tool limitations
-    // are not evidence of UB in Rc::into_array; skipping teardown alone is insufficient.
-    // gen_into_array_slice_harness!(harness_into_array_slice_bool, bool);
+    gen_into_array_slice_harness!(harness_into_array_slice_bool, bool);
     gen_into_array_slice_harness!(harness_into_array_slice_array, [u8; 4]);
 
     // Rc::pin harnesses.
@@ -9229,12 +8945,7 @@ mod verify {
     gen_pin_harness!(harness_pin_u64, u64);
     gen_pin_harness!(harness_pin_u128, u128);
     gen_pin_harness!(harness_pin_unit, ());
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks fixes the Box::new initialization
-    // false positive reached through Rc::new and supports the *mut RcInner<bool>
-    // to *mut u8 cast in NonNull::cast during cleanup. These tool issues are not
-    // evidence of UB in Rc::pin.
-    // gen_pin_harness!(harness_pin_bool, bool);
+    gen_pin_harness!(harness_pin_bool, bool);
     gen_pin_harness!(harness_pin_array, [u8; 4]);
     gen_pin_harness!(harness_pin_not_unpin_sentinel, NotUnpinSentinel);
 
@@ -9301,12 +9012,6 @@ mod verify {
 
                         assert!(Rc::weak_count(&rc) == 0);
                         kani::cover(true, "try_new success starts without explicit weak owners");
-
-                        // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-                        // Verify construction without teardown: validity checks reject
-                        // RcInner<Vec<T>> -> u8 mutable casts during deallocation.
-                        // Drop behavior is exercised by separate harnesses.
-                        mem::forget(rc);
                     }
                     Err(_) => {
                         // Kani does not currently model allocation failure, so the `Err`
@@ -9342,12 +9047,6 @@ mod verify {
                             true,
                             "try_new Vec success starts without explicit weak owners",
                         );
-
-                        // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-                        // Verify construction without teardown: validity checks reject
-                        // RcInner<Vec<T>> -> u8 mutable casts during deallocation.
-                        // Drop behavior is exercised by separate harnesses.
-                        mem::forget(rc);
                     }
                     Err(_) => {
                         // Kani does not currently model allocation failure, so the `Err`
@@ -9369,12 +9068,7 @@ mod verify {
     gen_try_new_harness!(harness_try_new_u64, u64);
     gen_try_new_harness!(harness_try_new_u128, u128);
     gen_try_new_harness!(harness_try_new_unit, ());
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable after rechecking the bool harness with teardown skipped.
-    // Its retained model contains an unsupported *mut RcInner<bool> to *mut u8
-    // cast in NonNull::cast during cleanup. This Kani limitation is not evidence
-    // of UB in Rc::try_new; the adjusted harness has not been reverified.
-    // gen_try_new_harness!(harness_try_new_bool, bool);
+    gen_try_new_harness!(harness_try_new_bool, bool);
     gen_try_new_harness!(harness_try_new_array, [u8; 4]);
 
     gen_try_new_vec_harness!(harness_try_new_vec_u8, u8);
@@ -9570,37 +9264,31 @@ mod verify {
 
     macro_rules! gen_try_unwrap_vec_harness {
         ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
-            // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-            // TODO: Re-enable the no-external-weak unique path when validity checks
-            // support RcInner<Vec<T>> -> u8 mutable casts during deallocation.
-            // try_unwrap itself drops its temporary Weak before returning, so
-            // skipping harness teardown cannot avoid the unsupported conversion.
-            // This Kani limitation is not evidence of UB in Rc::try_unwrap.
-            // #[kani::proof]
-            // pub fn $unique() {
-            //     let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
-            //     let expected_len = value.len();
-            //     let expected_capacity = value.capacity();
-            //     let expected_data = value.as_ptr();
-            //     let rc: Rc<Vec<$elem>, Global> = Rc::new_in(value, Global);
-            //
-            //     // Call the target function: this harness verifies `Rc::try_unwrap` for `Vec`.
-            //     match Rc::<Vec<$elem>, Global>::try_unwrap(rc) {
-            //         Ok(value) => {
-            //             assert!(
-            //                 value.len() == expected_len
-            //                     && value.capacity() == expected_capacity
-            //                     && core::ptr::eq(value.as_ptr(), expected_data)
-            //             );
-            //             kani::cover(true, "try_unwrap Vec unique preserves Vec metadata");
-            //         }
-            //         // The setup creates exactly one strong owner, so this branch is unreachable.
-            //         Err(rest) => {
-            //             assert!(rest.len() == expected_len && rest.capacity() == expected_capacity);
-            //             kani::cover(true, "try_unwrap Vec unique error branch is unreachable");
-            //         }
-            //     }
-            // }
+            #[kani::proof]
+            pub fn $unique() {
+                let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
+                let expected_len = value.len();
+                let expected_capacity = value.capacity();
+                let expected_data = value.as_ptr();
+                let rc: Rc<Vec<$elem>, Global> = Rc::new_in(value, Global);
+
+                // Call the target function: this harness verifies `Rc::try_unwrap` for `Vec`.
+                match Rc::<Vec<$elem>, Global>::try_unwrap(rc) {
+                    Ok(value) => {
+                        assert!(
+                            value.len() == expected_len
+                                && value.capacity() == expected_capacity
+                                && core::ptr::eq(value.as_ptr(), expected_data)
+                        );
+                        kani::cover(true, "try_unwrap Vec unique preserves Vec metadata");
+                    }
+                    // The setup creates exactly one strong owner, so this branch is unreachable.
+                    Err(rest) => {
+                        assert!(rest.len() == expected_len && rest.capacity() == expected_capacity);
+                        kani::cover(true, "try_unwrap Vec unique error branch is unreachable");
+                    }
+                }
+            }
 
             #[kani::proof]
             pub fn $shared() {
@@ -9632,14 +9320,8 @@ mod verify {
                                 && Rc::weak_count(&rest) == 0
                         );
                         kani::cover(true, "try_unwrap Vec shared returns the original Rc");
-                        // Skip final allocation cleanup after checking the Err result.
-                        mem::forget(rest);
                     }
                 }
-                // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-                // Keep the checked shared state without exercising teardown's
-                // unsupported RcInner<Vec<T>> -> u8 mutable cast.
-                mem::forget(_shared);
             }
 
             #[kani::proof]
@@ -9681,11 +9363,6 @@ mod verify {
                         kani::cover(true, "try_unwrap Vec with weak error branch is unreachable");
                     }
                 }
-                // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-                // The external weak prevents deallocation inside try_unwrap.
-                // After checking expiration and pointer identity, skip its final
-                // teardown to avoid the unsupported RcInner<Vec<T>> -> u8 cast.
-                mem::forget(weak);
             }
         };
     }
@@ -9762,17 +9439,12 @@ mod verify {
         harness_try_unwrap_array_weak_present,
         [u8; 4]
     );
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable after resolving the reported bool failures against Kani's
-    // known validity-check limitations for RcInner<bool> initialization and
-    // mutable casts to *mut u8 during deallocation. Full failure diagnostics
-    // remain to be confirmed; the summary alone does not establish UB in try_unwrap.
-    // gen_try_unwrap_harness!(
-    //     harness_try_unwrap_bool_unique,
-    //     harness_try_unwrap_bool_shared,
-    //     harness_try_unwrap_bool_weak_present,
-    //     bool
-    // );
+    gen_try_unwrap_harness!(
+        harness_try_unwrap_bool_unique,
+        harness_try_unwrap_bool_shared,
+        harness_try_unwrap_bool_weak_present,
+        bool
+    );
 
     gen_try_unwrap_vec_harness!(
         harness_try_unwrap_vec_u8_unique,
@@ -9871,10 +9543,8 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                // let vec = verifier_nondet_vec_rc::<$elem>();
-                // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 16] = kani::any();
-                let rc: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
                 let rc_clone: Rc<[$elem], Global> = Rc::clone(&rc);
                 let strong_before = Rc::strong_count(&rc);
                 let weak_before = Rc::weak_count(&rc);
@@ -9906,12 +9576,7 @@ mod verify {
     gen_as_ptr_harness!(harness_rc_as_ptr_u128, u128);
     gen_as_ptr_harness!(harness_rc_as_ptr_unit, ());
     gen_as_ptr_harness!(harness_rc_as_ptr_array, [u8; 4]);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable after confirming and resolving the reported bool failure.
-    // Both strong owners are dropped at harness teardown, reaching Kani's known
-    // -Z valid-value-checks limitation for the *mut RcInner<bool> to *mut u8 cast
-    // in NonNull::cast.the summary alone does not establish UB in Rc::as_ptr.
-    // gen_as_ptr_harness!(harness_rc_as_ptr_bool, bool);
+    gen_as_ptr_harness!(harness_rc_as_ptr_bool, bool);
 
     gen_as_ptr_unsized_harness!(harness_rc_as_ptr_vec_u8, [u8]);
     gen_as_ptr_unsized_harness!(harness_rc_as_ptr_vec_u16, [u16]);
@@ -9947,26 +9612,19 @@ mod verify {
         };
     }
 
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks supports copy_nonoverlapping.
-    // RcFromSlice's TrivialClone specialization calls Rc::copy_from_slice, whose
-    // implementation performs the copy itself; changing harness setup cannot avoid it.
-    // This is a Kani limitation, not evidence of UB in Rc::copy_from_slice.
-    // Disable the unit case with this group as well; whether its zero-sized copy
-    // is optimized away has not been confirmed in the instrumented MIR/model.
-    // gen_from_slice_copy_harness!(harness_from_slice_copy_i8, i8);
-    // gen_from_slice_copy_harness!(harness_from_slice_copy_i16, i16);
-    // gen_from_slice_copy_harness!(harness_from_slice_copy_i32, i32);
-    // gen_from_slice_copy_harness!(harness_from_slice_copy_i64, i64);
-    // gen_from_slice_copy_harness!(harness_from_slice_copy_i128, i128);
-    // gen_from_slice_copy_harness!(harness_from_slice_copy_u8, u8);
-    // gen_from_slice_copy_harness!(harness_from_slice_copy_u16, u16);
-    // gen_from_slice_copy_harness!(harness_from_slice_copy_u32, u32);
-    // gen_from_slice_copy_harness!(harness_from_slice_copy_u64, u64);
-    // gen_from_slice_copy_harness!(harness_from_slice_copy_u128, u128);
-    // gen_from_slice_copy_harness!(harness_from_slice_copy_unit, ());
-    // gen_from_slice_copy_harness!(harness_from_slice_copy_array, [u8; 4]);
-    // gen_from_slice_copy_harness!(harness_from_slice_copy_bool, bool);
+    gen_from_slice_copy_harness!(harness_from_slice_copy_i8, i8);
+    gen_from_slice_copy_harness!(harness_from_slice_copy_i16, i16);
+    gen_from_slice_copy_harness!(harness_from_slice_copy_i32, i32);
+    gen_from_slice_copy_harness!(harness_from_slice_copy_i64, i64);
+    gen_from_slice_copy_harness!(harness_from_slice_copy_i128, i128);
+    gen_from_slice_copy_harness!(harness_from_slice_copy_u8, u8);
+    gen_from_slice_copy_harness!(harness_from_slice_copy_u16, u16);
+    gen_from_slice_copy_harness!(harness_from_slice_copy_u32, u32);
+    gen_from_slice_copy_harness!(harness_from_slice_copy_u64, u64);
+    gen_from_slice_copy_harness!(harness_from_slice_copy_u128, u128);
+    gen_from_slice_copy_harness!(harness_from_slice_copy_unit, ());
+    gen_from_slice_copy_harness!(harness_from_slice_copy_array, [u8; 4]);
+    gen_from_slice_copy_harness!(harness_from_slice_copy_bool, bool);
 
     // A manual `Clone` implementation keeps this type out of the `TrivialClone`
     // specialization, forcing `RcFromSlice` to use its default clone-per-element path.
@@ -10029,14 +9687,7 @@ mod verify {
     gen_from_slice_clone_harness!(harness_from_slice_clone_u128, u128);
     gen_from_slice_clone_harness!(harness_from_slice_clone_unit, ());
     gen_from_slice_clone_harness!(harness_from_slice_clone_array, [u8; 4]);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks handles initialization writes correctly.
-    // This uses the non-TrivialClone path: from_iter_exact initializes fresh elements
-    // with ptr::write::<NonTrivialClone<bool>>. The retained GOTO model checks the
-    // destination byte is in 0..=1 before writing src into dst (core/src/ptr/mod.rs:1981).
-    // The destination is still uninitialized; this is a Kani instrumentation false
-    // positive, not a requirement of ptr::write or evidence of UB in this clone path.
-    // gen_from_slice_clone_harness!(harness_from_slice_clone_bool, bool);
+    gen_from_slice_clone_harness!(harness_from_slice_clone_bool, bool);
 
     // The `TrustedLen` path enters `from_iter_exact` with iterator state that current Kani
     // loop contracts cannot summarize while preserving pointer validity and yielded values.
@@ -10083,30 +9734,15 @@ mod verify {
     gen_to_rc_slice_harness!(harness_to_rc_slice_u128, u128);
     gen_to_rc_slice_harness!(harness_to_rc_slice_unit, ());
     gen_to_rc_slice_harness!(harness_to_rc_slice_array, [u8; 4]);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks handles initialization writes correctly.
-    // The TrustedLen ToRcSlice path calls from_iter_exact, which initializes freshly
-    // allocated elements with ptr::write::<bool>. The retained GOTO model reads dst
-    // and checks its old byte is in 0..=1 before assigning *dst = src
-    // (core/src/ptr/mod.rs:1981). ptr::write does not require an initialized old value;
-    // this is a Kani instrumentation false positive, not evidence of UB in ToRcSlice.
-    // gen_to_rc_slice_harness!(harness_to_rc_slice_bool, bool);
+    gen_to_rc_slice_harness!(harness_to_rc_slice_bool, bool);
 
     // `Rc::try_from` harnesses.
     macro_rules! gen_try_from_slice_to_array_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                // let values = verifier_nondet_vec_rc::<$ty>();
-                // let rc: Rc<[$ty]> = Rc::from(values);
-                // Choose fixed array lengths so both Ok and Err remain reachable.
-                let rc: Rc<[$ty]> = if kani::any::<bool>() {
-                    let array: [$ty; 2] = kani::any();
-                    Rc::new(array)
-                } else {
-                    let array: [$ty; 16] = kani::any();
-                    Rc::new(array)
-                };
+                let values = verifier_nondet_vec_rc::<$ty>();
+                let rc: Rc<[$ty]> = Rc::from(values);
                 let source_len = rc.len();
                 let expected_ptr = Rc::as_ptr(&rc);
                 // `N` is a const generic and cannot be symbolic, so each harness
@@ -10162,15 +9798,7 @@ mod verify {
     gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_u64, u64);
     gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_u128, u128);
     gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_unit, ());
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks handles initialization writes and
-    // bool-containing allocation pointer casts correctly. The retained GOTO model
-    // contains destination validity checks in Box::new<RcInner<[bool; 2/16]>> before
-    // initialization (alloc/src/boxed.rs:363), and an unsupported mutable cast in
-    // NonNull<RcInner<[bool; 2]>>::cast::<u8> during cleanup (core/src/ptr/non_null.rs:561).
-    // These are Kani instrumentation issues, not evidence of UB in TryFrom;
-    // the conversion itself reuses the allocation without copy_nonoverlapping.
-    // gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_bool, bool);
+    gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_bool, bool);
     gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_array, [u8; 4]);
 
     // `Rc::drop` has two direct control-flow branches:
@@ -10237,10 +9865,8 @@ mod verify {
         ($unique:ident, $shared:ident, $weak_present:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $unique() {
-                // let vec = verifier_nondet_vec_rc::<$elem>();
-                // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 16] = kani::any();
-                let rc: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
                 // Only the implicit weak exists while the sole strong slice owner is alive.
                 assert!(rc.inner().strong() == 1 && rc.inner().weak() == 1);
                 kani::cover(
@@ -10254,10 +9880,8 @@ mod verify {
 
             #[kani::proof]
             pub fn $shared() {
-                // let vec = verifier_nondet_vec_rc::<$elem>();
-                // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 16] = kani::any();
-                let rc: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
                 let rc_clone: Rc<[$elem], Global> = Rc::clone(&rc);
                 // Two strong owners make the first drop take the non-final branch.
                 assert!(rc.inner().strong() == 2 && rc.inner().weak() == 1);
@@ -10272,10 +9896,8 @@ mod verify {
 
             #[kani::proof]
             pub fn $weak_present() {
-                // let vec = verifier_nondet_vec_rc::<$elem>();
-                // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 16] = kani::any();
-                let rc: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
                 // The explicit weak adds to the implicit weak count.
                 assert!(rc.inner().strong() == 1 && rc.inner().weak() == 2);
@@ -10370,20 +9992,12 @@ mod verify {
         harness_drop_rc_array_weak_present,
         [u8; 4]
     );
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks supports the mutable cast from
-    // *mut RcInner<bool> to *mut u8 in NonNull::cast (core/src/ptr/non_null.rs:561).
-    // All three retained GOTO models contain this unsupported check. Weak::drop
-    // performs the cast before deallocation: unique reaches it via drop_slow's
-    // implicit Weak; shared via drop(rc_clone); weak_present via drop(weak).
-    // This is a Kani limitation, not evidence of UB in Rc::drop. Omitting final
-    // deallocation would remove the unique branch behavior being tested.
-    // gen_drop_rc_sized!(
-    //     harness_drop_rc_bool_unique,
-    //     harness_drop_rc_bool_shared,
-    //     harness_drop_rc_bool_weak_present,
-    //     bool
-    // );
+    gen_drop_rc_sized!(
+        harness_drop_rc_bool_unique,
+        harness_drop_rc_bool_shared,
+        harness_drop_rc_bool_weak_present,
+        bool
+    );
 
     gen_drop_rc_unsized!(
         harness_drop_rc_vec_u8_unique,
@@ -10447,10 +10061,8 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                // let vec = verifier_nondet_vec_rc::<$elem>();
-                // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 16] = kani::any();
-                let rc: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
                 let ptr = Rc::as_ptr(&rc);
                 let strong_before = Rc::strong_count(&rc);
                 let weak_before = Rc::weak_count(&rc);
@@ -10484,14 +10096,7 @@ mod verify {
     gen_clone_rc_sized_harness!(harness_clone_rc_u128, u128);
     gen_clone_rc_sized_harness!(harness_clone_rc_unit, ());
     gen_clone_rc_sized_harness!(harness_clone_rc_array, [u8; 4]);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks supports the mutable cast from
-    // *mut RcInner<bool> to *mut u8 in NonNull::cast (core/src/ptr/non_null.rs:561).
-    // The retained GOTO model contains this unsupported check. Rc::clone only
-    // increments the strong count and shares the allocation; dropping clone and rc
-    // at scope exit reaches Weak::drop's deallocation cast after the last owner dies.
-    // This is a Kani limitation, not evidence of UB in Rc::clone.
-    // gen_clone_rc_sized_harness!(harness_clone_rc_bool, bool);
+    gen_clone_rc_sized_harness!(harness_clone_rc_bool, bool);
 
     gen_clone_rc_unsized_harness!(harness_clone_rc_vec_u8, [u8]);
     gen_clone_rc_unsized_harness!(harness_clone_rc_vec_u16, [u16]);
@@ -10514,12 +10119,6 @@ mod verify {
                 kani::cover(true, "Rc::default creates one strong owner");
                 assert!(Rc::weak_count(&rc) == 0);
                 kani::cover(true, "Rc::default starts without explicit weak owners");
-                // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-                // The retained bool model has an unsupported -Z valid-value-checks
-                // mutable cast in Weak::drop: NonNull<RcInner<bool>>::cast::<u8>
-                // (core/src/ptr/non_null.rs:561). Verify default construction and
-                // its postconditions here, excluding return-value destruction.
-                mem::forget(rc);
             }
         };
     }
@@ -10536,12 +10135,6 @@ mod verify {
                 kani::cover(true, "Rc<Vec<T>>::default creates one strong owner");
                 assert!(Rc::weak_count(&rc) == 0);
                 kani::cover(true, "Rc<Vec<T>>::default starts without explicit weak owners");
-                // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-                // All five retained Vec models have an unsupported -Z valid-value-checks
-                // mutable cast in Weak::drop: NonNull<RcInner<Vec<T>>>::cast::<u8>
-                // (core/src/ptr/non_null.rs:561). Keep the default-value and owner-count
-                // checks above; exclude return-value destruction from these harnesses.
-                mem::forget(rc);
             }
         };
     }
@@ -10601,17 +10194,8 @@ mod verify {
         };
     }
 
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks supports copy_nonoverlapping.
-    // From<&str> calls Rc::<[u8]>::from(v.as_bytes()), then the TrivialClone
-    // RcFromSlice specialization calls Rc::copy_from_slice. Both retained GOTO
-    // models (empty and nonempty) contain the unsupported copy_nonoverlapping::<u8>
-    // check (core/src/ptr/mod.rs:582); even the zero-length copy is not eliminated
-    // before instrumentation here. The copy is in the target conversion, so harness
-    // setup changes or skipping cleanup cannot avoid it. This is a Kani limitation,
-    // not evidence of UB in From<&str> for Rc<str>.
-    // gen_from_ref_str_harness!(harness_from_ref_str_rc_str_empty, "");
-    // gen_from_ref_str_harness!(harness_from_ref_str_rc_str_nonempty, "test");
+    gen_from_ref_str_harness!(harness_from_ref_str_rc_str_empty, "");
+    gen_from_ref_str_harness!(harness_from_ref_str_rc_str_nonempty, "test");
 
     // Rc::from(Vec<T>) harnesses.
     macro_rules! gen_from_vec_harness {
@@ -10636,43 +10220,27 @@ mod verify {
         };
     }
 
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable when -Z valid-value-checks supports copy_nonoverlapping.
-    // From<Vec<T>> for Rc<[T]> allocates a new RcInner and copies the elements
-    // inside the target implementation (rc.rs:3272); changing harness setup or
-    // skipping cleanup cannot avoid this copy while preserving the target path.
-    // This is a Kani limitation, not evidence of UB in the conversion.
-    // Disable the unit case with this group as well; whether its zero-sized copy
-    // is optimized away has not been confirmed in the instrumented MIR/model.
-    // gen_from_vec_harness!(harness_from_vec_i8, i8);
-    // gen_from_vec_harness!(harness_from_vec_i16, i16);
-    // gen_from_vec_harness!(harness_from_vec_i32, i32);
-    // gen_from_vec_harness!(harness_from_vec_i64, i64);
-    // gen_from_vec_harness!(harness_from_vec_i128, i128);
-    // gen_from_vec_harness!(harness_from_vec_u8, u8);
-    // gen_from_vec_harness!(harness_from_vec_u16, u16);
-    // gen_from_vec_harness!(harness_from_vec_u32, u32);
-    // gen_from_vec_harness!(harness_from_vec_u64, u64);
-    // gen_from_vec_harness!(harness_from_vec_u128, u128);
-    // gen_from_vec_harness!(harness_from_vec_unit, ());
-    // gen_from_vec_harness!(harness_from_vec_array, [u8; 4]);
-    // gen_from_vec_harness!(harness_from_vec_bool, bool);
+    gen_from_vec_harness!(harness_from_vec_i8, i8);
+    gen_from_vec_harness!(harness_from_vec_i16, i16);
+    gen_from_vec_harness!(harness_from_vec_i32, i32);
+    gen_from_vec_harness!(harness_from_vec_i64, i64);
+    gen_from_vec_harness!(harness_from_vec_i128, i128);
+    gen_from_vec_harness!(harness_from_vec_u8, u8);
+    gen_from_vec_harness!(harness_from_vec_u16, u16);
+    gen_from_vec_harness!(harness_from_vec_u32, u32);
+    gen_from_vec_harness!(harness_from_vec_u64, u64);
+    gen_from_vec_harness!(harness_from_vec_u128, u128);
+    gen_from_vec_harness!(harness_from_vec_unit, ());
+    gen_from_vec_harness!(harness_from_vec_array, [u8; 4]);
+    gen_from_vec_harness!(harness_from_vec_bool, bool);
 
     // Rc<[u8]>::from(Rc<str>) harnesses.
     macro_rules! gen_from_rc_str_to_rc_u8_slice_harness {
-        ($name:ident, $value:expr, $array:expr) => {
+        ($name:ident, $value:expr) => {
             #[kani::proof]
             pub fn $name() {
                 let source: &str = $value;
-                // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-                // Avoid From<&str> during setup: it calls copy_nonoverlapping,
-                // whose validity check is unsupported under -Z valid-value-checks.
-                // let rc: Rc<str> = Rc::from(source);
-                let byte_rc: Rc<[u8]> = Rc::new($array);
-                // SAFETY: Each invocation supplies the fixed UTF-8 byte array for
-                // source. str and [u8] have identical layouts and length metadata;
-                // into_raw transfers the sole ownership token to from_raw.
-                let rc: Rc<str> = unsafe { Rc::from_raw(Rc::into_raw(byte_rc) as *const str) };
+                let rc: Rc<str> = Rc::from(source);
                 let expected_ptr = Rc::as_ptr(&rc) as *const [u8];
                 let strong_before = Rc::strong_count(&rc);
                 let weak_before = Rc::weak_count(&rc);
@@ -10698,12 +10266,8 @@ mod verify {
         };
     }
 
-    gen_from_rc_str_to_rc_u8_slice_harness!(harness_from_rc_str_to_rc_u8_slice_empty, "", [0u8; 0]);
-    gen_from_rc_str_to_rc_u8_slice_harness!(
-        harness_from_rc_str_to_rc_u8_slice_nonempty,
-        "test",
-        *b"test"
-    );
+    gen_from_rc_str_to_rc_u8_slice_harness!(harness_from_rc_str_to_rc_u8_slice_empty, "");
+    gen_from_rc_str_to_rc_u8_slice_harness!(harness_from_rc_str_to_rc_u8_slice_nonempty, "test");
 
     // Rc::into_raw_with_allocator harnesses.
     macro_rules! gen_into_raw_with_allocator_sized_harness {
@@ -10740,10 +10304,8 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                // let vec = verifier_nondet_vec_rc::<$elem>();
-                // let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let array: [$elem; 16] = kani::any();
-                let rc: Rc<[$elem], Global> = Rc::new(array);
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
                 let expected = Rc::as_ptr(&rc);
                 let strong_before = Rc::strong_count(&rc);
                 let weak_before = Rc::weak_count(&rc);
@@ -10783,17 +10345,8 @@ mod verify {
     gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_u32, u32);
     gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_u64, u64);
     gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_u128, u128);
-    // Kani 0.68.0 (commit 6ce55b95437ad334c7e0a319400c2aebb07db58f).
-    // TODO: Re-enable these round-trip harnesses when -Z valid-value-checks supports
-    // from_raw_in's mutable casts from *const () / *const bool to *mut RcInner<T>
-    // (rc.rs:1896). Both retained GOTO models contain these unsupported checks.
-    // The bool model also contains the unsupported NonNull<RcInner<bool>>::cast::<u8>
-    // in Weak::drop during cleanup (core/src/ptr/non_null.rs:561); skipping cleanup
-    // alone therefore does not avoid the round-trip limitation.
-    // These are Kani limitations in recovery/cleanup, not evidence of UB in
-    // Rc::into_raw_with_allocator itself.
-    // gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_unit, ());
-    // gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_bool, bool);
+    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_unit, ());
+    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_bool, bool);
     gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_array, [u8; 4]);
 
     gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_vec_u8, [u8]);
