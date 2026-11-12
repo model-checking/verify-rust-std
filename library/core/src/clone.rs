@@ -36,7 +36,13 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
+use safety::{ensures, requires};
+
+#[cfg(kani)]
+use crate::kani;
 use crate::marker::{Destruct, PointeeSized};
+#[cfg(kani)]
+use crate::ub_checks;
 
 mod uninit;
 
@@ -677,6 +683,28 @@ unsafe impl CloneToUninit for str {
 #[unstable(feature = "clone_to_uninit", issue = "126799")]
 unsafe impl CloneToUninit for crate::ffi::CStr {
     #[cfg_attr(debug_assertions, track_caller)]
+    // Safety contract: the trait's documented obligation is that `dest` is
+    // valid for writes of `size_of_val(self)` bytes — for a `CStr` exactly
+    // its nul-terminated view; alignment is 1, so trivial. That is precisely
+    // the region this function writes.
+    #[cfg_attr(kani, kani::modifies(core::ptr::slice_from_raw_parts_mut(dest, self.to_bytes_with_nul().len())))]
+    #[requires(ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dest, self.to_bytes_with_nul().len())))]
+    // `dest` must not overlap `self`: writing there would mutate bytes that
+    // `&self` holds as immutable (the copy is a `copy_nonoverlapping`).
+    #[requires(ub_checks::maybe_is_nonoverlapping(
+        self.as_ptr() as *const (),
+        dest as *const (),
+        1,
+        self.to_bytes_with_nul().len(),
+    ))]
+    // On return, the written bytes are byte-for-byte the source's
+    // nul-terminated view, so `*dest` is a valid `CStr` — the trait's
+    // "leaves `*dest` a valid value of `Self`" promise.
+    #[ensures(|_: &()| {
+        let n = self.to_bytes_with_nul().len();
+        // SAFETY: the body has just initialized `n` bytes at `dest`.
+        unsafe { core::slice::from_raw_parts(dest as *const u8, n) == self.to_bytes_with_nul() }
+    })]
     unsafe fn clone_to_uninit(&self, dest: *mut u8) {
         // SAFETY: For now, CStr is just a #[repr(trasnsparent)] [c_char] with some invariants.
         // And we can cast [c_char] to [u8] on all supported platforms (see: to_bytes_with_nul).
@@ -796,4 +824,94 @@ mod impls {
     /// Shared references can be cloned, but mutable references *cannot*!
     #[stable(feature = "rust1", since = "1.0.0")]
     impl<T: PointeeSized> !Clone for &mut T {}
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::ffi::CStr;
+    use crate::ub_checks::Invariant;
+
+    // Build an arbitrary valid `&CStr` via the safe `from_bytes_until_nul`
+    // (mirrors the private helper of the same name in `c_str`'s verify module).
+    fn arbitrary_cstr(slice: &[u8]) -> &CStr {
+        // At a minimum, the slice has a null terminator to form a valid CStr.
+        kani::assume(slice.len() > 0 && slice[slice.len() - 1] == 0);
+        let result = CStr::from_bytes_until_nul(slice);
+        // Given the assumption, from_bytes_until_nul should never fail.
+        assert!(result.is_ok());
+        let c_str = result.unwrap();
+        assert!(c_str.is_safe());
+        c_str
+    }
+
+    // unsafe impl CloneToUninit for CStr  (criterion 4)
+    //
+    // `proof_for_contract` assumes the preconditions (a writable `dest` of
+    // `n = to_bytes_with_nul().len()` bytes that does not overlap `self`),
+    // runs the real body, and verifies the `ensures`/`modifies` plus the UB
+    // checks for the internal `copy_nonoverlapping`. The source and `dest`
+    // share one buffer and `dest` may sit anywhere in it, so the overlapping
+    // placements are excluded only by the non-overlap precondition. Beyond
+    // the contract, the harness asserts that reconstructing a `&CStr` over
+    // the written bytes upholds the safety invariant — cloning a valid
+    // `CStr` yields a valid `CStr`.
+    #[kani::proof_for_contract(<CStr as CloneToUninit>::clone_to_uninit)]
+    #[kani::unwind(33)]
+    fn check_clone_to_uninit_cstr() {
+        const SIZE: usize = 32;
+        let mut buf: [u8; SIZE] = kani::any();
+        // Source and destination both come from this one pointer.
+        let base: *mut u8 = buf.as_mut_ptr();
+
+        // Source: any slice of `buf` that holds a valid `CStr`.
+        let src_off: usize = kani::any_where(|&o: &usize| o < SIZE);
+        let src_len: usize = kani::any_where(|&l: &usize| l >= 1 && l <= SIZE - src_off);
+        // SAFETY: `src_off + src_len <= SIZE`, so the slice lies within `buf`.
+        let slice: &[u8] = unsafe { core::slice::from_raw_parts(base.add(src_off), src_len) };
+        let c_str = arbitrary_cstr(slice);
+        let n = c_str.to_bytes_with_nul().len();
+
+        // Destination: anywhere in the same buffer.
+        let dst_off: usize = kani::any_where(|&o: &usize| o < SIZE);
+        // SAFETY: `dst_off < SIZE`, so `dest` points into `buf`.
+        let dest: *mut u8 = unsafe { base.add(dst_off) };
+
+        // SAFETY: the contract's preconditions (writable, non-overlapping;
+        // alignment is 1) are assumed by `proof_for_contract`.
+        unsafe {
+            c_str.clone_to_uninit(dest);
+        }
+
+        // The destination holds the source's nul-terminated view exactly
+        // (also pinned by the contract's `ensures`).
+        let written = unsafe { core::slice::from_raw_parts(dest as *const u8, n) };
+        assert_eq!(written, c_str.to_bytes_with_nul());
+
+        // Criterion 4: the written bytes reinterpreted as `&CStr` uphold the
+        // safety invariant.
+        let cloned: &CStr = unsafe { &*(written as *const [u8] as *const CStr) };
+        assert!(cloned.is_safe());
+
+        // Non-vacuity: neither the contract nor the invariant check is
+        // exercised only vacuously, and `dest` on either side of the source
+        // survives the non-overlap precondition.
+        kani::cover(
+            n == 1,
+            "non-vacuity: cloning an empty CStr (lone nul terminator) is reachable",
+        );
+        kani::cover(
+            n > 1,
+            "non-vacuity: cloning a non-empty CStr (content before the nul) is reachable",
+        );
+        kani::cover(
+            dst_off + n <= src_off,
+            "non-vacuity: dest before the source in the shared buffer is reachable",
+        );
+        kani::cover(
+            dst_off >= src_off + n,
+            "non-vacuity: dest after the source in the shared buffer is reachable",
+        );
+    }
 }
