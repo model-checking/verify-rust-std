@@ -2329,6 +2329,28 @@ mod verify {
     /// `Ord` implementation that returns, including inconsistent ones.
     struct AnyOrd<V>(V);
 
+    impl<V> AnyOrd<V> {
+        /// The result of a comparison operator: any value.
+        ///
+        /// For a zero-sized `V` it first copies one byte between two locals. The copy has no
+        /// effect on what is proved; it keeps the memory of the solver down. In a loop or a
+        /// function with a contract, CBMC checks every write against a table with one entry
+        /// per allocation (4096 entries under `--object-bits 12`). With formula slicing, the
+        /// table is defined in the formula only if some check needs it, but every lookup is
+        /// encoded, and a lookup in an undefined table costs about half a million variables.
+        /// Moving a sized element is a write whose check needs the table. Moving a
+        /// zero-sized element writes nothing, so without this copy nothing needs it.
+        fn any_result() -> bool {
+            if size_of::<V>() == 0 {
+                let src = 0u8;
+                let mut dst = 1u8;
+                // SAFETY: `src` and `dst` are distinct locals of one byte each.
+                unsafe { ptr::copy_nonoverlapping(&src, &mut dst, 1) };
+            }
+            kani::any()
+        }
+    }
+
     impl<V> PartialEq for AnyOrd<V> {
         fn eq(&self, _: &Self) -> bool {
             kani::any()
@@ -2340,16 +2362,16 @@ mod verify {
             if kani::any() { Some(any_ordering()) } else { None }
         }
         fn lt(&self, _: &Self) -> bool {
-            kani::any()
+            Self::any_result()
         }
         fn le(&self, _: &Self) -> bool {
-            kani::any()
+            Self::any_result()
         }
         fn gt(&self, _: &Self) -> bool {
-            kani::any()
+            Self::any_result()
         }
         fn ge(&self, _: &Self) -> bool {
-            kani::any()
+            Self::any_result()
         }
     }
     impl<V> Ord for AnyOrd<V> {
