@@ -5042,18 +5042,21 @@ mod verify {
     }
 
     // Nothing is dereferenced, so a provenance-free integer address is the most
-    // general base. CBMC mismodels arithmetic near NULL and `usize::MAX`, so the
-    // harness pins the base to a mid-range window and bounds `|offset|`.
+    // general base. CBMC encodes a pointer's address in the bits left over after
+    // the object ID; CI runs with `--object-bits 12`, leaving 52 bits. The
+    // harness therefore keeps the base and the result below 2^52; results that
+    // wrap around past `usize::MAX` are out of reach with 12 object bits.
     macro_rules! check_arith_offset_for {
         ($harness:ident, $ty:ty) => {
             #[kani::proof_for_contract(arith_offset_wrapper)]
             fn $harness() {
-                // `base_addr` in `[2^32, 2^45]`, `|offset| <= 2^20`: result stays
-                // in `(0, 2^46)` for every `T` here, clear of NULL and wrap edges.
+                // Every base below 2^52, and every offset whose result lands there.
                 let base_addr: usize = kani::any();
-                kani::assume(base_addr >= (1usize << 32) && base_addr <= (1usize << 45));
+                kani::assume(base_addr >= 1 && base_addr < (1usize << 52));
                 let offset: isize = kani::any();
-                kani::assume(offset >= -(1isize << 20) && offset <= (1isize << 20));
+                let r =
+                    base_addr as i128 + (offset as i128) * (crate::mem::size_of::<$ty>() as i128);
+                kani::assume(r >= 0 && r < (1i128 << 52));
 
                 let dst: *const $ty = crate::ptr::without_provenance(base_addr);
                 kani::cover(offset > 0, "arith_offset applies a forward displacement");
@@ -5069,11 +5072,10 @@ mod verify {
     check_arith_offset_for!(check_arith_offset_i128, i128);
 
     // ---- volatile_copy_nonoverlapping_memory ----
-    // Volatile-model scheme, used for all volatile intrinsics Kani does not
-    // support: the contract is verified on a `*_model` fn whose body is the
-    // non-volatile equivalent (here `copy_nonoverlapping`). Fidelity: the two
-    // differ only in LLVM's volatile flag, an optimization barrier with no
-    // effect on the abstract memory state CBMC reasons about.
+    // As for `volatile_load`/`volatile_store`, the contract lives on a thin
+    // `*_model` wrapper that calls the real intrinsic (Kani supports all five
+    // volatile/unaligned-volatile intrinsics since model-checking/kani#4672 and
+    // #4673). Contract as for `copy_nonoverlapping`, whose safety it shares.
     #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
         && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
         && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count))
@@ -5086,9 +5088,8 @@ mod verify {
         src: *const T,
         count: usize,
     ) {
-        // MODEL: forwards to the non-volatile copy (identical memory effects).
         // SAFETY: guaranteed by the precondition.
-        unsafe { copy_nonoverlapping(src, dst, count) }
+        unsafe { volatile_copy_nonoverlapping_memory(dst, src, count) }
     }
 
     // Same setup rationale as `check_copy_nonoverlapping_for`.
@@ -5138,7 +5139,7 @@ mod verify {
     );
 
     // ---- volatile_copy_memory ----
-    // Same volatile-model scheme, body `copy` (memmove): the contract is
+    // Calls the real intrinsic (memmove): the contract is
     // `volatile_copy_nonoverlapping_memory`'s minus the non-overlap clause.
     #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
         && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
@@ -5147,8 +5148,8 @@ mod verify {
     #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
     #[allow(dead_code)]
     unsafe fn volatile_copy_memory_model<T>(dst: *mut T, src: *const T, count: usize) {
-        // MODEL: non-volatile `copy`. SAFETY: guaranteed by the precondition.
-        unsafe { copy(src, dst, count) }
+        // SAFETY: guaranteed by the precondition.
+        unsafe { volatile_copy_memory(dst, src, count) }
     }
 
     // Same setup as `check_copy_for`, including the aliasing `dst`.
@@ -5185,8 +5186,8 @@ mod verify {
     check_volatile_copy_memory_for!(check_volatile_copy_memory_u32, u32);
 
     // ---- volatile_set_memory ----
-    // Same volatile-model scheme, body `write_bytes` (memset); contract is
-    // `write_bytes`'s verbatim, including the bytes-only ensures.
+    // Calls the real intrinsic (memset); contract is `write_bytes`'s verbatim,
+    // including the bytes-only ensures.
     #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
         && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
     #[requires(ub_checks::maybe_is_aligned_and_not_null(
@@ -5199,8 +5200,8 @@ mod verify {
     #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
     #[allow(dead_code)]
     unsafe fn volatile_set_memory_model<T>(dst: *mut T, val: u8, count: usize) {
-        // MODEL: non-volatile `write_bytes`. SAFETY: guaranteed by the precondition.
-        unsafe { write_bytes(dst, val, count) }
+        // SAFETY: guaranteed by the precondition.
+        unsafe { volatile_set_memory(dst, val, count) }
     }
 
     // Same setup rationale as `check_write_bytes_for`.
@@ -5302,14 +5303,14 @@ mod verify {
     check_volatile_store_for!(check_volatile_store_u32, u32);
 
     // ---- unaligned_volatile_load ----
-    // Volatile analogue of `ptr::read_unaligned`; same volatile-model scheme.
+    // Volatile analogue of `ptr::read_unaligned`; calls the real intrinsic.
     // Requires `can_read_unaligned(src)`: dropping the alignment obligation is
     // the whole difference from `volatile_load`.
     #[requires(ub_checks::can_read_unaligned(src))]
     #[allow(dead_code)]
     unsafe fn unaligned_volatile_load_model<T>(src: *const T) -> T {
-        // MODEL: non-volatile `read_unaligned`. SAFETY: guaranteed by the precondition.
-        unsafe { crate::ptr::read_unaligned(src) }
+        // SAFETY: guaranteed by the precondition.
+        unsafe { unaligned_volatile_load(src) }
     }
 
     // As `check_volatile_load_for`, but misaligned pointers are NOT pruned; the
@@ -5356,7 +5357,7 @@ mod verify {
     }
 
     // ---- unaligned_volatile_store ----
-    // Volatile analogue of `ptr::write_unaligned`; same volatile-model scheme.
+    // Volatile analogue of `ptr::write_unaligned`; calls the real intrinsic.
     // Requires `can_write_unaligned(dst)`: dropping alignment is the whole
     // difference from `volatile_store`. No ensures (write-only I/O memory);
     // fidelity is pinned by the harness read-back.
@@ -5364,8 +5365,8 @@ mod verify {
     #[cfg_attr(kani, kani::modifies(dst))]
     #[allow(dead_code)]
     unsafe fn unaligned_volatile_store_model<T>(dst: *mut T, val: T) {
-        // MODEL: non-volatile `write_unaligned`. SAFETY: guaranteed by the precondition.
-        unsafe { crate::ptr::write_unaligned(dst, val) }
+        // SAFETY: guaranteed by the precondition.
+        unsafe { unaligned_volatile_store(dst, val) }
     }
 
     // As `check_volatile_store_for`, but misaligned pointers are NOT pruned; the
@@ -5595,14 +5596,14 @@ mod verify {
     }
 
     // Both buffers fully initialized (whole-range clause otherwise
-    // unsatisfiable); `right` may alias `buffer1`. BOUNDED DOMAIN: the per-byte
-    // memcmp loop does not terminate under bounded model checking for unbounded
-    // `bytes`, so the range is capped at `MAX_BYTES = 8` with matching
+    // unsatisfiable); `right` may alias `buffer1`. BOUNDED DOMAIN: Kani lowers
+    // the intrinsic to CBMC's built-in `memcmp` loop, which cannot take a loop
+    // invariant, so the range is capped at `MAX_BYTES = 64` with matching
     // `kani::unwind`; the bound limits the checked instances, not the contract.
-    const MAX_BYTES: usize = 8;
+    const MAX_BYTES: usize = 64;
 
     #[kani::proof_for_contract(compare_bytes_model)]
-    #[kani::unwind(9)] // MAX_BYTES + 1
+    #[kani::unwind(65)] // MAX_BYTES + 1
     fn check_compare_bytes() {
         const N: usize = MAX_BYTES;
         let mut buffer1 = [MaybeUninit::<u8>::uninit(); N];
