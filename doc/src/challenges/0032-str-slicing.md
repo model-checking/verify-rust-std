@@ -2,8 +2,8 @@
 
 - **Status:** *Open*
 - **Solution:** *Option field to point to the PR that solved this challenge.*
-- **Tracking Issue:** *Link to issue*
-- **Start date:** *YYYY/MM/DD*
+- **Tracking Issue:** [#756](https://github.com/model-checking/verify-rust-std/issues/756)
+- **Start date:** *2026/11/13*
 - **Reward:** *TBD*
 
 -------------------
