@@ -48,3 +48,4 @@
   - [29: Safety of `boxed`](./challenges/0029-boxed.md)
   - [30: Safety and Correctness of Integer Logarithms](./challenges/0030-integer-logarithms.md)
   - [31: Verify the safety of `BinaryHeap` functions](./challenges/0031-binary-heap.md)
+  - [32: Verify the safety of `str` slicing](./challenges/0032-str-slicing.md)
