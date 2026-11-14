@@ -2207,11 +2207,8 @@ mod verify {
     }
 
     fn arbitrary_heap<T: Ord>() -> BinaryHeap<T> {
-        let max_len = if size_of::<T>() == 0 {
-            usize::MAX
-        } else {
-            MAX_ALLOCATION_BYTES / size_of::<T>()
-        };
+        let max_len =
+            if size_of::<T>() == 0 { usize::MAX } else { MAX_ALLOCATION_BYTES / size_of::<T>() };
         let cap: usize = kani::any_where(|c: &usize| *c <= max_len);
         let mut data: Vec<T> = zeroed_vec(cap);
         let len: usize = kani::any_where(|l: &usize| *l <= data.capacity() && *l <= max_len);
@@ -2320,7 +2317,16 @@ mod verify {
                 }
             };
             let leaked = ending == Ending::Leak && mutated && len > 1;
-            assert!(heap.len() == if popped { len - 1 } else if leaked { 1 } else { len });
+            assert!(
+                heap.len()
+                    == if popped {
+                        len - 1
+                    } else if leaked {
+                        1
+                    } else {
+                        len
+                    }
+            );
             if leaked {
                 let last = heap.pop();
                 assert!(last.is_some() && heap.is_empty());
@@ -2458,7 +2464,7 @@ mod verify {
                     kani::cover(new_pos == pos && end - pos > pos + 2, "already in order");
                     kani::cover(
                         new_pos > pos && new_pos + 1 == end && new_pos % 2 == 1,
-                        "last only child"
+                        "last only child",
                     );
                     kani::cover(new_pos - pos >= pos + 3, "hole moved at least two levels");
                     drop_or_forget(heap);
@@ -2480,7 +2486,7 @@ mod verify {
                     kani::cover(new_pos == pos && len - pos > pos + 2, "already in order");
                     kani::cover(
                         new_pos > pos && new_pos + 1 == len && new_pos % 2 == 1,
-                        "last only child"
+                        "last only child",
                     );
                     kani::cover(new_pos - pos >= pos + 3, "hole moved at least two levels");
                     drop_or_forget(heap);
