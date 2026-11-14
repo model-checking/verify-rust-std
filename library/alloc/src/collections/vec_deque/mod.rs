@@ -6604,12 +6604,18 @@ mod verify {
     proof_harnesses!(check_grow, [], [u64 => check_grow_u64]);
     proof_harnesses!(
         check_resize_with,
-        [kani::stub(VecDeque::<u64>::write_iter_loop, VecDeque::<u64>::write_iter_contract_replacement_drop)],
+        [kani::stub(
+            VecDeque::<u64>::write_iter_loop,
+            VecDeque::<u64>::write_iter_contract_replacement_drop
+        )],
         [u64 => check_resize_with_u64]
     );
     proof_harnesses!(
         check_resize_with_grow,
-        [kani::stub(VecDeque::<u64>::write_iter_loop, VecDeque::<u64>::write_iter_contract_replacement_drop)],
+        [kani::stub(
+            VecDeque::<u64>::write_iter_loop,
+            VecDeque::<u64>::write_iter_contract_replacement_drop
+        )],
         [u64 => check_resize_with_grow_u64]
     );
     proof_harnesses!(
