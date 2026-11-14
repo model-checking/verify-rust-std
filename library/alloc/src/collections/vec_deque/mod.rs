@@ -4573,9 +4573,11 @@ mod verify {
     }
     impl Shape for WithDrop {}
 
-    /// Number of `CountedDrop` destructors that have run. Reset by the harnesses that assert on
-    /// it (`bounded_evidence`). A plain `static mut`: Kani explores a single thread.
-    pub(super) static mut DROPS: usize = 0;
+    /// Number of `CountedDrop` destructors that have run. Assigned by every harness that
+    /// asserts on it (`check_*_counteddrop`, `bounded_evidence`) before the operation it
+    /// measures. A plain `static mut`: Kani explores a single thread. The initializer is not
+    /// zero on purpose: see `UNSHARED_STATIC_INIT`.
+    pub(super) static mut DROPS: usize = UNSHARED_STATIC_INIT;
 
     /// `WithDrop` plus a destructor counter, for the bounded drop-glue evidence only. The
     /// counter is not part of `WithDrop` itself because, at the pinned Kani, a write to a static
@@ -4589,9 +4591,238 @@ mod verify {
     pub(super) struct CountedDrop(u8);
     impl Drop for CountedDrop {
         fn drop(&mut self) {
-            unsafe { DROPS += 1 };
+            unsafe { DROPS = DROPS.wrapping_add(1) };
             core::hint::black_box(self.0);
         }
+    }
+    impl Shape for CountedDrop {}
+
+    /// Initializer of the statics of this module (`DROPS`, `WATCHED_SLOT` and its two
+    /// counters): a bit pattern that no constant reachable from a harness has. It
+    /// is never read as a value; every harness assigns a static before it asserts on it.
+    ///
+    /// Why not zero. The pinned Kani keeps one cache of emitted allocations keyed by their
+    /// bytes and serves both statics and constants from it, so a constant that has to be
+    /// emitted through memory can come out as a read of a *mutable* static whose initializer
+    /// has the same bytes. Whether it does depends on the order in which Kani emits the items
+    /// of the crate, which differs between two checkouts of the same source. And in every
+    /// harness that checks or applies a function contract, statics start with an arbitrary
+    /// value. With `static mut DROPS: usize = 0`, `RawVec`'s `ZERO_CAP` (eight zero bytes, read
+    /// by `RawVecInner::new_in`) was such a read in some checkouts and not in others:
+    /// `VecDeque::with_capacity(0)` in `any_deque` then returned an arbitrary capacity over a
+    /// dangling pointer and the generator failed its own pointer checks, in all four
+    /// `check_*_counteddrop` harnesses. A static whose bytes no constant shares cannot be
+    /// picked. Keep it that way for any static added here (a null pointer is eight zero bytes
+    /// too).
+    const UNSHARED_STATIC_INIT: usize = 0x5EED_D50B_C0DE_0001;
+
+    // ---------------------------------------------------------------------------------------
+    // Slice drop glue: a contracted model of `ptr::drop_in_place::<[T]>`
+    // ---------------------------------------------------------------------------------------
+
+    /// `WithDrop` with an 8-byte, 8-aligned payload: the `needs_drop` shape whose element size
+    /// and alignment differ from one, for the drop-glue harnesses.
+    #[derive(kani::Arbitrary)]
+    pub(super) struct WithDrop8(u64);
+    impl Drop for WithDrop8 {
+        fn drop(&mut self) {
+            core::hint::black_box(self.0);
+        }
+    }
+    impl Shape for WithDrop8 {}
+
+    /// Zero-sized `needs_drop` element. A `VecDeque` of it has capacity `usize::MAX` and never
+    /// touches its buffer, so the slices handed to the drop glue are dangling and up to
+    /// `usize::MAX` long.
+    #[derive(kani::Arbitrary)]
+    pub(super) struct WithDropZst;
+    impl Drop for WithDropZst {
+        fn drop(&mut self) {
+            core::hint::black_box(());
+        }
+    }
+    impl Shape for WithDropZst {}
+
+    /// What `ptr::drop_in_place::<[U]>` requires of its argument, as far as Kani can state it:
+    /// the whole slice is readable and writable (non-null, aligned, inside one live
+    /// allocation). Without `-Z uninit-checks` (not enabled by CI) this does not say that the
+    /// elements are initialized. One predicate, shared by the contracts, by the dispatcher's
+    /// assertion and by the bounded real-glue harness, so that they cannot drift apart.
+    pub(super) fn slice_drop_pre<U>(s: *mut [U]) -> bool {
+        core::ub_checks::can_dereference(s as *const [U]) && core::ub_checks::can_write(s)
+    }
+
+    /// Model of the compiler-generated slice drop glue (`drop_glue::<[U]>`) for an element
+    /// type whose destructor writes no memory: a source-level transcription of the loop rustc
+    /// builds for a slice (`rustc_mir_transform::elaborate_drop`, `drop_loop`: elements are
+    /// dropped one by one in ascending index order), under a loop invariant instead of an
+    /// unwinding bound. The compiler's own loop is not library source and cannot carry a loop
+    /// contract; this function stands in for it through [`drop_in_place_model`].
+    ///
+    /// * It keeps the whole-slice reborrow `&mut *s` that `ptr::drop_in_place` performs before
+    ///   calling the glue, so the model checks nothing less than the function it replaces.
+    /// * Each element is dropped by its *real* glue: `NonNull::drop_in_place` calls the
+    ///   `drop_glue` lang item directly and is not affected by the stub.
+    /// * The contract has a precondition only. With no `modifies` clause Kani checks that the
+    ///   body writes nothing outside its own locals, i.e. the contract is only provable for
+    ///   destructors that write no memory (`WithDrop`, `WithDrop8`, `WithDropZst`).
+    /// * Proved per shape, for every slice length, by the `check_drop_slice_contract_*`
+    ///   harnesses; the caller harnesses use the contract through
+    ///   `kani::stub_verified(drop_slice)`, so in them no element destructor runs on a slice
+    ///   element (only the precondition is checked at each drop site).
+    /// * What ties the model to the compiler's loop: reading `elaborate_drop`, and the bounded
+    ///   harnesses in `bounded_evidence` that run the real glue (`bounded_*_drop_glue_*`,
+    ///   `bounded_real_glue_meets_slice_drop_contract`).
+    /// * Not modelled: unwinding (the glue's cleanup loop that keeps dropping after a panicking
+    ///   destructor) and termination (`i` counts up to `len`; a loop-contract proof is a
+    ///   partial-correctness proof).
+    #[kani::requires(slice_drop_pre(s))]
+    pub(super) unsafe fn drop_slice<U>(s: *mut [U]) {
+        let _whole: &mut [U] = unsafe { &mut *s };
+        let len = s.len();
+        let base = s as *mut U;
+        let mut i: usize = 0;
+        #[kani::loop_invariant(i <= len)]
+        while i < len {
+            unsafe { core::ptr::NonNull::new_unchecked(base.add(i)).drop_in_place() };
+            i += 1;
+        }
+    }
+
+    /// The postcondition of dropping a slice of `n` [`CountedDrop`] elements: since the counter
+    /// read `before`, exactly `n` destructors have run. One function, used by the contract of
+    /// [`drop_slice_counted`] and by the bounded contract on the real glue
+    /// (`bounded_evidence::real_slice_drop_glue`), so that the two cannot drift apart.
+    /// `wrapping_add` because both contracts are proved from an arbitrary counter value.
+    pub(super) fn drops_advanced_by(before: usize, n: usize) -> bool {
+        unsafe { DROPS == before.wrapping_add(n) }
+    }
+
+    /// [`drop_slice`] for [`CountedDrop`], whose destructor increments [`DROPS`]: the same
+    /// loop, with the counter in the loop invariant and a postcondition stating that exactly
+    /// `s.len()` destructors ran ([`drops_advanced_by`]). This is what makes the *number* of
+    /// destructor runs provable without an unwinding bound: a harness resets `DROPS`, runs the
+    /// function under test and compares the counter. The count does not say *which* elements
+    /// were dropped; the dispatcher's watched slot (`WATCHED_SLOT`) covers that, at the level
+    /// of the slices handed to the glue. Proved by `check_drop_slice_contract_counteddrop`.
+    #[kani::requires(slice_drop_pre(s))]
+    #[kani::modifies(&raw const DROPS)]
+    #[kani::ensures(|_| drops_advanced_by(old(unsafe { DROPS }), s.len()))]
+    pub(super) unsafe fn drop_slice_counted(s: *mut [CountedDrop]) {
+        let _whole: &mut [CountedDrop] = unsafe { &mut *s };
+        let len = s.len();
+        let base = s as *mut CountedDrop;
+        let entry = unsafe { DROPS };
+        let mut i: usize = 0;
+        #[kani::loop_invariant(i <= len && unsafe { DROPS } == entry.wrapping_add(i))]
+        #[kani::loop_modifies(&i, &raw const DROPS)]
+        while i < len {
+            unsafe { core::ptr::NonNull::new_unchecked(base.add(i)).drop_in_place() };
+            i += 1;
+        }
+    }
+
+    /// Description of the assertion [`drop_in_place_model`] makes at every slice drop site.
+    const SLICE_DROP_PRE_MSG: &str =
+        "ptr::drop_in_place::<[T]>: the slice is valid for reads and writes (slice_drop_pre)";
+
+    /// Ghost state of the exact-count harnesses, for the question the destructor count
+    /// (`DROPS`) cannot answer: *which* buffer slots do the slices handed to
+    /// `ptr::drop_in_place::<[CountedDrop]>` cover?
+    ///
+    /// * `WATCHED_SLOT`: the address of one slot of the deque's buffer, chosen arbitrarily by
+    ///   the harness (`watch_any_slot`; null when there is nothing to watch);
+    /// * `WATCHED_SLOT_DROPS`: the number of slices containing that slot that have been handed
+    ///   to the drop glue since the harness last armed it (`arm_watched_slot`);
+    /// * `WATCHED_SLOT_LIMIT`: how often the harness allows that to happen (0 or 1).
+    ///
+    /// The dispatcher below updates the counter and asserts the limit at each slice drop, i.e.
+    /// at the call of the drop glue and independently of the model's contract. The slot is
+    /// arbitrary, so what is asserted about it holds for every slot of the buffer. What happens
+    /// to the elements of a slice once it is handed over is the model's side (its contract
+    /// proof and the bounded real-glue harnesses).
+    pub(super) static mut WATCHED_SLOT: *const CountedDrop =
+        ptr::without_provenance(UNSHARED_STATIC_INIT + 1);
+    /// See [`WATCHED_SLOT`].
+    pub(super) static mut WATCHED_SLOT_DROPS: usize = UNSHARED_STATIC_INIT + 2;
+    /// See [`WATCHED_SLOT`].
+    pub(super) static mut WATCHED_SLOT_LIMIT: usize = UNSHARED_STATIC_INIT + 3;
+
+    /// Description of the assertion the dispatcher makes when a slice holds the watched slot.
+    const WATCHED_SLOT_MSG: &str =
+        "ptr::drop_in_place::<[CountedDrop]>: no slot is handed over more often than it is due";
+
+    /// Whether `slot` is the address of one of the elements of `s` (`CountedDrop` has size 1).
+    fn slice_holds_slot(s: *mut [CountedDrop], slot: *const CountedDrop) -> bool {
+        let base = s as *const CountedDrop;
+        s.len() != 0 && core::ub_checks::same_allocation(slot, base) && {
+            let offset = unsafe { slot.offset_from(base) };
+            offset >= 0 && (offset as usize) < s.len()
+        }
+    }
+
+    /// Type dispatch for [`drop_in_place_model`] (`min_specialization`).
+    trait SliceDropModel {
+        unsafe fn drop_model(to_drop: *mut Self);
+    }
+
+    /// Every type that is not a slice: the real drop glue, reached the same way
+    /// `ptr::drop_in_place` reaches it (reborrow, then the `drop_glue` lang item).
+    impl<T: ?Sized> SliceDropModel for T {
+        default unsafe fn drop_model(to_drop: *mut Self) {
+            unsafe { core::ptr::NonNull::new_unchecked(to_drop).drop_in_place() }
+        }
+    }
+
+    /// Slices: the model if the element type has drop glue, otherwise the real (empty) glue.
+    /// The precondition is asserted here as well as stated on the model's contract: Kani
+    /// asserts a contract's `requires` where the contract replaces the call (`stub_verified`),
+    /// but not where the function body runs (CI passes `--no-assert-contracts`), and the range
+    /// of every slice handed to the drop glue must be checked either way.
+    impl<U> SliceDropModel for [U] {
+        default unsafe fn drop_model(to_drop: *mut Self) {
+            if core::mem::needs_drop::<U>() {
+                kani::assert(slice_drop_pre(to_drop), SLICE_DROP_PRE_MSG);
+                unsafe { drop_slice(to_drop) }
+            } else {
+                unsafe { core::ptr::NonNull::new_unchecked(to_drop).drop_in_place() }
+            }
+        }
+    }
+
+    /// Slices of the counting shape: the model with the exact-count postcondition, after
+    /// recording whether the slice contains the watched slot ([`WATCHED_SLOT`]).
+    impl SliceDropModel for [CountedDrop] {
+        unsafe fn drop_model(to_drop: *mut Self) {
+            kani::assert(slice_drop_pre(to_drop), SLICE_DROP_PRE_MSG);
+            unsafe {
+                if slice_holds_slot(to_drop, WATCHED_SLOT) {
+                    kani::assert(WATCHED_SLOT_DROPS < WATCHED_SLOT_LIMIT, WATCHED_SLOT_MSG);
+                    WATCHED_SLOT_DROPS = WATCHED_SLOT_DROPS.wrapping_add(1);
+                }
+                drop_slice_counted(to_drop)
+            }
+        }
+    }
+
+    /// Stub for `core::ptr::drop_in_place`, applied by the drop-glue harnesses
+    /// (`drop_glue_harnesses!`) and by nothing else.
+    ///
+    /// * Replaces: every *call* of `ptr::drop_in_place::<T>` reachable from the harness, for
+    ///   every `T` — the stub is keyed on the function, not on a type. The slice drops reached
+    ///   by the functions listed in the challenge are such calls (`Dropper::drop`,
+    ///   `Drop for VecDeque`, `truncate`, `Drain::drop` and its `DropGuard`), and so is
+    ///   `<*mut T>::drop_in_place`. `retain_back` and `truncate_to_range` also drop slices
+    ///   this way; they are not on the challenge list and no harness reaches them.
+    /// * Does not replace: drops the compiler inserts itself (MIR `Drop` terminators: a value
+    ///   going out of scope, `drop(x)`, an assignment dropping the old value). Those call the
+    ///   real glue directly, as do the per-element drops inside the model.
+    /// * Non-slice types, and slices of types without drop glue, take the real glue.
+    /// * For a slice of a `needs_drop` type it asserts [`slice_drop_pre`] and replaces the
+    ///   compiler's loop by [`drop_slice`] (or [`drop_slice_counted`]).
+    /// * `bounded_evidence` does not use it: the harnesses there run the real glue.
+    pub(super) unsafe fn drop_in_place_model<T: ?Sized>(to_drop: *mut T) {
+        unsafe { <T as SliceDropModel>::drop_model(to_drop) }
     }
 
     /// Ends a harness that owns `deque`. For shapes without a destructor the deque is dropped,
@@ -6112,6 +6343,516 @@ mod verify {
     proof_harnesses!(check_append, [], [WithDrop => check_append_withdrop]);
     proof_harnesses!(check_shrink_to, [], [Al16 => check_shrink_to_al16]);
 
+    // ---------------------------------------------------------------------------------------
+    // Callers of the slice drop glue for `needs_drop` elements, against a contracted model of
+    // the glue, without an unwinding bound
+    // ---------------------------------------------------------------------------------------
+    //
+    // `truncate`, `drain` (through `Drain::drop`), `retain_mut` and `resize_with` (both through
+    // `truncate`) and `Drop for VecDeque` hand slices of symbolic length to
+    // `ptr::drop_in_place::<[T]>`. The harnesses below run the same generic bodies as the other
+    // shapes (plus `check_drop`, `check_drain_dropping` and the destructor-counting bodies),
+    // from `any_deque`, with `core::ptr::drop_in_place` stubbed by `drop_in_place_model`: see
+    // `drop_slice` for what is modelled and `bounded_evidence` for the checks of the real
+    // compiler glue, which stays bounded. Because the bodies drop the deque at scope end (none
+    // ends in `finish`), every one of them also runs `Drop for VecDeque` on what is left.
+    //
+    // What each kind of harness establishes:
+    // * read-only shapes (`WithDrop`, `WithDrop8`, `WithDropZst`): every slice handed to the
+    //   glue is valid for reads and writes, and the rest of the function is safe. They do not
+    //   detect a wrong range that stays inside the buffer (the model's contract for them has
+    //   no postcondition).
+    // * `CountedDrop` (`check_*_counted`): the number of destructor runs and, except for
+    //   `drain`, through the watched slot which buffer slots the slices handed to the glue
+    //   cover.
+    //
+    // Non-vacuity of the drop path per ring layout: the covers of `check_truncate_counted`,
+    // `check_retain_mut_counted`, `check_drop` and the two `drain` bodies witness a non-empty
+    // dropped range for the wrapped and for the contiguous layout. The generic `check_truncate`
+    // and `check_resize_with` bodies only carry the covers they have for every shape (for
+    // `resize_with`, "truncated").
+
+    /// Where a slice produced by `any_initialized_slice` lies, for the covers of the contract
+    /// proofs.
+    #[derive(Clone, Copy)]
+    struct SliceForm {
+        /// At `ptr::dangling_mut::<T>()` (no allocation).
+        dangling: bool,
+        /// Strictly inside a heap buffer: elements before it and after it.
+        interior: bool,
+    }
+
+    /// The slices a `VecDeque<T>` hands to the drop glue, one of:
+    /// * for a zero-sized `T`, a dangling slice of any length up to `usize::MAX`;
+    /// * the empty slice at `RawVec`'s dangling pointer (a zero-capacity deque);
+    /// * an arbitrary sub-slice (symbolic offset and length) of a fully initialized heap
+    ///   buffer of symbolic capacity, bounded like `any_deque`'s by `MAX_ALLOCATION_BYTES`
+    ///   only. As in `any_deque`, every byte of the buffer holds the same symbolic valid fill
+    ///   byte. The buffer is leaked.
+    fn any_initialized_slice<T: Shape>() -> (*mut [T], SliceForm) {
+        if T::IS_ZST {
+            let s = ptr::slice_from_raw_parts_mut(ptr::dangling_mut::<T>(), kani::any());
+            return (s, SliceForm { dangling: true, interior: false });
+        }
+        if kani::any() {
+            let s = ptr::slice_from_raw_parts_mut(ptr::dangling_mut::<T>(), 0);
+            return (s, SliceForm { dangling: true, interior: false });
+        }
+        let cap: usize = kani::any();
+        kani::assume(cap > 0 && Layout::array::<T>(cap).is_ok());
+        kani::assume(
+            cap.checked_mul(core::mem::size_of::<T>()).is_some_and(|b| b <= MAX_ALLOCATION_BYTES),
+        );
+        let buf = unsafe { crate::alloc::alloc(Layout::array::<T>(cap).unwrap()) } as *mut T;
+        kani::assume(!buf.is_null());
+        unsafe { ptr::write_bytes(buf, T::any_fill(), cap) };
+        let off: usize = kani::any_where(|o: &usize| *o <= cap);
+        let n: usize = kani::any_where(|n: &usize| *n <= cap - off);
+        let s = ptr::slice_from_raw_parts_mut(unsafe { buf.add(off) }, n);
+        (s, SliceForm { dangling: false, interior: off > 0 && n > 0 && off + n < cap })
+    }
+
+    /// Proof of [`drop_slice`]'s contract for one element shape: on every slice
+    /// `any_initialized_slice` produces (the empty slice of a zero-capacity deque, and any
+    /// offset and length within a buffer of any capacity) the loop stays in bounds for any
+    /// length and, the contract having no `modifies` clause, writes nothing. The covers come
+    /// after the call, so each also witnesses that its slice passes the precondition.
+    fn check_drop_slice_contract<T: Shape>() {
+        let (s, form) = any_initialized_slice::<T>();
+        unsafe { drop_slice(s) };
+        kani::cover(s.len() > 2, "drop_slice: several elements");
+        kani::cover(s.len() == 0, "drop_slice: empty slice");
+        cover_buffer_path!(
+            T,
+            form.dangling && s.len() == 0,
+            "drop_slice: the empty slice at a dangling pointer (zero-capacity deque)"
+        );
+        cover_buffer_path!(
+            T,
+            form.interior && s.len() > 2,
+            "drop_slice: interior sub-slice of the buffer, several elements"
+        );
+    }
+
+    /// Proof of [`drop_slice_counted`]'s contract, from an arbitrary counter value.
+    fn check_drop_slice_contract_counted() {
+        let (s, form) = any_initialized_slice::<CountedDrop>();
+        unsafe { DROPS = kani::any() };
+        unsafe { drop_slice_counted(s) };
+        kani::cover(s.len() > 2, "drop_slice_counted: several elements");
+        kani::cover(s.len() == 0, "drop_slice_counted: empty slice");
+        kani::cover(
+            form.dangling && s.len() == 0,
+            "drop_slice_counted: the empty slice at a dangling pointer (zero-capacity deque)",
+        );
+        kani::cover(
+            form.interior && s.len() > 2,
+            "drop_slice_counted: interior sub-slice of the buffer, several elements",
+        );
+    }
+
+    /// `Drop for VecDeque` on its own: `ptr::drop_in_place` of the front slice and, through
+    /// `Dropper`, of the back slice.
+    fn check_drop<T: Shape>() {
+        let deque = any_deque::<T>();
+        let len = deque.len();
+        let wrapped = len > deque.capacity() - deque.head.as_index();
+        drop(deque);
+        kani::cover(wrapped && len > 2, "Drop for VecDeque: wrapped layout, both slices dropped");
+        kani::cover(!wrapped && len > 2, "Drop for VecDeque: contiguous layout");
+    }
+
+    /// `check_drain` (same assertion, same four range-position covers) with the pulled elements
+    /// dropped by their real glue instead of forgotten, and covers for the `needs_drop` branch
+    /// of `Drain::drop`: entered with elements remaining, the remaining range wrapping, the
+    /// remaining range contiguous. The elements left in the `Drain` are handed to the drop
+    /// glue there (`ptr::drop_in_place` of both slices of the remaining range), i.e. to the
+    /// model's contract: for the read-only shapes this checks that both slices are valid and
+    /// nothing more. That each drained element is destroyed once is not checked here (a second
+    /// drop or a leak of the remaining range passes): the destructor count is the subject of
+    /// `check_drain_counted`, and which elements are destroyed that of
+    /// `bounded_evidence::bounded_drain_drops_the_drained_slots`.
+    fn check_drain_dropping<T: Shape>() {
+        let mut deque = any_deque::<T>();
+        let len = deque.len();
+        let cap = deque.capacity();
+        let head = deque.head.as_index();
+        let (start, end) = any_subrange(len);
+        let mut drain = deque.drain(start..end);
+        let pull_front: bool = kani::any();
+        let pull_back: bool = kani::any();
+        if pull_front {
+            drop(drain.next());
+        }
+        if pull_back {
+            drop(drain.next_back());
+        }
+        let (idx, remaining) = (drain.idx, drain.remaining);
+        drop(drain);
+        assert_eq!(deque.len(), len - (end - start));
+        kani::cover(
+            core::mem::needs_drop::<T>() && remaining != 0,
+            "Drain::drop: needs_drop branch entered with elements remaining",
+        );
+        cover_buffer_path!(
+            T,
+            remaining > 2 && idx < cap - head && remaining > cap - head - idx,
+            "Drain::drop: the remaining range wraps (both slices non-empty)"
+        );
+        cover_buffer_path!(
+            T,
+            remaining > 2 && (idx >= cap - head || remaining <= cap - head - idx),
+            "Drain::drop: the remaining range is contiguous (one slice), several elements"
+        );
+        kani::cover(
+            pull_front && pull_back && remaining > 2 && start > 0 && end < len,
+            "drain: interior range, both ends pulled and dropped, the rest left to Drain::drop",
+        );
+        kani::cover(
+            start > 0 && end < len && end > start,
+            "drain: interior range (elements moved)",
+        );
+        kani::cover(start == 0 && end == len && len > 0, "drain: everything drained");
+        kani::cover(start > 0 && end == len && end > start, "drain: tail drained");
+        kani::cover(start == 0 && end < len && end > 0, "drain: head drained");
+        touch(&deque);
+    }
+
+    /// Makes an arbitrary slot of `deque`'s buffer the watched slot (see `WATCHED_SLOT`), with
+    /// no hand-over allowed until `arm_watched_slot` says otherwise, and returns the slot's
+    /// logical index in the ring: the slot holds the element of that index if the index is
+    /// below `deque.len()`, and no element otherwise. `None` for a zero-capacity deque, which
+    /// has no slot. The index is computed from `head` and the capacity here, not through the
+    /// deque's own index arithmetic.
+    fn watch_any_slot(deque: &VecDeque<CountedDrop>) -> Option<usize> {
+        let cap = deque.capacity();
+        let head = deque.head.as_index();
+        let physical: Option<usize> =
+            if cap == 0 { None } else { Some(kani::any_where(|p: &usize| *p < cap)) };
+        unsafe {
+            WATCHED_SLOT = match physical {
+                Some(p) => deque.ptr().add(p) as *const CountedDrop,
+                None => ptr::null(),
+            };
+        }
+        arm_watched_slot(false);
+        physical.map(|p| if p >= head { p - head } else { p + (cap - head) })
+    }
+
+    /// Starts a new measurement on the watched slot: resets its counter and states whether the
+    /// operation that follows is due to hand it to the drop glue (once) or not at all.
+    fn arm_watched_slot(due: bool) {
+        unsafe {
+            WATCHED_SLOT_DROPS = 0;
+            WATCHED_SLOT_LIMIT = due as usize;
+        }
+    }
+
+    /// Watches no slot (the dispatcher's bookkeeping then does nothing).
+    fn unwatch_slot() {
+        unsafe { WATCHED_SLOT = ptr::null() };
+    }
+
+    /// `truncate`, then `Drop for VecDeque`, on counting elements, for every capacity, head and
+    /// length:
+    /// * the destructor count after `truncate` is the number of removed elements, and after
+    ///   the deque is dropped it is the original length;
+    /// * an arbitrary slot of the buffer is in exactly one of the slices `truncate` hands to
+    ///   the drop glue if it holds a removed element, and in none otherwise (it holds a kept
+    ///   element, or none); `Drop for VecDeque` then hands over exactly the slots of the kept
+    ///   elements.
+    /// The count alone would accept a range of the right length in the wrong place (a kept
+    /// element destroyed, a removed one leaked); the watched slot is what rejects it.
+    fn check_truncate_counted() {
+        let mut deque = any_deque::<CountedDrop>();
+        let len = deque.len();
+        let front_len = deque.as_slices().0.len();
+        let new_len: usize = kani::any();
+        let watched = watch_any_slot(&deque);
+        let holds_removed = watched.is_some_and(|k| k < len && k >= new_len);
+        let holds_kept = watched.is_some_and(|k| k < len && k < new_len);
+        unsafe { DROPS = 0 };
+        arm_watched_slot(holds_removed);
+        deque.truncate(new_len);
+        let removed = len.saturating_sub(new_len);
+        kani::assert(
+            unsafe { DROPS } == removed,
+            "truncate: destructor count equals the number of removed elements",
+        );
+        kani::assert(
+            unsafe { WATCHED_SLOT_DROPS } == holds_removed as usize,
+            "truncate: a slot is handed to the drop glue once if it holds a removed element",
+        );
+        assert!(deque.len() == len - removed);
+        kani::cover(
+            new_len < len && new_len > front_len && len - new_len > 2,
+            "truncate: cut inside the back slice (wrapped), several dropped",
+        );
+        kani::cover(
+            new_len < len && new_len < front_len && front_len < len && new_len > 0,
+            "truncate: cut inside the front slice, whole back slice dropped (wrapped)",
+        );
+        kani::cover(
+            new_len < len && front_len == len && new_len > 0 && len - new_len > 2,
+            "truncate: contiguous layout, several dropped, some remain",
+        );
+        kani::cover(new_len >= len && len > 0, "truncate: no-op");
+        kani::cover(holds_removed, "truncate: the watched slot holds a removed element");
+        kani::cover(holds_kept, "truncate: the watched slot holds a kept element");
+        kani::cover(
+            watched.is_some_and(|k| k >= len),
+            "truncate: the watched slot holds no element",
+        );
+        arm_watched_slot(holds_kept);
+        drop(deque);
+        kani::assert(
+            unsafe { DROPS } == len,
+            "truncate then drop: destructor count equals the original length",
+        );
+        kani::assert(
+            unsafe { WATCHED_SLOT_DROPS } == holds_kept as usize,
+            "truncate then drop: a slot is handed to the drop glue once if it holds a kept element",
+        );
+    }
+
+    /// `drain`, then `Drop for VecDeque`, on counting elements: the destructor count after the
+    /// `Drain` is dropped is the length of the drained range (pulled elements are dropped by
+    /// their own glue in the harness, the rest by `Drain::drop`), and after the deque is
+    /// dropped it is the original length.
+    ///
+    /// Count only. The watched slot is not used here: with it (either asserted after
+    /// `Drain::drop` or at the two drop sites) this harness did not finish in six minutes at
+    /// the pinned Kani. So a remaining range of the right length in the wrong place inside
+    /// `Drain::drop` passes this harness; which elements `drain` destroys is checked on the
+    /// real glue, bounded, by `bounded_evidence::bounded_drain_drops_the_drained_slots`.
+    fn check_drain_counted() {
+        let mut deque = any_deque::<CountedDrop>();
+        let len = deque.len();
+        let cap = deque.capacity();
+        let head = deque.head.as_index();
+        let (start, end) = any_subrange(len);
+        unwatch_slot();
+        unsafe { DROPS = 0 };
+        let mut drain = deque.drain(start..end);
+        let pull_front: bool = kani::any();
+        let pull_back: bool = kani::any();
+        if pull_front {
+            drop(drain.next());
+        }
+        if pull_back {
+            drop(drain.next_back());
+        }
+        let (idx, remaining) = (drain.idx, drain.remaining);
+        drop(drain);
+        kani::assert(
+            unsafe { DROPS } == end - start,
+            "drain: destructor count equals the length of the drained range",
+        );
+        assert!(deque.len() == len - (end - start));
+        kani::cover(
+            remaining != 0,
+            "Drain::drop: needs_drop branch entered with elements remaining",
+        );
+        kani::cover(
+            remaining > 2 && idx < cap - head && remaining > cap - head - idx,
+            "Drain::drop: the remaining range wraps (both slices non-empty)",
+        );
+        kani::cover(
+            remaining > 2 && (idx >= cap - head || remaining <= cap - head - idx),
+            "Drain::drop: the remaining range is contiguous (one slice), several elements",
+        );
+        kani::cover(
+            pull_front && pull_back && remaining > 2 && start > 0 && end < len,
+            "drain: interior range, both ends pulled and dropped, the rest left to Drain::drop",
+        );
+        drop(deque);
+        kani::assert(
+            unsafe { DROPS } == len,
+            "drain then drop: destructor count equals the original length",
+        );
+    }
+
+    /// `retain_mut`, then `Drop for VecDeque`, on counting elements:
+    /// * the destructor count after `retain_mut` is the number of rejected elements (dropped
+    ///   through `truncate`), and after the deque is dropped it is the original length;
+    /// * an arbitrary slot of the buffer is in exactly one of the slices `retain_mut` hands to
+    ///   the drop glue if its logical index is in `new length..old length`, and in none
+    ///   otherwise; `Drop for VecDeque` then hands over exactly the slots below the new
+    ///   length. This is a statement about slots, not about which of the original elements
+    ///   end up in them: `retain_mut` moves the kept elements to the front first.
+    /// The predicate does not assign through its argument: an assignment would run a
+    /// destructor, i.e. write `DROPS`, inside `retain_mut`'s loops, whose `loop_modifies`
+    /// clauses rightly do not list a harness static.
+    fn check_retain_mut_counted() {
+        let mut deque = any_deque::<CountedDrop>();
+        let len = deque.len();
+        let front_len = deque.as_slices().0.len();
+        let watched = watch_any_slot(&deque);
+        unsafe { DROPS = 0 };
+        // The new length is only known afterwards: allow one hand-over, compare below.
+        arm_watched_slot(true);
+        deque.retain_mut(|_| kani::any());
+        let kept = deque.len();
+        assert!(kept <= len);
+        let in_dropped_tail = watched.is_some_and(|k| k < len && k >= kept);
+        let in_kept_front = watched.is_some_and(|k| k < kept);
+        kani::assert(
+            unsafe { DROPS } == len - kept,
+            "retain_mut: destructor count equals the number of rejected elements",
+        );
+        kani::assert(
+            unsafe { WATCHED_SLOT_DROPS } == in_dropped_tail as usize,
+            "retain_mut: a slot is handed to the drop glue once if in new_len..old_len",
+        );
+        kani::cover(kept > 0 && len - kept > 2, "retain_mut: several elements dropped, some kept");
+        kani::cover(
+            kept < len && kept > front_len && len - kept > 2,
+            "retain_mut: truncates inside the back slice (wrapped), several dropped",
+        );
+        kani::cover(
+            kept < len && kept < front_len && front_len < len && kept > 0,
+            "retain_mut: truncates inside the front slice, whole back slice dropped (wrapped)",
+        );
+        kani::cover(
+            kept < len && front_len == len && kept > 0 && len - kept > 2,
+            "retain_mut: truncates a contiguous deque, several dropped",
+        );
+        kani::cover(in_dropped_tail, "retain_mut: the watched slot is in the dropped tail");
+        kani::cover(in_kept_front, "retain_mut: the watched slot is below the new length");
+        arm_watched_slot(in_kept_front);
+        drop(deque);
+        kani::assert(
+            unsafe { DROPS } == len,
+            "retain_mut then drop: destructor count equals the original length",
+        );
+        kani::assert(
+            unsafe { WATCHED_SLOT_DROPS } == in_kept_front as usize,
+            "retain_mut then drop: a slot is handed to the drop glue once if below the new length",
+        );
+    }
+
+    /// `Drop for VecDeque` on counting elements, for both ring layouts: the destructor count is
+    /// the length, and an arbitrary slot of the buffer is in exactly one of the two slices
+    /// handed to the drop glue if it holds an element, and in neither otherwise.
+    fn check_drop_counted() {
+        let deque = any_deque::<CountedDrop>();
+        let len = deque.len();
+        let wrapped = len > deque.capacity() - deque.head.as_index();
+        let watched = watch_any_slot(&deque);
+        let holds_element = watched.is_some_and(|k| k < len);
+        unsafe { DROPS = 0 };
+        arm_watched_slot(holds_element);
+        drop(deque);
+        kani::assert(
+            unsafe { DROPS } == len,
+            "Drop for VecDeque: destructor count equals the length",
+        );
+        kani::assert(
+            unsafe { WATCHED_SLOT_DROPS } == holds_element as usize,
+            "Drop for VecDeque: a slot is handed to the drop glue once if it holds an element",
+        );
+        kani::cover(wrapped && len > 2, "Drop for VecDeque: wrapped layout, both slices dropped");
+        kani::cover(!wrapped && len > 2, "Drop for VecDeque: contiguous layout");
+        kani::cover(holds_element, "Drop for VecDeque: the watched slot holds an element");
+        kani::cover(
+            watched.is_some() && !holds_element,
+            "Drop for VecDeque: the watched slot holds no element",
+        );
+    }
+
+    /// One drop-glue harness: a `#[kani::proof]` without `kani::unwind`, in which
+    /// `core::ptr::drop_in_place` is stubbed by [`drop_in_place_model`] and the model's loop is
+    /// replaced by its verified contract (`kani::stub_verified`: the precondition is asserted
+    /// at the call, the `modifies` set havocked and the postcondition assumed). Running the
+    /// loop itself in the harness under its invariant (the same harness without
+    /// `stub_verified`) verifies as well, but took about two to nine times as long at the
+    /// pinned Kani.
+    macro_rules! drop_glue_harness {
+        ($contract:ident, $name:ident, [$($attr:meta),*], $call:expr) => {
+            #[kani::proof]
+            #[kani::stub(core::ptr::drop_in_place, drop_in_place_model)]
+            #[kani::stub_verified($contract)]
+            $(#[$attr])*
+            fn $name() {
+                $call
+            }
+        };
+    }
+
+    /// All drop-glue harnesses of one element shape, together with the proof of the model's
+    /// contract for that shape. `kani::stub_verified` only checks that *some*
+    /// `proof_for_contract` harness exists for the function name, not one per instantiation;
+    /// generating the contract proof and the callers from the same invocation is what keeps a
+    /// shape from being used in a caller without its contract being proved.
+    macro_rules! drop_glue_harnesses {
+        (
+            shape $ty:ty, contract_proof $proof:ident,
+            [$($body:ident $attrs:tt => $name:ident),* $(,)?]
+        ) => {
+            #[kani::proof_for_contract(drop_slice)]
+            fn $proof() {
+                check_drop_slice_contract::<$ty>();
+            }
+            $( drop_glue_harness!(drop_slice, $name, $attrs, $body::<$ty>()); )*
+        };
+        (
+            counted, contract_proof $proof:ident,
+            [$($body:ident $attrs:tt => $name:ident),* $(,)?]
+        ) => {
+            #[kani::proof_for_contract(drop_slice_counted)]
+            fn $proof() {
+                check_drop_slice_contract_counted();
+            }
+            $( drop_glue_harness!(drop_slice_counted, $name, $attrs, $body()); )*
+        };
+    }
+
+    drop_glue_harnesses!(
+        shape WithDrop, contract_proof check_drop_slice_contract_withdrop,
+        [
+            check_truncate [] => check_truncate_withdrop,
+            check_drain_dropping [] => check_drain_dropping_withdrop,
+            check_retain_mut [] => check_retain_mut_withdrop,
+            check_resize_with [kani::stub(
+                VecDeque::<WithDrop>::write_iter_loop,
+                VecDeque::<WithDrop>::write_iter_contract_replacement_drop
+            )] => check_resize_with_withdrop,
+            check_drop [] => check_drop_withdrop,
+        ]
+    );
+    // `drain` takes `check_drain_dropping` for every shape here: it runs everything
+    // `check_drain` runs (same assertion and covers) and drops the pulled elements as well, so
+    // a separate `check_drain` instantiation would cost a second harness of the most expensive
+    // kind for nothing. The two further shapes go on `truncate`, `drain` and `Drop`. The
+    // 8-byte shape stays on `drain` because the element size and alignment enter the validity
+    // of the two slices `Drain::drop` hands over, which a type without drop glue (`u64`) never
+    // has checked.
+    drop_glue_harnesses!(
+        shape WithDrop8, contract_proof check_drop_slice_contract_withdrop8,
+        [
+            check_truncate [] => check_truncate_withdrop8,
+            check_drain_dropping [] => check_drain_dropping_withdrop8,
+            check_drop [] => check_drop_withdrop8,
+        ]
+    );
+    drop_glue_harnesses!(
+        shape WithDropZst, contract_proof check_drop_slice_contract_withdropzst,
+        [
+            check_truncate [] => check_truncate_withdropzst,
+            check_drain_dropping [] => check_drain_dropping_withdropzst,
+            check_drop [] => check_drop_withdropzst,
+        ]
+    );
+    drop_glue_harnesses!(
+        counted, contract_proof check_drop_slice_contract_counteddrop,
+        [
+            check_truncate_counted [] => check_truncate_counteddrop,
+            check_drain_counted [] => check_drain_counteddrop,
+            check_retain_mut_counted [] => check_retain_mut_counteddrop,
+            check_drop_counted [] => check_drop_counteddrop,
+        ]
+    );
+
     /// Bounded supplementary evidence.
     ///
     /// None of the harnesses in this module is the proof of any function listed in Challenge
@@ -6408,6 +7149,129 @@ mod verify {
             assert!(kept <= len);
             assert!(deque.invariant_holds());
             kani::cover(kept > 0 && kept < len, "retain_mut: some dropped, some kept");
+            drop(deque);
+        }
+
+        /// The shipped call `ptr::drop_in_place::<[CountedDrop]>` — the real compiler glue, no
+        /// stub — under the clauses of [`drop_slice_counted`]'s contract, for slices of at most
+        /// `N` elements: the same precondition predicate (`slice_drop_pre`), the same
+        /// `modifies` set and the same postcondition predicate (`drops_advanced_by`).
+        #[kani::requires(slice_drop_pre(s) && s.len() <= N)]
+        #[kani::modifies(&raw const DROPS)]
+        #[kani::ensures(|_| drops_advanced_by(old(unsafe { DROPS }), s.len()))]
+        unsafe fn real_slice_drop_glue(s: *mut [CountedDrop]) {
+            unsafe { ptr::drop_in_place(s) }
+        }
+
+        /// Ties the model to what it replaces: the real slice drop glue satisfies the same
+        /// precondition/`modifies`/exact-count contract that the unbounded harnesses assume of
+        /// `drop_slice_counted`, for every sub-slice of up to `N` elements of a buffer of
+        /// capacity `<= 8` and an arbitrary initial counter. Bounded (`kani::unwind`): the
+        /// compiler's loop cannot carry a loop contract.
+        #[kani::proof_for_contract(real_slice_drop_glue)]
+        #[kani::unwind(6)]
+        fn bounded_real_glue_meets_slice_drop_contract() {
+            const CAP: usize = 8;
+            let cap: usize = kani::any_where(|c: &usize| *c > 0 && *c <= CAP);
+            let buf = unsafe { crate::alloc::alloc(Layout::array::<CountedDrop>(cap).unwrap()) }
+                as *mut CountedDrop;
+            kani::assume(!buf.is_null());
+            unsafe { ptr::write_bytes(buf, kani::any(), cap) };
+            let off: usize = kani::any_where(|o: &usize| *o <= cap);
+            let n: usize = kani::any_where(|n: &usize| *n <= cmp::min(cap - off, N));
+            unsafe { DROPS = kani::any() };
+            unsafe { real_slice_drop_glue(ptr::slice_from_raw_parts_mut(buf.add(off), n)) };
+            kani::cover(n == N && off > 0, "real glue: N elements of an interior sub-slice");
+            kani::cover(n == 0, "real glue: empty slice");
+        }
+
+        /// Ghost state of `bounded_drain_drops_the_drained_slots`: the address of one buffer
+        /// slot chosen by the harness (null when it watches none), and the number of `SlotDrop`
+        /// destructors that have run on that slot. (Initializers: see `UNSHARED_STATIC_INIT`;
+        /// the harness assigns both.)
+        static mut WATCHED_ELEMENT: *const SlotDrop =
+            ptr::without_provenance(UNSHARED_STATIC_INIT + 4);
+        /// See [`WATCHED_ELEMENT`].
+        static mut WATCHED_ELEMENT_DROPS: usize = UNSHARED_STATIC_INIT + 5;
+
+        /// An element whose destructor reports when it runs in place on the watched slot (a
+        /// destructor that runs on a value moved out of the buffer has another address).
+        struct SlotDrop(u8);
+        impl Drop for SlotDrop {
+            fn drop(&mut self) {
+                unsafe {
+                    if ptr::eq(self as *const SlotDrop, WATCHED_ELEMENT) {
+                        WATCHED_ELEMENT_DROPS += 1;
+                    }
+                }
+                core::hint::black_box(self.0);
+            }
+        }
+
+        /// *Which* elements `Drain::drop` destroys, on the real glue (no stub, no model): for an
+        /// arbitrary slot of the buffer, the number of destructors run in place on it while the
+        /// `Drain` is dropped is one if the slot holds an element left in the `Drain` (in the
+        /// drained range and not pulled out), and zero otherwise (a kept element, a pulled
+        /// one, or none). `check_drain_counted` proves the destructor *count* for any length
+        /// but cannot afford the watched slot (see there); this harness is what rejects a
+        /// remaining range of the right length in the wrong place, for deques of at most `N`
+        /// elements and capacity `<= 8`.
+        #[kani::proof]
+        #[kani::unwind(10)]
+        fn bounded_drain_drops_the_drained_slots() {
+            const CAP: usize = 8;
+            let requested: usize = kani::any();
+            kani::assume(requested <= CAP);
+            let mut deque = VecDeque::<SlotDrop>::with_capacity(requested);
+            let cap = deque.capacity();
+            kani::assume(cap <= CAP);
+            let head: usize = if cap == 0 { 0 } else { kani::any_where(|h: &usize| *h < cap) };
+            let len: usize = kani::any_where(|l: &usize| *l <= cmp::min(cap, N));
+            for i in 0..len {
+                unsafe { ptr::write(deque.ptr().add((head + i) % cap), SlotDrop(kani::any())) };
+            }
+            deque.head = wi(head);
+            deque.len = len;
+            let (start, end) = any_subrange(len);
+            let pull_front: bool = kani::any();
+            let pull_back: bool = kani::any();
+            // The elements `Drain::drop` is left with, computed without the `Drain`'s fields.
+            let pulled_front = (pull_front && end > start) as usize;
+            let pulled_back = (pull_back && end - start > pulled_front) as usize;
+            // An arbitrary slot and the logical index it has in the ring.
+            let physical: usize = if cap == 0 { 0 } else { kani::any_where(|p: &usize| *p < cap) };
+            let logical = if physical >= head { physical - head } else { physical + (cap - head) };
+            let left_in_drain =
+                cap != 0 && logical >= start + pulled_front && logical < end - pulled_back;
+            unsafe {
+                WATCHED_ELEMENT =
+                    if cap == 0 { ptr::null() } else { deque.ptr().add(physical) as *const _ };
+                WATCHED_ELEMENT_DROPS = 0;
+            }
+            let mut drain = deque.drain(start..end);
+            if pull_front {
+                drop(drain.next());
+            }
+            if pull_back {
+                drop(drain.next_back());
+            }
+            let (idx, remaining) = (drain.idx, drain.remaining);
+            drop(drain);
+            kani::assert(
+                unsafe { WATCHED_ELEMENT_DROPS } == left_in_drain as usize,
+                "Drain::drop: a slot is destroyed in place once if left in the Drain, else never",
+            );
+            kani::cover(
+                remaining > 1 && idx < cap - head && remaining > cap - head - idx,
+                "drain slots: the range left to Drain::drop wraps",
+            );
+            kani::cover(
+                pull_front && pull_back && remaining > 0 && end - start < len,
+                "drain slots: both ends pulled, the rest left to Drain::drop, one kept",
+            );
+            kani::cover(left_in_drain, "drain slots: the watched slot is left in the Drain");
+            // `Drain::drop` has moved the surviving elements: no slot statement about the rest.
+            unsafe { WATCHED_ELEMENT = ptr::null() };
             drop(deque);
         }
     }
