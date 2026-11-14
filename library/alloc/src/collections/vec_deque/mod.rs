@@ -4685,16 +4685,16 @@ mod verify {
     //! 6. **Which elements, as opposed to how many.** All pre-existing elements of a generated
     //!    deque are equal (one fill pattern per region), no contract has an `ensures` about element
     //!    contents, and no harness that starts from a generator compares element values. Which
-    //!    *slot* is concerned is checked by address in three places. `check_get` and
-    //!    `check_get_mut`: the returned reference. `check_{truncate,retain_mut,drop}_counteddrop`:
-    //!    the buffer slots covered by the slices handed to the drop glue (the watched slot), next
-    //!    to the destructor count. `bounded_drain_drops_the_drained_slots`: the slots `Drain::drop`
-    //!    destroys, on the real glue, for at most four elements. For `drain` without a bound only
-    //!    the destructor count is proved (`check_drain_counteddrop`): a remaining range of the
-    //!    right length in the wrong place passes it. The read-only `needs_drop` harnesses
-    //!    (`WithDrop`, `WithDrop8`, `WithDropZst`) check that every slice handed to the glue is
-    //!    valid and nothing more: a wrong range inside the buffer, a double drop or a leak passes
-    //!    them.
+    //!    *slot* is concerned is checked by address in these places. The contracts of
+    //!    `buffer_write` and `buffer_range`: the returned pointer. `check_get` and `check_get_mut`:
+    //!    the returned reference. `check_{truncate,retain_mut,drop}_counteddrop`: the buffer slots
+    //!    covered by the slices handed to the drop glue (the watched slot), next to the destructor
+    //!    count. `bounded_drain_drops_the_drained_slots`: the slots `Drain::drop` destroys, on the
+    //!    real glue, for at most four elements. For `drain` without a bound only the destructor
+    //!    count is proved (`check_drain_counteddrop`): a remaining range of the right length in the
+    //!    wrong place passes it. The read-only `needs_drop` harnesses (`WithDrop`, `WithDrop8`,
+    //!    `WithDropZst`) check that every slice handed to the glue is valid and nothing more: a
+    //!    wrong range inside the buffer, a double drop or a leak passes them.
     //! 7. **The compiler's slice drop loop** is checked bounded only (`len <= 4`). The proofs
     //!    without an unwinding bound are against the model (previous section).
     //! 8. **`ptr_rotate`.** The `check_make_contiguous_*` harnesses stub it. Which of its three
@@ -4846,9 +4846,10 @@ mod verify {
 
     /// `WithDrop` plus a destructor counter (`DROPS`, incremented with `wrapping_add` because the
     /// model's contract is proved from an arbitrary counter value), for the harnesses that count
-    /// destructor runs: `check_*_counteddrop` and three of the bounded real-glue harnesses in
-    /// `bounded_evidence`. It is a separate type so that the read-only shapes keep a model contract
-    /// without a `modifies` clause.
+    /// destructor runs: `check_*_counteddrop`, and in `bounded_evidence` the three harnesses built
+    /// on `small_deque_with_drop` and `bounded_real_glue_meets_slice_drop_contract`. It is a
+    /// separate type so that the read-only shapes keep a model contract without a `modifies`
+    /// clause.
     #[derive(kani::Arbitrary)]
     pub(super) struct CountedDrop(u8);
     impl Drop for CountedDrop {
@@ -5166,11 +5167,12 @@ mod verify {
     ///   that fill a region this way (`init_ring`, `any_vec`, `check_from_contiguous_raw_parts_in`,
     ///   `write_iter_contract_replacement`, `any_initialized_slice`).
     ///
-    ///   What is checked instead is which *slot* an operation concerns, by address, in three
-    ///   places: the reference `get`/`get_mut` return (`ring_slot`); the slots covered by the
-    ///   slices that `truncate`, `retain_mut` and `Drop for VecDeque` hand to the drop glue
-    ///   (`WATCHED_SLOT`, in `check_{truncate,retain_mut,drop}_counteddrop`); and, bounded, the
-    ///   slots on which `Drain::drop` runs a destructor
+    ///   What is checked instead is which *slot* an operation concerns, by address: the pointer
+    ///   `buffer_write` and `buffer_range` return (their `ensures`); the reference `get`/`get_mut`
+    ///   return (`ring_slot`); the slots covered by the slices that `truncate`, `retain_mut` and
+    ///   `Drop for VecDeque` hand to the drop glue (`WATCHED_SLOT`, in
+    ///   `check_{truncate,retain_mut,drop}_counteddrop`); and, bounded, the slots on which
+    ///   `Drain::drop` runs a destructor
     ///   (`bounded_evidence::bounded_drain_drops_the_drained_slots`). An operation that returned,
     ///   moved or overwrote the wrong initialized element anywhere else would still pass.
     ///
@@ -5179,12 +5181,12 @@ mod verify {
     ///   which elements it holds. The `CountedDrop` harnesses assert the number of destructor runs
     ///   (`DROPS`), which says how many elements were dropped, not which ones; the watched slot
     ///   adds which slots the dropped slices cover for `truncate`, `retain_mut` and `Drop for
-    ///   VecDeque`, and not for `drain`. The bounded drop-glue harnesses in `bounded_evidence` do
-    ///   not use `any_deque`: they write every element with its own `kani::any()` payload, but the
-    ///   three that build a `VecDeque<CountedDrop>` (`small_deque_with_drop`) assert only the
-    ///   count, `bounded_retain_mut_drop_glue_withdrop` (`WithDrop`) asserts no count at all, and
-    ///   `bounded_drain_drops_the_drained_slots` identifies slots by address, not elements by
-    ///   value.
+    ///   VecDeque`, and not for `drain`. The bounded drop-glue harnesses in `bounded_evidence` that
+    ///   build a deque do not use `any_deque`: they write every element with its own `kani::any()`
+    ///   payload, but the three that build a `VecDeque<CountedDrop>` (`small_deque_with_drop`)
+    ///   assert only the count, `bounded_retain_mut_drop_glue_withdrop` (`WithDrop`) asserts no
+    ///   count at all, and `bounded_drain_drops_the_drained_slots` identifies slots by address, not
+    ///   elements by value.
     /// * **Allocator.** The result is a `VecDeque<T, Global>`, and no harness in this module
     ///   instantiates `A` with any other allocator, although `VecDeque<T, A>` and every
     ///   function under verification are generic in `A`. What the proofs establish about the
