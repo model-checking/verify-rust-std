@@ -5676,6 +5676,11 @@ mod verify {
             !contiguous && head_len > len - head_len && new_cap - old_cap >= len - head_len;
         unsafe { deque.handle_capacity_increase(old_cap) };
         assert!(deque.is_contiguous() || T::IS_ZST || len > old_cap - head);
+        // `head` afterwards: cases A and B leave the front where it was; case C moves the
+        // segment `head..old_cap` to the end of the new buffer. (The contract's `ensures`
+        // states `len` and `invariant_holds` only.)
+        let expected_head = if contiguous || case_b { head } else { new_cap - head_len };
+        assert!(deque.head.as_index() == expected_head);
         kani::cover(contiguous && len > 0, "handle_capacity_increase: case A (no move)");
         kani::cover(case_b, "handle_capacity_increase: case B (tail moved)");
         kani::cover(!contiguous && !case_b, "handle_capacity_increase: case C (head moved)");
@@ -5747,19 +5752,42 @@ mod verify {
         touch(&deque);
     }
 
+    // `check_rotate_{left,right}_inner` assert where the rotation leaves `head` (the contracts
+    // state `len` and `invariant_holds` only), for a sized `T`. For a zero-sized `T` the shipped
+    // index arithmetic is reduced modulo 2^64 and not modulo the capacity `2^64 - 1` (see the
+    // comment before `check_push_front`), `head` selects no memory, and it is not asserted.
+
     fn check_rotate_left_inner<T: Shape>() {
         let mut deque = any_deque::<T>();
         let mid: usize = kani::any();
+        let (head, cap) = (deque.head.as_index(), deque.capacity());
         unsafe { deque.rotate_left_inner(mid) };
+        if !T::IS_ZST {
+            // The front moves on by `mid` slots, wrapping at the capacity (`mid <= len / 2`
+            // by the precondition, so `mid < cap` unless both are 0).
+            assert!(deque.head.as_index() == ring_slot(head, cap, mid));
+        }
         kani::cover(mid > 1, "rotate_left_inner: rotation by more than one");
+        cover_buffer_path!(
+            T,
+            mid > 0 && mid >= cap - head,
+            "rotate_left_inner: head wraps past the end of the buffer"
+        );
         touch(&deque);
     }
 
     fn check_rotate_right_inner<T: Shape>() {
         let mut deque = any_deque::<T>();
         let k: usize = kani::any();
+        let (head, cap) = (deque.head.as_index(), deque.capacity());
         unsafe { deque.rotate_right_inner(k) };
+        if !T::IS_ZST {
+            // The front moves back by `k` slots, wrapping at the capacity (`k <= len / 2`).
+            let expected_head = if k <= head { head - k } else { cap - (k - head) };
+            assert!(deque.head.as_index() == expected_head);
+        }
         kani::cover(k > 1, "rotate_right_inner: rotation by more than one");
+        cover_buffer_path!(T, k > head, "rotate_right_inner: head wraps to the end of the buffer");
         touch(&deque);
     }
 
@@ -5879,8 +5907,20 @@ mod verify {
 
     fn check_as_slices<T: Shape>() {
         let deque = any_deque::<T>();
+        let (head, cap, base) = (deque.head.as_index(), deque.capacity(), deque.ptr());
         let (a, b) = deque.as_slices();
         assert_eq!(a.len() + b.len(), deque.len());
+        // Address postcondition: the first half is the segment that starts at the front
+        // (`buf[head..]`, as far as the elements or the buffer go), the second half the
+        // wrapped part at the start of the buffer. The address of an empty half is not
+        // asserted.
+        assert!(a.len() == cmp::min(deque.len(), cap - head));
+        if !a.is_empty() {
+            assert!(ptr::eq(a.as_ptr(), unsafe { base.add(head) }));
+        }
+        if !b.is_empty() {
+            assert!(ptr::eq(b.as_ptr(), base));
+        }
         if let Some(last) = a.last() {
             core::mem::forget(unsafe { ptr::read(last) });
         }
@@ -5893,8 +5933,17 @@ mod verify {
     fn check_as_mut_slices<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
+        let (head, cap, base) = (deque.head.as_index(), deque.capacity(), deque.ptr());
         let (a, b) = deque.as_mut_slices();
         assert_eq!(a.len() + b.len(), len);
+        // Address postcondition, as in `check_as_slices`.
+        assert!(a.len() == cmp::min(len, cap - head));
+        if !a.is_empty() {
+            assert!(ptr::eq(a.as_ptr(), unsafe { base.add(head) }));
+        }
+        if !b.is_empty() {
+            assert!(ptr::eq(b.as_ptr(), base));
+        }
         if let Some(last) = a.last_mut() {
             *last = kani::any();
         }
@@ -5913,13 +5962,19 @@ mod verify {
 
     fn check_range<T: Shape>() {
         let deque = any_deque::<T>();
+        let (head, cap, base) = (deque.head.as_index(), deque.capacity(), deque.ptr());
         let (start, end) = any_subrange(deque.len());
         let mut iter = deque.range(start..end);
         assert_eq!(iter.len(), end - start);
+        // Address postcondition (see `ring_slot`): the iterator starts at the slot of logical
+        // index `start` and, from the back, at that of `end - 1`. The elements in between are
+        // not visited.
         if let Some(first) = iter.next() {
+            assert!(ptr::eq(first, unsafe { base.add(ring_slot(head, cap, start)) }));
             core::mem::forget(unsafe { ptr::read(first) });
         }
         if let Some(last) = iter.next_back() {
+            assert!(ptr::eq(last, unsafe { base.add(ring_slot(head, cap, end - 1)) }));
             core::mem::forget(unsafe { ptr::read(last) });
         }
         kani::cover(end - start > 2, "range: more than two elements");
@@ -5927,22 +5982,54 @@ mod verify {
 
     fn check_range_mut<T: Shape>() {
         let mut deque = any_deque::<T>();
+        let (head, cap, base) = (deque.head.as_index(), deque.capacity(), deque.ptr());
         let (start, end) = any_subrange(deque.len());
         let mut iter = deque.range_mut(start..end);
         assert_eq!(iter.len(), end - start);
+        // Address postcondition, as in `check_range`.
         if let Some(first) = iter.next() {
+            assert!(ptr::eq(&*first, unsafe { base.add(ring_slot(head, cap, start)) }));
             *first = kani::any();
         }
         if let Some(last) = iter.next_back() {
+            assert!(ptr::eq(&*last, unsafe { base.add(ring_slot(head, cap, end - 1)) }));
             *last = kani::any();
         }
         kani::cover(end - start > 2, "range_mut: more than two elements");
         touch(&deque);
     }
 
+    /// The `head` of a deque after a `Drain` over `start..end` has been dropped, for a deque
+    /// that had `len` elements with its front at physical index `head` of `cap` slots. Written
+    /// out from the five cases in the comment of `Drain`'s `DropGuard` (`drain.rs`), without
+    /// the deque's own index helpers:
+    /// * zero-sized `T`: the guard returns before it touches `head`;
+    /// * nothing is left: `head` is reset to 0;
+    /// * fewer elements in front of the drained range than behind it: the front part is moved
+    ///   up to the part behind, so the front is `end - start` slots further on, wrapping;
+    /// * otherwise the part behind is moved down (or nothing is moved) and `head` stays.
+    ///
+    /// Like `front_stays_after_growth` this transcribes a choice that is a heuristic, not a
+    /// safety property (which part is moved; the reset to 0), and has to follow the shipped
+    /// code if it changes. It is pinned because a wrong `head` here leaves the logical range
+    /// over slots whose elements were dropped or moved away, which nothing else reports
+    /// without `-Z uninit-checks`.
+    fn head_after_drain<T>(head: usize, cap: usize, len: usize, start: usize, end: usize) -> usize {
+        if T::IS_ZST {
+            head
+        } else if len - (end - start) == 0 {
+            0
+        } else if start < len - end {
+            ring_slot(head, cap, end - start)
+        } else {
+            head
+        }
+    }
+
     fn check_drain<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
+        let (head, cap) = (deque.head.as_index(), deque.capacity());
         let (start, end) = any_subrange(len);
         let mut drain = deque.drain(start..end);
         let pull_front: bool = kani::any();
@@ -5959,6 +6046,17 @@ mod verify {
         }
         drop(drain);
         assert_eq!(deque.len(), len - (end - start));
+        assert!(deque.head.as_index() == head_after_drain::<T>(head, cap, len, start, end));
+        cover_buffer_path!(
+            T,
+            end > start && start > 0 && start < len - end,
+            "drain: front part moved, head advanced"
+        );
+        cover_buffer_path!(
+            T,
+            end > start && len - end > 0 && start >= len - end,
+            "drain: part behind the range moved, head kept"
+        );
         kani::cover(
             start > 0 && end < len && end > start,
             "drain: interior range (elements moved)",
@@ -6096,6 +6194,11 @@ mod verify {
             "push_front: zero-sized T, head moves back two slots (the second accepted value)",
         );
         cover_buffer_path!(T, full && len > 0, "push_front: buffer grown");
+        cover_buffer_path!(
+            T,
+            cap == 0 && new_cap == first_growth_capacity::<T>(),
+            "push_front: growth from capacity 0 lands on min_non_zero_cap for this element size"
+        );
         cover_buffer_path!(
             T,
             full && head > 0 && new_head == head - 1,
@@ -6291,23 +6394,65 @@ mod verify {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let full = deque.is_full();
+        let (head, cap) = (deque.head.as_index(), deque.capacity());
         let index: usize = kani::any_where(|i: &usize| *i <= len);
         assume_can_grow_by(&deque, 1);
         deque.insert(index, kani::any());
         assert_eq!(deque.len(), len + 1);
+        let (new_head, new_cap) = (deque.head.as_index(), deque.capacity());
+        // Where the front is before elements are shifted: where it was, or where the growth
+        // of a full deque left it (see `front_stays_after_growth`).
+        let front = if full {
+            assert!(new_cap > cap);
+            let added = new_cap - cap;
+            if front_stays_after_growth(head, cap, added) { head } else { head + added }
+        } else {
+            assert!(new_cap == cap);
+            head
+        };
+        // `insert` shifts the shorter side. Back half (`len - index < index`): `head` stays.
+        // Front half: `head` moves back one slot, wrapping at the capacity; for a zero-sized
+        // `T` the two-slot move of `wrap_sub` is accepted as well (see the comment before
+        // `check_push_front`).
+        let one_back = if front == 0 { new_cap - 1 } else { front - 1 };
+        if len - index < index {
+            assert!(new_head == front);
+        } else if !T::IS_ZST {
+            assert!(new_head == one_back);
+        } else {
+            assert!(new_head == one_back || (front >= 2 && new_head == front - 2));
+        }
         kani::cover(len - index < index, "insert: back half shifted");
         kani::cover(len - index >= index && index > 0, "insert: front half shifted");
         cover_buffer_path!(T, full && len > 0, "insert: buffer grown");
+        cover_buffer_path!(
+            T,
+            cap == 0 && new_cap == first_growth_capacity::<T>(),
+            "insert: growth from capacity 0 lands on min_non_zero_cap for this element size"
+        );
         touch(&deque);
     }
 
     fn check_remove<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
+        let (head, cap) = (deque.head.as_index(), deque.capacity());
         let index: usize = kani::any();
         let elem = deque.remove(index);
         assert_eq!(elem.is_some(), index < len);
         assert_eq!(deque.len(), if index < len { len - 1 } else { len });
+        assert!(deque.capacity() == cap);
+        // Out of bounds: nothing changes. Otherwise `remove` shifts the shorter side: back
+        // half (`len - index - 1 < index`), `head` stays; front half, `head` moves on one
+        // slot, wrapping at the capacity.
+        let expected_head = if index >= len || len - index - 1 < index {
+            head
+        } else if head + 1 == cap {
+            0
+        } else {
+            head + 1
+        };
+        assert!(deque.head.as_index() == expected_head);
         core::mem::forget(elem);
         kani::cover(index < len && len - index - 1 < index, "remove: back half shifted");
         kani::cover(
@@ -6348,6 +6493,11 @@ mod verify {
         assert_eq!(deque.len(), len + other_len);
         assert_eq!(other.len(), 0);
         cover_buffer_path!(T, len + other_len > old_cap && other_len > 0, "append: buffer grown");
+        cover_buffer_path!(
+            T,
+            old_cap == 0 && other_len == 1 && deque.capacity() == first_growth_capacity::<T>(),
+            "append: growth from capacity 0 lands on min_non_zero_cap for this element size"
+        );
         kani::cover(len + other_len <= old_cap && other_len > 0 && len > 0, "append: in place");
         touch(&deque);
         touch(&other);
@@ -6433,6 +6583,11 @@ mod verify {
         deque.resize_with(new_len, || kani::any());
         assert_eq!(deque.len(), new_len);
         cover_buffer_path!(T, new_len > cap && len > 0, "resize_with: buffer grown");
+        cover_buffer_path!(
+            T,
+            cap == 0 && new_len == 1 && deque.capacity() == first_growth_capacity::<T>(),
+            "resize_with: growth from capacity 0 lands on min_non_zero_cap for this element size"
+        );
         kani::cover(
             new_len > len && new_len - len > 1 && new_len <= cap,
             "resize_with: appended in place",
@@ -6661,6 +6816,17 @@ mod verify {
     proof_harnesses!(check_reserve, [], [[u8; 2048] => check_reserve_u8x2048]);
     proof_harnesses!(check_try_reserve, [], [[u8; 2048] => check_try_reserve_u8x2048]);
     proof_harnesses!(check_grow, [], [[u8; 2048] => check_grow_u8x2048]);
+    proof_harnesses!(check_push_front, [], [[u8; 2048] => check_push_front_u8x2048]);
+    proof_harnesses!(check_insert, [], [[u8; 2048] => check_insert_u8x2048]);
+    proof_harnesses!(check_append, [], [[u8; 2048] => check_append_u8x2048]);
+    proof_harnesses!(
+        check_resize_with_grow,
+        [kani::stub(
+            VecDeque::<[u8; 2048]>::write_iter_loop,
+            VecDeque::<[u8; 2048]>::write_iter_contract_replacement_drop
+        )],
+        [[u8; 2048] => check_resize_with_grow_u8x2048]
+    );
 
     // Additional shapes (see the shape matrix in the module documentation). `WithDrop` goes here on
     // the targets that move or read elements and drop at most one at a time; `Al16` and `bool` on
@@ -6840,6 +7006,7 @@ mod verify {
         let (idx, remaining) = (drain.idx, drain.remaining);
         drop(drain);
         assert_eq!(deque.len(), len - (end - start));
+        assert!(deque.head.as_index() == head_after_drain::<T>(head, cap, len, start, end));
         kani::cover(
             core::mem::needs_drop::<T>() && remaining != 0,
             "Drain::drop: needs_drop branch entered with elements remaining",
@@ -6999,6 +7166,10 @@ mod verify {
             "drain: destructor count equals the length of the drained range",
         );
         assert!(deque.len() == len - (end - start));
+        kani::assert(
+            deque.head.as_index() == head_after_drain::<CountedDrop>(head, cap, len, start, end),
+            "drain: head is where the DropGuard's five cases put it",
+        );
         kani::cover(
             remaining != 0,
             "Drain::drop: needs_drop branch entered with elements remaining",
@@ -7551,6 +7722,51 @@ mod verify {
             unsafe { real_slice_drop_glue(ptr::slice_from_raw_parts_mut(buf.add(off), n)) };
             kani::cover(n == N && off > 0, "real glue: N elements of an interior sub-slice");
             kani::cover(n == 0, "real glue: empty slice");
+        }
+
+        /// The shipped call `ptr::drop_in_place::<[T]>` (the real compiler glue, no stub) on a
+        /// slice that satisfies `slice_drop_pre`, for the two `needs_drop` shapes whose element
+        /// is not one byte: at most `N` elements of a sub-slice of a buffer of capacity `<= 8`,
+        /// or, for a zero-sized `T`, a dangling slice of at most `N` elements. The other
+        /// harnesses of this module that run the real glue use 1-byte elements (`CountedDrop`,
+        /// `WithDrop`, `SlotDrop`). No count is asserted: the destructors of these shapes leave
+        /// no trace.
+        fn real_glue_on_slice<T: Shape>() {
+            const CAP: usize = 8;
+            let (s, interior): (*mut [T], bool) = if T::IS_ZST {
+                let n: usize = kani::any_where(|n: &usize| *n <= N);
+                (ptr::slice_from_raw_parts_mut(ptr::dangling_mut::<T>(), n), false)
+            } else {
+                let cap: usize = kani::any_where(|c: &usize| *c > 0 && *c <= CAP);
+                let buf =
+                    unsafe { crate::alloc::alloc(Layout::array::<T>(cap).unwrap()) } as *mut T;
+                kani::assume(!buf.is_null());
+                unsafe { ptr::write_bytes(buf, T::any_fill(), cap) };
+                let off: usize = kani::any_where(|o: &usize| *o <= cap);
+                let n: usize = kani::any_where(|n: &usize| *n <= cmp::min(cap - off, N));
+                (ptr::slice_from_raw_parts_mut(unsafe { buf.add(off) }, n), off > 0)
+            };
+            assert!(slice_drop_pre(s));
+            unsafe { ptr::drop_in_place(s) };
+            kani::cover(s.len() == N, "real glue: N elements");
+            cover_buffer_path!(
+                T,
+                s.len() == N && interior,
+                "real glue: N elements of an interior sub-slice"
+            );
+            kani::cover(s.len() == 0, "real glue: empty slice");
+        }
+
+        #[kani::proof]
+        #[kani::unwind(6)]
+        fn bounded_real_glue_withdrop8() {
+            real_glue_on_slice::<WithDrop8>();
+        }
+
+        #[kani::proof]
+        #[kani::unwind(6)]
+        fn bounded_real_glue_withdropzst() {
+            real_glue_on_slice::<WithDropZst>();
         }
 
         /// Ghost state of `bounded_drain_drops_the_drained_slots`: the address of one buffer
