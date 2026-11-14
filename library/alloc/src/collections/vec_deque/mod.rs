@@ -223,7 +223,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// Kani can check initialization only under `-Z uninit-checks`, which CI
     /// (`scripts/run-kani.sh`) does not pass. At the pinned Kani (`c5e65fd`) the flag cannot be
     /// used on this whole module (among others model-checking/kani#4852, #5164 and #5165; see
-    /// the Kani limitations in the documentation of `mod verify`). Without the flag Kani's
+    /// "Limits of these proofs" in the documentation of `mod verify`). Without the flag Kani's
     /// initialization predicate is constant `true`, also inside the `can_dereference` of
     /// `buffer_read`'s contract, so a read of a never-written slot of the buffer is not
     /// reported. Under CI's flags the property is therefore not verified: the generators in
@@ -869,9 +869,11 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// its index in a closure that a loop contract lower down could neither name nor re-pin
     /// after havocking. The transcription relies on `Iterator`'s documented equivalence between
     /// `fold` and repeated `next()`. Its loop-contract proof is a partial-correctness proof
-    /// (Kani's loop contracts assume termination); termination follows from the exact
-    /// `size_hint` of the `TrustedLen` iterators every caller passes. `loop_decreases` is not
-    /// used because at the pinned Kani it conflicts with an explicit `loop_modifies`.
+    /// (Kani's loop contracts assume termination); termination follows from the exact `size_hint`
+    /// of the iterators every caller passes (see `write_iter`: the `TrustedLen` iterator of
+    /// `spec_extend`, or a `Take<ByRefSized<_>>` prefix of it). `loop_decreases` is not used: at
+    /// Kani pin `1640445` or earlier it conflicted with an explicit `loop_modifies`, and that has
+    /// not been re-tested at the current pin.
     ///
     /// Callers of `write_iter` whose iterator is reused after the call (the wrapping branch of
     /// `write_iter_wrapping`, which passes `Take<ByRefSized<&mut I>>`) are verified with this
@@ -4474,98 +4476,284 @@ impl<T, const N: usize> From<[T; N]> for VecDeque<T> {
 mod verify {
     //! Kani proofs for Challenge 25.
     //!
+    //! Every statement in this documentation is about the Kani commit the repository pins,
+    //! `c5e65fd` (CBMC 6.11.0, toolchain nightly-2026-10-23), run with the flags of
+    //! `scripts/run-kani.sh`, unless it names another version.
+    //!
     //! # Method
     //!
-    //! Every harness starts from [`any_deque`]: a real allocation of symbolic capacity, a
-    //! symbolic `head` over every physical index and a symbolic `len` (so both the contiguous
-    //! and the wrapped ring layout are explored), with exactly the logical range initialized.
-    //! There is no `kani::unwind` and no length constant in any proof; the only bound on sizes
-    //! is CBMC's object model (`MAX_ALLOCATION_BYTES`). The 13 unsafe functions carry
-    //! `#[requires]`/`#[ensures]`/`kani::modifies` contracts checked by `proof_for_contract`
-    //! harnesses; the 30 safe functions have `#[kani::proof]` harnesses. Loops are discharged
-    //! with loop contracts (`retain_mut`, `write_iter_loop`).
+    //! Every proof of a listed function starts from a real allocation of symbolic capacity with a
+    //! symbolic `head` and a symbolic `len`, so both the contiguous and the wrapped ring layout are
+    //! explored, and with exactly the logical range initialized. The generator is [`any_deque`]
+    //! (`head` over every physical index, `len` over `0..=capacity`), except for
+    //! `handle_capacity_increase` and `abort_shrink` (`any_empty_deque` plus `init_ring`) and
+    //! `from_contiguous_raw_parts_in` (the raw parts of an empty `Vec` of symbolic capacity).
+    //! Outside [`bounded_evidence`] no harness uses `kani::unwind`, and none has a length constant
+    //! except `check_vecdeque_swap`, which predates this work and uses a 40-element array. The only
+    //! bound on sizes is `MAX_ALLOCATION_BYTES`: a buffer of at most 2^48 bytes.
+    //!
+    //! Of the 43 listed functions, 15 carry a contract (`#[requires]` and, where there is something
+    //! to state, `#[ensures]` and `kani::modifies`) checked by `proof_for_contract` harnesses: the
+    //! 13 unsafe functions of the challenge, and `rotate_left_inner` and `rotate_right_inner`,
+    //! which the challenge lists among the safe abstractions and which are `unsafe fn`s. The other
+    //! 28 have `#[kani::proof]` harnesses (29 bodies: `resize_with` has two). Loops are discharged
+    //! with loop contracts: the two loops of `retain_mut` and the loop of `write_iter_loop` in the
+    //! code under verification, and the loops of the slice drop model (`drop_slice`,
+    //! `drop_slice_counted`) in this module.
+    //!
+    //! `kani list` reports 221 harnesses in this file: 141 `#[kani::proof]` and 80
+    //! `proof_for_contract`. 15 of them are in [`bounded_evidence`]; they are the only ones with
+    //! `#[kani::unwind]`. Every harness except `check_vecdeque_swap` and ten that are written out
+    //! in `bounded_evidence` is generated by an instantiation macro (`contract_harnesses!`,
+    //! `proof_harnesses!`, `drop_glue_harnesses!`, `shipped_text_harness!`), so the `type => name`
+    //! pairs of those invocations are the complete record of which body is instantiated with which
+    //! shape.
     //!
     //! # Element shapes (generic `T`)
     //!
-    //! Kani rejects a `#[kani::proof]` on a generic function, so each harness body is written
-    //! once for arbitrary `T` and instantiated over element *shapes* chosen to cover every
-    //! property of `T` that the code observes. `VecDeque<T>` is parametric in `T` except through
+    //! Kani rejects a `#[kani::proof]` on a generic function, so each harness body is written once
+    //! for arbitrary `T` and instantiated over element *shapes* chosen to cover every property of
+    //! `T` that the code observes. `VecDeque<T>` is parametric in `T` except through
     //! `size_of`/`align_of` (allocation and pointer arithmetic), `T::IS_ZST` (the branches that
-    //! skip the buffer), moves of opaque values, and the drop glue `ptr::drop_in_place::<[T]>`
-    //! in `truncate`, `drain` and `Drop for VecDeque`; it never branches on `needs_drop` or on
-    //! element values (the only value-dependent code is the user closures, which the harnesses
-    //! make nondeterministic).
+    //! skip the buffer), moves of opaque values, `needs_drop::<T>()` (tested in `Drain`'s `Drop`
+    //! and in its `DropGuard`, `drain.rs`), and the drop glue `ptr::drop_in_place::<[T]>`. Of the
+    //! listed functions, `truncate` calls that glue, `retain_mut` and `resize_with` reach it
+    //! through `truncate`, and `drain` through `Drain::drop`; `Drop for VecDeque`, which is not on
+    //! the list, calls it too. The code does not branch on element values (the only value-dependent
+    //! code is the user closures, which the harnesses make nondeterministic).
     //!
-    //! | shape | size | align | `needs_drop` / non-`Copy` | validity invariant |
-    //! |---|---|---|---|---|
-    //! | `()` | 0 | 1 | no | no |
-    //! | `u8` | 1 | 1 | no | no |
-    //! | `bool` | 1 | 1 | no | yes (`0`/`1`) |
-    //! | `[u8; 3]` | 3 | 1 | no | no |
-    //! | `u64` | 8 | 8 | no | no |
-    //! | [`Al16`] | 16 | 16 | no | no |
-    //! | [`WithDrop`] | 1 | 1 | yes | no |
+    //! | shape | size | align | `needs_drop` / non-`Copy` | validity invariant | harnesses |
+    //! |---|---|---|---|---|---|
+    //! | `()` | 0 | 1 | no | no | 43 |
+    //! | `[u64; 0]` | 0 | 8 | no | no | 10 |
+    //! | `u8` | 1 | 1 | no | no | 44 |
+    //! | `bool` | 1 | 1 | no | yes (`0`/`1`) | 4 |
+    //! | `[u8; 3]` | 3 | 1 | no | no | 8 |
+    //! | `u64` | 8 | 8 | no | no | 44 |
+    //! | [`Al16`] | 16 | 16 | no | no | 13 |
+    //! | `[u8; 2048]` | 2048 | 1 | no | no | 4 |
+    //! | [`WithDrop`] | 1 | 1 | yes | no | 22 |
+    //! | [`WithDrop8`] | 8 | 8 | yes | no | 4 |
+    //! | [`WithDropZst`] | 0 | 1 | yes | no | 4 |
+    //! | [`CountedDrop`] | 1 | 1 | yes (the destructor writes a static) | no | 5 |
     //!
-    //! `u8`, `u64` and `()` instantiate every harness (plus `[u8; 3]` on the cheap ones);
-    //! `bool`, `Al16` and `WithDrop` instantiate the harnesses whose targets exercise their
-    //! property (see the instantiation lists). Two targets carry no validity-invariant shape:
-    //! `buffer_read` and `pop_front`, the two that move an element with a validity invariant
-    //! out of the buffer by value. Their `bool` instantiation, and equally a `NonZero<u8>` one
-    //! tried in its place, make CBMC's symbolic execution run out of memory nondeterministically
-    //! (at the pinned Kani the run ends in "CBMC appears to have run out of memory" or hits the
-    //! 10-minute CI cap; at the previous pin the same truncated run was reported as success with
-    //! a collapsed property count and no cover witnesses), while the other four `bool` targets
-    //! (`get`, `push_back`, `push_unchecked`, `write_iter`) verify in seconds with full
-    //! property counts. The validity property is therefore covered on those four targets only;
-    //! `buffer_read`/`pop_front` keep every other shape. For `WithDrop` the unbounded harnesses cover
-    //! every target that drops at most single elements; the slice drop glue
-    //! (`drop_in_place::<[T]>`, a compiler-generated loop that cannot carry a loop contract) is
-    //! checked bounded (`len <= 4`) in [`bounded_evidence`]. Generators write pre-existing
-    //! elements with one symbolic byte per region (a valid bit pattern of the shape,
-    //! [`Shape::any_fill`]); elements that enter through the API are per-element `kani::any()`.
-    //! Representative shapes are the closest Kani can come to the challenge's "no
-    //! monomorphization" clause.
+    //! The last column is the number of harnesses of the shape outside [`bounded_evidence`]. It,
+    //! and the statements below about which body has which shape, are read off the instantiation
+    //! macros: one harness per `type => name` pair, plus the contract proof each
+    //! `drop_glue_harnesses!` invocation generates. The harness names agree with `kani list`.
     //!
-    //! # Stubs and the `write_iter` transcription
+    //! `u8` and `u64` instantiate each of the 44 bodies written for a listed function (15 contract
+    //! bodies and 29 `kani::proof` bodies). `()` instantiates 43 of them: `grow` has no zero-sized
+    //! instance (see the comment at its instantiation). `[u8; 3]` is on eight contract bodies. The
+    //! other shapes are on the bodies whose targets exercise their property (see the instantiation
+    //! lists):
     //!
-    //! Everything a harness assumes about a callee is either its verified contract or one of
-    //! the items below, each with the harness that checks what it hides:
+    //! * `bool` on `get`, `push_back`, `push_unchecked` and `write_iter`. Two targets carry no
+    //!   validity-invariant shape: `buffer_read` and `pop_front`, the two that move an element out
+    //!   of the buffer by value. Their `bool` instantiations do not verify at the pin: every
+    //!   attempt ended in "CBMC appears to have run out of memory" or in a CBMC abort (status 133),
+    //!   and the cause is not established. At an earlier pin such a run was reported as successful,
+    //!   with a collapsed property count and no cover witnesses; a `NonZero<u8>` instantiation
+    //!   tried in their place at an earlier pin behaved like `bool` and was not re-tested. The four
+    //!   `bool` harnesses that exist verify in seconds with full property counts. The validity
+    //!   property is therefore covered on those four targets only.
+    //! * `Al16` on 13 bodies: the contract bodies of `push_unchecked`, `buffer_read`,
+    //!   `buffer_write`, `buffer_range`, `copy`, `copy_nonoverlapping`, `write_iter` and
+    //!   `from_contiguous_raw_parts_in`, and `get`, `pop_front`, `push_back`, `split_off` and
+    //!   `shrink_to`.
+    //! * `[u64; 0]` (zero-sized, alignment 8) on `get`, `as_slices`, `range`, `drain`, `pop_front`,
+    //!   `push_back`, `shrink_to`, `insert`, `append` and `make_contiguous`: the `T::IS_ZST` paths
+    //!   with a dangling buffer pointer that is not trivially aligned. Kani checks alignment where
+    //!   a reference or slice is formed and in `ptr::copy`; it does not check the alignment of a
+    //!   bare `ptr::read` or `ptr::write`.
+    //! * `[u8; 2048]` on `grow`, `push_back`, `reserve` and `try_reserve`: four entry points into
+    //!   `RawVecInner::grow_amortized`, for the `size > 1024` arm of `RawVec`'s `min_non_zero_cap`.
+    //!   `insert`, `push_front`, `append` and `resize_with` reach `grow_amortized` too and are
+    //!   instantiated only with elements of at most 8 bytes. That the arm for the instantiated
+    //!   shape is taken is witnessed by a `kani::cover` (see `first_growth_capacity`), which is
+    //!   reported in the log and not enforced.
+    //! * `WithDrop` on the targets that move or read elements, and with the other `needs_drop`
+    //!   shapes on the targets that hand a slice to the drop glue (`truncate`, `drain`,
+    //!   `retain_mut`, `resize_with`, `Drop for VecDeque`). That glue is a compiler-generated loop
+    //!   of symbolic length; it is not library source and cannot carry a loop contract. These paths
+    //!   are therefore checked in two parts, neither of which is a proof of the compiler's loop
+    //!   without a bound: (1) without an unwinding bound, against a contracted source-level model
+    //!   of the loop (`drop_slice`, `drop_slice_counted`), which the drop-glue harnesses substitute
+    //!   through `drop_in_place_model` (next section); (2) on the compiler's own loop, bounded
+    //!   (`len <= 4`), in [`bounded_evidence`]. `WithDrop8` and `WithDropZst` are instantiated on
+    //!   `truncate`, `drain` and `Drop for VecDeque` only; `CountedDrop` has its own bodies
+    //!   (`check_*_counted`).
+    //!
+    //! Generators write pre-existing elements with one symbolic byte per region (a valid bit
+    //! pattern of the shape, [`Shape::any_fill`]), so all pre-existing elements of a generated
+    //! deque are equal; elements that enter through the API are per-element `kani::any()`. Every
+    //! generated deque uses the `Global` allocator. Both restrictions are spelled out at
+    //! [`any_deque`] ("Restrictions of the generated states") and in the limits below.
+    //! Representative shapes are the closest Kani can come to the challenge's "no monomorphization"
+    //! clause.
+    //!
+    //! # Stubs, the slice drop model and the `write_iter` transcription
+    //!
+    //! One contract is assumed of a callee: the slice drop model's (`drop_slice`,
+    //! `drop_slice_counted`), which the drop-glue harnesses use through `kani::stub_verified` and
+    //! which `check_drop_slice_contract_*` prove. No other harness uses `stub_verified`. Everything
+    //! else a harness assumes about a callee is one of the replacements below, each with the
+    //! harness that checks what it hides:
     //!
     //! | replacement | replaces | asserts | over-approximates | evidence | residual argument |
     //! |---|---|---|---|---|---|
     //! | `write_iter_loop` (cfg(kani) body of `write_iter`) | the shipped `for_each` statement | — | — (transcription) | `bounded_evidence::bounded_write_iter_shipped_text_*` runs the shipped statement (`write_iter_for_each`) against the same contract, `n <= 4` | `Iterator::fold` ≡ repeated `next()`; see `write_iter_loop`'s doc for why no loop contract can reach the shipped loop |
     //! | [`VecDeque::write_iter_contract_replacement`] (and its `_drop` variant for `resize_with`) | `write_iter_loop` | `write_iter`'s precondition, via `write_iter_precondition` | `write_iter`'s `modifies` region gets an arbitrary fill; `written += hi`; iterator advanced by `hi` | `bounded_write_iter_wrapping_shipped_text_u8` (the branch with the shipped statement iterating) and `bounded_replacement_advance_by_matches_next_u8` (`advance_by(hi)` ≡ `hi` × `next()`) | exact-`hi` = `TrustedLen` exactness (asserted `lo == hi`) |
     //! | [`stub_ptr_rotate`] (`check_make_contiguous_*` only) | `core::slice::rotate::ptr_rotate` | its documented precondition (range writable) | leaves memory untouched | `bounded_evidence::bounded_rotate_{left,right}_permutes_range_u8`: the real `rotate_left`/`rotate_right` on ranges of every length and amount up to six, symbolic contents, guard bytes — exactly the rotated sequence, nothing else written | a rotation only permutes initialized slots; `make_contiguous` does nothing value-dependent afterwards |
+    //! | [`drop_in_place_model`] | `core::ptr::drop_in_place` | see the list below | | | |
+    //!
+    //! [`drop_in_place_model`] is applied by the harnesses that `drop_glue_harnesses!` generates
+    //! and by no other:
+    //!
+    //! * What it replaces: every call of `core::ptr::drop_in_place::<T>` reachable from the
+    //!   harness, for every `T` (a stub is keyed on the function, not on a type). For a slice of a
+    //!   `needs_drop` element type it runs the model loop in place of the compiler's loop. Every
+    //!   other type, and a slice of a type without drop glue, takes the real glue. Drops the
+    //!   compiler inserts itself (MIR `Drop` terminators: a value going out of scope, `drop(x)`, an
+    //!   assignment dropping the old value) are not calls of `ptr::drop_in_place`; they bypass the
+    //!   stub and run the real glue, as do the per-element drops inside the model.
+    //! * What it asserts: [`slice_drop_pre`] at every slice drop site, i.e. the whole slice is
+    //!   valid for reads and writes. For `[CountedDrop]` also that the watched slot (see
+    //!   `WATCHED_SLOT`) is not handed over more often than the harness allows.
+    //! * What it over-approximates: in the caller harnesses the model is used through its contract.
+    //!   For the read-only shapes that contract is a precondition with no `modifies` clause and no
+    //!   postcondition, so nothing is havocked and no destructor runs on a slice element there. For
+    //!   `CountedDrop`, `DROPS` is havocked and constrained to its old value plus the slice length.
+    //! * What checks what it hides (the compiler's loop): the model's contract is proved for any
+    //!   slice length by `check_drop_slice_contract_{withdrop,withdrop8,withdropzst,counteddrop}`;
+    //!   the real glue is run, bounded (`len <= 4`), by
+    //!   `bounded_{truncate,drain,vecdeque,retain_mut}_drop_glue_withdrop`, by
+    //!   `bounded_real_glue_meets_slice_drop_contract` (the shipped glue under the clauses of the
+    //!   counting model's contract) and by `bounded_drain_drops_the_drained_slots`.
+    //! * Residual argument: the model loop is a transcription of the loop rustc builds for a slice
+    //!   (`rustc_mir_transform::elaborate_drop`, `drop_loop`: the elements are dropped one by one
+    //!   in ascending index order). That correspondence is read from the compiler source; nothing
+    //!   checks it beyond the bounded harnesses.
+    //! * It is interim: it stands in until Kani can attach a loop invariant to the drop shim
+    //!   itself.
     //!
     //! Loop-contract proofs are partial-correctness proofs at the pinned Kani (termination is
-    //! assumed); the loops involved terminate by the exact `size_hint` of `TrustedLen`
-    //! iterators (`write_iter_loop`) and by `cur` reaching `len` (`retain_mut`).
+    //! assumed). The loops involved terminate by the exact `size_hint` of the iterators the callers
+    //! pass (`write_iter_loop`), by `cur` reaching `len` (`retain_mut`) and by `i` reaching the
+    //! slice length (the model loops).
     //!
-    //! # Kani limitations at the pinned version (`1640445`, CBMC 6.11.0)
+    //! # Limits of these proofs
     //!
-    //! 1. `kani::stub` of a contracted function is rejected (kani#4591), hence the
-    //!    contract-free `write_iter_loop` is the stub target. `stub_verified(write_iter)` no
-    //!    longer ICEs (kani#4749 is in the pin) but is unusable here: its generated replacement
-    //!    havocs the `modifies` region `slots(dst, hi)` element by element
-    //!    (`kani::internal::write_any_slice`, a `fill_with` loop), a loop of symbolic length no
-    //!    unwind bound covers; for `()` it verifies instantly, for `u8` CBMC did not terminate
-    //!    in over four hours on either the direct branch of `write_iter_wrapping` or
-    //!    `resize_with`'s growth path. The hand-written replacement writes the region with a
-    //!    single `write_bytes`. Independently, no contract replacement can prove the wrapping
-    //!    branch: it drops the by-value `Take<ByRefSized<&mut I>>` unconsumed, so the second
-    //!    call would see the whole iterator again (see `write_iter_contract_replacement`).
-    //! 2. A loop contract cannot survive the havocking of a loop-carried adapter holding a
-    //!    `&mut` (`Take<ByRefSized<&mut I>>`): its private fields cannot be re-pinned.
-    //! 3. A stub must be a method when the original is one: signatures are compared by the
-    //!    position of their own generic parameters.
-    //! 4. `retain_mut`'s loop contracts do not list the predicate closure: at the previous pin
-    //!    CBMC aborted on a zero-sized `loop_modifies` target (kani#4786, since fixed by
-    //!    kani#4792, which is in the pin; the lists are unchanged, the closure captures nothing).
-    //! 5. `loop_decreases` cannot be combined with an explicit `loop_modifies` (observed at the
-    //!    previous pin; not re-tested).
-    //! 6. `-Z uninit-checks` and `-Z valid-value-checks` are not enabled by CI (the former
-    //!    rejects alloc at this pin, kani#3300); reading uninitialized memory and invalid values
-    //!    are therefore only excluded by construction (initialized ranges, valid fills).
+    //! 1. **Initialization.** CI does not pass `-Z uninit-checks`, and without it Kani's
+    //!    initialization predicate is constant `true`: a read of a never-written slot inside the
+    //!    buffer is not reported. That exactly the logical range is initialized is established by
+    //!    construction in the generators and not re-checked after an operation (see
+    //!    `invariant_holds`). Six contract harnesses can reach never-written slots because their
+    //!    contracts admit it: `check_copy`, `check_copy_nonoverlapping`, `check_wrap_copy`,
+    //!    `check_write_iter_wrapping`, `check_abort_shrink` and `check_buffer_read` (see
+    //!    [`any_deque`]). The flag does not run on this module as a whole:
+    //!    model-checking/kani#4852, #5164, #5165 and #3300 were open on 2026-11-15. Three harnesses
+    //!    were run with it: `check_get_u8` verifies; `check_buffer_read_u8` fails, as it must, on
+    //!    the uninitialized read; `check_copy_u8` fails on uninitialized reads and on an arithmetic
+    //!    overflow inside Kani's own shadow-memory code (`kani_core/src/mem_init.rs`).
+    //!
+    //!    What the harnesses assert without the flag: `check_get` and `check_get_mut` the address
+    //!    of the returned reference (see `ring_slot`); the `pop_*` and `push_*` harnesses `head`,
+    //!    `len` and the capacity after the call. So a wrong slot handed out by `get` or `get_mut`
+    //!    fails, and so does a `pop_*` or `push_*` that leaves the logical range in the wrong
+    //!    place. Not caught: a function that returns or stores by value and uses the wrong slot (a
+    //!    `push_back` that writes one slot too far and a `pop_front` that reads from the new head
+    //!    both verify); and the other functions that hand out references (`as_slices`,
+    //!    `as_mut_slices`, `range`, `range_mut`) have no address check (an `as_slices` with its
+    //!    halves swapped verifies).
+    //!
+    //!    `-Z valid-value-checks` is not enabled by CI either: invalid values are excluded only by
+    //!    construction (valid fills).
+    //! 2. **Aliasing.** Kani does not check Rust's aliasing rules (Stacked Borrows, Tree Borrows).
+    //!    No proof here says anything about them.
+    //! 3. **Unwinding.** Kani does not model unwinding: a panic ends the path. Code that runs only
+    //!    while unwinding is not verified. For the drop paths that is the two `drop_in_place` calls
+    //!    in the `DropGuard` of `Drain::drop` (taken only after an element destructor has
+    //!    panicked), `Dropper`'s role of dropping the back slice when a destructor of the front
+    //!    slice panics, and the drop glue's own cleanup loop.
+    //! 4. **Termination.** See above: loop contracts give partial correctness, and no
+    //!    `loop_decreases` clause is used.
+    //! 5. **Destructors.** The destructors of the `needs_drop` shapes read their payload;
+    //!    `CountedDrop`'s also writes one static. A destructor that frees heap memory, or one that
+    //!    writes its own slot, is not covered. The second cannot satisfy the model's contract,
+    //!    which has no `modifies` clause.
+    //! 6. **Which elements, as opposed to how many.** All pre-existing elements of a generated
+    //!    deque are equal (one fill pattern per region), no contract has an `ensures` about element
+    //!    contents, and no harness that starts from a generator compares element values. Which
+    //!    *slot* is concerned is checked by address in three places. `check_get` and
+    //!    `check_get_mut`: the returned reference. `check_{truncate,retain_mut,drop}_counteddrop`:
+    //!    the buffer slots covered by the slices handed to the drop glue (the watched slot), next
+    //!    to the destructor count. `bounded_drain_drops_the_drained_slots`: the slots `Drain::drop`
+    //!    destroys, on the real glue, for at most four elements. For `drain` without a bound only
+    //!    the destructor count is proved (`check_drain_counteddrop`): a remaining range of the
+    //!    right length in the wrong place passes it. The read-only `needs_drop` harnesses
+    //!    (`WithDrop`, `WithDrop8`, `WithDropZst`) check that every slice handed to the glue is
+    //!    valid and nothing more: a wrong range inside the buffer, a double drop or a leak passes
+    //!    them.
+    //! 7. **The compiler's slice drop loop** is checked bounded only (`len <= 4`). The proofs
+    //!    without an unwinding bound are against the model (previous section).
+    //! 8. **`ptr_rotate`.** The `check_make_contiguous_*` harnesses stub it. Which of its three
+    //!    algorithms runs depends on the element size and on the two lengths; the bounded evidence
+    //!    for the stub runs `u8` ranges of at most six elements, which select `ptr_rotate_memmove`
+    //!    only. The stub hides that selection: no harness runs the other two algorithms.
+    //! 9. **`buffer_read` has no value postcondition.** Its contract is a precondition, so its
+    //!    proof does not say that the value returned is the one stored in slot `off`. A `ptr::read`
+    //!    at a byte offset instead of an element offset still verifies in `check_buffer_read_u64`
+    //!    and `check_buffer_read_al16`: the read stays in bounds and Kani does not check the
+    //!    alignment of a `ptr::read`.
+    //! 10. **Allocator.** `Global` only, as Kani models it. In that model an allocation never
+    //!     fails, so the paths taken when the allocator reports an error are not exercised (see
+    //!     [`any_deque`]).
+    //!
+    //! # Kani limitations at the pinned version (`c5e65fd`, CBMC 6.11.0)
+    //!
+    //! 1. `kani::stub` of a contracted function is rejected (kani#4591), hence the contract-free
+    //!    `write_iter_loop` is the stub target. `stub_verified(write_iter)` no longer ICEs
+    //!    (kani#4749 is in the pin) but is unusable here: its generated replacement havocs the
+    //!    `modifies` region `slots(dst, hi)` element by element (`kani::internal::write_any_slice`,
+    //!    a `fill_with` loop), a loop of symbolic length no unwind bound covers. For `u8`, CBMC
+    //!    timed out at a 15-minute limit on both the direct branch of `write_iter_wrapping` and
+    //!    `resize_with`'s growth path (at an earlier pin it had not terminated after four hours).
+    //!    For `()` the generated replacement fails one pointer check in `write_any_slice` (at an
+    //!    earlier pin it verified). The hand-written replacement writes the region with a single
+    //!    `write_bytes`. Independently, no contract replacement can prove the wrapping branch: it
+    //!    drops the by-value `Take<ByRefSized<&mut I>>` unconsumed, so the second call would see
+    //!    the whole iterator again (see `write_iter_contract_replacement`).
+    //! 2. A loop contract cannot survive the havocking of a loop-carried adapter holding a `&mut`
+    //!    (`Take<ByRefSized<&mut I>>`): its private fields cannot be re-pinned.
+    //! 3. A stub must be a method when the original is one: signatures are compared by the position
+    //!    of their own generic parameters.
+    //! 4. `retain_mut`'s loop contracts do not list the predicate closure: at an earlier pin CBMC
+    //!    aborted on a zero-sized `loop_modifies` target (kani#4786, since fixed by kani#4792,
+    //!    which is in the pin; the lists are unchanged, the closure captures nothing).
+    //! 5. `loop_decreases` could not be combined with an explicit `loop_modifies`. This was
+    //!    observed at pin `1640445` or earlier and has not been re-tested at this pin.
+    //! 6. `-Z uninit-checks` does not run on this module (limit 1 above).
+    //! 7. The compiler-generated slice drop loop is not source code and cannot carry a loop
+    //!    contract; for a slice of symbolic length CBMC unwinds it without end. Hence the model
+    //!    (`drop_slice`) and the bounded harnesses on the real glue.
+    //! 8. Under `--no-assert-contracts`, which CI passes, the `requires` of a contracted function
+    //!    is asserted where the contract replaces the call (`stub_verified`) and not where the
+    //!    function's body runs. `drop_in_place_model` therefore asserts `slice_drop_pre` itself.
+    //! 9. Statics and constants share one cache of emitted allocations keyed by their bytes, so a
+    //!    constant that is emitted through memory can come out as a read of a *mutable* static with
+    //!    the same initializer bytes. Which static is picked depends on the order in which the
+    //!    items of the crate are emitted, and that order differs between checkouts of the same
+    //!    source at different paths. In a harness instrumented for contracts a static starts with
+    //!    an arbitrary value, so the constant then reads an arbitrary value. This is what the
+    //!    spurious pointer failures of the destructor-counting harnesses were at this pin: with
+    //!    `static mut DROPS: usize = 0`, `RawVec`'s zero-capacity constant read `DROPS` in some
+    //!    checkouts and not in others. Failures of the same description had been reported at an
+    //!    earlier pin as model-checking/kani#4992 (a destructor writing a static breaks
+    //!    `proof_for_contract` harnesses); the mechanism was not checked at that pin. With an
+    //!    initializer no constant shares (`UNSHARED_STATIC_INIT`) they do not reproduce at
+    //!    `c5e65fd`. The Kani behaviour is not fixed, so every static of this module must keep such
+    //!    an initializer.
 
     use core::iter::TrustedLen;
     use core::marker::PhantomData;
@@ -4636,8 +4824,11 @@ mod verify {
     }
 
     /// `needs_drop` (and therefore non-`Copy`, move-only) element: its destructor reads its
-    /// payload, so a destructor run on an uninitialized or already-moved slot fails Kani's
-    /// memory checks. It keeps no count of its runs: see `CountedDrop`.
+    /// payload, so a destructor run on a deallocated or out-of-bounds slot fails Kani's memory
+    /// checks. A destructor run on an uninitialized or already-moved slot inside the buffer is not
+    /// detected under CI's flags (see `invariant_holds`), and a second run on the same element is
+    /// visible only through the count of `CountedDrop`. It keeps no count of its runs: see
+    /// `CountedDrop`.
     #[derive(kani::Arbitrary)]
     pub(super) struct WithDrop(u8);
     impl Drop for WithDrop {
@@ -4647,20 +4838,17 @@ mod verify {
     }
     impl Shape for WithDrop {}
 
-    /// Number of `CountedDrop` destructors that have run. Assigned by every harness that
-    /// asserts on it (`check_*_counteddrop`, `bounded_evidence`) before the operation it
-    /// measures. A plain `static mut`: Kani explores a single thread. The initializer is not
-    /// zero on purpose: see `UNSHARED_STATIC_INIT`.
+    /// Number of `CountedDrop` destructors that have run. Assigned by every harness that asserts on
+    /// it (`check_*_counteddrop`, and in `bounded_evidence` through `small_deque_with_drop` or
+    /// directly) before the operation it measures. A plain `static mut`: Kani explores a single
+    /// thread. The initializer is not zero on purpose: see `UNSHARED_STATIC_INIT`.
     pub(super) static mut DROPS: usize = UNSHARED_STATIC_INIT;
 
-    /// `WithDrop` plus a destructor counter, for the bounded drop-glue evidence only. The
-    /// counter is not part of `WithDrop` itself because, at the pinned Kani, a write to a static
-    /// from the element type's destructor makes every `proof_for_contract` harness over that
-    /// type with a symbolic-capacity buffer report spurious pointer failures in the harness's
-    /// own generator (the destructor never runs there): an address-model artifact of a static
-    /// object coexisting with a 2^48-byte dynamic object under Kani's `offset` check. The
-    /// evidence harnesses that count destructors build deques of capacity `<= 8`, where the
-    /// artifact does not arise, and they do not instantiate function contracts.
+    /// `WithDrop` plus a destructor counter (`DROPS`, incremented with `wrapping_add` because the
+    /// model's contract is proved from an arbitrary counter value), for the harnesses that count
+    /// destructor runs: `check_*_counteddrop` and three of the bounded real-glue harnesses in
+    /// `bounded_evidence`. It is a separate type so that the read-only shapes keep a model contract
+    /// without a `modifies` clause.
     #[derive(kani::Arbitrary)]
     pub(super) struct CountedDrop(u8);
     impl Drop for CountedDrop {
@@ -4671,9 +4859,10 @@ mod verify {
     }
     impl Shape for CountedDrop {}
 
-    /// Initializer of the statics of this module (`DROPS`, `WATCHED_SLOT` and its two
-    /// counters): a bit pattern that no constant reachable from a harness has. It
-    /// is never read as a value; every harness assigns a static before it asserts on it.
+    /// Initializer of the statics of this module (`DROPS`, `WATCHED_SLOT` and its two counters, and
+    /// the two statics of `bounded_evidence`, each offset by a small number): a bit pattern that no
+    /// constant reachable from a harness is expected to have. It is never read as a value; every
+    /// harness assigns a static before it asserts on it.
     ///
     /// Why not zero. The pinned Kani keeps one cache of emitted allocations keyed by their
     /// bytes and serves both statics and constants from it, so a constant that has to be
@@ -4685,9 +4874,15 @@ mod verify {
     /// by `RawVecInner::new_in`) was such a read in some checkouts and not in others:
     /// `VecDeque::with_capacity(0)` in `any_deque` then returned an arbitrary capacity over a
     /// dangling pointer and the generator failed its own pointer checks, in all four
-    /// `check_*_counteddrop` harnesses. A static whose bytes no constant shares cannot be
-    /// picked. Keep it that way for any static added here (a null pointer is eight zero bytes
-    /// too).
+    /// `check_*_counteddrop` harnesses. A static whose bytes no constant shares cannot be picked.
+    /// Keep it that way for any static added here (a null pointer is eight zero bytes too).
+    ///
+    /// An earlier version of this module explained failures of this kind as an artifact of a
+    /// destructor writing a static in a `proof_for_contract` harness (model-checking/kani#4992) and
+    /// kept the counter out of every contract harness for that reason. With this initializer the
+    /// failures do not reproduce at `c5e65fd`: `check_drop_slice_contract_counteddrop` is such a
+    /// harness, over a buffer of symbolic capacity, and verifies. The Kani behaviour is not fixed;
+    /// the initializer avoids it.
     const UNSHARED_STATIC_INIT: usize = 0x5EED_D50B_C0DE_0001;
 
     // ---------------------------------------------------------------------------------------
@@ -4903,7 +5098,9 @@ mod verify {
     /// exercising `Drop for VecDeque` (whose `ptr::drop_in_place::<[T]>` is then a no-op). For
     /// `needs_drop` shapes it is leaked: `drop_in_place::<[T]>` is a compiler-generated loop of
     /// symbolic length that cannot carry a loop contract, so the drop-glue paths are checked
-    /// separately, bounded, in `bounded_evidence`.
+    /// separately: without an unwinding bound against a contracted model of the glue (the
+    /// `drop_glue_harnesses!` block, whose bodies do not end in `finish`), and on the real glue,
+    /// bounded, in `bounded_evidence`.
     pub(super) fn finish<T, A: crate::alloc::Allocator>(deque: VecDeque<T, A>) {
         if core::mem::needs_drop::<T>() { core::mem::forget(deque) } else { drop(deque) }
     }
@@ -4922,11 +5119,12 @@ mod verify {
     // Symbolic deque generator
     // ---------------------------------------------------------------------------------------
 
-    /// Upper bound, in bytes, on the size of the backing allocation. This is not a bound of
-    /// the proof: it mirrors CBMC's memory model, whose objects are addressed with
-    /// `64 - object_bits` offset bits (`--object-bits 12` in `scripts/run-kani.sh`), so a single
-    /// allocation cannot exceed 2^51 bytes in the model. Every `cap` whose allocation fits the
-    /// model is explored; the bound only excludes allocations no real machine could back either.
+    /// Upper bound, in bytes, on the size of the backing allocation the generators request: 2^48.
+    /// It exists because of CBMC's memory model, whose objects are addressed with `64 -
+    /// object_bits` offset bits (`--object-bits 12` in `scripts/run-kani.sh`), so a single
+    /// allocation cannot exceed 2^51 bytes in the model. The constant is below that limit: what is
+    /// explored is every `cap` whose allocation is at most 2^48 bytes, not every `cap` the model
+    /// could hold. No element count or capacity is bounded otherwise.
     const MAX_ALLOCATION_BYTES: usize = 1 << 48;
 
     /// Builds a physical index from a symbolic `usize` (harness shorthand).
@@ -4960,23 +5158,33 @@ mod verify {
     ///   under verification does not branch on element values (the only value-dependent code
     ///   is the user closures, which the harnesses make nondeterministic; elements that enter
     ///   through the API, such as the ones `AnyIter` yields, are per-element `kani::any()`). It
-    ///   is not enough for any property about *which* element ends up where: an operation that
-    ///   returned, moved, overwrote or dropped the wrong initialized element would still pass
-    ///   every harness that starts from a generated deque. (The only harness in this module
-    ///   that asserts the positions of a deque's elements is the bounded `check_vecdeque_swap`
-    ///   at its end, which builds its deque from a symbolic array, not with these generators.)
-    ///   No contract in this file has an `ensures` about element contents. The same holds for
-    ///   the other places that fill a region this way (`init_ring`, `any_vec`,
-    ///   `check_from_contiguous_raw_parts_in`, `write_iter_contract_replacement`).
+    ///   is not enough for any property about *which* element ends up where: no harness that starts
+    ///   from a generated deque compares element values, and no contract in this file has an
+    ///   `ensures` about element contents. (The only harness in this module that asserts the values
+    ///   at given positions of a deque is `check_vecdeque_swap` at its end, which builds its deque
+    ///   from a symbolic array, not with these generators.) The same holds for the other places
+    ///   that fill a region this way (`init_ring`, `any_vec`, `check_from_contiguous_raw_parts_in`,
+    ///   `write_iter_contract_replacement`, `any_initialized_slice`).
     ///
-    ///   The evidence about destructors has the same limit, reached in two different ways.
-    ///   The unbounded `WithDrop` harnesses use these single-fill generators, so all their
-    ///   pre-existing elements are equal. The bounded drop-glue harnesses in
-    ///   `bounded_evidence` do not use `any_deque`: they write every element with its own
-    ///   `kani::any()` payload, but the three that build a `VecDeque<CountedDrop>`
-    ///   (`small_deque_with_drop`) assert only the number of destructor runs (`DROPS`), which
-    ///   says how many elements were dropped, not which ones, and
-    ///   `bounded_retain_mut_drop_glue_withdrop` (`WithDrop`) asserts no count at all.
+    ///   What is checked instead is which *slot* an operation concerns, by address, in three
+    ///   places: the reference `get`/`get_mut` return (`ring_slot`); the slots covered by the
+    ///   slices that `truncate`, `retain_mut` and `Drop for VecDeque` hand to the drop glue
+    ///   (`WATCHED_SLOT`, in `check_{truncate,retain_mut,drop}_counteddrop`); and, bounded, the
+    ///   slots on which `Drain::drop` runs a destructor
+    ///   (`bounded_evidence::bounded_drain_drops_the_drained_slots`). An operation that returned,
+    ///   moved or overwrote the wrong initialized element anywhere else would still pass.
+    ///
+    ///   The evidence about destructors is limited in the same way. The harnesses over `WithDrop`,
+    ///   `WithDrop8` and `WithDropZst` check that every slice handed to the drop glue is valid, not
+    ///   which elements it holds. The `CountedDrop` harnesses assert the number of destructor runs
+    ///   (`DROPS`), which says how many elements were dropped, not which ones; the watched slot
+    ///   adds which slots the dropped slices cover for `truncate`, `retain_mut` and `Drop for
+    ///   VecDeque`, and not for `drain`. The bounded drop-glue harnesses in `bounded_evidence` do
+    ///   not use `any_deque`: they write every element with its own `kani::any()` payload, but the
+    ///   three that build a `VecDeque<CountedDrop>` (`small_deque_with_drop`) assert only the
+    ///   count, `bounded_retain_mut_drop_glue_withdrop` (`WithDrop`) asserts no count at all, and
+    ///   `bounded_drain_drops_the_drained_slots` identifies slots by address, not elements by
+    ///   value.
     /// * **Allocator.** The result is a `VecDeque<T, Global>`, and no harness in this module
     ///   instantiates `A` with any other allocator, although `VecDeque<T, A>` and every
     ///   function under verification are generic in `A`. What the proofs establish about the
@@ -5041,8 +5249,10 @@ mod verify {
     }
 
     /// A harness iterator yielding exactly `remaining` arbitrary elements. It carries no
-    /// references, so loop-contract havocking cannot invalidate it, and its `size_hint` is
-    /// exact (it is `TrustedLen`, like every iterator the real callers of `write_iter` pass).
+    /// references, so loop-contract havocking cannot invalidate it, and its `size_hint` is exact.
+    /// It is `TrustedLen`, like the iterator `spec_extend` hands to `write_iter_wrapping`; what
+    /// `write_iter` itself receives is that iterator or a `Take<ByRefSized<_>>` prefix of it, which
+    /// is not `TrustedLen` but has an exact hint because the underlying iterator's is.
     pub(super) struct AnyIter<T> {
         remaining: usize,
         _marker: PhantomData<T>,
@@ -5087,17 +5297,20 @@ mod verify {
     /// Contract replacement for the loop of `VecDeque::write_iter` (`write_iter_loop`), used
     /// when verifying the callers of `write_iter` (`write_iter_wrapping`, `resize_with`).
     /// `write_iter` itself, loop included, is verified against its real body by
-    /// `check_write_iter_*`. (Running the real loop inside the callers was tried at the pinned
-    /// Kani: the loop contract is then instrumented for the `Take<ByRefSized<&mut _>>`
-    /// instance of the wrapping branch as well, and neither `check_resize_with_u8` nor a
-    /// direct-branch-only `write_iter_wrapping` harness finished within 20 minutes.)
+    /// `check_write_iter_*`. (Running the real loop inside the callers was tried at an earlier pin
+    /// and not repeated at this one: the loop contract is then instrumented for the
+    /// `Take<ByRefSized<&mut _>>` instance of the wrapping branch as well, and neither
+    /// `check_resize_with_u8` nor a direct-branch-only `write_iter_wrapping` harness finished
+    /// within 20 minutes.)
     ///
-    /// This is what `#[kani::stub_verified(write_iter)]` would generate, **plus one step**. It
-    /// is written by hand because the pinned Kani (a) ICEs when generating the replacement of a
-    /// contract whose `modifies` clause names a slice (model-checking/kani#3682; the fix,
-    /// model-checking/kani#4749, postdates the pin) and (b) cannot `kani::stub` a function that
-    /// carries a contract (model-checking/kani#4591); hence the contract-free helper is the
-    /// stub target. The extra step is `iter.advance_by(hi)`: a pure contract replacement drops
+    /// This is what `#[kani::stub_verified(write_iter)]` would generate, **plus one step**. It is
+    /// written by hand for two reasons. (a) The replacement the pinned Kani generates is unusable
+    /// here: it havocs the `modifies` region element by element, a loop of symbolic length
+    /// (limitation 1 in the module documentation; model-checking/kani#4749, which is in the pin,
+    /// fixed the internal compiler error that generating it used to end in,
+    /// model-checking/kani#3682). (b) The pinned Kani cannot `kani::stub` a function that carries a
+    /// contract (model-checking/kani#4591); hence the contract-free helper is the stub target. The
+    /// extra step is `iter.advance_by(hi)`: a pure contract replacement drops
     /// the by-value `Take<ByRefSized<&mut I>>` unconsumed, so the caller's second `write_iter`
     /// call would see the whole iterator again and could write past `len` — the caller's own
     /// `ensures`/`modifies` are only provable with the consumption modelled. This step is what
@@ -5113,8 +5326,9 @@ mod verify {
     /// arbitrary valid fill (the `modifies` region, `slots(dst, hi)`; one symbolic byte per
     /// region, since no proof reads element values), `*written` grows by `hi`, and the iterator
     /// is advanced by `hi`. Writing exactly `hi` rather than the contract's `<= hi` is the one
-    /// assumption beyond the contract; it is the `TrustedLen` exactness every caller relies on
-    /// (asserted here as `lo == hi`) and what the loop does with such an iterator.
+    /// assumption beyond the contract; it is the exactness of the `size_hint` every caller relies
+    /// on (asserted here as `lo == hi`; see `write_iter` for where it comes from) and what the loop
+    /// does with such an iterator.
     ///
     /// It is a method rather than a free function because the pinned Kani compares a stub's
     /// signature with the original's by the position of their *own* generic parameters (the
@@ -5192,11 +5406,12 @@ mod verify {
     /// by-value `Take<ByRefSized<&mut _>>`). In both, `write_iter`'s loop is replaced by the
     /// contract plus the consumption of the iterator (`write_iter_contract_replacement`), whose
     /// extra step is bounded-checked in `bounded_evidence`. `#[kani::stub_verified(write_iter)]`
-    /// (available since kani#4749 is in the pin) was tried for the direct branch: it verifies
-    /// instantly for `()`, but for a sized element the generated replacement havocs the
-    /// `modifies` region `slots(dst, hi)` element by element, a loop of symbolic length that
-    /// no unwind bound covers, and CBMC did not terminate in over four hours; the hand-written
-    /// replacement writes that region with a single `write_bytes`.
+    /// (available since kani#4749 is in the pin) was tried for the direct branch. For a sized
+    /// element the generated replacement havocs the `modifies` region `slots(dst, hi)` element by
+    /// element, a loop of symbolic length that no unwind bound covers: at the pin CBMC timed out at
+    /// a 15-minute limit for `u8`, and for `()` the generated replacement fails one pointer check
+    /// (limitation 1 in the module documentation). The hand-written replacement writes that region
+    /// with a single `write_bytes`.
     fn check_write_iter_wrapping<T: Shape>() {
         let mut deque = any_deque::<T>();
         let dst: usize = kani::any();
@@ -6439,9 +6654,11 @@ mod verify {
     proof_harnesses!(check_try_reserve, [], [[u8; 2048] => check_try_reserve_u8x2048]);
     proof_harnesses!(check_grow, [], [[u8; 2048] => check_grow_u8x2048]);
 
-    // Additional shapes (see the shape matrix in the module documentation). `WithDrop` goes on
-    // the targets that move or read elements and drop at most one at a time; `Al16` and `bool`
-    // on the cheap allocation/read paths. The drop-glue paths are in `bounded_evidence`.
+    // Additional shapes (see the shape matrix in the module documentation). `WithDrop` goes here on
+    // the targets that move or read elements and drop at most one at a time; `Al16` and `bool` on
+    // the cheap allocation/read paths. The targets that hand a slice to the drop glue are in the
+    // `drop_glue_harnesses!` block below (against the model of the glue) and in `bounded_evidence`
+    // (the real glue, bounded).
     contract_harnesses!(push_unchecked, check_push_unchecked, [WithDrop => check_push_unchecked_withdrop, Al16 => check_push_unchecked_al16, bool => check_push_unchecked_bool]);
     contract_harnesses!(buffer_read, check_buffer_read, [WithDrop => check_buffer_read_withdrop, Al16 => check_buffer_read_al16]);
     contract_harnesses!(buffer_write, check_buffer_write, [WithDrop => check_buffer_write_withdrop, Al16 => check_buffer_write_al16]);
@@ -6978,17 +7195,35 @@ mod verify {
         ]
     );
 
-    /// Bounded supplementary evidence.
+    /// Bounded supplementary evidence: 15 harnesses, the only ones in `verify` with
+    /// `#[kani::unwind]`.
     ///
-    /// None of the harnesses in this module is the proof of any function listed in Challenge
-    /// 25. Each is supplementary evidence for one stub, one transcription or one drop-glue path
-    /// named in its doc comment, and this module is the only place in `verify` that uses
-    /// `#[kani::unwind]`. Every listed function keeps its unbounded harness in the parent
-    /// module. No harness here reaches a loop that carries a loop contract except the
-    /// `retain_mut` drop-glue one (Kani replaces such loops by their contracts regardless of the
-    /// unwind bound, which is fine there: only the drop glue is bounded); the `write_iter`
-    /// iteration is exercised through the contract-free `write_iter_for_each`, the shipped
-    /// statement.
+    /// None of the harnesses in this module is the proof of any function listed in Challenge 25:
+    /// every listed function keeps its harnesses without an unwinding bound in the parent module.
+    /// Each harness here is supplementary evidence for one stub, one transcription or one drop-glue
+    /// path named in its doc comment:
+    /// * five `bounded_write_iter_shipped_text_*` and `bounded_write_iter_wrapping_shipped_text_u8`
+    ///   are `proof_for_contract` harnesses of `write_iter` and `write_iter_wrapping` that run the
+    ///   shipped `for_each` statement; the proofs of those two functions are `check_write_iter_*`
+    ///   and `check_write_iter_wrapping_*`;
+    /// * `bounded_replacement_advance_by_matches_next_u8` and the two
+    ///   `bounded_rotate_*_permutes_range_u8` check what a replacement or stub assumes and call no
+    ///   listed function;
+    /// * four `bounded_*_drop_glue_withdrop` and `bounded_real_glue_meets_slice_drop_contract` run
+    ///   the compiler's slice drop glue, which the `needs_drop` harnesses of `truncate`, `drain`,
+    ///   `retain_mut`, `resize_with` and `Drop for VecDeque` in the parent module replace by a
+    ///   model;
+    /// * `bounded_drain_drops_the_drained_slots` adds, for `drain`, which slots are destroyed.
+    ///   Nothing without a bound establishes that: `check_drain_counteddrop` proves the destructor
+    ///   count only.
+    ///
+    /// For the drop paths this bounded evidence is all there is about the compiler's own loop; the
+    /// harnesses without a bound are against the model (see the module documentation).
+    ///
+    /// No harness here reaches a loop that carries a loop contract except the `retain_mut`
+    /// drop-glue one (Kani replaces such loops by their contracts regardless of the unwind bound,
+    /// which is fine there: only the drop glue is bounded); the `write_iter` iteration is exercised
+    /// through the contract-free `write_iter_for_each`, the shipped statement.
     mod bounded_evidence {
         use core::iter::ByRefSized;
 
@@ -7250,9 +7485,9 @@ mod verify {
         /// by its loops (which run under their loop contracts here as everywhere) and dropped by
         /// `truncate`, whose destructor count is the subject of
         /// `bounded_truncate_drop_glue_withdrop`; this harness bounds the path from the loops
-        /// into that drop glue and `Drop for VecDeque` for the kept elements. It uses
-        /// `WithDrop` rather than `CountedDrop`: a destructor writing a static inside a
-        /// loop-contract harness trips the same pointer artifact described at `CountedDrop`.
+        /// into that drop glue and `Drop for VecDeque` for the kept elements. It uses `WithDrop`
+        /// and asserts no destructor count; the count and the dropped slots of `retain_mut` are the
+        /// subject of `check_retain_mut_counteddrop` in the parent module.
         #[kani::proof]
         #[kani::unwind(10)]
         fn bounded_retain_mut_drop_glue_withdrop() {
