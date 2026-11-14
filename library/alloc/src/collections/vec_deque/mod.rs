@@ -5196,15 +5196,54 @@ mod verify {
         }));
     }
 
+    /// The physical slot of logical index `i` in a ring of capacity `cap` whose front is at
+    /// physical index `head`, written out from the layout the struct's field comments define
+    /// (`self[0]` is `buf[head]`, wrapping at the capacity). It shares no code with the index
+    /// helpers of the code under verification (`to_wrapped_index`, `wrap_add`, `wrap_index`),
+    /// so a defect in one of them, or in how an accessor calls them, cannot also be in the
+    /// expected value. Requires `head < cap` and `i < cap`.
+    ///
+    /// `check_get` and `check_get_mut` use it for an address postcondition: the reference
+    /// returned for an in-bounds index must point at exactly this slot of the buffer. That
+    /// catches an accessor that returns the wrong slot (a neighbouring physical slot, the next
+    /// logical slot, a slot outside the logical range) without looking at any contents. What
+    /// it does not do:
+    /// * It is not an initialization check. It says which slot is referenced, not that the
+    ///   slot holds a value; a read of an uninitialized slot is only reported by Kani with
+    ///   `-Z uninit-checks`, which CI does not pass. It is no substitute for those checks.
+    /// * It is asserted for `get` and `get_mut` only; no other harness uses this helper.
+    ///   (`front`, `back`, `front_mut` and `back_mut` delegate to those two; the index they
+    ///   pass is not checked here.) The harnesses of the other functions that hand out
+    ///   references into the buffer (`as_slices`, `as_mut_slices`, `range`, `range_mut` and
+    ///   the iterators those return) have no address check: an `as_slices` that returns its
+    ///   two halves swapped passes `check_as_slices`.
+    /// * A function that returns the element by value (`pop_front`, `pop_back`, `remove`,
+    ///   ...) or stores one without returning a reference (`push_front`, `push_back`) has no
+    ///   address to compare; which slot such a function reads or writes is constrained only
+    ///   through the `head`/`len` post-state its harness asserts, and by the memory checks on
+    ///   the access.
+    /// * For a zero-sized `T` every slot is the buffer's dangling base address, so the
+    ///   assertion holds for any slot and distinguishes none (nothing is read from memory for
+    ///   such a `T`). It is still asserted: the reference must be at that base address.
+    fn ring_slot(head: usize, cap: usize, i: usize) -> usize {
+        let head_room = cap - head;
+        if i < head_room { head + i } else { i - head_room }
+    }
+
     fn check_get<T: Shape>() {
         let deque = any_deque::<T>();
         let i: usize = kani::any();
+        let (head, cap, base) = (deque.head.as_index(), deque.capacity(), deque.ptr());
         let elem = deque.get(i);
         assert_eq!(elem.is_some(), i < deque.len());
         if let Some(elem) = elem {
+            // Address postcondition: the reference is to the physical slot of logical index
+            // `i` (see `ring_slot` for what this does and does not establish).
+            assert!(ptr::eq(elem, unsafe { base.add(ring_slot(head, cap, i)) }));
             core::mem::forget(unsafe { ptr::read(elem) });
         }
         kani::cover(i > 0 && i < deque.len(), "get: in-bounds non-front index");
+        kani::cover(i < deque.len() && i >= cap - head, "get: element in the wrapped segment");
         kani::cover(i >= deque.len(), "get: out-of-bounds index");
         finish(deque);
     }
@@ -5213,12 +5252,17 @@ mod verify {
         let mut deque = any_deque::<T>();
         let i: usize = kani::any();
         let len = deque.len();
+        let (head, cap, base) = (deque.head.as_index(), deque.capacity(), deque.ptr());
         let elem = deque.get_mut(i);
         assert_eq!(elem.is_some(), i < len);
         if let Some(elem) = elem {
+            // Address postcondition: the reference is to the physical slot of logical index
+            // `i` (see `ring_slot` for what this does and does not establish).
+            assert!(ptr::eq(&*elem, unsafe { base.add(ring_slot(head, cap, i)) }));
             *elem = kani::any();
         }
         kani::cover(i > 0 && i < len, "get_mut: in-bounds non-front index");
+        kani::cover(i < len && i >= cap - head, "get_mut: element in the wrapped segment");
         touch(&deque);
         finish(deque);
     }
@@ -5326,14 +5370,38 @@ mod verify {
         touch(&deque);
     }
 
+    // `check_pop_*` and `check_push_*` assert the `head`/`len`/capacity post-state against the
+    // pre-state, with the expected `head` written out here instead of through the deque's own
+    // index helpers. `len` and `head` are asserted exactly, except that `push_front` on a
+    // zero-sized `T` may leave either of two `head` values; the capacity is asserted exactly
+    // except after a growth (for both see the comment before `check_push_front`). This pins
+    // where the logical range sits after the operation, including which of the two possible
+    // positions a growth leaves it in. It does not check which slot the returned or stored
+    // element was read from or written to (these functions hand out no reference to compare
+    // addresses with, see `ring_slot`), nor that the slots of the range are initialized (that
+    // needs `-Z uninit-checks`).
+
     fn check_pop_front<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
+        let (head, cap) = (deque.head.as_index(), deque.capacity());
         let elem = deque.pop_front();
         assert_eq!(elem.is_some(), len > 0);
         assert_eq!(deque.len(), len.saturating_sub(1));
+        assert!(deque.capacity() == cap);
+        // Non-empty: the front moves to the next slot, wrapping at the capacity (`head < cap`
+        // here). Empty: nothing changes.
+        let expected_head = if len == 0 {
+            head
+        } else if head + 1 == cap {
+            0
+        } else {
+            head + 1
+        };
+        assert!(deque.head.as_index() == expected_head);
         core::mem::forget(elem);
         kani::cover(len > 1, "pop_front: elements remain");
+        kani::cover(len > 1 && head + 1 == cap, "pop_front: head wraps to slot 0");
         touch(&deque);
         finish(deque);
     }
@@ -5341,24 +5409,106 @@ mod verify {
     fn check_pop_back<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
+        let (head, cap) = (deque.head.as_index(), deque.capacity());
         let elem = deque.pop_back();
         assert_eq!(elem.is_some(), len > 0);
         assert_eq!(deque.len(), len.saturating_sub(1));
+        // Only `len` changes: the front stays where it was.
+        assert!(deque.capacity() == cap);
+        assert!(deque.head.as_index() == head);
         core::mem::forget(elem);
         kani::cover(len > 1, "pop_back: elements remain");
         touch(&deque);
         finish(deque);
     }
 
+    // Growth (`push_*` on a full deque, so `len == cap`): the old buffer's contents keep their
+    // physical positions in the larger one, and `handle_capacity_increase` un-wraps the ring by
+    // moving one of its two segments. So with `added = new_cap - cap` slots appended, the front
+    // is afterwards either where it was (the `head` slots that had wrapped to the start of the
+    // buffer were moved into the appended space; `head == 0` is the case with nothing to
+    // move) or `added` slots further on (the segment `head..cap` was moved to the end of the
+    // new buffer). The harnesses assert which of the two it is, see
+    // `front_stays_after_growth`. The new capacity itself is `RawVec`'s amortized-growth
+    // policy; only `new_cap > cap` is asserted.
+    //
+    // Zero-sized `T` (capacity `usize::MAX`, never full here, no slots): `check_push_front`
+    // accepts two values for the new `head`: one slot back, wrapping at the capacity, or, if
+    // `head >= 2`, two slots back. The second is what the shipped code does: `wrap_sub`
+    // computes `head.wrapping_sub(1).wrapping_add(capacity)`, which is reduced modulo 2^64 and
+    // not modulo the capacity `2^64 - 1`, so for `head >= 2` `push_front` moves `head` back by
+    // two (witnessed by a cover below; for `head < 2` it gives the one-slot value). The first
+    // is accepted as well so that the harness does not depend on that arithmetic. No memory is
+    // involved (the buffer pointer of a zero-sized `T` is never offset by a nonzero number of
+    // bytes) and `head` stays below the capacity, which `touch` asserts; the only trace is how
+    // `as_slices` splits `len`.
+
+    /// Whether growing a full ring (`len == cap`, front at `head`) by `added` slots leaves the
+    /// front where it was (`true`: there was no wrapped part, or it was moved into the
+    /// appended space) or moves the segment `head..cap` to the end of the new buffer
+    /// (`false`). The front stays iff nothing had wrapped (`head == 0`), or the wrapped part
+    /// (`head` slots) is the shorter of the two segments and fits in the appended space.
+    ///
+    /// This transcribes the "move the shorter segment" choice of `handle_capacity_increase`
+    /// for a full deque, as `check_handle_capacity_increase` does for its covers. The choice
+    /// is a heuristic, not a safety property: moving the other segment would be just as
+    /// sound, and this function has to follow the shipped code if the heuristic changes. It
+    /// is pinned all the same, because accepting either position cannot tell a growth that
+    /// moved the front segment and did not update `head` from one that moved the wrapped
+    /// part. The first leaves the logical range over uninitialized appended slots, and
+    /// without `-Z uninit-checks` no other check reports that.
+    fn front_stays_after_growth(head: usize, cap: usize, added: usize) -> bool {
+        head == 0 || (head < cap - head && head <= added)
+    }
+
     fn check_push_front<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let full = deque.is_full();
+        let (head, cap) = (deque.head.as_index(), deque.capacity());
         assume_can_grow_by(&deque, 1);
         deque.push_front(kani::any());
         assert_eq!(deque.len(), len + 1);
+        let (new_head, new_cap) = (deque.head.as_index(), deque.capacity());
+        if full {
+            assert!(new_cap > cap);
+            let added = new_cap - cap;
+            // The new head is one slot before the front the growth left (see above), wrapping
+            // at the new capacity.
+            let front_kept = if head == 0 { new_cap - 1 } else { head - 1 };
+            let front_moved = head + added - 1;
+            let grown_head =
+                if front_stays_after_growth(head, cap, added) { front_kept } else { front_moved };
+            assert!(new_head == grown_head);
+        } else {
+            assert!(new_cap == cap);
+            // Room left: the head moves back by exactly one slot, wrapping at the capacity
+            // (`cap > 0` here: the deque was not full).
+            let expected_head = if head == 0 { cap - 1 } else { head - 1 };
+            if !T::IS_ZST {
+                assert!(new_head == expected_head);
+            } else {
+                // Zero-sized `T`: the two-slot move of the shipped code is accepted too.
+                assert!(new_head == expected_head || (head >= 2 && new_head == head - 2));
+            }
+        }
+        kani::cover(
+            !T::IS_ZST || (head >= 2 && new_head == head - 2),
+            "push_front: zero-sized T, head moves back two slots (the second accepted value)",
+        );
         cover_buffer_path!(T, full && len > 0, "push_front: buffer grown");
+        cover_buffer_path!(
+            T,
+            full && head > 0 && new_head == head - 1,
+            "push_front: growth kept the front in place (wrapped part moved)"
+        );
+        cover_buffer_path!(
+            T,
+            full && head > 0 && new_head == head + (new_cap - cap) - 1,
+            "push_front: growth moved the front segment to the end"
+        );
         kani::cover(!full && len > 0, "push_front: no growth");
+        kani::cover(!full && len > 0 && head == 0, "push_front: head wraps to the last slot");
         touch(&deque);
         finish(deque);
     }
@@ -5367,10 +5517,34 @@ mod verify {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let full = deque.is_full();
+        let (head, cap) = (deque.head.as_index(), deque.capacity());
         assume_can_grow_by(&deque, 1);
         deque.push_back(kani::any());
         assert_eq!(deque.len(), len + 1);
+        let (new_head, new_cap) = (deque.head.as_index(), deque.capacity());
+        if full {
+            assert!(new_cap > cap);
+            let added = new_cap - cap;
+            // The head is the front the growth left (see above).
+            let grown_head =
+                if front_stays_after_growth(head, cap, added) { head } else { head + added };
+            assert!(new_head == grown_head);
+        } else {
+            // Room left: only `len` changes.
+            assert!(new_cap == cap);
+            assert!(new_head == head);
+        }
         cover_buffer_path!(T, full && len > 0, "push_back: buffer grown");
+        cover_buffer_path!(
+            T,
+            full && head > 0 && new_head == head,
+            "push_back: growth kept the front in place (wrapped part moved)"
+        );
+        cover_buffer_path!(
+            T,
+            full && head > 0 && new_head == head + (new_cap - cap),
+            "push_back: growth moved the front segment to the end"
+        );
         kani::cover(!full && len > 0, "push_back: no growth");
         touch(&deque);
         finish(deque);
