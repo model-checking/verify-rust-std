@@ -2290,15 +2290,6 @@ mod verify {
             Leak,
         }
 
-        fn arbitrary_ending() -> Ending {
-            match kani::any::<u8>() % 4 {
-                0 => Ending::Pop,
-                1 => Ending::Refresh,
-                2 => Ending::Drop,
-                _ => Ending::Leak,
-            }
-        }
-
         fn peek_mut_then<T: Ord + kani::Arbitrary>(ending: Ending) {
             let mut heap = arbitrary_heap::<T>();
             let len = heap.len();
@@ -2336,11 +2327,8 @@ mod verify {
                 mem::forget(last);
             }
             kani::cover(len == 0, "no elements");
-            kani::cover(len > 2 && mutated && ending == Ending::Pop, "pop after a mutable peek");
-            kani::cover(len > 2 && mutated && ending == Ending::Refresh, "refresh after one");
-            kani::cover(len > 2 && mutated && ending == Ending::Drop, "drop after one");
-            kani::cover(len > 2 && mutated && ending == Ending::Leak, "leak after one");
-            kani::cover(len > 2 && !mutated && ending == Ending::Drop, "drop after a shared peek");
+            kani::cover(len > 2 && mutated, "ends after a mutable peek");
+            kani::cover(len > 2 && !mutated, "ends after a shared peek");
             drop_or_forget(heap);
         }
 
@@ -2558,12 +2546,27 @@ mod verify {
             };
         }
 
-        // `peek_mut`, maybe a write to the top, then any of the four ways a `PeekMut` can end.
+        // `peek_mut`, maybe a write to the top, then one harness per way a `PeekMut` can end.
         macro_rules! check_peek_mut {
             ($T:ty) => {
                 #[kani::proof]
-                fn check_peek_mut() {
-                    peek_mut_then::<$T>(arbitrary_ending());
+                fn check_peek_mut_pop() {
+                    peek_mut_then::<$T>(Ending::Pop);
+                }
+
+                #[kani::proof]
+                fn check_peek_mut_refresh() {
+                    peek_mut_then::<$T>(Ending::Refresh);
+                }
+
+                #[kani::proof]
+                fn check_peek_mut_drop() {
+                    peek_mut_then::<$T>(Ending::Drop);
+                }
+
+                #[kani::proof]
+                fn check_peek_mut_leak() {
+                    peek_mut_then::<$T>(Ending::Leak);
                 }
             };
         }
@@ -2610,10 +2613,27 @@ mod verify {
             };
         }
 
-        // `rebuild_tail` from any `start`, whichever strategy it picks.
-        macro_rules! check_rebuild_tail {
+        // `From<Vec<T>>` on a vector of any length.
+        macro_rules! check_from_vec {
             ($T:ty) => {
                 #[kani::proof]
+                fn check_from_vec() {
+                    let heap = arbitrary_heap::<$T>();
+                    let len = heap.len();
+                    kani::assume(len <= MAX_SIFT_DOWN_END);
+                    let rebuilt = BinaryHeap::from(heap.into_vec());
+                    assert!(rebuilt.len() == len);
+                    kani::cover(len > 1_000_000, "large heap");
+                    drop_or_forget(rebuilt);
+                }
+            };
+        }
+
+        // `rebuild_tail` from any `start`, whichever strategy it picks.
+        macro_rules! check_rebuild_tail {
+            ($T:ty $(, #[$attr:meta])*) => {
+                #[kani::proof]
+                $(#[$attr])*
                 fn check_rebuild_tail() {
                     let mut heap = arbitrary_heap::<$T>();
                     let len = heap.len();
@@ -2630,8 +2650,9 @@ mod verify {
 
         // `append` of two heaps of any lengths.
         macro_rules! check_append {
-            ($T:ty) => {
+            ($T:ty $(, #[$attr:meta])*) => {
                 #[kani::proof]
+                $(#[$attr])*
                 fn check_append() {
                     let mut a = arbitrary_heap::<$T>();
                     let mut b = arbitrary_heap::<$T>();
@@ -2646,22 +2667,6 @@ mod verify {
                     kani::cover(b_len == 0, "second heap empty");
                     drop_or_forget(a);
                     drop_or_forget(b);
-                }
-            };
-        }
-
-        // `From<Vec<T>>` on a vector of any length.
-        macro_rules! check_from_vec {
-            ($T:ty) => {
-                #[kani::proof]
-                fn check_from_vec() {
-                    let heap = arbitrary_heap::<$T>();
-                    let len = heap.len();
-                    kani::assume(len <= MAX_SIFT_DOWN_END);
-                    let rebuilt = BinaryHeap::from(heap.into_vec());
-                    assert!(rebuilt.len() == len);
-                    kani::cover(len > 1_000_000, "large heap");
-                    drop_or_forget(rebuilt);
                 }
             };
         }
@@ -2754,7 +2759,7 @@ mod verify {
         }
 
         macro_rules! harnesses_for {
-            ($T:ty) => {
+            ($T:ty $(, #[$attr:meta])*) => {
                 check_hole_new!($T);
                 check_hole_get!($T);
                 check_hole_move_to!($T);
@@ -2768,9 +2773,9 @@ mod verify {
                 check_peek_mut!($T);
                 check_peek_mut_read!($T);
                 check_rebuild!($T);
-                check_rebuild_tail!($T);
-                check_append!($T);
                 check_from_vec!($T);
+                check_rebuild_tail!($T $(, #[$attr])*);
+                check_append!($T $(, #[$attr])*);
                 check_into_sorted_vec!($T);
                 check_as_mut_slice!($T);
                 check_into_iter_sorted!($T);
@@ -2804,7 +2809,7 @@ mod verify {
 
         mod zero_sized {
             use super::*;
-            harnesses_for!(ZeroSized);
+            harnesses_for!(ZeroSized, #[kani::solver(kissat)]);
         }
 
         // A mutating `cmp` only matters where elements are compared, so only those harnesses run.
@@ -2816,8 +2821,15 @@ mod verify {
             check_sift_down_to_bottom!(MutatedByCmp);
             check_push!(MutatedByCmp);
             check_pop!(MutatedByCmp);
+            check_peek_mut!(MutatedByCmp);
             check_rebuild!(MutatedByCmp);
+            check_from_vec!(MutatedByCmp);
             check_rebuild_tail!(MutatedByCmp);
+            check_append!(MutatedByCmp);
+            check_into_sorted_vec!(MutatedByCmp);
+            check_as_mut_slice!(MutatedByCmp);
+            check_into_iter_sorted!(MutatedByCmp);
+            check_drain_sorted!(MutatedByCmp);
         }
     }
 
@@ -2903,6 +2915,7 @@ mod verify {
         // `rebuild_tail` computes `2 * len` to pick a strategy.
         #[kani::proof]
         #[kani::should_panic]
+        #[kani::solver(kissat)]
         fn check_rebuild_tail_doubled_len_overflows() {
             let mut heap = arbitrary_heap::<ZeroSized>();
             let len = heap.len();
@@ -2914,6 +2927,7 @@ mod verify {
         // `rebuild_tail` computes `tail_len * 11` to pick a strategy.
         #[kani::proof]
         #[kani::should_panic]
+        #[kani::solver(kissat)]
         fn check_rebuild_tail_weighted_tail_overflows() {
             let mut heap = arbitrary_heap::<ZeroSized>();
             let len = heap.len();
@@ -2935,6 +2949,7 @@ mod verify {
         // The combined length of two heaps can exceed `usize::MAX`.
         #[kani::proof]
         #[kani::should_panic]
+        #[kani::solver(kissat)]
         fn check_append_total_len_overflows() {
             let mut a = arbitrary_heap::<ZeroSized>();
             let mut b = arbitrary_heap::<ZeroSized>();
