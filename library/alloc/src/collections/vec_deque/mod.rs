@@ -186,6 +186,49 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// Structural invariant of a `VecDeque` (see the field comments on the struct):
     /// `len <= capacity()` and `head < capacity()` unless the capacity is zero, in which
     /// case `head == 0`. Only used by the verification contracts below and by `mod verify`.
+    ///
+    /// # Initialization is not part of this predicate
+    ///
+    /// The unsafe code in this file relies on a second property: exactly the logical range
+    /// (the `len` slots starting at `head`, wrapping at `capacity()`) holds initialized values
+    /// of `T`, and every other slot is uninitialized or has been moved out of.
+    /// `invariant_holds` does **not** state it. It is structural only: it relates `head` and
+    /// `len` to the capacity and says nothing about the contents of any slot, so a contract or
+    /// harness that establishes `invariant_holds()` has not thereby shown that the logical
+    /// range is initialized.
+    ///
+    /// The property is deliberately not a conjunct of this predicate, because the contracts
+    /// that use it must also hold where `head` and `len` do not describe an initialized range:
+    ///
+    /// * `wrap_copy` requires `invariant_holds()` and is called in transient states, after
+    ///   `head` or `len` has been changed or an element has been moved out and before the
+    ///   other elements are moved into place: by `insert`, `remove` and `rotate_right_inner`,
+    ///   and by `Drain`, `ExtractIf` and `Splice`, which keep `len` at a temporary value while
+    ///   they work.
+    /// * `handle_capacity_increase` ensures `invariant_holds()` and is called by `Splice` with
+    ///   `len` temporarily covering the hole left by the drained elements.
+    /// * `write_iter_wrapping` requires and ensures `invariant_holds()` for every `dst` its
+    ///   contract admits. Its only caller passes the slot after the last element, in a complete
+    ///   state; for another `dst` the grown logical range can cover slots the call did not
+    ///   write.
+    /// * `abort_shrink` likewise ensures `invariant_holds()` for every state and `old_head` its
+    ///   contract admits. Where it restores `head` to `old_head`, the logical range is
+    ///   initialized only if the slots that follow the restored head slice (wrapping at the
+    ///   capacity) hold the remaining elements. They do when `shrink_to` calls it; the contract
+    ///   does not require it.
+    ///
+    /// With initialization as a conjunct, those pre- and postconditions would be false at real
+    /// call sites or for arguments the contracts admit.
+    ///
+    /// Kani can check initialization only under `-Z uninit-checks`, which CI
+    /// (`scripts/run-kani.sh`) does not pass. At the pinned Kani (`c5e65fd`) the flag cannot be
+    /// used on this whole module (among others model-checking/kani#4852, #5164 and #5165; see
+    /// the Kani limitations in the documentation of `mod verify`). Without the flag Kani's
+    /// initialization predicate is constant `true`, also inside the `can_dereference` of
+    /// `buffer_read`'s contract, so a read of a never-written slot of the buffer is not
+    /// reported. Under CI's flags the property is therefore not verified: the generators in
+    /// `mod verify` establish it by construction (see `any_deque` and its restrictions), and
+    /// nothing re-checks it after an operation.
     #[cfg(kani)]
     fn invariant_holds(&self) -> bool {
         self.len <= self.capacity()
@@ -249,6 +292,15 @@ impl<T, A: Allocator> VecDeque<T, A> {
     ///
     /// `off < self.capacity()` and slot `off` must hold an initialized `T`. The value is moved
     /// out: the caller must ensure the slot is no longer considered initialized afterwards.
+    ///
+    /// The contract below states both conditions (`can_dereference` covers the second), but
+    /// Kani checks the initialization one only under `-Z uninit-checks`, which CI does not
+    /// pass: under CI's flags the precondition admits every in-bounds slot (see
+    /// `invariant_holds`).
+    ///
+    /// The contract has no postcondition: that the result is the value slot `off` held is a
+    /// statement about element values (functional correctness), and the safety proofs of the
+    /// callers do not depend on which value is returned.
     #[inline]
     #[requires(off.as_index() < self.capacity() && core::ub_checks::can_dereference(unsafe { self.ptr().add(off.as_index()) }))]
     unsafe fn buffer_read(&mut self, off: WrappedIndex) -> T {
@@ -389,7 +441,10 @@ impl<T, A: Allocator> VecDeque<T, A> {
     ///
     /// # Safety
     ///
-    /// `src + len <= self.capacity()` and `dst + len <= self.capacity()`.
+    /// `len <= self.capacity()`, `src <= self.capacity() - len` and
+    /// `dst <= self.capacity() - len`. This is `src + len <= self.capacity()` and
+    /// `dst + len <= self.capacity()` (the two `debug_assert!`s below) written so that no
+    /// intermediate result can overflow, which is the form the contract uses.
     #[inline]
     #[requires(len <= self.capacity() && src.as_index() <= self.capacity() - len && dst.as_index() <= self.capacity() - len)]
     #[ensures(|_| self.head == old(self.head) && self.len == old(self.len))]
@@ -421,8 +476,10 @@ impl<T, A: Allocator> VecDeque<T, A> {
     ///
     /// # Safety
     ///
-    /// `src + len <= self.capacity()`, `dst + len <= self.capacity()` and the two ranges
-    /// must not overlap: `src.abs_diff(dst) >= len`.
+    /// `len <= self.capacity()`, `src <= self.capacity() - len` and
+    /// `dst <= self.capacity() - len` (the overflow-free form of `src + len <= self.capacity()`
+    /// and `dst + len <= self.capacity()`, as for `copy`), and the two ranges must not
+    /// overlap: `src.abs_diff(dst) >= len`.
     #[inline]
     #[requires(len <= self.capacity() && src.as_index() <= self.capacity() - len && dst.as_index() <= self.capacity() - len)]
     #[requires(src.abs_diff(dst) >= len)]
@@ -463,7 +520,9 @@ impl<T, A: Allocator> VecDeque<T, A> {
     ///
     /// `src` and `dst` must be physical indices (`< self.capacity()`, or both `0` when the
     /// capacity is `0`) and `min(src.abs_diff(dst), self.capacity() - src.abs_diff(dst)) + len`
-    /// must not exceed `self.capacity()`.
+    /// must not exceed `self.capacity()`. The sum is meant as a mathematical integer: the
+    /// contract below computes it with `checked_add`, so a `len` that would overflow it is
+    /// rejected, not wrapped.
     #[requires(self.invariant_holds()
         && ((src.as_index() < self.capacity() && dst.as_index() < self.capacity()) || (src.is_zero() && dst.is_zero()))
         && cmp::min(src.abs_diff(dst), self.capacity() - src.abs_diff(dst))
@@ -712,11 +771,18 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// Assumes no wrapping around happens.
     /// Assumes capacity is sufficient.
     ///
-    /// # Safety
-    ///
-    /// `iter` must yield at most `self.capacity() - dst` items. The contract below expresses
-    /// this through the iterator's upper `size_hint`, which is exact for the `TrustedLen`
-    /// iterators every caller passes.
+    /// The contract below requires both assumptions, through `write_iter_precondition`: with
+    /// `hi` the iterator's upper `size_hint`, which must be `Some`,
+    /// `dst + hi <= self.capacity()` holds and the sum does not overflow (the predicate also
+    /// requires that `*written + hi` does not overflow). `iter` must yield at most `hi` items;
+    /// a contract cannot state that about an arbitrary `impl Iterator`, so it is taken from the
+    /// exact `size_hint` of the iterators every caller passes: the `TrustedLen` iterator that
+    /// `spec_extend` hands to `write_iter_wrapping`, and the `Take<ByRefSized<_>>` prefix of it
+    /// that `write_iter_wrapping` passes on its wrapping branch (`ByRefSized` does not
+    /// implement `TrustedLen`; its hint is exact because the underlying iterator's is).
+    /// Item `i` is then written to the physical slot `dst + i < self.capacity()`: no write
+    /// wraps around, and the capacity is sufficient. Given such an iterator, a caller that
+    /// violates either assumption violates the precondition.
     #[inline]
     #[requires(self.write_iter_precondition(dst, iter.size_hint().1, *written))]
     #[ensures(|_| old(*written) <= *written
@@ -750,6 +816,13 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// contract replacement in `mod verify` (`write_iter_contract_replacement`) asserts exactly
     /// the clause the contract requires. Only used by the verification contracts and by
     /// `mod verify`.
+    ///
+    /// It is the formal statement of `write_iter`'s two documented assumptions, "no wrapping
+    /// around happens" and "capacity is sufficient": with `hi` the iterator's upper
+    /// `size_hint`, which must be `Some`, `dst + hi <= self.capacity()` holds and the sum does
+    /// not overflow. It additionally requires that `written + hi` does not overflow, since
+    /// `write_iter` increments `*written` once per item; that third clause is not one of the
+    /// documented assumptions.
     #[cfg(kani)]
     fn write_iter_precondition(
         &self,
@@ -840,10 +913,11 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// Assumes that `iter` yields at most `len` items.
     /// Assumes capacity is sufficient.
     ///
-    /// # Safety
-    ///
-    /// `dst <= self.capacity()`, `self.len + len <= self.capacity()` and `iter` yields at most
-    /// `len` items (expressed through its upper `size_hint`, exact for `TrustedLen` callers).
+    /// As the contract below states it: `dst <= self.capacity()`,
+    /// `len <= self.capacity() - self.len` (the overflow-free form of
+    /// `self.len + len <= self.capacity()`; the subtraction cannot underflow because the
+    /// invariant gives `self.len <= self.capacity()`) and `iter` yields at most `len` items
+    /// (expressed through its upper `size_hint`, exact for `TrustedLen` callers).
     #[requires(self.invariant_holds() && dst.as_index() <= self.capacity() && len <= self.capacity() - self.len)]
     #[requires(iter.size_hint().1.is_some_and(|hi| hi <= len))]
     #[ensures(|written| *written <= len && self.len == old(self.len) + *written && self.invariant_holds())]
@@ -4863,17 +4937,66 @@ mod verify {
     /// Builds an arbitrary `VecDeque<T>` with symbolic capacity, symbolic `head` and symbolic
     /// `len`, backed by a real allocation of that capacity.
     ///
-    /// * `cap` is only restricted by the layout precondition `RawVec` itself imposes
-    ///   (`Layout::array::<T>(cap).is_ok()`); there is no length bound.
+    /// * `cap` is restricted by the layout precondition `RawVec` itself imposes
+    ///   (`Layout::array::<T>(cap).is_ok()`) and by `MAX_ALLOCATION_BYTES` (the buffer is at
+    ///   most 2^48 bytes large); there is no other bound on the capacity or the length.
     /// * `head` ranges over every valid physical index and `len` over `0..=cap`, so both the
     ///   contiguous (`head + len <= cap`) and the wrapped (`head + len > cap`) ring layouts are
     ///   explored (see the `kani::cover` witnesses).
     /// * Exactly the logical range `head..head + len` (wrapping at `cap`) is initialized, every
     ///   byte with the shape's arbitrary valid fill byte (`Shape::any_fill`); slots outside it
-    ///   stay uninitialized. `VecDeque<T>` never branches on element values (the only
-    ///   value-dependent code is the user closures, which the harnesses make nondeterministic,
-    ///   and the elements `AnyIter` yields are per-element `kani::any()`), so one symbolic byte
-    ///   per initialized region loses nothing.
+    ///   are never written.
+    ///
+    /// # Restrictions of the generated states
+    ///
+    /// For the structure (`cap`, `head`, `len`), `any_deque` produces every state
+    /// `invariant_holds` admits whose buffer is at most `MAX_ALLOCATION_BYTES` (2^48 bytes, see
+    /// that constant) large. Three things it does not vary:
+    ///
+    /// * **Contents.** Each initialized region is written by one `ptr::write_bytes` with a
+    ///   single symbolic byte, the same byte for both halves of a wrapped deque. All
+    ///   pre-existing elements of a generated deque are therefore equal, and so are all bytes
+    ///   of one element. That is enough for absence of undefined behavior, because the code
+    ///   under verification does not branch on element values (the only value-dependent code
+    ///   is the user closures, which the harnesses make nondeterministic; elements that enter
+    ///   through the API, such as the ones `AnyIter` yields, are per-element `kani::any()`). It
+    ///   is not enough for any property about *which* element ends up where: an operation that
+    ///   returned, moved, overwrote or dropped the wrong initialized element would still pass
+    ///   every harness that starts from a generated deque. (The only harness in this module
+    ///   that asserts the positions of a deque's elements is the bounded `check_vecdeque_swap`
+    ///   at its end, which builds its deque from a symbolic array, not with these generators.)
+    ///   No contract in this file has an `ensures` about element contents. The same holds for
+    ///   the other places that fill a region this way (`init_ring`, `any_vec`,
+    ///   `check_from_contiguous_raw_parts_in`, `write_iter_contract_replacement`).
+    ///
+    ///   The evidence about destructors has the same limit, reached in two different ways.
+    ///   The unbounded `WithDrop` harnesses use these single-fill generators, so all their
+    ///   pre-existing elements are equal. The bounded drop-glue harnesses in
+    ///   `bounded_evidence` do not use `any_deque`: they write every element with its own
+    ///   `kani::any()` payload, but the three that build a `VecDeque<CountedDrop>`
+    ///   (`small_deque_with_drop`) assert only the number of destructor runs (`DROPS`), which
+    ///   says how many elements were dropped, not which ones, and
+    ///   `bounded_retain_mut_drop_glue_withdrop` (`WithDrop`) asserts no count at all.
+    /// * **Allocator.** The result is a `VecDeque<T, Global>`, and no harness in this module
+    ///   instantiates `A` with any other allocator, although `VecDeque<T, A>` and every
+    ///   function under verification are generic in `A`. What the proofs establish about the
+    ///   allocator-facing code (`RawVec<T, A>`'s allocation, growth, shrinking and
+    ///   deallocation) is established for `Global` as Kani models it. In that model an
+    ///   allocation never fails (Kani runs CBMC with `--no-malloc-may-fail`), so the paths
+    ///   taken when the allocator reports an error are not exercised either.
+    /// * **Initialization.** It is always exactly the logical range, and some contract
+    ///   harnesses do not stay inside it. `check_copy`, `check_copy_nonoverlapping`,
+    ///   `check_wrap_copy`, `check_write_iter_wrapping` and `check_abort_shrink` call their
+    ///   function with arbitrary slot arguments that the contract admits, so the state after
+    ///   the call is not required to have an initialized logical range (a copy may copy
+    ///   never-written slots into it; `write_iter_wrapping` grows `len` over slots it did not
+    ///   write unless `dst` is the slot after the last element; where `abort_shrink` restores
+    ///   `head` to `old_head`, the range can run on from the restored head slice into
+    ///   never-written slots), and the read in `touch` can then hit a never-written slot.
+    ///   `check_buffer_read` reads an arbitrary in-bounds slot, inside or outside the logical
+    ///   range: the initialization condition in `buffer_read`'s precondition is vacuous under
+    ///   CI's flags. See `invariant_holds` for why the contracts do not state initialization
+    ///   and why these reads are not reported.
     pub(super) fn any_deque<T: Shape>() -> VecDeque<T> {
         let requested: usize = kani::any();
         kani::assume(Layout::array::<T>(requested).is_ok());
@@ -5190,12 +5313,14 @@ mod verify {
     // Safe-abstraction harnesses (`kani::proof`)
     // ---------------------------------------------------------------------------------------
 
-    /// Abstraction of the *safe* `core::slice::rotate::ptr_rotate` used by
-    /// `<[T]>::rotate_left/right`: it checks the callee's documented precondition (the range
-    /// `mid - left .. mid + right` must be valid for reading and writing) and otherwise leaves
-    /// memory untouched. `make_contiguous` performs no value-dependent operation after the
-    /// rotation, and a rotation of a valid slice can only permute valid values, so this
-    /// abstraction is sound for the memory-safety proof of `make_contiguous`.
+    /// Abstraction of `core::slice::rotate::ptr_rotate` (an `unsafe fn`, which
+    /// `make_contiguous` reaches only through the safe `<[T]>::rotate_left/right`): it checks
+    /// the callee's documented precondition (the range `mid - left .. mid + right` must be
+    /// valid for reading and writing) and otherwise leaves memory untouched. It deliberately
+    /// states no postcondition about where the elements end up: `make_contiguous` performs no
+    /// value-dependent operation after the rotation, and a rotation of a valid slice can only
+    /// permute valid values, so this abstraction is sound for the memory-safety proof of
+    /// `make_contiguous`.
     unsafe fn stub_ptr_rotate<T>(left: usize, mid: *mut T, right: usize) {
         let len = left.checked_add(right).expect("rotate range overflows");
         let start = unsafe { mid.sub(left) };
