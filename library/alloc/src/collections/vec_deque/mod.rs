@@ -4535,6 +4535,32 @@ mod verify {
     pub(super) struct Al16(u8);
     impl Shape for Al16 {}
 
+    /// Zero-sized with alignment 8: the `IS_ZST` branches and `RawVec`'s dangling buffer
+    /// pointer at an alignment other than 1 (`()` has alignment 1, where every address is
+    /// aligned).
+    impl Shape for [u64; 0] {}
+
+    /// Larger than 1 KiB (2048 bytes, alignment 1): the third arm of `RawVec`'s
+    /// `min_non_zero_cap` (element size 1 / up to 1024 bytes / larger), the floor
+    /// `RawVecInner::grow_amortized` applies to every amortized growth.
+    impl Shape for [u8; 2048] {}
+
+    /// The capacity an amortized growth by one element from capacity 0 lands on for a sized
+    /// `T`: `max(min_non_zero_cap(size_of::<T>()), max(0 * 2, 0 + 1))`, i.e. the arm of
+    /// `RawVec`'s `min_non_zero_cap` selected by the element size. Written out here (rather
+    /// than read from `RawVec::MIN_NON_ZERO_CAP`) so that the growth harnesses' "from capacity
+    /// 0" covers are witnesses that the arm for the instantiated shape was taken: 8 for 1-byte
+    /// shapes, 4 for `u64`/`Al16`, 1 for `[u8; 2048]`. They are covers, not assertions: a
+    /// satisfied cover in the log is the evidence, and an unsatisfied one does not fail the
+    /// harness (the capacity `RawVec` picks is a growth policy, not a safety property).
+    pub(super) fn first_growth_capacity<T>() -> usize {
+        match core::mem::size_of::<T>() {
+            1 => 8,
+            2..=1024 => 4,
+            _ => 1,
+        }
+    }
+
     /// `needs_drop` (and therefore non-`Copy`, move-only) element: its destructor reads its
     /// payload, so a destructor run on an uninitialized or already-moved slot fails Kani's
     /// memory checks. It keeps no count of its runs: see `CountedDrop`.
@@ -5545,6 +5571,11 @@ mod verify {
             full && head > 0 && new_head == head + (new_cap - cap),
             "push_back: growth moved the front segment to the end"
         );
+        cover_buffer_path!(
+            T,
+            cap == 0 && new_cap == first_growth_capacity::<T>(),
+            "push_back: growth from capacity 0 lands on min_non_zero_cap for this element size"
+        );
         kani::cover(!full && len > 0, "push_back: no growth");
         touch(&deque);
         finish(deque);
@@ -5560,6 +5591,11 @@ mod verify {
         assert_eq!(deque.len(), len);
         assert!(deque.capacity() >= len + additional);
         cover_buffer_path!(T, len + additional > old_cap && len > 0, "reserve: buffer grown");
+        cover_buffer_path!(
+            T,
+            old_cap == 0 && additional == 1 && deque.capacity() == first_growth_capacity::<T>(),
+            "reserve: growth from capacity 0 lands on min_non_zero_cap for this element size"
+        );
         kani::cover(len + additional <= old_cap, "reserve: no growth");
         touch(&deque);
     }
@@ -5593,6 +5629,14 @@ mod verify {
             T,
             result.is_ok() && len + additional > old_cap && len > 0,
             "try_reserve: buffer grown"
+        );
+        cover_buffer_path!(
+            T,
+            result.is_ok()
+                && old_cap == 0
+                && additional == 1
+                && deque.capacity() == first_growth_capacity::<T>(),
+            "try_reserve: growth from capacity 0 lands on min_non_zero_cap for this element size"
         );
         kani::cover(result.is_err(), "try_reserve: capacity overflow reported");
         touch(&deque);
@@ -5757,11 +5801,16 @@ mod verify {
         let mut deque = any_deque::<T>();
         kani::assume(deque.is_full());
         let len = deque.len();
+        let old_cap = deque.capacity();
         assume_can_grow_by(&deque, 1);
         deque.grow();
         assert_eq!(deque.len(), len);
         assert!(!deque.is_full());
         kani::cover(len > 1, "grow: non-trivial deque");
+        kani::cover(
+            old_cap == 0 && deque.capacity() == first_growth_capacity::<T>(),
+            "grow: growth from capacity 0 lands on min_non_zero_cap for this element size",
+        );
         touch(&deque);
     }
 
@@ -5966,6 +6015,73 @@ mod verify {
     );
     proof_harnesses!(check_rotate_left, [], [u8 => check_rotate_left_u8, () => check_rotate_left_unit]);
     proof_harnesses!(check_rotate_right, [], [u8 => check_rotate_right_u8, () => check_rotate_right_unit]);
+
+    // Element-shape coverage beyond 1-byte and alignment-1 elements (see the shape matrix in the
+    // module documentation).
+    //
+    // `u64` (stride 8, alignment 8) on the safe functions that were instantiated only with
+    // 1-byte and zero-sized elements, where a byte offset and an element offset coincide.
+    proof_harnesses!(check_range, [], [u64 => check_range_u64]);
+    proof_harnesses!(check_range_mut, [], [u64 => check_range_mut_u64]);
+    proof_harnesses!(check_drain, [], [u64 => check_drain_u64]);
+    proof_harnesses!(check_reserve_exact, [], [u64 => check_reserve_exact_u64]);
+    proof_harnesses!(check_try_reserve, [], [u64 => check_try_reserve_u64]);
+    proof_harnesses!(check_insert, [], [u64 => check_insert_u64]);
+    proof_harnesses!(check_remove, [], [u64 => check_remove_u64]);
+    proof_harnesses!(check_append, [], [u64 => check_append_u64]);
+    proof_harnesses!(check_retain_mut, [], [u64 => check_retain_mut_u64]);
+    proof_harnesses!(check_grow, [], [u64 => check_grow_u64]);
+    proof_harnesses!(
+        check_resize_with,
+        [kani::stub(VecDeque::<u64>::write_iter_loop, VecDeque::<u64>::write_iter_contract_replacement_drop)],
+        [u64 => check_resize_with_u64]
+    );
+    proof_harnesses!(
+        check_resize_with_grow,
+        [kani::stub(VecDeque::<u64>::write_iter_loop, VecDeque::<u64>::write_iter_contract_replacement_drop)],
+        [u64 => check_resize_with_grow_u64]
+    );
+    proof_harnesses!(
+        check_make_contiguous,
+        [kani::stub(core::slice::rotate::ptr_rotate, stub_ptr_rotate)],
+        [u64 => check_make_contiguous_u64]
+    );
+    proof_harnesses!(check_rotate_left, [], [u64 => check_rotate_left_u64]);
+    proof_harnesses!(check_rotate_right, [], [u64 => check_rotate_right_u64]);
+    // `[u64; 0]` (zero-sized, alignment 8): the `IS_ZST` paths with a dangling buffer pointer
+    // that is not trivially aligned. Kani checks alignment where a reference or slice is formed,
+    // not on a bare `ptr::read`/`ptr::write`. `get`, `as_slices`, `push_back` and `insert` form
+    // one from the dangling pointer themselves (`push_back` and `insert` in the reference that
+    // `buffer_write` returns). `pop_front` only reads through the pointer; its harness reaches a
+    // reference only in `touch` after the operation and in `Drop` (`as_mut_slices`).
+    proof_harnesses!(check_get, [], [[u64; 0] => check_get_u64x0]);
+    proof_harnesses!(check_as_slices, [], [[u64; 0] => check_as_slices_u64x0]);
+    proof_harnesses!(check_pop_front, [], [[u64; 0] => check_pop_front_u64x0]);
+    proof_harnesses!(check_push_back, [], [[u64; 0] => check_push_back_u64x0]);
+    proof_harnesses!(check_insert, [], [[u64; 0] => check_insert_u64x0]);
+    // `[u64; 0]` on the other `T::IS_ZST` branches of the verified functions (`shrink_to`,
+    // `append`, `make_contiguous`, the `Drain` drop guard; `capacity`'s and `wrap_copy`'s are
+    // on the `insert` path above) and on the slice iterators behind `range`. The `IS_ZST`
+    // branch in `From<[T; N]>` is outside the verified functions and is reached by no harness.
+    proof_harnesses!(check_range, [], [[u64; 0] => check_range_u64x0]);
+    proof_harnesses!(check_drain, [], [[u64; 0] => check_drain_u64x0]);
+    proof_harnesses!(check_shrink_to, [], [[u64; 0] => check_shrink_to_u64x0]);
+    proof_harnesses!(check_append, [], [[u64; 0] => check_append_u64x0]);
+    proof_harnesses!(
+        check_make_contiguous,
+        [kani::stub(core::slice::rotate::ptr_rotate, stub_ptr_rotate)],
+        [[u64; 0] => check_make_contiguous_u64x0]
+    );
+    // `[u8; 2048]` (larger than 1 KiB) on four entry points into `RawVecInner::grow_amortized`
+    // (`grow`, `push_back`, `reserve`, `try_reserve`): the `size > 1024` arm of
+    // `min_non_zero_cap`, witnessed by each body's "growth from capacity 0" cover (the new
+    // capacity is 1). That witness is a `kani::cover`: it is reported in the log and does not
+    // fail verification when unsatisfied. `insert`, `push_front`, `append` and `resize_with`
+    // reach `grow_amortized` too; they are instantiated only with elements of at most 8 bytes.
+    proof_harnesses!(check_push_back, [], [[u8; 2048] => check_push_back_u8x2048]);
+    proof_harnesses!(check_reserve, [], [[u8; 2048] => check_reserve_u8x2048]);
+    proof_harnesses!(check_try_reserve, [], [[u8; 2048] => check_try_reserve_u8x2048]);
+    proof_harnesses!(check_grow, [], [[u8; 2048] => check_grow_u8x2048]);
 
     // Additional shapes (see the shape matrix in the module documentation). `WithDrop` goes on
     // the targets that move or read elements and drop at most one at a time; `Al16` and `bool`
