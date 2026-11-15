@@ -1,0 +1,1400 @@
+diff -ru a/ops/range.rs b/ops/range.rs
+--- a/ops/range.rs
++++ b/ops/range.rs
+@@ -365,8 +365,8 @@
+     // expose start/end, modifying them without changing (future/current)
+     // private fields may lead to incorrect behavior, so we don't want to
+     // support that mode.
+-    pub(crate) start: Idx,
+-    pub(crate) end: Idx,
++    #[stable(feature = "rust1", since = "1.0.0")] pub start: Idx,
++    #[stable(feature = "rust1", since = "1.0.0")] pub end: Idx,
+ 
+     // This field represents an overflow flag for either bound (start or end):
+     //  - `false` upon construction
+@@ -379,7 +379,7 @@
+     // often wrapping (modular arithmetic) around at the boundary of `Idx`.
+     //
+     // This is required to support PartialEq and Hash without a PartialOrd bound or specialization.
+-    pub(crate) exhausted: bool,
++    #[stable(feature = "rust1", since = "1.0.0")] pub exhausted: bool,
+ }
+ 
+ impl<Idx> RangeInclusive<Idx> {
+diff -ru a/slice/iter.rs b/slice/iter.rs
+--- a/slice/iter.rs	2026-10-28 02:58:11
++++ b/slice/iter.rs	2026-10-28 02:58:11
+@@ -91,7 +91,7 @@
+ 
+ impl<'a, T> Iter<'a, T> {
+     #[inline]
+-    pub(super) const fn new(slice: &'a [T]) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] #[rustc_const_stable(feature = "rust1", since = "1.0.0")] pub const fn new(slice: &'a [T]) -> Self {
+         let len = slice.len();
+         let ptr: NonNull<T> = NonNull::from_ref(slice).cast();
+         // SAFETY: Similar to `IterMut::new`.
+@@ -216,7 +216,7 @@
+ 
+ impl<'a, T> IterMut<'a, T> {
+     #[inline]
+-    pub(super) const fn new(slice: &'a mut [T]) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] #[rustc_const_stable(feature = "rust1", since = "1.0.0")] pub const fn new(slice: &'a mut [T]) -> Self {
+         let len = slice.len();
+         let ptr: NonNull<T> = NonNull::from_mut(slice).cast();
+         // SAFETY: There are several things here:
+@@ -409,7 +409,7 @@
+ 
+ impl<'a, T: 'a, P: FnMut(&T) -> bool> Split<'a, T, P> {
+     #[inline]
+-    pub(super) fn new(slice: &'a [T], pred: P) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] pub fn new(slice: &'a [T], pred: P) -> Self {
+         Self { v: slice, pred, finished: false }
+     }
+     /// Returns a slice which contains items not yet handled by split.
+@@ -563,7 +563,7 @@
+ 
+ impl<'a, T: 'a, P: FnMut(&T) -> bool> SplitInclusive<'a, T, P> {
+     #[inline]
+-    pub(super) fn new(slice: &'a [T], pred: P) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] pub fn new(slice: &'a [T], pred: P) -> Self {
+         let finished = slice.is_empty();
+         Self { v: slice, pred, finished }
+     }
+@@ -684,7 +684,7 @@
+ 
+ impl<'a, T: 'a, P: FnMut(&T) -> bool> SplitMut<'a, T, P> {
+     #[inline]
+-    pub(super) fn new(slice: &'a mut [T], pred: P) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] pub fn new(slice: &'a mut [T], pred: P) -> Self {
+         Self { v: slice, pred, finished: false }
+     }
+ }
+@@ -813,7 +813,7 @@
+ 
+ impl<'a, T: 'a, P: FnMut(&T) -> bool> SplitInclusiveMut<'a, T, P> {
+     #[inline]
+-    pub(super) fn new(slice: &'a mut [T], pred: P) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] pub fn new(slice: &'a mut [T], pred: P) -> Self {
+         let finished = slice.is_empty();
+         Self { v: slice, pred, finished }
+     }
+@@ -938,7 +938,7 @@
+ 
+ impl<'a, T: 'a, P: FnMut(&T) -> bool> RSplit<'a, T, P> {
+     #[inline]
+-    pub(super) fn new(slice: &'a [T], pred: P) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] pub fn new(slice: &'a [T], pred: P) -> Self {
+         Self { inner: Split::new(slice, pred) }
+     }
+ }
+@@ -1035,7 +1035,7 @@
+ 
+ impl<'a, T: 'a, P: FnMut(&T) -> bool> RSplitMut<'a, T, P> {
+     #[inline]
+-    pub(super) fn new(slice: &'a mut [T], pred: P) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] pub fn new(slice: &'a mut [T], pred: P) -> Self {
+         Self { inner: SplitMut::new(slice, pred) }
+     }
+ }
+@@ -1161,7 +1161,7 @@
+ 
+ impl<'a, T: 'a, P: FnMut(&T) -> bool> SplitN<'a, T, P> {
+     #[inline]
+-    pub(super) fn new(s: Split<'a, T, P>, n: usize) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] pub fn new(s: Split<'a, T, P>, n: usize) -> Self {
+         Self { inner: GenericSplitN { iter: s, count: n } }
+     }
+ }
+@@ -1205,7 +1205,7 @@
+ 
+ impl<'a, T: 'a, P: FnMut(&T) -> bool> RSplitN<'a, T, P> {
+     #[inline]
+-    pub(super) fn new(s: RSplit<'a, T, P>, n: usize) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] pub fn new(s: RSplit<'a, T, P>, n: usize) -> Self {
+         Self { inner: GenericSplitN { iter: s, count: n } }
+     }
+ }
+@@ -1245,7 +1245,7 @@
+ 
+ impl<'a, T: 'a, P: FnMut(&T) -> bool> SplitNMut<'a, T, P> {
+     #[inline]
+-    pub(super) fn new(s: SplitMut<'a, T, P>, n: usize) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] pub fn new(s: SplitMut<'a, T, P>, n: usize) -> Self {
+         Self { inner: GenericSplitN { iter: s, count: n } }
+     }
+ }
+@@ -1286,7 +1286,7 @@
+ 
+ impl<'a, T: 'a, P: FnMut(&T) -> bool> RSplitNMut<'a, T, P> {
+     #[inline]
+-    pub(super) fn new(s: RSplitMut<'a, T, P>, n: usize) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] pub fn new(s: RSplitMut<'a, T, P>, n: usize) -> Self {
+         Self { inner: GenericSplitN { iter: s, count: n } }
+     }
+ }
+@@ -1333,7 +1333,7 @@
+ 
+ impl<'a, T: 'a> Windows<'a, T> {
+     #[inline]
+-    pub(super) const fn new(slice: &'a [T], size: NonZero<usize>) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] #[rustc_const_stable(feature = "rust1", since = "1.0.0")] pub const fn new(slice: &'a [T], size: NonZero<usize>) -> Self {
+         Self { v: slice, size }
+     }
+ }
+@@ -1482,7 +1482,7 @@
+ 
+ impl<'a, T: 'a> Chunks<'a, T> {
+     #[inline]
+-    pub(super) const fn new(slice: &'a [T], size: usize) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] #[rustc_const_stable(feature = "rust1", since = "1.0.0")] pub const fn new(slice: &'a [T], size: usize) -> Self {
+         Self { v: slice, chunk_size: size }
+     }
+ }
+@@ -1665,7 +1665,7 @@
+ 
+ impl<'a, T: 'a> ChunksMut<'a, T> {
+     #[inline]
+-    pub(super) const fn new(slice: &'a mut [T], size: usize) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] #[rustc_const_stable(feature = "rust1", since = "1.0.0")] pub const fn new(slice: &'a mut [T], size: usize) -> Self {
+         Self { v: slice, chunk_size: size, _marker: PhantomData }
+     }
+ }
+@@ -1846,7 +1846,7 @@
+ 
+ impl<'a, T> ChunksExact<'a, T> {
+     #[inline]
+-    pub(super) const fn new(slice: &'a [T], chunk_size: usize) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] #[rustc_const_stable(feature = "rust1", since = "1.0.0")] pub const fn new(slice: &'a [T], chunk_size: usize) -> Self {
+         let rem = slice.len() % chunk_size;
+         let fst_len = slice.len() - rem;
+         // SAFETY: 0 <= fst_len <= slice.len() by construction above
+@@ -2023,7 +2023,7 @@
+ 
+ impl<'a, T> ChunksExactMut<'a, T> {
+     #[inline]
+-    pub(super) const fn new(slice: &'a mut [T], chunk_size: usize) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] #[rustc_const_stable(feature = "rust1", since = "1.0.0")] pub const fn new(slice: &'a mut [T], chunk_size: usize) -> Self {
+         let rem = slice.len() % chunk_size;
+         let fst_len = slice.len() - rem;
+         // SAFETY: 0 <= fst_len <= slice.len() by construction above
+@@ -2182,7 +2182,7 @@
+ 
+ impl<'a, T: 'a, const N: usize> ArrayWindows<'a, T, N> {
+     #[inline]
+-    pub(super) const fn new(slice: &'a [T]) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] #[rustc_const_stable(feature = "rust1", since = "1.0.0")] pub const fn new(slice: &'a [T]) -> Self {
+         Self { v: slice }
+     }
+ }
+@@ -2313,7 +2313,7 @@
+ 
+ impl<'a, T: 'a> RChunks<'a, T> {
+     #[inline]
+-    pub(super) const fn new(slice: &'a [T], size: usize) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] #[rustc_const_stable(feature = "rust1", since = "1.0.0")] pub const fn new(slice: &'a [T], size: usize) -> Self {
+         Self { v: slice, chunk_size: size }
+     }
+ }
+@@ -2480,7 +2480,7 @@
+ 
+ impl<'a, T: 'a> RChunksMut<'a, T> {
+     #[inline]
+-    pub(super) const fn new(slice: &'a mut [T], size: usize) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] #[rustc_const_stable(feature = "rust1", since = "1.0.0")] pub const fn new(slice: &'a mut [T], size: usize) -> Self {
+         Self { v: slice, chunk_size: size, _marker: PhantomData }
+     }
+ }
+@@ -2656,7 +2656,7 @@
+ 
+ impl<'a, T> RChunksExact<'a, T> {
+     #[inline]
+-    pub(super) const fn new(slice: &'a [T], chunk_size: usize) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] #[rustc_const_stable(feature = "rust1", since = "1.0.0")] pub const fn new(slice: &'a [T], chunk_size: usize) -> Self {
+         let rem = slice.len() % chunk_size;
+         // SAFETY: 0 <= rem <= slice.len() by construction above
+         let (fst, snd) = unsafe { slice.split_at_unchecked(rem) };
+@@ -2839,7 +2839,7 @@
+ 
+ impl<'a, T> RChunksExactMut<'a, T> {
+     #[inline]
+-    pub(super) const fn new(slice: &'a mut [T], chunk_size: usize) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] #[rustc_const_stable(feature = "rust1", since = "1.0.0")] pub const fn new(slice: &'a mut [T], chunk_size: usize) -> Self {
+         let rem = slice.len() % chunk_size;
+         // SAFETY: 0 <= rem <= slice.len() by construction above
+         let (fst, snd) = unsafe { slice.split_at_mut_unchecked(rem) };
+@@ -3017,7 +3017,7 @@
+ 
+ #[stable(feature = "slice_group_by", since = "1.77.0")]
+ impl<'a, T: 'a, P> ChunkBy<'a, T, P> {
+-    pub(super) const fn new(slice: &'a [T], predicate: P) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] #[rustc_const_stable(feature = "rust1", since = "1.0.0")] pub const fn new(slice: &'a [T], predicate: P) -> Self {
+         ChunkBy { slice, predicate }
+     }
+ }
+@@ -3125,7 +3125,7 @@
+ 
+ #[stable(feature = "slice_group_by", since = "1.77.0")]
+ impl<'a, T: 'a, P> ChunkByMut<'a, T, P> {
+-    pub(super) const fn new(slice: &'a mut [T], predicate: P) -> Self {
++    #[stable(feature = "rust1", since = "1.0.0")] #[rustc_const_stable(feature = "rust1", since = "1.0.0")] pub const fn new(slice: &'a mut [T], predicate: P) -> Self {
+         ChunkByMut { slice, predicate }
+     }
+ }
+diff -ru a/slice/mod.rs b/slice/mod.rs
+--- a/slice/mod.rs
++++ b/slice/mod.rs
+@@ -109,13 +109,13 @@
+     /// let a = [1, 2, 3];
+     /// assert_eq!(a.len(), 3);
+     /// ```
+-    #[lang = "slice_len_fn"]
++    // #[lang = "slice_len_fn"]
+     #[stable(feature = "rust1", since = "1.0.0")]
+     #[rustc_const_stable(feature = "const_slice_len", since = "1.39.0")]
+     #[rustc_no_implicit_autorefs]
+     #[inline]
+     #[must_use]
+-    pub const fn len(&self) -> usize {
++    pub(crate) const fn len(&self) -> usize {
+         ptr::metadata(self)
+     }
+ 
+@@ -135,7 +135,7 @@
+     #[rustc_no_implicit_autorefs]
+     #[inline]
+     #[must_use]
+-    pub const fn is_empty(&self) -> bool {
++    pub(crate) const fn is_empty(&self) -> bool {
+         self.len() == 0
+     }
+ 
+@@ -154,7 +154,7 @@
+     #[rustc_const_stable(feature = "const_slice_first_last_not_mut", since = "1.56.0")]
+     #[inline]
+     #[must_use]
+-    pub const fn first(&self) -> Option<&T> {
++    pub(crate) const fn first(&self) -> Option<&T> {
+         if let [first, ..] = self { Some(first) } else { None }
+     }
+ 
+@@ -177,7 +177,7 @@
+     #[rustc_const_stable(feature = "const_slice_first_last", since = "1.83.0")]
+     #[inline]
+     #[must_use]
+-    pub const fn first_mut(&mut self) -> Option<&mut T> {
++    pub(crate) const fn first_mut(&mut self) -> Option<&mut T> {
+         if let [first, ..] = self { Some(first) } else { None }
+     }
+ 
+@@ -197,7 +197,7 @@
+     #[rustc_const_stable(feature = "const_slice_first_last_not_mut", since = "1.56.0")]
+     #[inline]
+     #[must_use]
+-    pub const fn split_first(&self) -> Option<(&T, &[T])> {
++    pub(crate) const fn split_first(&self) -> Option<(&T, &[T])> {
+         if let [first, tail @ ..] = self { Some((first, tail)) } else { None }
+     }
+ 
+@@ -219,7 +219,7 @@
+     #[rustc_const_stable(feature = "const_slice_first_last", since = "1.83.0")]
+     #[inline]
+     #[must_use]
+-    pub const fn split_first_mut(&mut self) -> Option<(&mut T, &mut [T])> {
++    pub(crate) const fn split_first_mut(&mut self) -> Option<(&mut T, &mut [T])> {
+         if let [first, tail @ ..] = self { Some((first, tail)) } else { None }
+     }
+ 
+@@ -239,7 +239,7 @@
+     #[rustc_const_stable(feature = "const_slice_first_last_not_mut", since = "1.56.0")]
+     #[inline]
+     #[must_use]
+-    pub const fn split_last(&self) -> Option<(&T, &[T])> {
++    pub(crate) const fn split_last(&self) -> Option<(&T, &[T])> {
+         if let [init @ .., last] = self { Some((last, init)) } else { None }
+     }
+ 
+@@ -261,7 +261,7 @@
+     #[rustc_const_stable(feature = "const_slice_first_last", since = "1.83.0")]
+     #[inline]
+     #[must_use]
+-    pub const fn split_last_mut(&mut self) -> Option<(&mut T, &mut [T])> {
++    pub(crate) const fn split_last_mut(&mut self) -> Option<(&mut T, &mut [T])> {
+         if let [init @ .., last] = self { Some((last, init)) } else { None }
+     }
+ 
+@@ -280,7 +280,7 @@
+     #[rustc_const_stable(feature = "const_slice_first_last_not_mut", since = "1.56.0")]
+     #[inline]
+     #[must_use]
+-    pub const fn last(&self) -> Option<&T> {
++    pub(crate) const fn last(&self) -> Option<&T> {
+         if let [.., last] = self { Some(last) } else { None }
+     }
+ 
+@@ -303,7 +303,7 @@
+     #[rustc_const_stable(feature = "const_slice_first_last", since = "1.83.0")]
+     #[inline]
+     #[must_use]
+-    pub const fn last_mut(&mut self) -> Option<&mut T> {
++    pub(crate) const fn last_mut(&mut self) -> Option<&mut T> {
+         if let [.., last] = self { Some(last) } else { None }
+     }
+ 
+@@ -326,7 +326,7 @@
+     #[inline]
+     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+     #[rustc_const_stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+-    pub const fn first_chunk<const N: usize>(&self) -> Option<&[T; N]> {
++    pub(crate) const fn first_chunk<const N: usize>(&self) -> Option<&[T; N]> {
+         if self.len() < N {
+             None
+         } else {
+@@ -356,7 +356,7 @@
+     #[inline]
+     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+     #[rustc_const_stable(feature = "const_slice_first_last_chunk", since = "1.83.0")]
+-    pub const fn first_chunk_mut<const N: usize>(&mut self) -> Option<&mut [T; N]> {
++    pub(crate) const fn first_chunk_mut<const N: usize>(&mut self) -> Option<&mut [T; N]> {
+         if self.len() < N {
+             None
+         } else {
+@@ -386,7 +386,7 @@
+     #[inline]
+     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+     #[rustc_const_stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+-    pub const fn split_first_chunk<const N: usize>(&self) -> Option<(&[T; N], &[T])> {
++    pub(crate) const fn split_first_chunk<const N: usize>(&self) -> Option<(&[T; N], &[T])> {
+         let Some((first, tail)) = self.split_at_checked(N) else { return None };
+ 
+         // SAFETY: We explicitly check for the correct number of elements,
+@@ -416,7 +416,7 @@
+     #[inline]
+     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+     #[rustc_const_stable(feature = "const_slice_first_last_chunk", since = "1.83.0")]
+-    pub const fn split_first_chunk_mut<const N: usize>(
++    pub(crate) const fn split_first_chunk_mut<const N: usize>(
+         &mut self,
+     ) -> Option<(&mut [T; N], &mut [T])> {
+         let Some((first, tail)) = self.split_at_mut_checked(N) else { return None };
+@@ -446,7 +446,7 @@
+     #[inline]
+     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+     #[rustc_const_stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+-    pub const fn split_last_chunk<const N: usize>(&self) -> Option<(&[T], &[T; N])> {
++    pub(crate) const fn split_last_chunk<const N: usize>(&self) -> Option<(&[T], &[T; N])> {
+         let Some(index) = self.len().checked_sub(N) else { return None };
+         let (init, last) = self.split_at(index);
+ 
+@@ -477,7 +477,7 @@
+     #[inline]
+     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+     #[rustc_const_stable(feature = "const_slice_first_last_chunk", since = "1.83.0")]
+-    pub const fn split_last_chunk_mut<const N: usize>(
++    pub(crate) const fn split_last_chunk_mut<const N: usize>(
+         &mut self,
+     ) -> Option<(&mut [T], &mut [T; N])> {
+         let Some(index) = self.len().checked_sub(N) else { return None };
+@@ -508,7 +508,7 @@
+     #[inline]
+     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+     #[rustc_const_stable(feature = "const_slice_last_chunk", since = "1.80.0")]
+-    pub const fn last_chunk<const N: usize>(&self) -> Option<&[T; N]> {
++    pub(crate) const fn last_chunk<const N: usize>(&self) -> Option<&[T; N]> {
+         // FIXME(const-hack): Without const traits, we need this instead of `get`.
+         let Some(index) = self.len().checked_sub(N) else { return None };
+         let (_, last) = self.split_at(index);
+@@ -538,7 +538,7 @@
+     #[inline]
+     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+     #[rustc_const_stable(feature = "const_slice_first_last_chunk", since = "1.83.0")]
+-    pub const fn last_chunk_mut<const N: usize>(&mut self) -> Option<&mut [T; N]> {
++    pub(crate) const fn last_chunk_mut<const N: usize>(&mut self) -> Option<&mut [T; N]> {
+         // FIXME(const-hack): Without const traits, we need this instead of `get`.
+         let Some(index) = self.len().checked_sub(N) else { return None };
+         let (_, last) = self.split_at_mut(index);
+@@ -571,7 +571,7 @@
+     #[inline]
+     #[must_use]
+     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+-    pub const fn get<I>(&self, index: I) -> Option<&I::Output>
++    pub(crate) const fn get<I>(&self, index: I) -> Option<&I::Output>
+     where
+         I: [const] SliceIndex<Self>,
+     {
+@@ -599,7 +599,7 @@
+     #[must_use]
+     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+     #[rustc_no_writable]
+-    pub const fn get_mut<I>(&mut self, index: I) -> Option<&mut I::Output>
++    pub(crate) const fn get_mut<I>(&mut self, index: I) -> Option<&mut I::Output>
+     where
+         I: [const] SliceIndex<Self>,
+     {
+@@ -639,7 +639,7 @@
+     #[must_use]
+     #[track_caller]
+     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+-    pub const unsafe fn get_unchecked<I>(&self, index: I) -> &I::Output
++    pub(crate) const unsafe fn get_unchecked<I>(&self, index: I) -> &I::Output
+     where
+         I: [const] SliceIndex<Self>,
+     {
+@@ -685,7 +685,7 @@
+     #[track_caller]
+     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+     #[rustc_no_writable]
+-    pub const unsafe fn get_unchecked_mut<I>(&mut self, index: I) -> &mut I::Output
++    pub(crate) const unsafe fn get_unchecked_mut<I>(&mut self, index: I) -> &mut I::Output
+     where
+         I: [const] SliceIndex<Self>,
+     {
+@@ -727,7 +727,7 @@
+     #[rustc_as_ptr]
+     #[inline(always)]
+     #[must_use]
+-    pub const fn as_ptr(&self) -> *const T {
++    pub(crate) const fn as_ptr(&self) -> *const T {
+         self as *const [T] as *const T
+     }
+ 
+@@ -759,7 +759,7 @@
+     #[inline(always)]
+     #[must_use]
+     #[rustc_no_writable]
+-    pub const fn as_mut_ptr(&mut self) -> *mut T {
++    pub(crate) const fn as_mut_ptr(&mut self) -> *mut T {
+         self as *mut [T] as *mut T
+     }
+ 
+@@ -795,7 +795,7 @@
+     #[rustc_const_stable(feature = "const_ptr_offset", since = "1.61.0")]
+     #[inline]
+     #[must_use]
+-    pub const fn as_ptr_range(&self) -> Range<*const T> {
++    pub(crate) const fn as_ptr_range(&self) -> Range<*const T> {
+         let start = self.as_ptr();
+         // SAFETY: The `add` here is safe, because:
+         //
+@@ -838,7 +838,7 @@
+     #[rustc_const_stable(feature = "const_ptr_offset", since = "1.61.0")]
+     #[inline]
+     #[must_use]
+-    pub const fn as_mut_ptr_range(&mut self) -> Range<*mut T> {
++    pub(crate) const fn as_mut_ptr_range(&mut self) -> Range<*mut T> {
+         let start = self.as_mut_ptr();
+         // SAFETY: See as_ptr_range() above for why `add` here is safe.
+         let end = unsafe { start.add(self.len()) };
+@@ -852,7 +852,7 @@
+     #[rustc_const_stable(feature = "core_slice_as_array", since = "1.93.0")]
+     #[inline]
+     #[must_use]
+-    pub const fn as_array<const N: usize>(&self) -> Option<&[T; N]> {
++    pub(crate) const fn as_array<const N: usize>(&self) -> Option<&[T; N]> {
+         if self.len() == N {
+             let ptr = self.as_ptr().cast_array();
+ 
+@@ -871,7 +871,7 @@
+     #[rustc_const_stable(feature = "core_slice_as_array", since = "1.93.0")]
+     #[inline]
+     #[must_use]
+-    pub const fn as_mut_array<const N: usize>(&mut self) -> Option<&mut [T; N]> {
++    pub(crate) const fn as_mut_array<const N: usize>(&mut self) -> Option<&mut [T; N]> {
+         if self.len() == N {
+             let ptr = self.as_mut_ptr().cast_array();
+ 
+@@ -907,7 +907,7 @@
+     #[rustc_const_stable(feature = "const_swap", since = "1.85.0")]
+     #[inline]
+     #[track_caller]
+-    pub const fn swap(&mut self, a: usize, b: usize) {
++    pub(crate) const fn swap(&mut self, a: usize, b: usize) {
+         // Bounds checks that panic exactly like indexing would.
+         let _ = &self[a];
+         let _ = &self[b];
+@@ -946,7 +946,7 @@
+     /// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
+     #[unstable(feature = "slice_swap_unchecked", issue = "88539")]
+     #[track_caller]
+-    pub const unsafe fn swap_unchecked(&mut self, a: usize, b: usize) {
++    pub(crate) const unsafe fn swap_unchecked(&mut self, a: usize, b: usize) {
+         assert_unsafe_precondition!(
+             check_library_ub,
+             "slice::swap_unchecked requires that the indices are within the slice",
+@@ -976,7 +976,7 @@
+     #[stable(feature = "rust1", since = "1.0.0")]
+     #[rustc_const_stable(feature = "const_slice_reverse", since = "1.90.0")]
+     #[inline]
+-    pub const fn reverse(&mut self) {
++    pub(crate) const fn reverse(&mut self) {
+         let half_len = self.len() / 2;
+         let Range { start, end } = self.as_mut_ptr_range();
+ 
+@@ -1037,8 +1037,8 @@
+     #[stable(feature = "rust1", since = "1.0.0")]
+     #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
+     #[inline]
+-    #[rustc_diagnostic_item = "slice_iter"]
+-    pub const fn iter(&self) -> Iter<'_, T> {
++    // #[rustc_diagnostic_item = "slice_iter"]
++    pub(crate) const fn iter(&self) -> Iter<'_, T> {
+         Iter::new(self)
+     }
+ 
+@@ -1058,7 +1058,7 @@
+     #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
+     #[stable(feature = "rust1", since = "1.0.0")]
+     #[inline]
+-    pub const fn iter_mut(&mut self) -> IterMut<'_, T> {
++    pub(crate) const fn iter_mut(&mut self) -> IterMut<'_, T> {
+         IterMut::new(self)
+     }
+ 
+@@ -1113,7 +1113,7 @@
+     #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
+     #[inline]
+     #[track_caller]
+-    pub const fn windows(&self, size: usize) -> Windows<'_, T> {
++    pub(crate) const fn windows(&self, size: usize) -> Windows<'_, T> {
+         let size = NonZero::new(size).expect("window size must be non-zero");
+         Windows::new(self, size)
+     }
+@@ -1153,7 +1153,7 @@
+     #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
+     #[inline]
+     #[track_caller]
+-    pub const fn chunks(&self, chunk_size: usize) -> Chunks<'_, T> {
++    pub(crate) const fn chunks(&self, chunk_size: usize) -> Chunks<'_, T> {
+         assert!(chunk_size != 0, "chunk size must be non-zero");
+         Chunks::new(self, chunk_size)
+     }
+@@ -1197,7 +1197,7 @@
+     #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
+     #[inline]
+     #[track_caller]
+-    pub const fn chunks_mut(&mut self, chunk_size: usize) -> ChunksMut<'_, T> {
++    pub(crate) const fn chunks_mut(&mut self, chunk_size: usize) -> ChunksMut<'_, T> {
+         assert!(chunk_size != 0, "chunk size must be non-zero");
+         ChunksMut::new(self, chunk_size)
+     }
+@@ -1240,7 +1240,7 @@
+     #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
+     #[inline]
+     #[track_caller]
+-    pub const fn chunks_exact(&self, chunk_size: usize) -> ChunksExact<'_, T> {
++    pub(crate) const fn chunks_exact(&self, chunk_size: usize) -> ChunksExact<'_, T> {
+         assert!(chunk_size != 0, "chunk size must be non-zero");
+         ChunksExact::new(self, chunk_size)
+     }
+@@ -1288,7 +1288,7 @@
+     #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
+     #[inline]
+     #[track_caller]
+-    pub const fn chunks_exact_mut(&mut self, chunk_size: usize) -> ChunksExactMut<'_, T> {
++    pub(crate) const fn chunks_exact_mut(&mut self, chunk_size: usize) -> ChunksExactMut<'_, T> {
+         assert!(chunk_size != 0, "chunk size must be non-zero");
+         ChunksExactMut::new(self, chunk_size)
+     }
+@@ -1336,7 +1336,7 @@
+     #[inline]
+     #[must_use]
+     #[track_caller]
+-    pub const unsafe fn as_chunks_unchecked<#[rustc_panics_when_zero] const N: usize>(
++    pub(crate) const unsafe fn as_chunks_unchecked<#[rustc_panics_when_zero] const N: usize>(
+         &self,
+     ) -> &[[T; N]] {
+         assert_unsafe_precondition!(
+@@ -1396,7 +1396,7 @@
+     #[inline]
+     #[track_caller]
+     #[must_use]
+-    pub const fn as_chunks<#[rustc_panics_when_zero] const N: usize>(&self) -> (&[[T; N]], &[T]) {
++    pub(crate) const fn as_chunks<#[rustc_panics_when_zero] const N: usize>(&self) -> (&[[T; N]], &[T]) {
+         assert!(N != 0, "chunk size must be non-zero");
+         let len_rounded_down = self.len() / N * N;
+         // SAFETY: The rounded-down value is always the same or smaller than the
+@@ -1443,7 +1443,7 @@
+     #[inline]
+     #[track_caller]
+     #[must_use]
+-    pub const fn as_rchunks<#[rustc_panics_when_zero] const N: usize>(&self) -> (&[T], &[[T; N]]) {
++    pub(crate) const fn as_rchunks<#[rustc_panics_when_zero] const N: usize>(&self) -> (&[T], &[[T; N]]) {
+         assert!(N != 0, "chunk size must be non-zero");
+         let len = self.len() / N;
+         let (remainder, multiple_of_n) = self.split_at(self.len() - len * N);
+@@ -1498,7 +1498,7 @@
+     #[inline]
+     #[must_use]
+     #[track_caller]
+-    pub const unsafe fn as_chunks_unchecked_mut<#[rustc_panics_when_zero] const N: usize>(
++    pub(crate) const unsafe fn as_chunks_unchecked_mut<#[rustc_panics_when_zero] const N: usize>(
+         &mut self,
+     ) -> &mut [[T; N]] {
+         assert_unsafe_precondition!(
+@@ -1554,7 +1554,7 @@
+     #[inline]
+     #[track_caller]
+     #[must_use]
+-    pub const fn as_chunks_mut<#[rustc_panics_when_zero] const N: usize>(
++    pub(crate) const fn as_chunks_mut<#[rustc_panics_when_zero] const N: usize>(
+         &mut self,
+     ) -> (&mut [[T; N]], &mut [T]) {
+         assert!(N != 0, "chunk size must be non-zero");
+@@ -1609,7 +1609,7 @@
+     #[inline]
+     #[track_caller]
+     #[must_use]
+-    pub const fn as_rchunks_mut<#[rustc_panics_when_zero] const N: usize>(
++    pub(crate) const fn as_rchunks_mut<#[rustc_panics_when_zero] const N: usize>(
+         &mut self,
+     ) -> (&mut [T], &mut [[T; N]]) {
+         assert!(N != 0, "chunk size must be non-zero");
+@@ -1652,7 +1652,7 @@
+     #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
+     #[inline]
+     #[track_caller]
+-    pub const fn array_windows<#[rustc_panics_when_zero] const N: usize>(
++    pub(crate) const fn array_windows<#[rustc_panics_when_zero] const N: usize>(
+         &self,
+     ) -> ArrayWindows<'_, T, N> {
+         assert!(N != 0, "window size must be non-zero");
+@@ -1694,7 +1694,7 @@
+     #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
+     #[inline]
+     #[track_caller]
+-    pub const fn rchunks(&self, chunk_size: usize) -> RChunks<'_, T> {
++    pub(crate) const fn rchunks(&self, chunk_size: usize) -> RChunks<'_, T> {
+         assert!(chunk_size != 0, "chunk size must be non-zero");
+         RChunks::new(self, chunk_size)
+     }
+@@ -1738,7 +1738,7 @@
+     #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
+     #[inline]
+     #[track_caller]
+-    pub const fn rchunks_mut(&mut self, chunk_size: usize) -> RChunksMut<'_, T> {
++    pub(crate) const fn rchunks_mut(&mut self, chunk_size: usize) -> RChunksMut<'_, T> {
+         assert!(chunk_size != 0, "chunk size must be non-zero");
+         RChunksMut::new(self, chunk_size)
+     }
+@@ -1783,7 +1783,7 @@
+     #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
+     #[inline]
+     #[track_caller]
+-    pub const fn rchunks_exact(&self, chunk_size: usize) -> RChunksExact<'_, T> {
++    pub(crate) const fn rchunks_exact(&self, chunk_size: usize) -> RChunksExact<'_, T> {
+         assert!(chunk_size != 0, "chunk size must be non-zero");
+         RChunksExact::new(self, chunk_size)
+     }
+@@ -1832,7 +1832,7 @@
+     #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
+     #[inline]
+     #[track_caller]
+-    pub const fn rchunks_exact_mut(&mut self, chunk_size: usize) -> RChunksExactMut<'_, T> {
++    pub(crate) const fn rchunks_exact_mut(&mut self, chunk_size: usize) -> RChunksExactMut<'_, T> {
+         assert!(chunk_size != 0, "chunk size must be non-zero");
+         RChunksExactMut::new(self, chunk_size)
+     }
+@@ -1872,7 +1872,7 @@
+     #[stable(feature = "slice_group_by", since = "1.77.0")]
+     #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
+     #[inline]
+-    pub const fn chunk_by<F>(&self, pred: F) -> ChunkBy<'_, T, F>
++    pub(crate) const fn chunk_by<F>(&self, pred: F) -> ChunkBy<'_, T, F>
+     where
+         F: FnMut(&T, &T) -> bool,
+     {
+@@ -1914,7 +1914,7 @@
+     #[stable(feature = "slice_group_by", since = "1.77.0")]
+     #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
+     #[inline]
+-    pub const fn chunk_by_mut<F>(&mut self, pred: F) -> ChunkByMut<'_, T, F>
++    pub(crate) const fn chunk_by_mut<F>(&mut self, pred: F) -> ChunkByMut<'_, T, F>
+     where
+         F: FnMut(&T, &T) -> bool,
+     {
+@@ -1960,7 +1960,7 @@
+     #[inline]
+     #[track_caller]
+     #[must_use]
+-    pub const fn split_at(&self, mid: usize) -> (&[T], &[T]) {
++    pub(crate) const fn split_at(&self, mid: usize) -> (&[T], &[T]) {
+         match self.split_at_checked(mid) {
+             Some(pair) => pair,
+             None => panic!("mid > len"),
+@@ -1994,7 +1994,7 @@
+     #[track_caller]
+     #[must_use]
+     #[rustc_const_stable(feature = "const_slice_split_at_mut", since = "1.83.0")]
+-    pub const fn split_at_mut(&mut self, mid: usize) -> (&mut [T], &mut [T]) {
++    pub(crate) const fn split_at_mut(&mut self, mid: usize) -> (&mut [T], &mut [T]) {
+         match self.split_at_mut_checked(mid) {
+             Some(pair) => pair,
+             None => panic!("mid > len"),
+@@ -2046,7 +2046,7 @@
+     #[inline]
+     #[must_use]
+     #[track_caller]
+-    pub const unsafe fn split_at_unchecked(&self, mid: usize) -> (&[T], &[T]) {
++    pub(crate) const unsafe fn split_at_unchecked(&self, mid: usize) -> (&[T], &[T]) {
+         // FIXME(const-hack): the const function `from_raw_parts` is used to make this
+         // function const; previously the implementation used
+         // `(self.get_unchecked(..mid), self.get_unchecked(mid..))`
+@@ -2100,7 +2100,7 @@
+     #[inline]
+     #[must_use]
+     #[track_caller]
+-    pub const unsafe fn split_at_mut_unchecked(&mut self, mid: usize) -> (&mut [T], &mut [T]) {
++    pub(crate) const unsafe fn split_at_mut_unchecked(&mut self, mid: usize) -> (&mut [T], &mut [T]) {
+         let len = self.len();
+         let ptr = self.as_mut_ptr();
+ 
+@@ -2161,7 +2161,7 @@
+     #[rustc_const_stable(feature = "split_at_checked", since = "1.80.0")]
+     #[inline]
+     #[must_use]
+-    pub const fn split_at_checked(&self, mid: usize) -> Option<(&[T], &[T])> {
++    pub(crate) const fn split_at_checked(&self, mid: usize) -> Option<(&[T], &[T])> {
+         if mid <= self.len() {
+             // SAFETY: `[ptr; mid]` and `[mid; len]` are inside `self`, which
+             // fulfills the requirements of `split_at_unchecked`.
+@@ -2200,7 +2200,7 @@
+     #[rustc_const_stable(feature = "const_slice_split_at_mut", since = "1.83.0")]
+     #[inline]
+     #[must_use]
+-    pub const fn split_at_mut_checked(&mut self, mid: usize) -> Option<(&mut [T], &mut [T])> {
++    pub(crate) const fn split_at_mut_checked(&mut self, mid: usize) -> Option<(&mut [T], &mut [T])> {
+         if mid <= self.len() {
+             // SAFETY: `[ptr; mid]` and `[mid; len]` are inside `self`, which
+             // fulfills the requirements of `split_at_unchecked`.
+@@ -2252,7 +2252,7 @@
+     /// ```
+     #[stable(feature = "rust1", since = "1.0.0")]
+     #[inline]
+-    pub fn split<F>(&self, pred: F) -> Split<'_, T, F>
++    pub(crate) fn split<F>(&self, pred: F) -> Split<'_, T, F>
+     where
+         F: FnMut(&T) -> bool,
+     {
+@@ -2274,7 +2274,7 @@
+     /// ```
+     #[stable(feature = "rust1", since = "1.0.0")]
+     #[inline]
+-    pub fn split_mut<F>(&mut self, pred: F) -> SplitMut<'_, T, F>
++    pub(crate) fn split_mut<F>(&mut self, pred: F) -> SplitMut<'_, T, F>
+     where
+         F: FnMut(&T) -> bool,
+     {
+@@ -2310,7 +2310,7 @@
+     /// ```
+     #[stable(feature = "split_inclusive", since = "1.51.0")]
+     #[inline]
+-    pub fn split_inclusive<F>(&self, pred: F) -> SplitInclusive<'_, T, F>
++    pub(crate) fn split_inclusive<F>(&self, pred: F) -> SplitInclusive<'_, T, F>
+     where
+         F: FnMut(&T) -> bool,
+     {
+@@ -2334,7 +2334,7 @@
+     /// ```
+     #[stable(feature = "split_inclusive", since = "1.51.0")]
+     #[inline]
+-    pub fn split_inclusive_mut<F>(&mut self, pred: F) -> SplitInclusiveMut<'_, T, F>
++    pub(crate) fn split_inclusive_mut<F>(&mut self, pred: F) -> SplitInclusiveMut<'_, T, F>
+     where
+         F: FnMut(&T) -> bool,
+     {
+@@ -2370,7 +2370,7 @@
+     /// ```
+     #[stable(feature = "slice_rsplit", since = "1.27.0")]
+     #[inline]
+-    pub fn rsplit<F>(&self, pred: F) -> RSplit<'_, T, F>
++    pub(crate) fn rsplit<F>(&self, pred: F) -> RSplit<'_, T, F>
+     where
+         F: FnMut(&T) -> bool,
+     {
+@@ -2396,7 +2396,7 @@
+     ///
+     #[stable(feature = "slice_rsplit", since = "1.27.0")]
+     #[inline]
+-    pub fn rsplit_mut<F>(&mut self, pred: F) -> RSplitMut<'_, T, F>
++    pub(crate) fn rsplit_mut<F>(&mut self, pred: F) -> RSplitMut<'_, T, F>
+     where
+         F: FnMut(&T) -> bool,
+     {
+@@ -2424,7 +2424,7 @@
+     /// ```
+     #[stable(feature = "rust1", since = "1.0.0")]
+     #[inline]
+-    pub fn splitn<F>(&self, n: usize, pred: F) -> SplitN<'_, T, F>
++    pub(crate) fn splitn<F>(&self, n: usize, pred: F) -> SplitN<'_, T, F>
+     where
+         F: FnMut(&T) -> bool,
+     {
+@@ -2450,7 +2450,7 @@
+     /// ```
+     #[stable(feature = "rust1", since = "1.0.0")]
+     #[inline]
+-    pub fn splitn_mut<F>(&mut self, n: usize, pred: F) -> SplitNMut<'_, T, F>
++    pub(crate) fn splitn_mut<F>(&mut self, n: usize, pred: F) -> SplitNMut<'_, T, F>
+     where
+         F: FnMut(&T) -> bool,
+     {
+@@ -2479,7 +2479,7 @@
+     /// ```
+     #[stable(feature = "rust1", since = "1.0.0")]
+     #[inline]
+-    pub fn rsplitn<F>(&self, n: usize, pred: F) -> RSplitN<'_, T, F>
++    pub(crate) fn rsplitn<F>(&self, n: usize, pred: F) -> RSplitN<'_, T, F>
+     where
+         F: FnMut(&T) -> bool,
+     {
+@@ -2506,7 +2506,7 @@
+     /// ```
+     #[stable(feature = "rust1", since = "1.0.0")]
+     #[inline]
+-    pub fn rsplitn_mut<F>(&mut self, n: usize, pred: F) -> RSplitNMut<'_, T, F>
++    pub(crate) fn rsplitn_mut<F>(&mut self, n: usize, pred: F) -> RSplitNMut<'_, T, F>
+     where
+         F: FnMut(&T) -> bool,
+     {
+@@ -2533,7 +2533,7 @@
+     /// ```
+     #[unstable(feature = "slice_split_once", issue = "112811")]
+     #[inline]
+-    pub fn split_once<F>(&self, pred: F) -> Option<(&[T], &[T])>
++    pub(crate) fn split_once<F>(&self, pred: F) -> Option<(&[T], &[T])>
+     where
+         F: FnMut(&T) -> bool,
+     {
+@@ -2562,7 +2562,7 @@
+     /// ```
+     #[unstable(feature = "slice_split_once", issue = "112811")]
+     #[inline]
+-    pub fn rsplit_once<F>(&self, pred: F) -> Option<(&[T], &[T])>
++    pub(crate) fn rsplit_once<F>(&self, pred: F) -> Option<(&[T], &[T])>
+     where
+         F: FnMut(&T) -> bool,
+     {
+@@ -2599,7 +2599,7 @@
+     #[stable(feature = "rust1", since = "1.0.0")]
+     #[inline]
+     #[must_use]
+-    pub fn contains(&self, x: &T) -> bool
++    pub(crate) fn contains(&self, x: &T) -> bool
+     where
+         T: PartialEq,
+     {
+@@ -2629,7 +2629,7 @@
+     /// ```
+     #[stable(feature = "rust1", since = "1.0.0")]
+     #[must_use]
+-    pub fn starts_with(&self, needle: &[T]) -> bool
++    pub(crate) fn starts_with(&self, needle: &[T]) -> bool
+     where
+         T: PartialEq,
+     {
+@@ -2660,7 +2660,7 @@
+     /// ```
+     #[stable(feature = "rust1", since = "1.0.0")]
+     #[must_use]
+-    pub fn ends_with(&self, needle: &[T]) -> bool
++    pub(crate) fn ends_with(&self, needle: &[T]) -> bool
+     where
+         T: PartialEq,
+     {
+@@ -2692,7 +2692,7 @@
+     /// ```
+     #[must_use = "returns the subslice without modifying the original"]
+     #[stable(feature = "slice_strip", since = "1.51.0")]
+-    pub fn strip_prefix<P: SlicePattern<Item = T> + ?Sized>(&self, prefix: &P) -> Option<&[T]>
++    pub(crate) fn strip_prefix<P: SlicePattern<Item = T> + ?Sized>(&self, prefix: &P) -> Option<&[T]>
+     where
+         T: PartialEq,
+     {
+@@ -2728,7 +2728,7 @@
+     /// ```
+     #[must_use = "returns the subslice without modifying the original"]
+     #[stable(feature = "slice_strip", since = "1.51.0")]
+-    pub fn strip_suffix<P: SlicePattern<Item = T> + ?Sized>(&self, suffix: &P) -> Option<&[T]>
++    pub(crate) fn strip_suffix<P: SlicePattern<Item = T> + ?Sized>(&self, suffix: &P) -> Option<&[T]>
+     where
+         T: PartialEq,
+     {
+@@ -2768,7 +2768,7 @@
+     /// ```
+     #[must_use = "returns the subslice without modifying the original"]
+     #[stable(feature = "strip_circumfix", since = "1.98.0")]
+-    pub fn strip_circumfix<S, P>(&self, prefix: &P, suffix: &S) -> Option<&[T]>
++    pub(crate) fn strip_circumfix<S, P>(&self, prefix: &P, suffix: &S) -> Option<&[T]>
+     where
+         T: PartialEq,
+         S: SlicePattern<Item = T> + ?Sized,
+@@ -2802,7 +2802,7 @@
+     /// ```
+     #[must_use = "returns the subslice without modifying the original"]
+     #[stable(feature = "trim_prefix_suffix", since = "CURRENT_RUSTC_VERSION")]
+-    pub fn trim_prefix<P: SlicePattern<Item = T> + ?Sized>(&self, prefix: &P) -> &[T]
++    pub(crate) fn trim_prefix<P: SlicePattern<Item = T> + ?Sized>(&self, prefix: &P) -> &[T]
+     where
+         T: PartialEq,
+     {
+@@ -2840,7 +2840,7 @@
+     /// ```
+     #[must_use = "returns the subslice without modifying the original"]
+     #[stable(feature = "trim_prefix_suffix", since = "CURRENT_RUSTC_VERSION")]
+-    pub fn trim_suffix<P: SlicePattern<Item = T> + ?Sized>(&self, suffix: &P) -> &[T]
++    pub(crate) fn trim_suffix<P: SlicePattern<Item = T> + ?Sized>(&self, suffix: &P) -> &[T]
+     where
+         T: PartialEq,
+     {
+@@ -2927,7 +2927,7 @@
+     /// ```
+     #[rustc_const_unstable(feature = "const_binary_search", issue = "159532")]
+     #[stable(feature = "rust1", since = "1.0.0")]
+-    pub const fn binary_search(&self, x: &T) -> Result<usize, usize>
++    pub(crate) const fn binary_search(&self, x: &T) -> Result<usize, usize>
+     where
+         T: [const] Ord,
+     {
+@@ -2979,7 +2979,7 @@
+     #[rustc_const_unstable(feature = "const_binary_search", issue = "159532")]
+     #[stable(feature = "rust1", since = "1.0.0")]
+     #[inline]
+-    pub const fn binary_search_by<'a, F>(&'a self, mut f: F) -> Result<usize, usize>
++    pub(crate) const fn binary_search_by<'a, F>(&'a self, mut f: F) -> Result<usize, usize>
+     where
+         F: [const] FnMut(&'a T) -> Ordering + [const] Destruct,
+     {
+@@ -3081,7 +3081,7 @@
+     #[rustc_const_unstable(feature = "const_binary_search", issue = "159532")]
+     #[stable(feature = "slice_binary_search_by_key", since = "1.10.0")]
+     #[inline]
+-    pub const fn binary_search_by_key<'a, B, F>(&'a self, b: &B, mut f: F) -> Result<usize, usize>
++    pub(crate) const fn binary_search_by_key<'a, B, F>(&'a self, b: &B, mut f: F) -> Result<usize, usize>
+     where
+         F: [const] FnMut(&'a T) -> B + [const] Destruct,
+         B: [const] Ord + [const] Destruct,
+@@ -3143,7 +3143,7 @@
+     /// [total order]: https://en.wikipedia.org/wiki/Total_order
+     #[stable(feature = "sort_unstable", since = "1.20.0")]
+     #[inline]
+-    pub fn sort_unstable(&mut self)
++    pub(crate) fn sort_unstable(&mut self)
+     where
+         T: Ord,
+     {
+@@ -3198,7 +3198,7 @@
+     /// [total order]: https://en.wikipedia.org/wiki/Total_order
+     #[stable(feature = "sort_unstable", since = "1.20.0")]
+     #[inline]
+-    pub fn sort_unstable_by<F>(&mut self, mut compare: F)
++    pub(crate) fn sort_unstable_by<F>(&mut self, mut compare: F)
+     where
+         F: FnMut(&T, &T) -> Ordering,
+     {
+@@ -3250,7 +3250,7 @@
+     /// [total order]: https://en.wikipedia.org/wiki/Total_order
+     #[stable(feature = "sort_unstable", since = "1.20.0")]
+     #[inline]
+-    pub fn sort_unstable_by_key<K, F>(&mut self, mut f: F)
++    pub(crate) fn sort_unstable_by_key<K, F>(&mut self, mut f: F)
+     where
+         F: FnMut(&T) -> K,
+         K: Ord,
+@@ -3320,7 +3320,7 @@
+     /// [`sort_unstable`]: slice::sort_unstable
+     #[unstable(feature = "slice_partial_sort_unstable", issue = "149046")]
+     #[inline]
+-    pub fn partial_sort_unstable<R>(&mut self, range: R)
++    pub(crate) fn partial_sort_unstable<R>(&mut self, range: R)
+     where
+         T: Ord,
+         R: RangeBounds<usize>,
+@@ -3391,7 +3391,7 @@
+     /// [`sort_unstable_by`]: slice::sort_unstable_by
+     #[unstable(feature = "slice_partial_sort_unstable", issue = "149046")]
+     #[inline]
+-    pub fn partial_sort_unstable_by<F, R>(&mut self, range: R, mut compare: F)
++    pub(crate) fn partial_sort_unstable_by<F, R>(&mut self, range: R, mut compare: F)
+     where
+         F: FnMut(&T, &T) -> Ordering,
+         R: RangeBounds<usize>,
+@@ -3462,7 +3462,7 @@
+     /// [`sort_unstable_by_key`]: slice::sort_unstable_by_key
+     #[unstable(feature = "slice_partial_sort_unstable", issue = "149046")]
+     #[inline]
+-    pub fn partial_sort_unstable_by_key<K, F, R>(&mut self, range: R, mut f: F)
++    pub(crate) fn partial_sort_unstable_by_key<K, F, R>(&mut self, range: R, mut f: F)
+     where
+         F: FnMut(&T) -> K,
+         K: Ord,
+@@ -3526,7 +3526,7 @@
+     /// [total order]: https://en.wikipedia.org/wiki/Total_order
+     #[stable(feature = "slice_select_nth_unstable", since = "1.49.0")]
+     #[inline]
+-    pub fn select_nth_unstable(&mut self, index: usize) -> (&mut [T], &mut T, &mut [T])
++    pub(crate) fn select_nth_unstable(&mut self, index: usize) -> (&mut [T], &mut T, &mut [T])
+     where
+         T: Ord,
+     {
+@@ -3591,7 +3591,7 @@
+     /// [total order]: https://en.wikipedia.org/wiki/Total_order
+     #[stable(feature = "slice_select_nth_unstable", since = "1.49.0")]
+     #[inline]
+-    pub fn select_nth_unstable_by<F>(
++    pub(crate) fn select_nth_unstable_by<F>(
+         &mut self,
+         index: usize,
+         mut compare: F,
+@@ -3658,7 +3658,7 @@
+     /// [total order]: https://en.wikipedia.org/wiki/Total_order
+     #[stable(feature = "slice_select_nth_unstable", since = "1.49.0")]
+     #[inline]
+-    pub fn select_nth_unstable_by_key<K, F>(
++    pub(crate) fn select_nth_unstable_by_key<K, F>(
+         &mut self,
+         index: usize,
+         mut f: F,
+@@ -3692,7 +3692,7 @@
+     /// ```
+     #[unstable(feature = "slice_partition_dedup", issue = "54279")]
+     #[inline]
+-    pub fn partition_dedup(&mut self) -> (&mut [T], &mut [T])
++    pub(crate) fn partition_dedup(&mut self) -> (&mut [T], &mut [T])
+     where
+         T: PartialEq,
+     {
+@@ -3730,7 +3730,7 @@
+     /// ```
+     #[unstable(feature = "slice_partition_dedup", issue = "54279")]
+     #[inline]
+-    pub fn partition_dedup_by<F>(&mut self, mut same_bucket: F) -> (&mut [T], &mut [T])
++    pub(crate) fn partition_dedup_by<F>(&mut self, mut same_bucket: F) -> (&mut [T], &mut [T])
+     where
+         F: FnMut(&mut T, &mut T) -> bool,
+     {
+@@ -3856,7 +3856,7 @@
+     /// ```
+     #[unstable(feature = "slice_partition_dedup", issue = "54279")]
+     #[inline]
+-    pub fn partition_dedup_by_key<K, F>(&mut self, mut key: F) -> (&mut [T], &mut [T])
++    pub(crate) fn partition_dedup_by_key<K, F>(&mut self, mut key: F) -> (&mut [T], &mut [T])
+     where
+         F: FnMut(&mut T) -> K,
+         K: PartialEq,
+@@ -3898,7 +3898,7 @@
+     /// ```
+     #[stable(feature = "slice_rotate", since = "1.26.0")]
+     #[rustc_const_stable(feature = "const_slice_rotate", since = "1.92.0")]
+-    pub const fn rotate_left(&mut self, mid: usize) {
++    pub(crate) const fn rotate_left(&mut self, mid: usize) {
+         assert!(mid <= self.len());
+         let k = self.len() - mid;
+         let p = self.as_mut_ptr();
+@@ -3944,7 +3944,7 @@
+     /// ```
+     #[stable(feature = "slice_rotate", since = "1.26.0")]
+     #[rustc_const_stable(feature = "const_slice_rotate", since = "1.92.0")]
+-    pub const fn rotate_right(&mut self, k: usize) {
++    pub(crate) const fn rotate_right(&mut self, k: usize) {
+         assert!(k <= self.len());
+         let mid = self.len() - k;
+         let p = self.as_mut_ptr();
+@@ -4018,7 +4018,7 @@
+     /// assert_eq!(a, [3]);
+     /// ```
+     #[unstable(feature = "slice_shift", issue = "151772")]
+-    pub const fn shift_left<const N: usize>(&mut self, inserted: [T; N]) -> [T; N] {
++    pub(crate) const fn shift_left<const N: usize>(&mut self, inserted: [T; N]) -> [T; N] {
+         if let Some(shift) = self.len().checked_sub(N) {
+             // SAFETY: Having just checked that the inserted/returned arrays are
+             // shorter than (or the same length as) the slice:
+@@ -4122,7 +4122,7 @@
+     /// assert_eq!(a, [1]);
+     /// ```
+     #[unstable(feature = "slice_shift", issue = "151772")]
+-    pub const fn shift_right<const N: usize>(&mut self, inserted: [T; N]) -> [T; N] {
++    pub(crate) const fn shift_right<const N: usize>(&mut self, inserted: [T; N]) -> [T; N] {
+         if let Some(shift) = self.len().checked_sub(N) {
+             // SAFETY: Having just checked that the inserted/returned arrays are
+             // shorter than (or the same length as) the slice:
+@@ -4180,7 +4180,7 @@
+     /// ```
+     #[doc(alias = "memset")]
+     #[stable(feature = "slice_fill", since = "1.50.0")]
+-    pub fn fill(&mut self, value: T)
++    pub(crate) fn fill(&mut self, value: T)
+     where
+         T: Clone,
+     {
+@@ -4204,7 +4204,7 @@
+     /// assert_eq!(buf, vec![0; 10]);
+     /// ```
+     #[stable(feature = "slice_fill_with", since = "1.51.0")]
+-    pub fn fill_with<F>(&mut self, mut f: F)
++    pub(crate) fn fill_with<F>(&mut self, mut f: F)
+     where
+         F: FnMut() -> T,
+     {
+@@ -4268,7 +4268,7 @@
+     #[stable(feature = "clone_from_slice", since = "1.7.0")]
+     #[track_caller]
+     #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
+-    pub const fn clone_from_slice(&mut self, src: &[T])
++    pub(crate) const fn clone_from_slice(&mut self, src: &[T])
+     where
+         T: [const] Clone + [const] Destruct,
+     {
+@@ -4334,7 +4334,7 @@
+     #[stable(feature = "copy_from_slice", since = "1.9.0")]
+     #[rustc_const_stable(feature = "const_copy_from_slice", since = "1.87.0")]
+     #[track_caller]
+-    pub const fn copy_from_slice(&mut self, src: &[T])
++    pub(crate) const fn copy_from_slice(&mut self, src: &[T])
+     where
+         T: Copy,
+     {
+@@ -4369,7 +4369,7 @@
+     #[inline]
+     #[stable(feature = "copy_within", since = "1.37.0")]
+     #[track_caller]
+-    pub fn copy_within<R: RangeBounds<usize>>(&mut self, src: R, dest: usize)
++    pub(crate) fn copy_within<R: RangeBounds<usize>>(&mut self, src: R, dest: usize)
+     where
+         T: Copy,
+     {
+@@ -4437,7 +4437,7 @@
+     #[stable(feature = "swap_with_slice", since = "1.27.0")]
+     #[rustc_const_unstable(feature = "const_swap_with_slice", issue = "142204")]
+     #[track_caller]
+-    pub const fn swap_with_slice(&mut self, other: &mut [T]) {
++    pub(crate) const fn swap_with_slice(&mut self, other: &mut [T]) {
+         assert!(self.len() == other.len(), "destination and source slices have different lengths");
+         // SAFETY: `self` is valid for `self.len()` elements by definition, and `src` was
+         // checked to have the same length. The slices cannot overlap because
+@@ -4514,7 +4514,7 @@
+     /// ```
+     #[stable(feature = "slice_align_to", since = "1.30.0")]
+     #[must_use]
+-    pub unsafe fn align_to<U>(&self) -> (&[T], &[U], &[T]) {
++    pub(crate) unsafe fn align_to<U>(&self) -> (&[T], &[U], &[T]) {
+         // Note that most of this function will be constant-evaluated,
+         if U::IS_ZST || T::IS_ZST {
+             // handle ZSTs specially, which is – don't handle them at all.
+@@ -4579,7 +4579,7 @@
+     /// ```
+     #[stable(feature = "slice_align_to", since = "1.30.0")]
+     #[must_use]
+-    pub unsafe fn align_to_mut<U>(&mut self) -> (&mut [T], &mut [U], &mut [T]) {
++    pub(crate) unsafe fn align_to_mut<U>(&mut self) -> (&mut [T], &mut [U], &mut [T]) {
+         // Note that most of this function will be constant-evaluated,
+         if U::IS_ZST || T::IS_ZST {
+             // handle ZSTs specially, which is – don't handle them at all.
+@@ -4670,7 +4670,7 @@
+     /// ```
+     #[unstable(feature = "portable_simd", issue = "86656")]
+     #[must_use]
+-    pub fn as_simd<const LANES: usize>(&self) -> (&[T], &[Simd<T, LANES>], &[T])
++    pub(crate) fn as_simd<const LANES: usize>(&self) -> (&[T], &[Simd<T, LANES>], &[T])
+     where
+         Simd<T, LANES>: AsRef<[T; LANES]>,
+         T: simd::SimdElement,
+@@ -4705,7 +4705,7 @@
+     /// method for something like `LANES == 3`.
+     #[unstable(feature = "portable_simd", issue = "86656")]
+     #[must_use]
+-    pub fn as_simd_mut<const LANES: usize>(&mut self) -> (&mut [T], &mut [Simd<T, LANES>], &mut [T])
++    pub(crate) fn as_simd_mut<const LANES: usize>(&mut self) -> (&mut [T], &mut [Simd<T, LANES>], &mut [T])
+     where
+         Simd<T, LANES>: AsMut<[T; LANES]>,
+         T: simd::SimdElement,
+@@ -4743,7 +4743,7 @@
+     #[inline]
+     #[stable(feature = "is_sorted", since = "1.82.0")]
+     #[must_use]
+-    pub fn is_sorted(&self) -> bool
++    pub(crate) fn is_sorted(&self) -> bool
+     where
+         T: PartialOrd,
+     {
+@@ -4786,7 +4786,7 @@
+     /// ```
+     #[stable(feature = "is_sorted", since = "1.82.0")]
+     #[must_use]
+-    pub fn is_sorted_by<'a, F>(&'a self, mut compare: F) -> bool
++    pub(crate) fn is_sorted_by<'a, F>(&'a self, mut compare: F) -> bool
+     where
+         F: FnMut(&'a T, &'a T) -> bool,
+     {
+@@ -4810,7 +4810,7 @@
+     #[inline]
+     #[stable(feature = "is_sorted", since = "1.82.0")]
+     #[must_use]
+-    pub fn is_sorted_by_key<'a, F, K>(&'a self, f: F) -> bool
++    pub(crate) fn is_sorted_by_key<'a, F, K>(&'a self, f: F) -> bool
+     where
+         F: FnMut(&'a T) -> K,
+         K: PartialOrd,
+@@ -4870,7 +4870,7 @@
+     #[rustc_const_unstable(feature = "const_binary_search", issue = "159532")]
+     #[stable(feature = "partition_point", since = "1.52.0")]
+     #[must_use]
+-    pub const fn partition_point<P>(&self, mut pred: P) -> usize
++    pub(crate) const fn partition_point<P>(&self, mut pred: P) -> usize
+     where
+         P: [const] FnMut(&T) -> bool + [const] Destruct,
+     {
+@@ -4923,7 +4923,7 @@
+     #[inline]
+     #[must_use = "method does not modify the slice if the range is out of bounds"]
+     #[stable(feature = "slice_take", since = "1.87.0")]
+-    pub fn split_off<'a, R: OneSidedRange<usize>>(
++    pub(crate) fn split_off<'a, R: OneSidedRange<usize>>(
+         self: &mut &'a Self,
+         range: R,
+     ) -> Option<&'a Self> {
+@@ -4989,7 +4989,7 @@
+     #[inline]
+     #[must_use = "method does not modify the slice if the range is out of bounds"]
+     #[stable(feature = "slice_take", since = "1.87.0")]
+-    pub fn split_off_mut<'a, R: OneSidedRange<usize>>(
++    pub(crate) fn split_off_mut<'a, R: OneSidedRange<usize>>(
+         self: &mut &'a mut Self,
+         range: R,
+     ) -> Option<&'a mut Self> {
+@@ -5027,7 +5027,7 @@
+     #[inline]
+     #[stable(feature = "slice_take", since = "1.87.0")]
+     #[rustc_const_unstable(feature = "const_split_off_first_last", issue = "138539")]
+-    pub const fn split_off_first<'a>(self: &mut &'a Self) -> Option<&'a T> {
++    pub(crate) const fn split_off_first<'a>(self: &mut &'a Self) -> Option<&'a T> {
+         // FIXME(const-hack): Use `?` when available in const instead of `let-else`.
+         let Some((first, rem)) = self.split_first() else { return None };
+         *self = rem;
+@@ -5052,7 +5052,7 @@
+     #[inline]
+     #[stable(feature = "slice_take", since = "1.87.0")]
+     #[rustc_const_unstable(feature = "const_split_off_first_last", issue = "138539")]
+-    pub const fn split_off_first_mut<'a>(self: &mut &'a mut Self) -> Option<&'a mut T> {
++    pub(crate) const fn split_off_first_mut<'a>(self: &mut &'a mut Self) -> Option<&'a mut T> {
+         // FIXME(const-hack): Use `mem::take` and `?` when available in const.
+         // Original: `mem::take(self).split_first_mut()?`
+         let Some((first, rem)) = mem::replace(self, &mut []).split_first_mut() else { return None };
+@@ -5077,7 +5077,7 @@
+     #[inline]
+     #[stable(feature = "slice_take", since = "1.87.0")]
+     #[rustc_const_unstable(feature = "const_split_off_first_last", issue = "138539")]
+-    pub const fn split_off_last<'a>(self: &mut &'a Self) -> Option<&'a T> {
++    pub(crate) const fn split_off_last<'a>(self: &mut &'a Self) -> Option<&'a T> {
+         // FIXME(const-hack): Use `?` when available in const instead of `let-else`.
+         let Some((last, rem)) = self.split_last() else { return None };
+         *self = rem;
+@@ -5102,7 +5102,7 @@
+     #[inline]
+     #[stable(feature = "slice_take", since = "1.87.0")]
+     #[rustc_const_unstable(feature = "const_split_off_first_last", issue = "138539")]
+-    pub const fn split_off_last_mut<'a>(self: &mut &'a mut Self) -> Option<&'a mut T> {
++    pub(crate) const fn split_off_last_mut<'a>(self: &mut &'a mut Self) -> Option<&'a mut T> {
+         // FIXME(const-hack): Use `mem::take` and `?` when available in const.
+         // Original: `mem::take(self).split_last_mut()?`
+         let Some((last, rem)) = mem::replace(self, &mut []).split_last_mut() else { return None };
+@@ -5159,7 +5159,7 @@
+     #[stable(feature = "get_many_mut", since = "1.86.0")]
+     #[inline]
+     #[track_caller]
+-    pub unsafe fn get_disjoint_unchecked_mut<I, const N: usize>(
++    pub(crate) unsafe fn get_disjoint_unchecked_mut<I, const N: usize>(
+         &mut self,
+         indices: [I; N],
+     ) -> [&mut I::Output; N]
+@@ -5226,7 +5226,7 @@
+     /// ```
+     #[stable(feature = "get_many_mut", since = "1.86.0")]
+     #[inline]
+-    pub fn get_disjoint_mut<I, const N: usize>(
++    pub(crate) fn get_disjoint_mut<I, const N: usize>(
+         &mut self,
+         indices: [I; N],
+     ) -> Result<[&mut I::Output; N], GetDisjointMutError>
+@@ -5277,7 +5277,7 @@
+     /// ```
+     #[must_use]
+     #[stable(feature = "element_offset", since = "1.94.0")]
+-    pub fn element_offset(&self, element: &T) -> Option<usize> {
++    pub(crate) fn element_offset(&self, element: &T) -> Option<usize> {
+         if T::IS_ZST {
+             panic!("elements are zero-sized");
+         }
+@@ -5331,7 +5331,7 @@
+     /// ```
+     #[must_use]
+     #[stable(feature = "substr_range", since = "1.98.0")]
+-    pub fn subslice_range(&self, subslice: &[T]) -> Option<core::range::Range<usize>> {
++    pub(crate) fn subslice_range(&self, subslice: &[T]) -> Option<core::range::Range<usize>> {
+         if T::IS_ZST {
+             panic!("elements are zero-sized");
+         }
+@@ -5362,7 +5362,7 @@
+     /// for example `Box<[T]>` or `Arc<[T]>`.
+     #[inline]
+     #[unstable(feature = "str_as_str", issue = "130366")]
+-    pub const fn as_slice(&self) -> &[T] {
++    pub(crate) const fn as_slice(&self) -> &[T] {
+         self
+     }
+ 
+@@ -5373,7 +5373,7 @@
+     /// for example `Box<[T]>` or `MutexGuard<[T]>`.
+     #[inline]
+     #[unstable(feature = "str_as_str", issue = "130366")]
+-    pub const fn as_mut_slice(&mut self) -> &mut [T] {
++    pub(crate) const fn as_mut_slice(&mut self) -> &mut [T] {
+         self
+     }
+ }
+@@ -5461,7 +5461,7 @@
+     /// ```
+     #[stable(feature = "slice_flatten", since = "1.80.0")]
+     #[rustc_const_stable(feature = "const_slice_flatten", since = "1.87.0")]
+-    pub const fn as_flattened(&self) -> &[T] {
++    pub(crate) const fn as_flattened(&self) -> &[T] {
+         let len = if T::IS_ZST {
+             self.len().checked_mul(N).expect("slice len overflow")
+         } else {
+@@ -5503,7 +5503,7 @@
+     /// ```
+     #[stable(feature = "slice_flatten", since = "1.80.0")]
+     #[rustc_const_stable(feature = "const_slice_flatten", since = "1.87.0")]
+-    pub const fn as_flattened_mut(&mut self) -> &mut [T] {
++    pub(crate) const fn as_flattened_mut(&mut self) -> &mut [T] {
+         let len = if T::IS_ZST {
+             self.len().checked_mul(N).expect("slice len overflow")
+         } else {
+diff -ru a/slice/raw.rs b/slice/raw.rs
+--- a/slice/raw.rs
++++ b/slice/raw.rs
+@@ -119,7 +119,7 @@
+ #[stable(feature = "rust1", since = "1.0.0")]
+ #[rustc_const_stable(feature = "const_slice_from_raw_parts", since = "1.64.0")]
+ #[must_use]
+-#[rustc_diagnostic_item = "slice_from_raw_parts"]
++// #[rustc_diagnostic_item = "slice_from_raw_parts"]
+ #[track_caller]
+ pub const unsafe fn from_raw_parts<'a, T>(data: *const T, len: usize) -> &'a [T] {
+     // SAFETY: the caller must uphold the safety contract for `from_raw_parts`.
+@@ -174,7 +174,7 @@
+ #[stable(feature = "rust1", since = "1.0.0")]
+ #[rustc_const_stable(feature = "const_slice_from_raw_parts_mut", since = "1.83.0")]
+ #[must_use]
+-#[rustc_diagnostic_item = "slice_from_raw_parts_mut"]
++// #[rustc_diagnostic_item = "slice_from_raw_parts_mut"]
+ #[track_caller]
+ pub const unsafe fn from_raw_parts_mut<'a, T>(data: *mut T, len: usize) -> &'a mut [T] {
+     // SAFETY: the caller must uphold the safety contract for `from_raw_parts_mut`.
+@@ -198,7 +198,7 @@
+ /// Converts a reference to T into a slice of length 1 (without copying).
+ #[stable(feature = "from_ref", since = "1.28.0")]
+ #[rustc_const_stable(feature = "const_slice_from_ref_shared", since = "1.63.0")]
+-#[rustc_diagnostic_item = "slice_from_ref"]
++// #[rustc_diagnostic_item = "slice_from_ref"]
+ #[must_use]
+ pub const fn from_ref<T>(s: &T) -> &[T] {
+     array::from_ref(s)

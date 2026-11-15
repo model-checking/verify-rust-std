@@ -6,6 +6,7 @@ Specifically, it currently contains the following proofs:
 
 - Partial proof of [LinkedList](alloc/collections/linked_list.rs/)
 - Partial proof of [RawVec](alloc/raw_vec/mod.rs/)
+- Partial proof of [core::slice](core/slice/mod.rs/)
 
 See each proof's accompanying README for a tour of the proof and applicable caveats.
 
