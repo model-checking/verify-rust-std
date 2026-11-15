@@ -2190,7 +2190,11 @@ mod verify {
     //!   receives two `&T`, never the slot of the hole (`index != pos` in the contracts of
     //!   `Hole`), and the heap is exclusively borrowed during the call, so safe code in `Ord`
     //!   cannot reach the heap in any other way. A comparison that panics is out of the scope of
-    //!   the challenge.
+    //!   the challenge. A write of a comparison to other memory (a static, or memory behind a
+    //!   pointer in the element) is left out of this model. That is sound: the functions in
+    //!   scope read and write only the heaps they are given, exclusively borrowed or owned,
+    //!   and their locals, so such a write changes nothing that they read, and later
+    //!   comparisons return arbitrary results in any case.
     //! * Destructors. `DropFails` fails the proof when an element is dropped, so the functions
     //!   in scope run no destructor of `T`: they only move elements.
     //! * Invalid bit patterns. `bool`. The elements of a generated heap are all-zero, which is
@@ -2200,7 +2204,7 @@ mod verify {
     //!     `ptr::swap_nonoverlapping`, `Global::{alloc_impl_runtime, grow_impl_runtime}` and the
     //!     precondition checks of `slice::from_raw_parts_mut` and of the pointer functions: `()`,
     //!     and every other type. `grow_amortized` is only reached with a zero-sized type when
-    //!     the vector is full (`panic_push_full`, `panic_append_too_long`).
+    //!     the vector is full (`panic_push_full`, `panic_append_overflow`).
     //!   * `raw_vec::min_non_zero_cap`, when `push` or `append` reallocates: size 1 (`u8`,
     //!     `bool`), up to 1 KiB (the types of 2 to 16 bytes), larger (`[u64; 256]`, 2 KiB). The
     //!     harnesses of `push` and `append` have a `kani::cover` for the reallocation.
@@ -2248,16 +2252,20 @@ mod verify {
     //! A heap of a zero-sized type can be longer than `isize::MAX`. Then `2 * pos + 1` can
     //! overflow in the sift-down loops (the FIXME in `sift_down_range`), and `2 * len` and
     //! `tail_len * 11` in the heuristic of `rebuild_tail`; a full vector cannot grow. The
-    //! challenge accepts an overflow panic there. The harnesses of each element type take
-    //! the inputs for which nothing overflows: for the three sift-down functions,
-    //! `rebuild_tail`, `push` and `append` these are all such inputs, and the other
-    //! functions, which reach the overflows only through those six, use heaps of at most
-    //! `MAX_SIFT_DOWN_LEN` elements. The `panic_*` harnesses run inputs from the rest. They
-    //! pass when an execution panics and no check other than a panic fails. They do not
-    //! run every input of the rest. When the hole starts at or below `isize::MAX` in a
-    //! longer heap, the comparisons decide whether an overflow is reached. And the inputs
-    //! for which the heuristic of `rebuild_tail` overflows are not run: a harness for
-    //! `2 * len` and one for `tail_len * 11` need about 10 GB of memory each.
+    //! challenge accepts an overflow panic there. Two sets of harnesses share the inputs of
+    //! each function, and between them they take every length.
+    //!
+    //! * The harnesses of each element type take the inputs for which nothing overflows:
+    //!   heaps of at most `MAX_SIFT_DOWN_LEN` elements for the functions that sift down, of
+    //!   at most `MAX_POP_LEN` for those that remove an element first, and the conditions
+    //!   `rebuild_tail_fits` and `append_fits`.
+    //! * For the zero-sized type, the `long_zst_*` harnesses, `panic_push_full` and
+    //!   `panic_append_overflow` take all the other inputs. There the comparisons decide
+    //!   whether an overflow is reached, so some executions return and others panic. These
+    //!   harnesses pass when some execution panics and no check other than a panic fails,
+    //!   on the executions that return as on those that panic. On those that return they
+    //!   also check the result (`must_hold`). (`should_panic` cannot require that the panic
+    //!   is an overflow. Kani lists the panics, and they are all overflows.)
     //!
     //! # Models and limits
     //!
@@ -2284,9 +2292,17 @@ mod verify {
     //!
     //! # Not proved
     //!
-    //! * That no element is duplicated or lost by a sift. Each step is checked (the contract of
-    //!   `Hole::move_to` allows it to write the slot of the hole only, and no destructor runs),
-    //!   but the loop contracts do not track the contents of the slice.
+    //! * That a call leaves a heap of valid elements, for the next call to start from. Each
+    //!   harness starts from a heap of valid elements and proves one call. The argument for
+    //!   the heap after it: the functions in scope create no element, and every write to the
+    //!   buffer stores a whole element that was read from the buffer or passed in. For the
+    //!   three steps of a `Hole` this is checked on `u8` and `bool` elements: `Hole::new` takes
+    //!   out the element at `pos`, `Hole::move_to` puts the element of `index` into the slot
+    //!   that the hole leaves (and its contract lets it write no other slot), and `Drop for
+    //!   Hole` writes back the element that was taken out. No destructor runs (`DropFails`). The
+    //!   other writes are those of `ptr::swap`, `mem::swap` and `Vec`. So a sift only
+    //!   permutes the elements. Kani does not carry this through the loops, whose contracts
+    //!   do not track the contents of the slice (see "Models and limits").
     //! * Termination of the loops of `sift_down_range`, `sift_down_to_bottom` and
     //!   `rebuild_tail`: the pinned Kani only accepts a variable as a termination measure. (The
     //!   other three loops have a `loop_decreases` clause.)
@@ -2310,6 +2326,10 @@ mod verify {
     /// Largest length for which the child index `2 * pos + 1` of every `pos < len` fits in
     /// a `usize`. Only a heap of a zero-sized type can be longer.
     const MAX_SIFT_DOWN_LEN: usize = isize::MAX as usize + 1;
+
+    /// Largest length for the functions that remove one element before they sift down
+    /// (`pop` and its callers, `into_sorted_vec`): they sift in a heap that is one shorter.
+    const MAX_POP_LEN: usize = MAX_SIFT_DOWN_LEN + 1;
 
     // ------------------------------------------------------------------------------------
     // Element types
@@ -2526,6 +2546,38 @@ mod verify {
         heap
     }
 
+    /// Any heap of at most `MAX_POP_LEN` elements: no child index can overflow once one
+    /// element is removed.
+    fn any_heap_pop<T: Element>() -> BinaryHeap<T> {
+        let heap = any_heap();
+        kani::assume(heap.len() <= MAX_POP_LEN);
+        heap
+    }
+
+    /// Whether `rebuild_tail(start)` computes without an overflow in a heap of `len`
+    /// elements (`start <= len`). When the tail is not longer than the rest, the heuristic
+    /// computes `2 * len` and `tail_len * 11`; `rebuild` computes child indices.
+    fn rebuild_tail_fits(len: usize, start: usize) -> bool {
+        let tail_len = len - start;
+        if start == len {
+            true
+        } else if start < tail_len {
+            len <= MAX_SIFT_DOWN_LEN
+        } else {
+            len <= usize::MAX / 2 && tail_len <= usize::MAX / 11
+        }
+    }
+
+    /// Whether `append` computes without an overflow for heaps of these lengths: the total
+    /// fits in a `usize` for `Vec::append`, and `rebuild_tail` is then called with a tail
+    /// (the shorter heap, never longer than the rest) for which its heuristic fits.
+    fn append_fits(len_a: usize, len_b: usize) -> bool {
+        let shorter = if len_a < len_b { len_a } else { len_b };
+        len_a.checked_add(len_b).is_some_and(|total| {
+            shorter == 0 || (total <= usize::MAX / 2 && shorter <= usize::MAX / 11)
+        })
+    }
+
     /// The end of a harness for `value`, which owns elements of type `T`: it is dropped,
     /// which frees its buffer, unless dropping an element has an effect (`DropFails`). In
     /// that case it is leaked: the element-wise drop of a vector of symbolic length is a
@@ -2722,7 +2774,7 @@ mod verify {
     }
 
     fn check_pop<T: Element>() {
-        let mut heap = any_heap_sift_down::<T>();
+        let mut heap = any_heap_pop::<T>();
         let len = heap.len();
         let item = heap.pop();
         assert!(item.is_some() == (len > 0));
@@ -2827,7 +2879,7 @@ mod verify {
     }
 
     fn check_peek_mut_pop<T: Element>() {
-        let mut heap = any_heap_sift_down::<T>();
+        let mut heap = any_heap_pop::<T>();
         let len = heap.len();
         let Some(peek) = any_peek_mut(&mut heap) else {
             assert!(len == 0);
@@ -2880,15 +2932,8 @@ mod verify {
         let start: usize = kani::any_where(|start: &usize| *start <= len);
         let tail_len = len - start;
         // Every input for which no arithmetic overflows. The others only exist for a
-        // zero-sized type: the heuristic computes `2 * len` and `tail_len * 11` when the
-        // tail is not longer than the rest, and `rebuild` computes child indices.
-        kani::assume(if start == len {
-            true
-        } else if start < tail_len {
-            len <= MAX_SIFT_DOWN_LEN
-        } else {
-            len <= usize::MAX / 2 && tail_len <= usize::MAX / 11
-        });
+        // zero-sized type: `long_zst_rebuild_tail`.
+        kani::assume(rebuild_tail_fits(len, start));
         heap.rebuild_tail(start);
         assert!(heap.len() == len);
         kani::cover(start < tail_len && len > 1_000_000, "long tail: rebuild");
@@ -2911,13 +2956,9 @@ mod verify {
         let (len_a, len_b) = (a.len(), b.len());
         // The longer heap receives the shorter one.
         let cap_receiver = if len_a < len_b { b.capacity() } else { a.capacity() };
-        // Every input without an overflow: the total length fits in a `usize` for
-        // `Vec::append`, and `rebuild_tail` is called with a tail (the shorter heap) for
-        // which its heuristic does not overflow (see `check_rebuild_tail`).
-        let shorter = if len_a < len_b { len_a } else { len_b };
-        kani::assume(len_a.checked_add(len_b).is_some_and(|total| {
-            shorter == 0 || (total <= usize::MAX / 2 && shorter <= usize::MAX / 11)
-        }));
+        // Every input without an overflow. The others only exist for a zero-sized type:
+        // `panic_append_overflow`.
+        kani::assume(append_fits(len_a, len_b));
         a.append(&mut b);
         assert!(a.len() == len_a + len_b && b.len() == 0);
         kani::cover(len_a < len_b && len_a > 1_000_000, "swapped, both long");
@@ -2938,7 +2979,7 @@ mod verify {
     }
 
     fn check_into_sorted_vec<T: Element>() {
-        let heap = any_heap_sift_down::<T>();
+        let heap = any_heap_pop::<T>();
         let len = heap.len();
         let vec = heap.into_sorted_vec();
         assert!(vec.len() == len);
@@ -2968,7 +3009,7 @@ mod verify {
     // `n - 1`. So the iterator yields exactly `n` elements.
 
     fn check_into_iter_sorted<T: Element>() {
-        let heap = any_heap_sift_down::<T>();
+        let heap = any_heap_pop::<T>();
         let n = heap.len();
         let mut iter = heap.into_iter_sorted();
         assert!(iter.size_hint() == (n, Some(n)));
@@ -2984,7 +3025,7 @@ mod verify {
     }
 
     fn check_drain_sorted<T: Element>() {
-        let mut heap = any_heap_sift_down::<T>();
+        let mut heap = any_heap_pop::<T>();
         let n = heap.len();
         let mut iter = heap.drain_sorted();
         assert!(iter.size_hint() == (n, Some(n)));
@@ -3181,11 +3222,96 @@ mod verify {
     }
 
     // ------------------------------------------------------------------------------------
-    // Panics. Each harness has one kind of input, which needs a heap that only exists for a
-    // zero-sized type, or an argument that no caller passes. `should_panic` requires at
-    // least one failed check, and every failed check to be a panic: some execution panics,
-    // and no execution fails one of Kani's memory checks. The harnesses that end with
-    // `must_have_panicked()` also show that every execution panics.
+    // Which element a `Hole` moves. The harnesses above show that each step of a `Hole` is
+    // safe. These show which element it moves, for elements of one byte with any value:
+    // `u8`, and `bool`, which has invalid bit patterns. The argument that the functions only
+    // move elements rests on it (see "Not proved"). The steps do not depend on the element
+    // type; a value of several bytes is not followed here because the solver needs gigabytes
+    // for it.
+
+    macro_rules! hole_value_harnesses {
+        ($v:ty) => {
+            /// `Hole::new` takes out the element at `pos`.
+            #[kani::proof]
+            fn new_takes_the_element() {
+                let data = any_slice::<AnyOrd<$v>>();
+                let pos: usize = kani::any_where(|pos: &usize| *pos < data.len());
+                let value: $v = kani::any();
+                data[pos].0 = value;
+                // SAFETY: `pos < data.len()`.
+                let hole = unsafe { Hole::new(data, pos) };
+                assert!(hole.elt.0 == value);
+                kani::cover(pos > 1_000_000, "far from the start");
+            }
+
+            /// `Hole::move_to` puts the element of `index` into the slot that the hole
+            /// leaves.
+            #[kani::proof]
+            fn move_to_moves_the_element() {
+                let data = any_slice::<AnyOrd<$v>>();
+                let len = data.len();
+                let pos: usize = kani::any_where(|pos: &usize| *pos < len);
+                let index: usize = kani::any_where(|index: &usize| *index != pos && *index < len);
+                let value: $v = kani::any();
+                data[index].0 = value;
+                // SAFETY: `pos < len`.
+                let mut hole = unsafe { Hole::new(data, pos) };
+                // SAFETY: `index` is in the slice and is not the hole.
+                unsafe { hole.move_to(index) };
+                assert!(hole.data[pos].0 == value);
+                kani::cover(index > pos && index - pos > 1_000_000, "far towards the end");
+                kani::cover(index < pos, "towards the start");
+            }
+
+            /// `Drop for Hole` writes back the element that the hole took out, where the
+            /// hole is then: at `pos`, or at `index` if it has moved. A moved hole also
+            /// leaves the element of `index` at `pos`.
+            #[kani::proof]
+            fn drop_writes_the_element_back() {
+                let data = any_slice::<AnyOrd<$v>>();
+                let len = data.len();
+                let pos: usize = kani::any_where(|pos: &usize| *pos < len);
+                let index: usize = kani::any_where(|index: &usize| *index != pos && *index < len);
+                let (taken, other): ($v, $v) = kani::any();
+                data[pos].0 = taken;
+                data[index].0 = other;
+                // SAFETY: `pos < len`.
+                let mut hole = unsafe { Hole::new(data, pos) };
+                let moved: bool = kani::any();
+                if moved {
+                    // SAFETY: `index` is in the slice and is not the hole.
+                    unsafe { hole.move_to(index) };
+                }
+                drop(hole);
+                if moved {
+                    assert!(data[index].0 == taken && data[pos].0 == other);
+                } else {
+                    assert!(data[pos].0 == taken && data[index].0 == other);
+                }
+                kani::cover(moved && len > 1_000_000, "moved hole in a long slice");
+                kani::cover(!moved, "hole that has not moved");
+            }
+        };
+    }
+
+    mod hole_u8 {
+        use super::*;
+        hole_value_harnesses!(u8);
+    }
+    mod hole_bool {
+        use super::*;
+        hole_value_harnesses!(bool);
+    }
+
+    // ------------------------------------------------------------------------------------
+    // Panics. These inputs need a heap that only exists for a zero-sized type, or an argument
+    // that no caller passes. `should_panic` requires at least one failed check, and every
+    // failed check to be a panic: some execution panics, and no execution fails one of
+    // Kani's memory checks, whether it returns or panics.
+    //  * `long_zst_*`: for each function that can overflow, every input that its harness
+    //    above excludes. Some executions return and others panic on an overflow.
+    //  * `panic_*`: one kind of input each. Those that end with `must_have_panicked()` also
+    //    show that every execution panics.
 
     /// A zero-sized element: a heap of these can be longer than `isize::MAX`.
     type Zst = AnyOrd<()>;
@@ -3196,6 +3322,14 @@ mod verify {
     fn must_have_panicked() -> ! {
         // SAFETY: not reached in a harness that passes; Kani checks that.
         unsafe { core::hint::unreachable_unchecked() }
+    }
+
+    /// An assertion for a harness with `should_panic`, where a failed `assert!` would count as
+    /// the expected panic: Kani reports a false `condition` as a failure that is not a panic.
+    fn must_hold(condition: bool) {
+        if !condition {
+            must_have_panicked()
+        }
     }
 
     /// `2 * pos + 1` overflows for the position that `sift_down_range` starts from.
@@ -3235,17 +3369,6 @@ mod verify {
         must_have_panicked()
     }
 
-    /// `pop` on a heap longer than `MAX_SIFT_DOWN_LEN + 1`: `2 * pos + 1` overflows once the
-    /// hole is past `isize::MAX`. Whether it gets there depends on the comparisons, so some
-    /// executions return.
-    #[kani::proof]
-    #[kani::should_panic]
-    fn panic_pop_child_index() {
-        let mut heap = any_heap::<Zst>();
-        kani::assume(heap.len() > MAX_SIFT_DOWN_LEN + 1);
-        let _ = heap.pop();
-    }
-
     /// `push` on a full vector: capacity overflow.
     #[kani::proof]
     #[kani::should_panic]
@@ -3256,13 +3379,14 @@ mod verify {
         must_have_panicked()
     }
 
-    /// `append` when the total length does not fit in a `usize`: capacity overflow.
+    /// `append` for every pair of lengths that `check_append` excludes: the total does not
+    /// fit in a `usize` (capacity overflow), or the heuristic of `rebuild_tail` overflows.
     #[kani::proof]
     #[kani::should_panic]
-    fn panic_append_too_long() {
+    fn panic_append_overflow() {
         let mut a = any_heap::<Zst>();
         let mut b = any_heap::<Zst>();
-        kani::assume(a.len().checked_add(b.len()).is_none());
+        kani::assume(!append_fits(a.len(), b.len()));
         a.append(&mut b);
         must_have_panicked()
     }
@@ -3276,6 +3400,180 @@ mod verify {
         kani::assume(start > heap.len());
         heap.rebuild_tail(start);
         must_have_panicked()
+    }
+
+    // The rest of the lengths of a zero-sized heap, function by function. In each harness
+    // the comparisons decide whether the hole gets past `isize::MAX`, where `2 * pos + 1`
+    // overflows; `rebuild_tail` also reaches the overflows of its heuristic. On the
+    // executions that return, the result is checked as in the harnesses of the element types.
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn long_zst_sift_down_range() {
+        let mut heap = any_heap::<Zst>();
+        let len = heap.len();
+        let pos: usize = kani::any();
+        let end: usize = kani::any();
+        kani::assume(pos < end && end <= len && end > MAX_SIFT_DOWN_LEN);
+        // SAFETY: `pos < end <= heap.len()`.
+        let new_pos = unsafe { heap.sift_down_range(pos, end) };
+        must_hold(pos <= new_pos && new_pos < end && heap.len() == len);
+        kani::cover(true, "an execution returns");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn long_zst_sift_down() {
+        let mut heap = any_heap::<Zst>();
+        let len = heap.len();
+        let pos: usize = kani::any();
+        kani::assume(pos < len && len > MAX_SIFT_DOWN_LEN);
+        // SAFETY: `pos < heap.len()`.
+        let new_pos = unsafe { heap.sift_down(pos) };
+        must_hold(pos <= new_pos && new_pos < len && heap.len() == len);
+        kani::cover(true, "an execution returns");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn long_zst_sift_down_to_bottom() {
+        let mut heap = any_heap::<Zst>();
+        let len = heap.len();
+        let pos: usize = kani::any();
+        kani::assume(pos < len && len > MAX_SIFT_DOWN_LEN);
+        // SAFETY: `pos < heap.len()`.
+        unsafe { heap.sift_down_to_bottom(pos) };
+        must_hold(heap.len() == len);
+        kani::cover(true, "an execution returns");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn long_zst_pop() {
+        let mut heap = any_heap::<Zst>();
+        let len = heap.len();
+        kani::assume(len > MAX_POP_LEN);
+        let item = heap.pop();
+        must_hold(item.is_some() && heap.len() == len - 1);
+        kani::cover(true, "an execution returns");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn long_zst_peek_mut_drop() {
+        let mut heap = any_heap::<Zst>();
+        let len = heap.len();
+        kani::assume(len > MAX_SIFT_DOWN_LEN);
+        drop(any_peek_mut(&mut heap));
+        must_hold(heap.len() == len);
+        kani::cover(true, "an execution returns");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn long_zst_peek_mut_pop() {
+        let mut heap = any_heap::<Zst>();
+        let len = heap.len();
+        kani::assume(len > MAX_POP_LEN);
+        if let Some(peek) = any_peek_mut(&mut heap) {
+            let _ = PeekMut::pop(peek);
+        }
+        must_hold(heap.len() == len - 1);
+        kani::cover(true, "an execution returns");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn long_zst_peek_mut_refresh() {
+        let mut heap = any_heap::<Zst>();
+        let len = heap.len();
+        kani::assume(len > MAX_SIFT_DOWN_LEN);
+        if let Some(mut peek) = any_peek_mut(&mut heap) {
+            let _ = peek.refresh();
+            must_hold(peek.original_len.is_none() && peek.heap.len() == len);
+            // Leaked, so that this harness is only about `refresh`.
+            mem::forget(peek);
+        }
+        must_hold(heap.len() == len);
+        kani::cover(true, "an execution returns");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn long_zst_rebuild() {
+        let mut heap = any_heap::<Zst>();
+        let len = heap.len();
+        kani::assume(len > MAX_SIFT_DOWN_LEN);
+        heap.rebuild();
+        must_hold(heap.len() == len);
+        kani::cover(true, "an execution returns");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn long_zst_from_vec() {
+        let vec = any_vec::<Zst>();
+        let len = vec.len();
+        kani::assume(len > MAX_SIFT_DOWN_LEN);
+        let heap = BinaryHeap::from(vec);
+        must_hold(heap.len() == len);
+        kani::cover(true, "an execution returns");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn long_zst_rebuild_tail() {
+        let mut heap = any_heap::<Zst>();
+        let len = heap.len();
+        let start: usize = kani::any_where(|start: &usize| *start <= len);
+        kani::assume(!rebuild_tail_fits(len, start));
+        heap.rebuild_tail(start);
+        must_hold(heap.len() == len);
+        kani::cover(true, "an execution returns");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn long_zst_into_sorted_vec() {
+        let heap = any_heap::<Zst>();
+        let len = heap.len();
+        kani::assume(len > MAX_POP_LEN);
+        let vec = heap.into_sorted_vec();
+        must_hold(vec.len() == len);
+        kani::cover(true, "an execution returns");
+    }
+
+    // The two sorted iterators: `size_hint` is exact before and after `next`, as in
+    // `check_into_iter_sorted` and `check_drain_sorted`.
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn long_zst_into_iter_sorted() {
+        let heap = any_heap::<Zst>();
+        let n = heap.len();
+        kani::assume(n > MAX_POP_LEN);
+        let mut iter = heap.into_iter_sorted();
+        must_hold(iter.size_hint() == (n, Some(n)));
+        let item = iter.next();
+        must_hold(item.is_some() && iter.size_hint() == (n - 1, Some(n - 1)));
+        kani::cover(true, "an execution returns");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn long_zst_drain_sorted() {
+        let mut heap = any_heap::<Zst>();
+        let n = heap.len();
+        kani::assume(n > MAX_POP_LEN);
+        let mut iter = heap.drain_sorted();
+        must_hold(iter.size_hint() == (n, Some(n)));
+        let item = iter.next();
+        must_hold(item.is_some() && iter.size_hint() == (n - 1, Some(n - 1)));
+        // `Drop for DrainSorted` is not in the scope of the challenge (see
+        // `check_drain_sorted`).
+        mem::forget(iter);
+        must_hold(heap.len() == n - 1);
+        kani::cover(true, "an execution returns");
     }
 
     /// Control for `DropFails`: a harness that does drop an element fails. (In the harnesses
