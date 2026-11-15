@@ -59,6 +59,11 @@ impl<'a> Iterator for Chars<'a> {
             let mut chunks = self.iter.as_slice().as_chunks::<CHUNK_SIZE>().0.iter();
             let mut bytes_skipped: usize = 0;
 
+            #[safety::loop_invariant(verify::chunks_inv(
+                &chunks,
+                bytes_skipped,
+                on_entry(chunks.kani_raw_parts()),
+            ))]
             while remainder > CHUNK_SIZE
                 && let Some(chunk) = chunks.next()
             {
@@ -66,6 +71,7 @@ impl<'a> Iterator for Chars<'a> {
 
                 let mut start_bytes = [false; CHUNK_SIZE];
 
+                #[safety::loop_invariant(verify::flags_valid(&start_bytes))]
                 for i in 0..CHUNK_SIZE {
                     start_bytes[i] = !super::validations::utf8_is_cont_byte(chunk[i]);
                 }
@@ -78,6 +84,11 @@ impl<'a> Iterator for Chars<'a> {
             unsafe { self.iter.advance_by(bytes_skipped).unwrap_unchecked() };
 
             // skip trailing continuation bytes
+            #[safety::loop_invariant(verify::bytes_inv(
+                &self.iter,
+                on_entry(self.iter.kani_raw_parts()),
+            ))]
+            #[cfg_attr(kani, kani::loop_modifies(&self.iter))]
             while self.iter.len() > 0 {
                 let b = self.iter.as_slice()[0];
                 if !super::validations::utf8_is_cont_byte(b) {
@@ -88,6 +99,11 @@ impl<'a> Iterator for Chars<'a> {
             }
         }
 
+        #[safety::loop_invariant(
+            verify::bytes_inv(&self.iter, on_entry(self.iter.kani_raw_parts()))
+                && verify::on_char_boundary(&self.iter)
+        )]
+        #[cfg_attr(kani, kani::loop_modifies(&self.iter, &remainder))]
         while (remainder > 0) && (self.iter.len() > 0) {
             remainder -= 1;
             let b = self.iter.as_slice()[0];
@@ -1641,3 +1657,722 @@ macro_rules! escape_types_impls {
 }
 
 escape_types_impls!(EscapeDebug, EscapeDefault, EscapeUnicode);
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::ptr::NonNull;
+    use crate::str::pattern::SearchStep;
+    use crate::str::validations::{utf8_char_width, utf8_is_cont_byte};
+
+    // ---------------------------------------------------------------------------------------
+    // Loop invariants of `Chars::advance_by`
+    // ---------------------------------------------------------------------------------------
+
+    /// Invariant of the two loops of `Chars::advance_by` that move the byte iterator: it still
+    /// ends where it ended on entry to the loop, and it starts within the range it covered then.
+    ///
+    /// The pointers are compared by address and are not dereferenced; see `haystack_window`.
+    pub(super) fn bytes_inv(iter: &slice::Iter<'_, u8>, entry: (*const u8, *const u8)) -> bool {
+        let (ptr, end) = iter.kani_raw_parts();
+        let (ptr0, end0) = entry;
+        end == end0
+            && (ptr as usize).wrapping_sub(ptr0 as usize)
+                <= (end0 as usize).wrapping_sub(ptr0 as usize)
+    }
+
+    /// Additional invariant of the last loop of `Chars::advance_by`: the byte iterator is empty
+    /// or starts with a byte that is not a continuation byte, that is, on a char boundary. With
+    /// it, the harness shows that `advance_by` leaves the iterator on a char boundary.
+    ///
+    /// The byte is read through `HAYSTACK` for the reason given at the models of the
+    /// `slice::Iter` methods below, so this is meaningful only in the harnesses of this module.
+    pub(super) fn on_char_boundary(iter: &slice::Iter<'_, u8>) -> bool {
+        let (ptr, end) = iter.kani_raw_parts();
+        // SAFETY: the harnesses are single-threaded.
+        let (base, len) = unsafe { HAYSTACK };
+        let start = (ptr as usize).wrapping_sub(base as usize);
+        // SAFETY: `start` is within the haystack.
+        ptr == end || (start < len && !utf8_is_cont_byte(unsafe { *base.wrapping_add(start) }))
+    }
+
+    /// Invariant of the chunk loop of `Chars::advance_by`: the chunk iterator still ends where
+    /// it ended on entry to the loop, and it has moved forward by `bytes_skipped` bytes, which is
+    /// a whole number of chunks that does not go past that end.
+    pub(super) fn chunks_inv(
+        chunks: &slice::Iter<'_, [u8; 32]>,
+        bytes_skipped: usize,
+        entry: (*const [u8; 32], *const [u8; 32]),
+    ) -> bool {
+        let (ptr, end) = chunks.kani_raw_parts();
+        let (ptr0, end0) = entry;
+        end == end0
+            && bytes_skipped % 32 == 0
+            && bytes_skipped <= (end0 as usize).wrapping_sub(ptr0 as usize)
+            && (ptr as usize).wrapping_sub(ptr0 as usize) == bytes_skipped
+    }
+
+    /// Invariant of the loop of `Chars::advance_by` that fills `start_bytes`: every element is a
+    /// valid `bool`. A loop contract replaces what the loop writes by arbitrary bytes, so this
+    /// has to be stated; like any invariant it is checked, not assumed.
+    pub(super) fn flags_valid(flags: &[bool; 32]) -> bool {
+        let words = flag_words(flags);
+        (words[0] | words[1]) & !0x0101_0101_0101_0101_0101_0101_0101_0101 == 0
+    }
+
+    /// The bytes of `flags`, as two integers.
+    fn flag_words(flags: &[bool; 32]) -> [u128; 2] {
+        // SAFETY: 32 readable bytes, read as integers.
+        unsafe { (flags as *const [bool; 32] as *const [u128; 2]).read_unaligned() }
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Strings of any length
+    // ---------------------------------------------------------------------------------------
+
+    /// The largest object that CBMC can represent with `--object-bits 12`, the setting of
+    /// `scripts/run-kani.sh`. No proof here depends on the value: lengths stay symbolic.
+    const MAX_LEN: usize = (1 << 51) - 1;
+
+    unsafe extern "C" {
+        /// CBMC's model of `malloc` (`-Z c-ffi`). `core` has no allocator, and an array of this
+        /// size cannot be a local variable.
+        fn malloc(size: usize) -> *mut u8;
+    }
+
+    /// The string made by `any_str`. The models of the `slice::Iter` methods rebuild iterators
+    /// from it.
+    static mut HAYSTACK: (*const u8, usize) = (crate::ptr::null(), 0);
+
+    /// A string of any length up to `MAX_LEN`, with arbitrary contents.
+    ///
+    /// The contents are not constrained to be UTF-8. No function verified here reads more of
+    /// the string than a few bytes around a position, and each harness assumes, for the
+    /// positions that its function reads, the facts that hold there in every valid string
+    /// (assumption 4 of the challenge). The proofs therefore cover every valid string.
+    fn any_str() -> &'static str {
+        let len: usize = kani::any();
+        kani::assume(len <= MAX_LEN);
+        let ptr: *const u8 = if len == 0 {
+            NonNull::<u8>::dangling().as_ptr()
+        } else {
+            // SAFETY: CBMC's model of `malloc`, which returns memory with arbitrary contents.
+            let ptr = unsafe { malloc(len) };
+            kani::assume(!ptr.is_null());
+            ptr
+        };
+        // SAFETY: the harnesses are single-threaded.
+        unsafe { HAYSTACK = (ptr, len) };
+        // SAFETY: `ptr` is valid for reads of `len` bytes. See above for UTF-8.
+        unsafe { from_utf8_unchecked(slice::from_raw_parts(ptr, len)) }
+    }
+
+    /// The length of the well-formed UTF-8 byte sequence that starts at `bytes[i]`, or 0 if
+    /// none does (Table 3-7 of the Unicode Standard).
+    fn sequence_len(bytes: &[u8], i: usize) -> usize {
+        let rest = bytes.len() - i;
+        let within =
+            |k: usize, lo: u8, hi: u8| k < rest && lo <= bytes[i + k] && bytes[i + k] <= hi;
+        let tail = |k: usize| within(k, 0x80, 0xBF);
+        match bytes[i] {
+            0x00..=0x7F => 1,
+            0xC2..=0xDF if tail(1) => 2,
+            0xE0 if within(1, 0xA0, 0xBF) && tail(2) => 3,
+            0xE1..=0xEC | 0xEE..=0xEF if tail(1) && tail(2) => 3,
+            0xED if within(1, 0x80, 0x9F) && tail(2) => 3,
+            0xF0 if within(1, 0x90, 0xBF) && tail(2) && tail(3) => 4,
+            0xF1..=0xF3 if tail(1) && tail(2) && tail(3) => 4,
+            0xF4 if within(1, 0x80, 0x8F) && tail(2) && tail(3) => 4,
+            _ => 0,
+        }
+    }
+
+    /// The range of `haystack` that `piece` covers. Checks that `piece` lies within `haystack`
+    /// and that it starts and ends on char boundaries.
+    fn check_piece(haystack: &str, piece: &str) -> (usize, usize) {
+        let start = (piece.as_ptr() as usize).wrapping_sub(haystack.as_ptr() as usize);
+        let end = start.wrapping_add(piece.len());
+        assert!(start <= end && end <= haystack.len());
+        assert!(haystack.is_char_boundary(start) && haystack.is_char_boundary(end));
+        (start, end)
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Models of `slice::Iter` methods (assumption 1 of the challenge)
+    // ---------------------------------------------------------------------------------------
+    //
+    // A loop contract replaces the variables that the loop modifies by arbitrary values, and
+    // CBMC cannot follow a pointer that it got that way, whatever the loop invariant says about
+    // it (https://github.com/model-checking/kani/issues/4993). The loops of `Chars::advance_by`
+    // modify `slice::Iter`s. So the harness of `advance_by` replaces the `slice::Iter` methods
+    // that the loops call by the models below, which take only the addresses from the iterator
+    // and build every pointer they use from `HAYSTACK`. `check_iter_models` compares each of
+    // them with the method it stands for.
+
+    /// The range of the haystack that `iter` covers, in bytes, from addresses alone.
+    fn haystack_window<T>(iter: &slice::Iter<'_, T>) -> (usize, usize) {
+        let (ptr, end) = iter.kani_raw_parts();
+        // SAFETY: the harnesses are single-threaded.
+        let (base, len) = unsafe { HAYSTACK };
+        let start = (ptr as usize).wrapping_sub(base as usize);
+        let stop = (end as usize).wrapping_sub(base as usize);
+        assert!(start <= stop && stop <= len);
+        (start, stop)
+    }
+
+    /// The elements of type `T` in the bytes `start..stop` of the haystack.
+    ///
+    /// Like `haystack_iter`, this calls no function that has a contract: inside a loop with a
+    /// contract, each such call costs a copy of the loop's write set.
+    fn haystack_slice<'a, T>(start: usize, stop: usize) -> &'a [T] {
+        // SAFETY: the harnesses are single-threaded.
+        let base = unsafe { HAYSTACK.0 };
+        let ptr = base.wrapping_add(start) as *const T;
+        // SAFETY: the callers pass a range from `haystack_window`, which is within the haystack.
+        unsafe { &*crate::ptr::slice_from_raw_parts(ptr, (stop - start) / size_of::<T>()) }
+    }
+
+    /// An iterator over the elements of type `T` in the bytes `start..stop` of the haystack.
+    fn haystack_iter<'a, T>(start: usize, stop: usize) -> slice::Iter<'a, T> {
+        // SAFETY: the harnesses are single-threaded.
+        let base = unsafe { HAYSTACK.0 };
+        let ptr = base.wrapping_add(start) as *const T;
+        let end = base.wrapping_add(stop) as *const T;
+        // SAFETY: as in `haystack_slice`; these are the fields that `<[T]>::iter` computes.
+        unsafe { slice::Iter::kani_from_raw_parts(ptr, end) }
+    }
+
+    /// Model of `<slice::Iter<T> as ExactSizeIterator>::len`.
+    fn model_iter_len<'a, T>(iter: &slice::Iter<'a, T>) -> usize
+    where
+        'a: 'a, // early-bound, like the lifetime of the impl
+    {
+        let (start, stop) = haystack_window(iter);
+        (stop - start) / size_of::<T>()
+    }
+
+    /// Model of `slice::Iter::as_slice`, without the fact about UTF-8 that
+    /// `model_iter_as_slice` adds.
+    fn model_iter_as_slice_plain<'a, T>(iter: &slice::Iter<'a, T>) -> &'a [T] {
+        let (start, stop) = haystack_window(iter);
+        haystack_slice(start, stop)
+    }
+
+    /// Model of `slice::Iter::as_slice` for the byte iterator of a `Chars`.
+    ///
+    /// This is where the harness of `Chars::advance_by` brings in UTF-8 (assumption 4). The
+    /// byte iterator of a `Chars` ends on a char boundary of a valid string. So if its first
+    /// byte starts a sequence, all of that sequence is in the iterator, and what follows the
+    /// sequence is the end or a byte that is not a continuation byte. This holds wherever in
+    /// the string the iterator starts; `utf8_char_width` is 0 for a continuation byte.
+    fn model_iter_as_slice<'a, T>(iter: &slice::Iter<'a, T>) -> &'a [T]
+    where
+        'a: 'a,
+    {
+        let (start, stop) = haystack_window(iter);
+        if size_of::<T>() == 1 && start < stop {
+            // SAFETY: `start` is within the haystack.
+            let width = utf8_char_width(unsafe { *HAYSTACK.0.wrapping_add(start) });
+            kani::assume(width <= stop - start);
+            kani::assume(
+                width == 0
+                    || start + width == stop
+                    // SAFETY: `start + width` is within the haystack.
+                    || !utf8_is_cont_byte(unsafe { *HAYSTACK.0.wrapping_add(start + width) }),
+            );
+        }
+        haystack_slice(start, stop)
+    }
+
+    /// Model of `<slice::Iter<T> as Iterator>::advance_by`.
+    fn model_iter_advance_by<'a, T>(
+        iter: &mut slice::Iter<'a, T>,
+        n: usize,
+    ) -> Result<(), NonZero<usize>>
+    where
+        'a: 'a,
+    {
+        let (start, stop) = haystack_window(iter);
+        let len = (stop - start) / size_of::<T>();
+        let advance = if n < len { n } else { len };
+        *iter = haystack_iter(start + advance * size_of::<T>(), stop);
+        NonZero::new(n - advance).map_or(Ok(()), Err)
+    }
+
+    /// Model of `<slice::Iter<T> as Iterator>::next`.
+    fn model_iter_next<'a, T>(iter: &mut slice::Iter<'a, T>) -> Option<&'a T>
+    where
+        'a: 'a,
+    {
+        let (start, stop) = haystack_window(iter);
+        if start == stop {
+            None
+        } else {
+            let rest: &'a [T] = haystack_slice(start, stop);
+            *iter = haystack_iter(start + size_of::<T>(), stop);
+            Some(&rest[0])
+        }
+    }
+
+    /// The models agree with the methods of an iterator over any part of the haystack.
+    #[kani::proof]
+    fn check_iter_models() {
+        let bytes = any_str().as_bytes();
+        let i: usize = kani::any();
+        let j: usize = kani::any();
+        kani::assume(i <= j && j <= bytes.len());
+        let part = &bytes[i..j];
+
+        let iter = part.iter();
+        assert!(model_iter_len(&iter) == iter.len());
+        let (model, real) = (model_iter_as_slice_plain(&iter), iter.as_slice());
+        assert!(model.as_ptr() == real.as_ptr() && model.len() == real.len());
+
+        let n: usize = kani::any();
+        let (mut model, mut real) = (part.iter(), part.iter());
+        assert!(model_iter_advance_by(&mut model, n) == real.advance_by(n));
+        assert!(model.kani_raw_parts() == real.kani_raw_parts());
+
+        let chunks = part.as_chunks::<32>().0;
+        let (mut model, mut real) = (chunks.iter(), chunks.iter());
+        let (model_item, real_item) = (model_iter_next(&mut model), real.next());
+        assert!(
+            model_item.map(|chunk| chunk as *const [u8; 32])
+                == real_item.map(|chunk| chunk as *const [u8; 32])
+        );
+        assert!(model.kani_raw_parts() == real.kani_raw_parts());
+        kani::cover(real_item.is_some() && n > 0 && n < part.len(), "reachable");
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Model of the fold in `Chars::advance_by`
+    // ---------------------------------------------------------------------------------------
+    //
+    // `start_bytes.into_iter().map(..).sum()` runs a loop inside `IndexRange::try_fold`. It is
+    // called from a loop that has a contract, it cannot be given a contract of its own from
+    // here (https://github.com/model-checking/kani/issues/4893), and without one CBMC 6.11
+    // rejects the writes to its local variables. The harness of `advance_by` therefore
+    // replaces `PolymorphicIter::fold` by `kani_fold_32`, which reads the elements one by one
+    // without a loop. The array always has 32 elements, so the two harnesses below cover every
+    // input of this call: the real fold and the model both return the number of `true` flags.
+    //
+    // The chunk loop of `advance_by` has no `loop_modifies`: CBMC infers what it writes. With
+    // an explicit list, the pinned Kani rejects the write to the compiler's temporary for
+    // `chunks.next()` in the loop condition, which cannot be named in the list
+    // (https://github.com/model-checking/kani/pull/5071). The inference in turn needs every
+    // write in the loop to go to a target it can find, which is why the model does not write
+    // to the iterator (see `kani_fold_32`).
+
+    /// The number of `true` elements, for valid flags.
+    fn count_flags(flags: &[bool; 32]) -> u8 {
+        let words = flag_words(flags);
+        (words[0].count_ones() + words[1].count_ones()) as u8
+    }
+
+    fn sum_flags(flags: [bool; 32]) -> u8 {
+        flags.into_iter().map(|i| i as u8).sum::<u8>()
+    }
+
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn check_sum_of_flags() {
+        let flags: [bool; 32] = kani::any();
+        assert!(sum_flags(flags) == count_flags(&flags));
+    }
+
+    #[kani::proof]
+    #[kani::stub(
+        crate::array::iter::iter_inner::PolymorphicIter::fold,
+        crate::array::iter::iter_inner::PolymorphicIter::kani_fold_32
+    )]
+    fn check_sum_of_flags_model() {
+        let flags: [bool; 32] = kani::any();
+        assert!(sum_flags(flags) == count_flags(&flags));
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // `Chars`
+    // ---------------------------------------------------------------------------------------
+    //
+    // Every state of a `Chars` is the state of a new `Chars` over some valid string, namely
+    // `as_str()`, so the harnesses start from `any_str().chars()`.
+
+    #[kani::proof]
+    fn check_chars_next() {
+        let s = any_str();
+        // A valid string that is not empty starts with a well-formed sequence.
+        kani::assume(s.is_empty() || sequence_len(s.as_bytes(), 0) != 0);
+        let mut chars = s.chars();
+        let c = chars.next();
+        let rest = check_rest(s, &chars);
+        assert!(c.is_some() == !s.is_empty());
+        assert!(c.is_none_or(is_valid_char));
+        assert!(rest.1 == s.len());
+        assert!(c.is_none() || rest.0 == sequence_len(s.as_bytes(), 0));
+        kani::cover(c.is_some_and(|c| c.len_utf8() == 4), "reachable");
+    }
+
+    #[kani::proof]
+    fn check_chars_next_back() {
+        let s = any_str();
+        // A valid string that is not empty ends with a well-formed sequence.
+        let width: usize = kani::any();
+        kani::assume(
+            s.is_empty()
+                || (1 <= width
+                    && width <= 4
+                    && width <= s.len()
+                    && sequence_len(s.as_bytes(), s.len() - width) == width),
+        );
+        let mut chars = s.chars();
+        let c = chars.next_back();
+        let rest = check_rest(s, &chars);
+        assert!(c.is_some() == !s.is_empty());
+        assert!(c.is_none_or(is_valid_char));
+        assert!(rest.0 == 0);
+        assert!(c.is_none() || rest.1 == s.len() - width);
+        kani::cover(c.is_some_and(|c| c.len_utf8() == 4), "reachable");
+    }
+
+    /// Whether `c` holds a Unicode scalar value. `Chars::next` and `next_back` make their result
+    /// with `char::from_u32_unchecked`, and with the flags of `scripts/run-kani.sh` Kani checks
+    /// neither the precondition of that function nor the validity of the `char` it returns.
+    fn is_valid_char(c: char) -> bool {
+        char::from_u32(c as u32).is_some()
+    }
+
+    /// The range of `s` that is left in `chars`.
+    fn check_rest(s: &str, chars: &Chars<'_>) -> (usize, usize) {
+        let rest = chars.as_str();
+        let start = (rest.as_ptr() as usize).wrapping_sub(s.as_ptr() as usize);
+        let end = start.wrapping_add(rest.len());
+        assert!(start <= end && end <= s.len());
+        (start, end)
+    }
+
+    #[kani::proof]
+    fn check_chars_as_str() {
+        let s = any_str();
+        let rest = s.chars().as_str();
+        assert!(rest.as_ptr() == s.as_ptr() && rest.len() == s.len());
+    }
+
+    /// `Chars::advance_by` for a string of any length and any count.
+    #[kani::proof]
+    #[kani::stub(<crate::slice::Iter<u8> as crate::iter::ExactSizeIterator>::len, model_iter_len)]
+    #[kani::stub(crate::slice::Iter::as_slice, model_iter_as_slice)]
+    #[kani::stub(
+        <crate::slice::Iter<u8> as crate::iter::Iterator>::advance_by,
+        model_iter_advance_by
+    )]
+    #[kani::stub(<crate::slice::Iter<[u8; 32]> as crate::iter::Iterator>::next, model_iter_next)]
+    #[kani::stub(
+        crate::array::iter::iter_inner::PolymorphicIter::fold,
+        crate::array::iter::iter_inner::PolymorphicIter::kani_fold_32
+    )]
+    fn check_chars_advance_by() {
+        let s = any_str();
+        // A valid string does not start with a continuation byte.
+        kani::assume(s.is_empty() || !utf8_is_cont_byte(s.as_bytes()[0]));
+        let mut chars = s.chars();
+        let n: usize = kani::any();
+        let result = chars.advance_by(n);
+        // The iterator is still within the string, and on a char boundary.
+        let _ = haystack_window(&chars.iter);
+        assert!(on_char_boundary(&chars.iter));
+        kani::cover(result.is_ok() && n > 64 && s.len() == MAX_LEN, "reachable");
+        kani::cover(result.is_err() && n > 64, "reachable");
+        // Counts below the chunk size skip the chunk loop.
+        kani::cover(result.is_ok() && n > 0 && n < 32, "reachable");
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // `Bytes`
+    // ---------------------------------------------------------------------------------------
+
+    /// The safety contract of `Bytes::__iterator_get_unchecked`, `idx < self.0.len()`, is
+    /// sufficient for its body.
+    #[kani::proof_for_contract(Bytes::__iterator_get_unchecked)]
+    fn check_bytes_iterator_get_unchecked() {
+        let s = any_str();
+        let mut bytes = s.bytes();
+        let idx: usize = kani::any();
+        // SAFETY: Kani assumes the contract.
+        let byte = unsafe { bytes.__iterator_get_unchecked(idx) };
+        assert!(byte == s.as_bytes()[idx]);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // The most general pattern (assumption 2 of the challenge)
+    // ---------------------------------------------------------------------------------------
+
+    /// A pattern whose searcher does whatever the safety contract of `Searcher` and
+    /// `ReverseSearcher` allows.
+    struct AnyPattern;
+
+    /// The searcher of `AnyPattern`. It has not yet searched `front..back`.
+    ///
+    /// A match is any range within `front..back` that starts and ends on char boundaries, and
+    /// searching from one end moves that end past the match. This is all that the traits
+    /// promise: matches lie on char boundaries, come in order and do not overlap, and for a
+    /// `DoubleEndedSearcher` those found from the two ends do not cross. Whether and where
+    /// there is a match is arbitrary.
+    struct AnySearcher<'a> {
+        haystack: &'a str,
+        front: usize,
+        back: usize,
+    }
+
+    impl<'a> AnySearcher<'a> {
+        fn inv(&self) -> bool {
+            self.front <= self.back
+                && self.back <= self.haystack.len()
+                && self.haystack.is_char_boundary(self.front)
+                && self.haystack.is_char_boundary(self.back)
+        }
+
+        /// Any range within `front..back` that starts and ends on char boundaries.
+        fn any_range(&self) -> (usize, usize) {
+            let a: usize = kani::any();
+            let b: usize = kani::any();
+            kani::assume(self.front <= a && a <= b && b <= self.back);
+            kani::assume(self.haystack.is_char_boundary(a) && self.haystack.is_char_boundary(b));
+            (a, b)
+        }
+    }
+
+    impl Pattern for AnyPattern {
+        type Searcher<'a> = AnySearcher<'a>;
+
+        fn into_searcher(self, haystack: &str) -> AnySearcher<'_> {
+            AnySearcher { haystack, front: 0, back: haystack.len() }
+        }
+    }
+
+    // SAFETY: the indices that the methods return lie on char boundaries of the haystack.
+    unsafe impl<'a> Searcher<'a> for AnySearcher<'a> {
+        fn haystack(&self) -> &'a str {
+            self.haystack
+        }
+
+        fn next(&mut self) -> SearchStep {
+            if kani::any() {
+                return SearchStep::Done;
+            }
+            let (a, b) = self.any_range();
+            kani::assume(a == self.front);
+            self.front = b;
+            if kani::any() { SearchStep::Match(a, b) } else { SearchStep::Reject(a, b) }
+        }
+
+        fn next_match(&mut self) -> Option<(usize, usize)> {
+            if kani::any() {
+                return None;
+            }
+            let (a, b) = self.any_range();
+            self.front = b;
+            Some((a, b))
+        }
+    }
+
+    // SAFETY: as above.
+    unsafe impl<'a> ReverseSearcher<'a> for AnySearcher<'a> {
+        fn next_back(&mut self) -> SearchStep {
+            if kani::any() {
+                return SearchStep::Done;
+            }
+            let (a, b) = self.any_range();
+            kani::assume(b == self.back);
+            self.back = a;
+            if kani::any() { SearchStep::Match(a, b) } else { SearchStep::Reject(a, b) }
+        }
+
+        fn next_match_back(&mut self) -> Option<(usize, usize)> {
+            if kani::any() {
+                return None;
+            }
+            let (a, b) = self.any_range();
+            self.back = a;
+            Some((a, b))
+        }
+    }
+
+    impl<'a> DoubleEndedSearcher<'a> for AnySearcher<'a> {}
+
+    /// A searcher in any state, over a string of any length.
+    fn any_searcher() -> AnySearcher<'static> {
+        let searcher = AnySearcher { haystack: any_str(), front: kani::any(), back: kani::any() };
+        kani::assume(searcher.inv());
+        searcher
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // `SplitInternal`
+    // ---------------------------------------------------------------------------------------
+
+    /// The invariant of `SplitInternal`: `start` and `end` are char boundaries of the haystack,
+    /// and the part that the searcher has not searched yet lies between them.
+    fn split_inv(split: &SplitInternal<'_, AnyPattern>) -> bool {
+        let searcher = &split.matcher;
+        searcher.inv()
+            && split.start <= searcher.front
+            && searcher.back <= split.end
+            && split.end <= searcher.haystack.len()
+            && searcher.haystack.is_char_boundary(split.start)
+            && searcher.haystack.is_char_boundary(split.end)
+    }
+
+    /// A `SplitInternal` in any state that satisfies the invariant.
+    fn any_split() -> SplitInternal<'static, AnyPattern> {
+        let split = SplitInternal {
+            start: kani::any(),
+            end: kani::any(),
+            matcher: any_searcher(),
+            allow_trailing_empty: kani::any(),
+            finished: kani::any(),
+        };
+        kani::assume(split_inv(&split));
+        split
+    }
+
+    /// What a method of `SplitInternal` returned is a piece of the haystack between char
+    /// boundaries, and the invariant holds again.
+    fn check_split(split: &SplitInternal<'static, AnyPattern>, piece: Option<&'static str>) {
+        if let Some(piece) = piece {
+            check_piece(split.matcher.haystack, piece);
+        }
+        assert!(split_inv(split));
+    }
+
+    /// The iterators that the methods of `str` create satisfy the invariants.
+    #[kani::proof]
+    fn check_new_iterators() {
+        let s = any_str();
+        assert!(split_inv(&s.split(AnyPattern).0));
+        assert!(split_inv(&s.split_inclusive(AnyPattern).0));
+        assert!(split_inv(&s.split_terminator(AnyPattern).0));
+        assert!(s.matches(AnyPattern).0.0.inv());
+        assert!(s.match_indices(AnyPattern).0.0.inv());
+    }
+
+    #[kani::proof]
+    fn check_split_get_end() {
+        let mut split = any_split();
+        let piece = split.get_end();
+        check_split(&split, piece);
+        kani::cover(piece.is_some_and(|piece| !piece.is_empty()), "reachable");
+    }
+
+    #[kani::proof]
+    fn check_split_next() {
+        let mut split = any_split();
+        let piece = split.next();
+        check_split(&split, piece);
+        kani::cover(piece.is_some_and(|piece| !piece.is_empty()) && !split.finished, "reachable");
+    }
+
+    #[kani::proof]
+    fn check_split_next_inclusive() {
+        let mut split = any_split();
+        let piece = split.next_inclusive();
+        check_split(&split, piece);
+        kani::cover(piece.is_some_and(|piece| !piece.is_empty()) && !split.finished, "reachable");
+    }
+
+    #[kani::proof]
+    fn check_split_next_back() {
+        let mut split = any_split();
+        let piece = split.next_back();
+        check_split(&split, piece);
+        kani::cover(piece.is_some_and(|piece| !piece.is_empty()) && !split.finished, "reachable");
+    }
+
+    #[kani::proof]
+    fn check_split_next_back_inclusive() {
+        let mut split = any_split();
+        let piece = split.next_back_inclusive();
+        check_split(&split, piece);
+        kani::cover(piece.is_some_and(|piece| !piece.is_empty()) && !split.finished, "reachable");
+    }
+
+    #[kani::proof]
+    fn check_split_remainder() {
+        let split = any_split();
+        let piece = split.remainder();
+        check_split(&split, piece);
+        kani::cover(piece.is_some_and(|piece| !piece.is_empty()), "reachable");
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // `MatchIndicesInternal` and `MatchesInternal`
+    // ---------------------------------------------------------------------------------------
+
+    #[kani::proof]
+    fn check_match_indices_next() {
+        let mut matches = MatchIndicesInternal::<AnyPattern>(any_searcher());
+        if let Some((start, piece)) = matches.next() {
+            assert!(check_piece(matches.0.haystack, piece).0 == start);
+        }
+        assert!(matches.0.inv());
+    }
+
+    #[kani::proof]
+    fn check_match_indices_next_back() {
+        let mut matches = MatchIndicesInternal::<AnyPattern>(any_searcher());
+        if let Some((start, piece)) = matches.next_back() {
+            assert!(check_piece(matches.0.haystack, piece).0 == start);
+        }
+        assert!(matches.0.inv());
+    }
+
+    #[kani::proof]
+    fn check_matches_next() {
+        let mut matches = MatchesInternal::<AnyPattern>(any_searcher());
+        if let Some(piece) = matches.next() {
+            check_piece(matches.0.haystack, piece);
+        }
+        assert!(matches.0.inv());
+    }
+
+    #[kani::proof]
+    fn check_matches_next_back() {
+        let mut matches = MatchesInternal::<AnyPattern>(any_searcher());
+        if let Some(piece) = matches.next_back() {
+            check_piece(matches.0.haystack, piece);
+        }
+        assert!(matches.0.inv());
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // `SplitAsciiWhitespace`
+    // ---------------------------------------------------------------------------------------
+
+    /// `SplitAsciiWhitespace::remainder` in any state of the iterator.
+    ///
+    /// The slice that the inner `slice::Split` still has to split is all of the string at
+    /// first; `next` replaces it by the part after an ASCII whitespace byte and `next_back` by
+    /// the part before one.
+    #[kani::proof]
+    fn check_split_ascii_whitespace_remainder() {
+        let s = any_str();
+        let bytes = s.as_bytes();
+        let i: usize = kani::any();
+        let j: usize = kani::any();
+        kani::assume(i <= j && j <= bytes.len());
+        kani::assume(i == 0 || bytes[i - 1].is_ascii_whitespace());
+        kani::assume(j == bytes.len() || bytes[j].is_ascii_whitespace());
+        // In a valid string, the byte after an ASCII byte is not a continuation byte.
+        kani::assume(
+            i == 0 || i == bytes.len() || !bytes[i - 1].is_ascii() || !utf8_is_cont_byte(bytes[i]),
+        );
+
+        let mut split = s.split_ascii_whitespace();
+        split.inner.iter.iter.v = &bytes[i..j];
+        split.inner.iter.iter.finished = kani::any();
+        match split.remainder() {
+            Some(rest) => assert!(check_piece(s, rest) == (i, j)),
+            None => assert!(split.inner.iter.iter.finished),
+        }
+    }
+}

@@ -168,6 +168,36 @@ impl<T> AsRef<[T]> for Iter<'_, T> {
     }
 }
 
+#[cfg(kani)]
+impl<T> Iter<'_, T> {
+    /// The two pointer fields of the iterator, read without a call to any function.
+    ///
+    /// The proofs in `str::iter` use this in loop invariants and in models of the methods of
+    /// this type. A loop invariant must not call a function that has a contract, as
+    /// `NonNull::as_ptr` does: the verification condition becomes too large to solve.
+    pub(crate) fn kani_raw_parts(&self) -> (*const T, *const T) {
+        // SAFETY: `NonNull<T>` is a transparent wrapper of `*const T`.
+        (unsafe { mem::transmute::<NonNull<T>, *const T>(self.ptr) }, self.end_or_len)
+    }
+
+    /// The iterator with these two pointer fields, made without a call to any function.
+    ///
+    /// # Safety
+    ///
+    /// The pointers must be those of an iterator over a slice that lives for `'a`.
+    pub(crate) unsafe fn kani_from_raw_parts<'a>(
+        ptr: *const T,
+        end_or_len: *const T,
+    ) -> Iter<'a, T> {
+        // SAFETY: the caller passes the fields of a valid iterator, so `ptr` is not null.
+        Iter {
+            ptr: unsafe { mem::transmute::<*const T, NonNull<T>>(ptr) },
+            end_or_len,
+            _marker: PhantomData,
+        }
+    }
+}
+
 #[unstable(feature = "ub_checks", issue = "none")]
 impl<T> Invariant for Iter<'_, T> {
     /// An iterator can be safely used if its pointer can be read for its current length.
