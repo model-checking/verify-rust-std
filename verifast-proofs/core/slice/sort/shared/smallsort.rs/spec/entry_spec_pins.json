@@ -1,0 +1,92 @@
+{
+ "targets/has_efficient_in_place_swap": {
+  "smallsort.rs": [
+   {
+    "occ": 0,
+    "sig": "pub(crate)constfnhas_efficient_in_place_swap<T>()->bool",
+    "spec": "//@ req true;\n//@ ens result == (std::mem::size_of::<T>() <= 8);"
+   }
+  ]
+ },
+ "targets/insertion_sort_shift_left": {
+  "smallsort.rs": [
+   {
+    "occ": 0,
+    "sig": "pubfninsertion_sort_shift_left<T,F:FnMut(&T,&T)->bool>(v:&mut[T],offset:usize,is_less:&mutF,)",
+    "spec": "/*@\nreq thread_token(?t) &*& t == currentThread &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs) &*& foreach(vs, own::<T>(t)) &*&\n*is_less |-> ?f0 &*& <F>.own(t, f0);\n@*/\n/*@\nens thread_token(t) &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1) &*&\nif is_less_models::<T, F>(f0) {\nis_perm(vs1, vs) &&\n(!sorted_by(is_less_model_of::<T, F>(f0), take(offset, vs)) || sorted_by(is_less_model_of::<T, F>(f0), vs1))\n} else {\ntrue\n};\n@*/\n/*@\non_unwind_ens thread_token(t) &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1);\n@*/"
+   }
+  ]
+ },
+ "targets/sort4_stable": {
+  "smallsort.rs": [
+   {
+    "occ": 0,
+    "sig": "pubunsafefnsort4_stable<T,F:FnMut(&T,&T)->bool>(v_base:*constT,dst:*mutT,is_less:&mutF,)",
+    "spec": "/*@\nreq thread_token(?t) &*& t == currentThread &*&\narray::<T>(v_base, 4, ?vs) &*& foreach(vs, own::<T>(t)) &*&\narray_::<T>(dst, 4, _) &*&\n*is_less |-> ?f0 &*& <F>.own(t, f0);\n@*/\n/*@\nens thread_token(t) &*&\narray::<T>(v_base, 4, ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\narray::<T>(dst, 4, ?ds) &*& is_perm(ds, vs1) == true &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1) &*&\nif is_less_models::<T, F>(f0) {\nvs1 == vs && sorted_by(is_less_model_of::<T, F>(f0), ds)\n} else {\ntrue\n};\n@*/\n/*@\non_unwind_ens thread_token(t) &*&\narray::<T>(v_base, 4, ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\narray_::<T>(dst, 4, _) &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1);\n@*/"
+   }
+  ]
+ },
+ "targets/stable_small_sort/default": {
+  "smallsort.rs": [
+   {
+    "occ": 0,
+    "sig": "defaultfnsmall_sort<F:FnMut(&T,&T)->bool>(v:&mut[T],_scratch:&mut[MaybeUninit<T>],is_less:&mutF,)",
+    "spec": "/*@\nreq thread_token(?t) &*& t == currentThread &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs) &*& foreach(vs, own::<T>(t)) &*&\narray::<std::mem::MaybeUninit<T>>(strip_pointer_metadata(_scratch as pointer) as *std::mem::MaybeUninit<T>, _scratch.len(), ?ss) &*&\nforeach(ss, own::<std::mem::MaybeUninit<T>>(t)) &*&\n*is_less |-> ?f0 &*& <F>.own(t, f0);\n@*/\n/*@\nens thread_token(t) &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\narray::<std::mem::MaybeUninit<T>>(strip_pointer_metadata(_scratch as pointer) as *std::mem::MaybeUninit<T>, _scratch.len(), ?ss1) &*&\nforeach(ss1, own::<std::mem::MaybeUninit<T>>(t)) &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1) &*&\nif is_less_models::<T, F>(f0) {\nis_perm(vs1, vs) && sorted_by(is_less_model_of::<T, F>(f0), vs1)\n} else {\ntrue\n};\n@*/\n/*@\non_unwind_ens thread_token(t) &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\narray::<std::mem::MaybeUninit<T>>(strip_pointer_metadata(_scratch as pointer) as *std::mem::MaybeUninit<T>, _scratch.len(), ?ss1) &*&\nforeach(ss1, own::<std::mem::MaybeUninit<T>>(t)) &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1);\n@*/"
+   }
+  ]
+ },
+ "targets/stable_small_sort/specialized": {
+  "smallsort.rs": [
+   {
+    "occ": 0,
+    "sig": "fnsmall_sort<F:FnMut(&T,&T)->bool>(v:&mut[T],scratch:&mut[MaybeUninit<T>],is_less:&mutF,)",
+    "spec": "/*@\nreq thread_token(?t) &*& t == currentThread &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs) &*& foreach(vs, own::<T>(t)) &*&\narray::<std::mem::MaybeUninit<T>>(strip_pointer_metadata(scratch as pointer) as *std::mem::MaybeUninit<T>, scratch.len(), ?ss) &*&\nforeach(ss, own::<std::mem::MaybeUninit<T>>(t)) &*&\n*is_less |-> ?f0 &*& <F>.own(t, f0);\n@*/\n/*@\nens thread_token(t) &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\narray::<std::mem::MaybeUninit<T>>(strip_pointer_metadata(scratch as pointer) as *std::mem::MaybeUninit<T>, scratch.len(), ?ss1) &*&\nforeach(ss1, own::<std::mem::MaybeUninit<T>>(t)) &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1) &*&\nif is_less_models::<T, F>(f0) {\nis_perm(vs1, vs) && sorted_by(is_less_model_of::<T, F>(f0), vs1)\n} else {\ntrue\n};\n@*/\n/*@\non_unwind_ens thread_token(t) &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\narray::<std::mem::MaybeUninit<T>>(strip_pointer_metadata(scratch as pointer) as *std::mem::MaybeUninit<T>, scratch.len(), ?ss1) &*&\nforeach(ss1, own::<std::mem::MaybeUninit<T>>(t)) &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1);\n@*/"
+   }
+  ]
+ },
+ "targets/swap_if_less": {
+  "smallsort.rs": [
+   {
+    "occ": 0,
+    "sig": "unsafefnswap_if_less<T,F>(v_base:*mutT,a_pos:usize,b_pos:usize,is_less:&mutF)whereF:FnMut(&T,&T)->bool,",
+    "spec": "/*@\nreq thread_token(?t) &*& t == currentThread &*&\narray::<T>(v_base, ?n, ?vs) &*& foreach(vs, own::<T>(t)) &*& a_pos < n &*& b_pos < n &*&\n*is_less |-> ?f0 &*& <F>.own(t, f0);\n@*/\n/*@\nens thread_token(t) &*&\narray::<T>(v_base, n, ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1) &*&\nif is_less_models::<T, F>(f0) {\nif apply_lt(is_less_model_of::<T, F>(f0), nth(b_pos, vs), nth(a_pos, vs)) {\nvs1 == update_nth(a_pos, nth(b_pos, vs), update_nth(b_pos, nth(a_pos, vs), vs))\n} else {\nvs1 == vs\n}\n} else {\ntrue\n};\n@*/\n/*@\non_unwind_ens thread_token(t) &*&\narray::<T>(v_base, n, ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1);\n@*/"
+   }
+  ]
+ },
+ "targets/unstable_freeze_small_sort/copy": {
+  "smallsort.rs": [
+   {
+    "occ": 3,
+    "sig": "fnsmall_sort<F>(v:&mut[T],is_less:&mutF)whereF:FnMut(&T,&T)->bool,",
+    "spec": "/*@\nreq thread_token(?t) &*& t == currentThread &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs) &*& foreach(vs, own::<T>(t)) &*&\n*is_less |-> ?f0 &*& <F>.own(t, f0);\n@*/\n/*@\nens thread_token(t) &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1) &*&\nif is_less_models::<T, F>(f0) {\nis_perm(vs1, vs) && sorted_by(is_less_model_of::<T, F>(f0), vs1)\n} else {\ntrue\n};\n@*/\n/*@\non_unwind_ens thread_token(t) &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1);\n@*/"
+   }
+  ]
+ },
+ "targets/unstable_freeze_small_sort/default": {
+  "smallsort.rs": [
+   {
+    "occ": 1,
+    "sig": "defaultfnsmall_sort<F>(v:&mut[T],is_less:&mutF)whereF:FnMut(&T,&T)->bool,",
+    "spec": "/*@\nreq thread_token(?t) &*& t == currentThread &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs) &*& foreach(vs, own::<T>(t)) &*&\n*is_less |-> ?f0 &*& <F>.own(t, f0);\n@*/\n/*@\nens thread_token(t) &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1) &*&\nif is_less_models::<T, F>(f0) {\nis_perm(vs1, vs) && sorted_by(is_less_model_of::<T, F>(f0), vs1)\n} else {\ntrue\n};\n@*/\n/*@\non_unwind_ens thread_token(t) &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1);\n@*/"
+   }
+  ]
+ },
+ "targets/unstable_small_sort/default": {
+  "smallsort.rs": [
+   {
+    "occ": 0,
+    "sig": "defaultfnsmall_sort<F>(v:&mut[T],is_less:&mutF)whereF:FnMut(&T,&T)->bool,",
+    "spec": "/*@\nreq thread_token(?t) &*& t == currentThread &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs) &*& foreach(vs, own::<T>(t)) &*&\n*is_less |-> ?f0 &*& <F>.own(t, f0);\n@*/\n/*@\nens thread_token(t) &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1) &*&\nif is_less_models::<T, F>(f0) {\nis_perm(vs1, vs) && sorted_by(is_less_model_of::<T, F>(f0), vs1)\n} else {\ntrue\n};\n@*/\n/*@\non_unwind_ens thread_token(t) &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1);\n@*/"
+   }
+  ]
+ },
+ "targets/unstable_small_sort/specialized": {
+  "smallsort.rs": [
+   {
+    "occ": 1,
+    "sig": "fnsmall_sort<F>(v:&mut[T],is_less:&mutF)whereF:FnMut(&T,&T)->bool,",
+    "spec": "/*@\nreq thread_token(?t) &*& t == currentThread &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs) &*& foreach(vs, own::<T>(t)) &*&\n*is_less |-> ?f0 &*& <F>.own(t, f0);\n@*/\n/*@\nens thread_token(t) &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1) &*&\nif is_less_models::<T, F>(f0) {\nis_perm(vs1, vs) && sorted_by(is_less_model_of::<T, F>(f0), vs1)\n} else {\ntrue\n};\n@*/\n/*@\non_unwind_ens thread_token(t) &*&\narray::<T>(strip_pointer_metadata(v as pointer) as *T, v.len(), ?vs1) &*& foreach(vs1, own::<T>(t)) &*&\n*is_less |-> ?f1 &*& <F>.own(t, f1);\n@*/"
+   }
+  ]
+ }
+}

@@ -6,6 +6,7 @@ Specifically, it currently contains the following proofs:
 
 - Partial proof of [LinkedList](alloc/collections/linked_list.rs/)
 - Partial proof of [RawVec](alloc/raw_vec/mod.rs/)
+- Proof of [smallsort](core/slice/sort/shared/smallsort.rs/) (Challenge 8)
 
 See each proof's accompanying README for a tour of the proof and applicable caveats.
 

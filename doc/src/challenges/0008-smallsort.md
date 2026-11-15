@@ -1,9 +1,10 @@
 # Challenge 8: Contracts for SmallSort
 
-- **Status:** Open
+- **Status:** Resolved
 - **Tracking Issue:** [#56](https://github.com/model-checking/verify-rust-std/issues/56)
 - **Start date:** *2024/08/17*
 - **Reward:** *10,000 USD*
+- **Contributors:** [Haoran Ding](https://github.com/haoran-ding)
 
 -------------------
 
