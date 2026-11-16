@@ -567,8 +567,8 @@ unsafe fn insert_tail<T, F: FnMut(&T, &T) -> bool>(begin: *mut T, tail: *mut T, 
                 break;
             }
         }
-        // VeriFast rewrite (rewrites/001): the drop of `gap_guard` at the end of this block, written out:
-        // `CopyOnDrop::drop`'s body followed by `mem::forget`. Runtime-equivalent; see rewrites/LOG.md.
+        // VeriFast rewrite: the drop of `gap_guard` at the end of this block, written out:
+        // `CopyOnDrop::drop`'s body followed by `mem::forget`. Runtime-equivalent; see README.md.
         ptr::copy_nonoverlapping(gap_guard.src, gap_guard.dst, gap_guard.len);
         mem::forget(gap_guard);
     }

@@ -29,14 +29,12 @@ It is part of `verifast-proofs/check-verifast-proofs.sh`, i.e. of the VeriFast C
 
 | Path | Contents |
 |---|---|
-| `original/smallsort.rs` | Byte-identical copy of `library/core/src/slice/sort/shared/smallsort.rs` (checked by `verify.sh`). |
+| `original/smallsort.rs` | Copy of `library/core/src/slice/sort/shared/smallsort.rs` (`verify.sh` checks that they are identical). |
 | `original/lib.rs` | Crate root around the module: re-exports the `core` items the module refers to as `crate::mem`, `crate::{hint, intrinsics, ptr, slice}`, and a copy of the `FreezeMarker` declaration. No executable code. |
-| `rewrites/`, `rewritten/` | `rewritten/` = `original/` + the one code rewrite `rewrites/001-*.patch` that refinement-checker cannot check (see [Code changes](#code-changes)); `rewrites/LOG.md` is its review log, `rewrites/tests/` its differential test. |
-| `targets/<entry>/[<impl>/]` | The verified crates (`lib.rs`, `smallsort.rs` with specs, proofs and ghost code, `std_extra.rsspec`): one per entry function, and one per impl for the three trait methods. 10 crates. |
-| `trusted/` | Master copies of everything trusted. Each crate contains these blocks verbatim (checked). |
-| `spec/entry_spec_pins.json`, `tools/` | Pinned entry specs and checks run by `verify.sh` (see [What `verify.sh` checks](#what-verifysh-checks)). |
-| `tests/` | Audit scripts (not run by CI): vacuity and consistency probes, soundness probes for the trusted wrappers, tamper tests for `verify.sh`. |
-| `verify.sh`, `update.sh` | Proof check (CI), and the merge script used by `verifast-proofs/patch-verifast-proofs.sh`. |
+| `rewritten/` | `original/` with the one code change that refinement-checker cannot check (see [Code changes](#code-changes)). |
+| `verified/<entry>/[<impl>/]` | The verified crates (`lib.rs` identical to `original/lib.rs`; `smallsort.rs` with specs, proofs and ghost code): one per entry function, and one per impl for the three trait methods. 10 crates. |
+| `std_extra.rsspec` | Trusted specs of std functions that VeriFast 26.10 does not specify, passed to VeriFast with `-extern_spec`. |
+| `verify.sh`, `update.sh` | Proof check (CI), and the merge script called by `verifast-proofs/patch-verifast-proofs.sh`. |
 
 ### Why 10 crates
 
@@ -47,13 +45,13 @@ VeriFast 26.10 names both methods `<T as Trait>::small_sort`, so it cannot hold 
 
 | Entry function | Crates |
 |---|---|
-| `<T as StableSmallSortTypeImpl>::small_sort` | `targets/stable_small_sort/default`, `targets/stable_small_sort/specialized` |
-| `<T as UnstableSmallSortTypeImpl>::small_sort` | `targets/unstable_small_sort/default`, `targets/unstable_small_sort/specialized` |
-| `<T as UnstableSmallSortFreezeTypeImpl>::small_sort` | `targets/unstable_freeze_small_sort/default`, `targets/unstable_freeze_small_sort/copy` |
-| `swap_if_less` | `targets/swap_if_less` |
-| `insertion_sort_shift_left` | `targets/insertion_sort_shift_left` |
-| `sort4_stable` | `targets/sort4_stable` |
-| `has_efficient_in_place_swap` | `targets/has_efficient_in_place_swap` |
+| `<T as StableSmallSortTypeImpl>::small_sort` | `stable_small_sort/default`, `stable_small_sort/specialized` |
+| `<T as UnstableSmallSortTypeImpl>::small_sort` | `unstable_small_sort/default`, `unstable_small_sort/specialized` |
+| `<T as UnstableSmallSortFreezeTypeImpl>::small_sort` | `unstable_freeze_small_sort/default`, `unstable_freeze_small_sort/copy` |
+| `swap_if_less` | `swap_if_less` |
+| `insertion_sort_shift_left` | `insertion_sort_shift_left` |
+| `sort4_stable` | `sort4_stable` |
+| `has_efficient_in_place_swap` | `has_efficient_in_place_swap` |
 
 Every function that has a spec in a crate is verified in that crate (`-skip_specless_fns` only skips functions
 without a spec), so the crates together verify every function listed, against its spec, in every impl.
@@ -105,9 +103,6 @@ The guarantees under `is_less_models(f0)`:
 
 Stability (the relative order of equal elements) is not specified.
 
-The entry specs are pinned in `spec/entry_spec_pins.json`; `verify.sh` rejects a crate whose entry spec
-was changed or removed.
-
 ## Tour of the proof
 
 All helpers have specs and are verified: `insert_tail`, `insertion_sort_shift_left`,
@@ -139,9 +134,9 @@ from the three order axioms), array split/join with explicit counts, and zero-si
 - **`<T as UnstableSmallSortTypeImpl>::small_sort`, specialized impl.** It calls
   `<T as UnstableSmallSortFreezeTypeImpl>::small_sort` for a generic `T`. VeriFast resolves such a call to
   the trait declaration, which cannot carry an explicit spec. The call therefore goes through a wrapper
-  (`trusted/freeze_small_sort_wrapper.rs`, only in that crate) whose body is the original call
+  (block `TRUSTED FREEZE SMALL SORT WRAPPER`, only in that crate) whose body is the original call
   (refinement-checker) and whose spec is *exactly* the spec of `UnstableSmallSortFreezeTypeImpl::small_sort`
-  (`verify.sh` compares the texts). The two impls of that trait (`targets/unstable_freeze_small_sort/default`
+  (`verify.sh` compares the texts). The two impls of that trait (`unstable_freeze_small_sort/default`
   and `.../copy`) are verified against that spec, so whichever impl the call dispatches to satisfies it.
   Those are the only impls (the trait is `pub(crate)`), and neither calls back into `UnstableSmallSortTypeImpl`.
 
@@ -153,59 +148,78 @@ identical in every crate:
 1. **Calls through wrappers** (checked by refinement-checker, which inlines each wrapper; a wrapper body that
    is not exactly the original call is rejected): `v.as_mut_ptr()` on slices and `MaybeUninit`,
    `wrapping_sub`/`wrapping_add(1)` on `*const T`, `ptr::copy(.., .., 1)`, `MaybeUninit::uninit()`,
-   `len + 16`, the comparator calls `is_less(&x, &y)`, and (one crate) the generic freeze `small_sort` call.
+   `len + 16`, the comparator calls `is_less(&x, &y)`, the loop `for offset in [0, len_div_2]` in
+   `small_sort_general_with_scratch` (written as its desugaring, with `into_iter`/`next` through wrappers),
+   and (one crate) the generic freeze `small_sort` call.
    These give VeriFast specs for functions it does not specify, see [Trusted base](#trusted-base).
 2. **Two `for` loops written as their own desugaring** (in `bidirectional_merge` and
    `small_sort_general_with_scratch`), so that the iterator can be named in the loop invariant (checked by
    refinement-checker).
-3. **Rewrite 001** (`rewrites/001-insert-tail-explicit-guard-drop.patch`; not checkable by refinement-checker,
-   so it is a reviewed patch, pinned by hash, and `verify.sh` rebuilds `rewritten/` from `original/` and
-   compares). At the end of `insert_tail`'s `unsafe` block, the implicit drop of the guard `gap_guard:
-   CopyOnDrop<T>` is written out as `ptr::copy_nonoverlapping(gap_guard.src, gap_guard.dst, gap_guard.len);
-   mem::forget(gap_guard);`, i.e. `CopyOnDrop::drop`'s body followed by `mem::forget`. VeriFast 26.10
-   translates an implicit drop as a call of `drop_in_place` with its generic spec, which loses the drop's
-   write (the write that completes the insertion), so no caller's postcondition could be proven. The
-   rewrite is runtime-equivalent: on the normal path the drop executes exactly that body on the current field
-   values, `CopyOnDrop<T>` has no fields with drop glue, nothing in between can panic, and the unwind paths
-   (comparator panics inside the loop) are unchanged. `rewrites/LOG.md` gives the argument in full;
-   `rewrites/tests/run.sh` compares both versions on 12000 random runs (including panicking and inconsistent
-   comparators and element types with destructors) in four build configurations, with identical traces.
+3. **The drop of the guard in `insert_tail`, written out** (`rewritten/smallsort.rs`; refinement-checker
+   cannot check this one, so `verified/` is checked against `rewritten/`, and this is the full difference
+   between `original/` and `rewritten/`):
 
-`lib.rs` is identical in `original/`, `rewritten/` and all crates except the first line comment.
+   ```diff
+   @@ -567,6 +567,10 @@
+                    break;
+                }
+            }
+   +        // VeriFast rewrite: the drop of `gap_guard` at the end of this block, written out:
+   +        // `CopyOnDrop::drop`'s body followed by `mem::forget`. Runtime-equivalent; see README.md.
+   +        ptr::copy_nonoverlapping(gap_guard.src, gap_guard.dst, gap_guard.len);
+   +        mem::forget(gap_guard);
+        }
+    }
+   ```
+
+   VeriFast 26.10 translates the implicit drop of a local whose type has a `Drop` impl as a call of
+   `drop_in_place` with its generic spec, which loses the drop's effect: here, the write of `tmp` into the
+   gap that completes the insertion, so no caller's postcondition could be proven. The change is
+   runtime-equivalent: on the normal path, the drop of `gap_guard` at the end of the block executes exactly
+   `CopyOnDrop::drop`'s body (`ptr::copy_nonoverlapping(self.src, self.dst, self.len)`) on the current field
+   values, which is the inserted call; `mem::forget` then suppresses the drop, and `CopyOnDrop<T>` has no
+   fields with drop glue (two raw pointers and a `usize`), so forgetting it has no other effect. Nothing
+   between the end of the loop and the end of the block can panic. The unwind paths (a comparator panic
+   inside the loop) are unchanged: the guard is still live there and is dropped by unwinding as before. We
+   also compared both versions on 12000 random runs (lengths 0..39, many duplicates, a correct, a random, a
+   panicking and an inconsistent comparator, an element type with a destructor that counts drops) with
+   `-C overflow-checks` and `-C debug-assertions` each on and off: the traces were identical.
+
+`lib.rs` is identical in `original/`, `rewritten/` and all crates.
 `intrinsics::abort_immediate` is newer than the nightly VeriFast 26.10 is built on, so `lib.rs` re-exports
 `core::intrinsics::abort` under that name (both abort immediately).
 
 ## Trusted base
 
-Everything trusted lives in `trusted/` and is pinned by a hash in `verify.sh`; every crate must contain each
-block verbatim, and `assume` / `assume_correct` may appear nowhere else (`verify.sh` checks both).
+Everything trusted is in the blocks marked `// ===== BEGIN TRUSTED ... =====` / `// ===== END TRUSTED ... =====`
+of each `smallsort.rs`, and in `std_extra.rsspec`. `verify.sh` checks that the blocks are the same in every
+crate and that `assume` / `assume_correct` appear nowhere else.
 
-1. **Comparator model** (`trusted/comparator_model.rs`). VeriFast's spec of `FnMut::call_mut` says nothing
+1. **Comparator model** (block `COMPARATOR MODEL`). VeriFast's spec of `FnMut::call_mut` says nothing
    about the result, so correctness needs a model: uninterpreted `is_less_models(f)` ("`f` is well-behaved")
    and `is_less_model_of(f)` ("the order `f` computes"), plus three axioms that make that order a strict
    weak order (irreflexive, transitive, incomparability transitive). They are satisfiable by any strict weak
    order; a comparator that is not one simply has `is_less_models(f) == false`, and then only memory safety
    is claimed.
-2. **Comparator call wrapper** (`trusted/comparator_call_wrapper.rs`). Every `is_less(&x, &y)` goes through
+2. **Comparator call wrapper** (block `COMPARATOR CALL WRAPPER`). Every `is_less(&x, &y)` goes through
    `is_less__VeriFast_wrapper(is_less, &x, &y)` (body: exactly the call). Its `assume_correct` spec: for a
    well-behaved comparator the call does not panic, changes neither the comparator nor the values, and
    returns `is_less_model_of(f0)(x, y)`; otherwise nothing is known about the result.
-3. **Std wrappers and specs** (`trusted/std_wrappers.rs`, `trusted/std_extra.rsspec`), for std functions
+3. **Std wrappers and specs** (block `STD WRAPPERS`, and `std_extra.rsspec`), for std functions
    that VeriFast 26.10 does not specify, following core's documentation:
    `<[T]>::as_mut_ptr`, `MaybeUninit::as_mut_ptr`, `MaybeUninit::uninit`, `<*const T>::wrapping_sub` /
    `wrapping_add` (exact wrapping address, same provenance), the `[0, b].into_iter()` iterator, checked
    `usize + 16`, `hint::select_unpredictable`, `intrinsics::abort`, `usize::is_multiple_of`,
    `slice::from_raw_parts`, and a lemma that a slice length is at most `usize::MAX`. `ptr::copy(src, dst, 1)`
    also goes through a wrapper: VeriFast 26.10's own `ptr::copy` spec does not bound the offset in its
-   overlapping case, which allows deriving `false` (`tests/soundness/` has the probe); the wrapper's spec is
-   VeriFast's at `count = 1` with the offset bounded. `tools/copy_gate.py` rejects direct `ptr::copy`-family
-   calls outside the trusted blocks.
-4. **Model axioms** (`trusted/model_axioms.rs`): `<MaybeUninit<T>>.own` holds for every value (VeriFast
+   overlapping case, which allows deriving `false`; the wrapper's spec is VeriFast's at `count = 1` with the
+   offset bounded.
+4. **Model axioms** (block `MODEL AXIOMS`): `<MaybeUninit<T>>.own` holds for every value (VeriFast
    leaves it undefined); the size and alignment of `MaybeUninit<[T; 48]>` and `MaybeUninit<[T; 32]>`
    (arrays of `N` elements aligned as `T`); and `48 * size_of::<T>() <= isize::MAX` for the `T`s the
    `UnstableSmallSortFreezeTypeImpl` impls are instantiated with (they instantiate `[T; 48]`, which rustc
    rejects for larger `T`).
-5. **Freeze small-sort wrapper** (`trusted/freeze_small_sort_wrapper.rs`), see the [tour](#tour-of-the-proof).
+5. **Freeze small-sort wrapper** (block `FREEZE SMALL SORT WRAPPER`), see the [tour](#tour-of-the-proof).
 
 ## Caveats
 
@@ -220,7 +234,7 @@ block verbatim, and `assume` / `assume_correct` may appear nowhere else (`verify
 - **Partial correctness.** VeriFast does not prove termination.
 - **VeriFast is not foundational** and has [known unsoundnesses](https://github.com/verifast/verifast/blob/master/tests/rust/README.md);
   the proof found and works around one (the `ptr::copy` spec, see [Trusted base](#trusted-base)).
-  `verify.sh` also reports when VeriFast's solver prints "Detected an inconsistency"; it does not for this proof.
+  VeriFast's solver does not report "Detected an inconsistency" for this proof.
 
 ### Findings about the code
 
@@ -234,39 +248,31 @@ the module-internal function contracts:
 
 ## What `verify.sh` checks
 
-1. `original/smallsort.rs` is identical to the library file.
-2. The trusted files, the check tools, the entry-spec pins, `rewrites/apply.sh` and the patch match a pinned
-   sha256, and `trusted/` has no extra file.
-3. `rewritten/` is exactly `original/` + the patch; the freeze wrapper's spec is exactly the spec of
-   `UnstableSmallSortFreezeTypeImpl::small_sort` in both of its impl crates.
-4. For each crate: it refines `rewritten/` (refinement-checker); its trusted blocks and `std_extra.rsspec`
-   are the masters in `trusted/`; the freeze-wrapper block appears only in `unstable_small_sort/specialized`;
-   no `assume` outside the trusted blocks; its entry spec is the pinned one (`tools/entry_spec_pin.py`); no
-   ghost pointer-constructor tricks known to derive `false` in VeriFast 26.10 (`tools/ghost_gate.py`); no
-   direct `ptr::copy` (`tools/copy_gate.py`); and VeriFast reports `0 errors found` with
+1. The trusted blocks are the same in every crate, `assume` / `assume_correct` appear nowhere else, the
+   freeze small-sort wrapper is only in `unstable_small_sort/specialized`, and its spec is exactly the spec
+   of `UnstableSmallSortFreezeTypeImpl::small_sort` in `unstable_freeze_small_sort/{default,copy}`.
+2. For each crate: VeriFast reports no errors with
    `-rustc_args "--edition 2024" -skip_specless_fns -allow_assume -allow_dead_code -ignore_unwind_paths
    -ignore_ref_creation -extern_spec std=std_extra.rsspec` (`--edition 2024` is the edition `core` is built
-   with; `-allow_dead_code` because unwind-cleanup code after calls that cannot unwind is unreachable).
+   with; `-allow_dead_code` because unwind-cleanup code after calls that cannot unwind is unreachable), and
+   refinement-checker accepts it against `rewritten/`.
+3. `original/smallsort.rs` is identical to the library file.
 
-Audits done in addition (scripts in `tests/`, not run by CI): `//@ assert false;` at the end of every
-proven function's body fails (no vacuous proof, `tests/vacuity_end.sh`), and at the start of every entry body
-fails (consistent preconditions, `tests/consistency.sh`); the soundness probes of the comparator and
-`ptr::copy` wrappers (`tests/soundness/run.sh`); 13 tampered copies (altered trusted blocks, call sites,
-wrapper bodies, gates) are all rejected by `verify.sh` (`tests/tamper.sh`). The vacuity probes were run
-on the final proof; the consistency, soundness and tamper scripts were last run on 2026-10-31, before the
-model axioms (`trusted/model_axioms.rs`) were added.
+We also checked that the proofs are not vacuous: for every proven function (entry functions included),
+`//@ assert false;` inserted at the end of its body makes VeriFast fail, so the end of the body is reachable
+under the precondition.
 
 ## Running the proof
 
 ```
-cd verifast-proofs/core/slice/sort/shared/smallsort.rs
-bash verify.sh                                # all 10 crates
-bash verify.sh targets/swap_if_less           # one crate
+cd verifast-proofs
+export PATH=`pwd`:$PATH
+cd core/slice/sort/shared/smallsort.rs
+bash verify.sh                   # all 10 crates
+bash verify.sh swap_if_less      # one crate
 ```
 
-`VFVERSION` defaults to 26.10; if `VERIFAST_HOME` does not exist, VeriFast is downloaded through
-`verifast-proofs/setup-verifast-home`. Each run is limited to `VF_TIMEOUT` seconds (default 5400) and, where
-a systemd user session exists, to `VF_MEM` memory (default 8G). Times on one core:
+Times on one core:
 
 | Crate | Time |
 |---|---|
@@ -276,4 +282,4 @@ a systemd user session exists, to `VF_MEM` memory (default 8G). Times on one cor
 | `unstable_freeze_small_sort/copy` | ≈ 27 min |
 
 When the library file changes, `verifast-proofs/patch-verifast-proofs.sh` calls `update.sh`, which merges
-the change into every crate (`git merge-file`), updates `original/` and rebuilds `rewritten/`.
+the change into `rewritten/` and every crate (`git merge-file`) and updates `original/`.
