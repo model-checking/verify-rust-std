@@ -2290,7 +2290,7 @@ mod verify {
         fn peek_mut_then<T: Ord + kani::Arbitrary>(ending: Ending) {
             let mut heap = arbitrary_heap::<T>();
             let len = heap.len();
-            kani::assume(len <= MAX_SIFT_DOWN_END);
+            kani::assume(ending == Ending::Leak || len <= MAX_SIFT_DOWN_END);
             let mutated: bool = kani::any();
             let popped = match heap.peek_mut() {
                 None => false,
@@ -2879,6 +2879,18 @@ mod verify {
             let _ = unsafe { heap.sift_down_range(pos, end) };
         }
 
+        // `sift_down` is `sift_down_range` up to `len`.
+        #[kani::proof]
+        #[kani::should_panic]
+        fn check_sift_down_child_overflows() {
+            let mut heap = arbitrary_heap::<ZeroSized>();
+            let len = heap.len();
+            kani::assume(len > MAX_SIFT_DOWN_END);
+            let pos: usize = kani::any_where(|p: &usize| *p < len);
+            // SAFETY: `pos < len`.
+            let _ = unsafe { heap.sift_down(pos) };
+        }
+
         // `sift_down_to_bottom` descends to the end, so its child index overflows too.
         #[kani::proof]
         #[kani::should_panic]
@@ -2900,6 +2912,45 @@ mod verify {
             let _ = heap.pop();
         }
 
+        // `PeekMut::pop` pops, which sifts down through the `len - 1` elements that remain.
+        #[kani::proof]
+        #[kani::should_panic]
+        fn check_peek_mut_pop_child_overflows() {
+            let mut heap = arbitrary_heap::<ZeroSized>();
+            kani::assume(heap.len() > MAX_SIFT_DOWN_END);
+            let mut top = heap.peek_mut().unwrap();
+            if kani::any() {
+                *top = kani::any();
+            }
+            let _ = PeekMut::pop(top);
+        }
+
+        // `refresh` sifts a mutated top down from the root.
+        #[kani::proof]
+        #[kani::should_panic]
+        fn check_peek_mut_refresh_child_overflows() {
+            let mut heap = arbitrary_heap::<ZeroSized>();
+            kani::assume(heap.len() > MAX_SIFT_DOWN_END);
+            let mut top = heap.peek_mut().unwrap();
+            if kani::any() {
+                *top = kani::any();
+            }
+            let _ = top.refresh();
+        }
+
+        // Dropping a `PeekMut` sifts a mutated top down from the root.
+        #[kani::proof]
+        #[kani::should_panic]
+        fn check_peek_mut_drop_child_overflows() {
+            let mut heap = arbitrary_heap::<ZeroSized>();
+            kani::assume(heap.len() > MAX_SIFT_DOWN_END);
+            let mut top = heap.peek_mut().unwrap();
+            if kani::any() {
+                *top = kani::any();
+            }
+            drop(top);
+        }
+
         // `rebuild` sifts down from positions in the first half of the heap.
         #[kani::proof]
         #[kani::should_panic]
@@ -2909,6 +2960,15 @@ mod verify {
             heap.rebuild();
         }
 
+        // `From<Vec<T>>` rebuilds.
+        #[kani::proof]
+        #[kani::should_panic]
+        fn check_from_vec_child_overflows() {
+            let heap = arbitrary_heap::<ZeroSized>();
+            kani::assume(heap.len() > MAX_SIFT_DOWN_END);
+            let _ = BinaryHeap::from(heap.into_vec());
+        }
+
         // `into_sorted_vec` sifts down through a range that starts at `len - 1`.
         #[kani::proof]
         #[kani::should_panic]
@@ -2916,6 +2976,51 @@ mod verify {
             let heap = arbitrary_heap::<ZeroSized>();
             kani::assume(heap.len() > MAX_SIFT_DOWN_END + 1);
             let _ = heap.into_sorted_vec();
+        }
+
+        // A `pop` after a write through `as_mut_slice` overflows like any other `pop`.
+        #[kani::proof]
+        #[kani::should_panic]
+        fn check_as_mut_slice_child_overflows() {
+            let mut heap = arbitrary_heap::<ZeroSized>();
+            let len = heap.len();
+            kani::assume(len > MAX_SIFT_DOWN_END + 1);
+            // SAFETY: `as_mut_slice` only asks for heap order, which is broken on purpose.
+            let slice = unsafe { heap.as_mut_slice() };
+            slice[kani::any_where(|i: &usize| *i < len)] = kani::any();
+            let _ = heap.pop();
+        }
+
+        // `IntoIterSorted::next` pops.
+        #[kani::proof]
+        #[kani::should_panic]
+        fn check_into_iter_sorted_child_overflows() {
+            let heap = arbitrary_heap::<ZeroSized>();
+            kani::assume(heap.len() > MAX_SIFT_DOWN_END + 1);
+            let _ = heap.into_iter_sorted().next();
+        }
+
+        // `DrainSorted::next` pops.
+        #[kani::proof]
+        #[kani::should_panic]
+        fn check_drain_sorted_child_overflows() {
+            let mut heap = arbitrary_heap::<ZeroSized>();
+            kani::assume(heap.len() > MAX_SIFT_DOWN_END + 1);
+            let mut drain = heap.drain_sorted();
+            let _ = drain.next();
+            mem::forget(drain);
+        }
+
+        // `rebuild_tail` rebuilds the whole heap when the tail is longer than the rest.
+        #[kani::proof]
+        #[kani::should_panic]
+        #[kani::solver(kissat)]
+        fn check_rebuild_tail_rebuild_child_overflows() {
+            let mut heap = arbitrary_heap::<ZeroSized>();
+            let len = heap.len();
+            kani::assume(len > MAX_SIFT_DOWN_END);
+            let start: usize = kani::any_where(|s: &usize| *s < len && *s < len - *s);
+            heap.rebuild_tail(start);
         }
 
         // `rebuild_tail` computes `2 * len` to pick a strategy.
@@ -2960,6 +3065,23 @@ mod verify {
             let mut a = arbitrary_heap::<ZeroSized>();
             let mut b = arbitrary_heap::<ZeroSized>();
             kani::assume(a.len().checked_add(b.len()).is_none());
+            a.append(&mut b);
+        }
+
+        // When the combined length fits, `append` can still overflow inside `rebuild_tail`.
+        #[kani::proof]
+        #[kani::should_panic]
+        #[kani::solver(kissat)]
+        fn check_append_rebuild_tail_overflows() {
+            let mut a = arbitrary_heap::<ZeroSized>();
+            let mut b = arbitrary_heap::<ZeroSized>();
+            let shorter = if a.len() < b.len() { a.len() } else { b.len() };
+            kani::assume(shorter > 0);
+            kani::assume(
+                a.len()
+                    .checked_add(b.len())
+                    .is_some_and(|total| total > isize::MAX as usize || shorter > usize::MAX / 11),
+            );
             a.append(&mut b);
         }
     }
