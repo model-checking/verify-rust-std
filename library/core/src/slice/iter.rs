@@ -168,6 +168,44 @@ impl<T> AsRef<[T]> for Iter<'_, T> {
     }
 }
 
+#[cfg(kani)]
+impl<T> Iter<'_, T> {
+    /// Verification-only access to the representation, avoiding contracted
+    /// NonNull methods inside loop clauses (see Kani issue #4796).
+    pub(crate) fn kani_raw_parts(&self) -> (*const T, *const T) {
+        (unsafe { mem::transmute::<NonNull<T>, *const T>(self.ptr) }, self.end_or_len)
+    }
+
+    /// Clause-only copy: CBMC adds a write-set parameter to ordinary calls,
+    /// whereas calls from loop clauses have a different calling convention.
+    ///
+    /// # Safety
+    /// `this` must point to readable iterator storage. The pointer fields are
+    /// read as raw pointer representations, so a havoc candidate need not yet
+    /// satisfy the NonNull or iterator range invariants.
+    pub(crate) unsafe fn kani_loop_raw_parts(this: *const Self) -> (*const T, *const T) {
+        // Read the representation before requiring NonNull's validity. Havoc
+        // can produce invalid candidates, which the invariant must exclude.
+        let ptr = unsafe { (&raw const (*this).ptr).cast::<*const T>() };
+        let end = unsafe { &raw const (*this).end_or_len };
+        unsafe { (crate::intrinsics::read_via_copy(ptr), crate::intrinsics::read_via_copy(end)) }
+    }
+
+    /// # Safety
+    /// These must be the fields of a valid iterator over a slice living for
+    /// `'a`, including the special end/length representation for a ZST.
+    pub(crate) unsafe fn kani_from_raw_parts<'a>(
+        ptr: *const T,
+        end_or_len: *const T,
+    ) -> Iter<'a, T> {
+        Iter {
+            ptr: unsafe { mem::transmute::<*const T, NonNull<T>>(ptr) },
+            end_or_len,
+            _marker: PhantomData,
+        }
+    }
+}
+
 #[unstable(feature = "ub_checks", issue = "none")]
 impl<T> Invariant for Iter<'_, T> {
     /// An iterator can be safely used if its pointer can be read for its current length.
