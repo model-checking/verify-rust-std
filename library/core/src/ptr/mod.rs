@@ -732,7 +732,8 @@ pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
 // Challenge 2, part 3: the intrinsic's contract carried through this thin wrapper
 // (identical to `write_bytes_wrapper` in `intrinsics/mod.rs`). Alignment is demanded
 // even for a zero-sized write, matching the body's `assert_unsafe_precondition!`.
-// Ensures as `*const u8`: the region is initialized as bytes, need not be a valid `T`.
+// Ensures is over `*const u8`, since the bytes need not form a valid `T`. Kani checks
+// that they are initialized only with `-Z uninit-checks`.
 #[cfg_attr(kani, kani::modifies(slice_from_raw_parts(dst, count)))]
 #[safety::requires(!count.overflowing_mul(mem::size_of::<T>()).1
     && ub_checks::can_write(slice_from_raw_parts_mut(dst, count)))]

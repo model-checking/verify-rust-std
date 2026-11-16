@@ -1899,8 +1899,8 @@ mod verify {
     check_align_of_val_raw_dangling_for!(check_align_of_val_raw_dangling_u8, u8);
     check_align_of_val_raw_dangling_for!(check_align_of_val_raw_dangling_u64, u64);
 
-    // Slice case: initialized backing array so `can_dereference` holds;
-    // alignment is independent of `len`.
+    // Slice case: initialized backing array, as `can_dereference` requires under
+    // `-Z uninit-checks`; alignment is independent of `len`.
     macro_rules! check_align_of_val_raw_slice_for {
         ($harness:ident, $ty:ty) => {
             #[kani::proof_for_contract(align_of_val_raw)]

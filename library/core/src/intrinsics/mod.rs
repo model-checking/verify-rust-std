@@ -3280,6 +3280,10 @@ pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + PointeeSized, M>(ptr: 
 /// It is UB to read the uninitialized bytes, so we cannot compare their values only their
 /// initialization state.
 ///
+/// The comparison goes through `ub_checks::can_dereference`, which checks initialization only
+/// when Kani runs with `-Z uninit-checks`. Without that flag, as in CI, `can_dereference` treats
+/// every byte as initialized, so this function does not check initialization.
+///
 /// This is used for contracts only.
 #[allow(dead_code)]
 #[allow(unused_variables)]
@@ -4296,7 +4300,8 @@ mod verify {
 
     // ---- copy_nonoverlapping ----
     // Restores the pre-body-removal contract. `MaybeUninit<T>` because the copy is
-    // untyped; the ensures checks per-byte initialization state is preserved.
+    // untyped; the ensures compares per-byte initialization state, which Kani
+    // checks only with `-Z uninit-checks` (see `check_copy_untyped`).
     #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
         && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
         && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count))
@@ -5237,9 +5242,10 @@ mod verify {
         unsafe { volatile_load(src) }
     }
 
-    // `src` stays inside a fully initialized stack allocation (uninit would make
-    // `can_dereference` unsatisfiable, hence vacuous); the byte-granular offset
-    // generates misaligned pointers the alignment clause must prune.
+    // `src` stays inside a fully initialized stack allocation. `can_dereference`
+    // checks initialization only with `-Z uninit-checks`, which CI does not pass.
+    // The byte-granular offset generates misaligned pointers the alignment clause
+    // must prune.
     macro_rules! check_volatile_load_for {
         ($harness:ident, $ty:ty) => {
             #[kani::proof_for_contract(volatile_load_model)]
@@ -5585,7 +5591,8 @@ mod verify {
     // ---- compare_bytes ----
     // Backs slice comparison; Kani models it as a memcmp. Requires each pointer
     // readable and initialized for the WHOLE `bytes` range, not merely up to the
-    // first differing byte (the docs stress chunked reads). No ensures: relating
+    // first differing byte (the docs stress chunked reads); Kani checks the
+    // initialization part only with `-Z uninit-checks`. No ensures: relating
     // the returned sign to the first differing byte is functional, not safety.
     #[requires(ub_checks::can_dereference(core::ptr::slice_from_raw_parts(left, bytes))
         && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(right, bytes)))]
@@ -5595,8 +5602,7 @@ mod verify {
         unsafe { compare_bytes(left, right, bytes) }
     }
 
-    // Both buffers fully initialized (whole-range clause otherwise
-    // unsatisfiable); `right` may alias `buffer1`. BOUNDED DOMAIN: Kani lowers
+    // Both buffers fully initialized; `right` may alias `buffer1`. BOUNDED DOMAIN: Kani lowers
     // the intrinsic to CBMC's built-in `memcmp` loop, which cannot take a loop
     // invariant, so the range is capped at `MAX_BYTES = 64` with matching
     // `kani::unwind`; the bound limits the checked instances, not the contract.
