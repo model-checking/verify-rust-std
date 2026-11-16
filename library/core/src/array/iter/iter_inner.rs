@@ -176,12 +176,16 @@ trait Challenge22FoldElement {
 
 #[cfg(kani)]
 impl<T> Challenge22FoldElement for T {
-    default fn admitted() -> bool { false }
+    default fn admitted() -> bool {
+        false
+    }
 }
 
 #[cfg(kani)]
 impl Challenge22FoldElement for bool {
-    fn admitted() -> bool { true }
+    fn admitted() -> bool {
+        true
+    }
 }
 
 impl<T> PolymorphicIter<[MaybeUninit<T>]> {
@@ -425,12 +429,10 @@ mod verify {
         // Same representation conversion as IntoIterator for arrays, without
         // array::map's unrelated construction and draining machinery.
         let data: [MaybeUninit<bool>; 32] = unsafe { crate::mem::transmute(flags) };
-        let mut actual = unsafe {
-            PolymorphicIter::new_unchecked(IndexRange::new_unchecked(start, end), data)
-        };
-        let mut model = unsafe {
-            PolymorphicIter::new_unchecked(IndexRange::new_unchecked(start, end), data)
-        };
+        let mut actual =
+            unsafe { PolymorphicIter::new_unchecked(IndexRange::new_unchecked(start, end), data) };
+        let mut model =
+            unsafe { PolymorphicIter::new_unchecked(IndexRange::new_unchecked(start, end), data) };
         let actual: &mut PolymorphicIter<[MaybeUninit<bool>]> = &mut actual;
         let model: &mut PolymorphicIter<[MaybeUninit<bool>]> = &mut model;
         let observe = |(sum, trace, calls): (u8, u64, u8), flag: bool| {

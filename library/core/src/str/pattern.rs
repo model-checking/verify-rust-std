@@ -2201,11 +2201,7 @@ pub mod verify {
         assert!(verifier_char_searcher_invariant(&searcher));
         let encoding = searcher.utf8_encoded;
         let width = searcher.utf8_size;
-        let result = if reverse {
-            searcher.next_match_back()
-        } else {
-            searcher.next_match()
-        };
+        let result = if reverse { searcher.next_match_back() } else { searcher.next_match() };
         assert!(verifier_char_searcher_invariant(&searcher));
         assert_eq!(searcher.haystack.as_ptr(), haystack.as_ptr());
         assert_eq!(searcher.haystack.len(), haystack.len());

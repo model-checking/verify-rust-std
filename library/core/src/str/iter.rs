@@ -2029,10 +2029,7 @@ mod verify {
         let result = chars.advance_by(kani::any());
         assert!(chars.iter.kani_raw_parts() == (ptr, ptr));
         kani::cover(result.is_ok(), "zero request on arbitrary empty pointer");
-        kani::cover(
-            result.is_err(),
-            "positive request on arbitrary empty pointer",
-        );
+        kani::cover(result.is_err(), "positive request on arbitrary empty pointer");
     }
 
     fn any_window(s: &str) -> (usize, usize) {
@@ -2093,10 +2090,7 @@ mod verify {
             assert!(a == b);
         }
         cover_completed_text(s);
-        kani::cover(
-            a > 4096 && b - a > 4096,
-            "completed on a large interior window",
-        );
+        kani::cover(a > 4096 && b - a > 4096, "completed on a large interior window");
     }
 
     #[kani::proof]
@@ -2124,10 +2118,7 @@ mod verify {
             assert!(a == b);
         }
         cover_completed_text(s);
-        kani::cover(
-            a > 4096 && b - a > 4096,
-            "completed on a large interior window",
-        );
+        kani::cover(a > 4096 && b - a > 4096, "completed on a large interior window");
     }
 
     #[kani::proof]
@@ -2137,10 +2128,7 @@ mod verify {
         let chars = window(s, a, b).chars();
         check_range(s, chars.as_str(), a, b);
         cover_completed_text(s);
-        kani::cover(
-            a > 4096 && b - a > 4096,
-            "completed on a large interior window",
-        );
+        kani::cover(a > 4096 && b - a > 4096, "completed on a large interior window");
     }
 
     // Challenge 22 permits assuming pattern.rs (assumption 2). This is an
@@ -2171,11 +2159,7 @@ mod verify {
         type Searcher<'a> = ModelSearcher<'a>;
 
         fn into_searcher(self, haystack: &str) -> ModelSearcher<'_> {
-            ModelSearcher {
-                haystack,
-                front: 0,
-                back: haystack.len(),
-            }
+            ModelSearcher { haystack, front: 0, back: haystack.len() }
         }
     }
 
@@ -2214,20 +2198,12 @@ mod verify {
             if kani::any() {
                 let old = self.front;
                 self.front = self.back;
-                if old == self.back {
-                    SearchStep::Done
-                } else {
-                    SearchStep::Reject(old, self.back)
-                }
+                if old == self.back { SearchStep::Done } else { SearchStep::Reject(old, self.back) }
             } else {
                 let (_, b) = any_match_range(self.haystack, self.front, self.back);
                 let a = self.front;
                 self.front = b;
-                if kani::any() {
-                    SearchStep::Match(a, b)
-                } else {
-                    SearchStep::Reject(a, b)
-                }
+                if kani::any() { SearchStep::Match(a, b) } else { SearchStep::Reject(a, b) }
             }
         }
 
@@ -2263,11 +2239,7 @@ mod verify {
                 let (a, _) = any_match_range(self.haystack, self.front, self.back);
                 let b = self.back;
                 self.back = a;
-                if kani::any() {
-                    SearchStep::Match(a, b)
-                } else {
-                    SearchStep::Reject(a, b)
-                }
+                if kani::any() { SearchStep::Match(a, b) } else { SearchStep::Reject(a, b) }
             }
         }
 
@@ -2299,11 +2271,7 @@ mod verify {
         SplitInternal {
             start,
             end,
-            matcher: ModelSearcher {
-                haystack: s,
-                front,
-                back,
-            },
+            matcher: ModelSearcher { haystack: s, front, back },
             allow_trailing_empty: kani::any(),
             finished: kani::any(),
         }
@@ -2334,10 +2302,7 @@ mod verify {
         }
         kani::cover(result.is_none(), "split: no remaining piece");
         kani::cover(result.is_some_and(str::is_empty), "split: empty piece");
-        kani::cover(
-            result.is_some_and(|part| part.len() > 4096),
-            "split: large piece",
-        );
+        kani::cover(result.is_some_and(|part| part.len() > 4096), "split: large piece");
         cover_completed_text(s);
     }
 
@@ -2347,14 +2312,8 @@ mod verify {
             assert!(index == check_piece(s, part));
         }
         kani::cover(result.is_none(), "matches: exhausted");
-        kani::cover(
-            result.is_some_and(|(_, part)| part.is_empty()),
-            "matches: empty match",
-        );
-        kani::cover(
-            result.is_some_and(|(_, part)| part.len() > 4096),
-            "matches: large match",
-        );
+        kani::cover(result.is_some_and(|(_, part)| part.is_empty()), "matches: empty match");
+        kani::cover(result.is_some_and(|(_, part)| part.len() > 4096), "matches: large match");
         cover_completed_text(s);
     }
 
@@ -2362,17 +2321,9 @@ mod verify {
     fn harness_searcher_protocol() {
         let s = symbolic_text();
         let (front, back) = any_window(s);
-        let mut searcher = ModelSearcher {
-            haystack: s,
-            front,
-            back,
-        };
+        let mut searcher = ModelSearcher { haystack: s, front, back };
         let reverse: bool = kani::any();
-        let result = if reverse {
-            searcher.next_match_back()
-        } else {
-            searcher.next_match()
-        };
+        let result = if reverse { searcher.next_match_back() } else { searcher.next_match() };
         check_searcher(s, &searcher);
         if let Some((a, b)) = result {
             assert!(front <= a && a <= b && b <= back);
@@ -2502,15 +2453,9 @@ mod verify {
             Some(part) => {
                 assert!(!finished);
                 check_range(s, part, start, end);
-                kani::cover(
-                    part.len() > 4096,
-                    "returned a large remainder after range checks",
-                );
+                kani::cover(part.len() > 4096, "returned a large remainder after range checks");
                 kani::cover(part.is_empty(), "ASCII whitespace remainder: empty window");
-                kani::cover(
-                    !part.is_empty(),
-                    "ASCII whitespace remainder: nonempty window",
-                );
+                kani::cover(!part.is_empty(), "ASCII whitespace remainder: nonempty window");
             }
             None => {
                 assert!(finished);
@@ -2579,10 +2524,7 @@ mod verify {
                     == real.next().map(|x| x as *const [u8; 32])
             );
             assert!(model.kani_raw_parts() == real.kani_raw_parts());
-            kani::cover(
-                part.len() > 4096 && n > 32,
-                "large symbolic window and request",
-            );
+            kani::cover(part.len() > 4096 && n > 32, "large symbolic window and request");
             kani::cover(part.is_empty(), "empty slice models completed");
         }
 
@@ -2696,10 +2638,7 @@ mod verify {
             // INPUT-LENGTH: only prefixes of this initialized array are inputs.
             // INPUT DOMAIN: allocated prefix or index extent.
             kani::assume(len <= bytes.len());
-            kani::cover(
-                true,
-                "C22-A23: harness_reverse_byte_model assumption admitted",
-            );
+            kani::cover(true, "C22-A23: harness_reverse_byte_model assumption admitted");
             let needle: u8 = kani::any();
             let result = verifier_last_byte(needle, &bytes[..len]);
             if let Some(index) = result {
@@ -2713,10 +2652,7 @@ mod verify {
             }
             kani::cover(result.is_some(), "byte model: matching byte");
             kani::cover(result.is_none(), "byte model: no match");
-            kani::cover(
-                len > 0 && result == Some(len - 1),
-                "byte model: final byte matches",
-            );
+            kani::cover(len > 0 && result == Some(len - 1), "byte model: final byte matches");
             kani::cover(len == 0 && result.is_none(), "byte model: empty prefix");
             kani::cover(true, "C22-END: harness_reverse_byte_model completed");
         }
@@ -2733,20 +2669,14 @@ mod verify {
                 result.is_some() && needle.len_utf8() == 4,
                 "real char search: four-byte match",
             );
-            kani::cover(
-                front == back && result.is_none(),
-                "real char search: empty window",
-            );
+            kani::cover(front == back && result.is_none(), "real char search: empty window");
         }
 
         #[kani::proof]
         #[kani::unwind(18)]
         fn harness_char_searcher_forward_refinement() {
             assert_char_searcher_direction(false);
-            kani::cover(
-                true,
-                "C22-END: harness_char_searcher_forward_refinement completed",
-            );
+            kani::cover(true, "C22-END: harness_char_searcher_forward_refinement completed");
         }
 
         #[kani::proof]
@@ -2754,10 +2684,7 @@ mod verify {
         #[kani::stub(crate::slice::memchr::memrchr, verifier_last_byte)]
         fn harness_char_searcher_reverse_refinement() {
             assert_char_searcher_direction(true);
-            kani::cover(
-                true,
-                "C22-END: harness_char_searcher_reverse_refinement completed",
-            );
+            kani::cover(true, "C22-END: harness_char_searcher_reverse_refinement completed");
         }
     }
 }
