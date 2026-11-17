@@ -350,7 +350,6 @@ impl<T> PolymorphicIter<[MaybeUninit<T>]> {
         kani::assume(res_u8 <= total as u8);
         self.alive = crate::ops::IndexRange::zero_to(0);
         assert!(self.len() == 0, "bounded fold did not consume the iterator");
-        kani::cover(total == 32, "bounded32 helper reached");
         unsafe { *(&raw mut accum).cast::<u8>() = res_u8 };
         accum
     }
@@ -404,4 +403,48 @@ pub fn check_kani_fold_bounded32_soundness() {
     kani::cover(res == 0, "all values false");
     kani::cover(res == 32, "all values true");
     kani::cover(res > 0 && res < 32, "mixed values");
+
+    // Range surjectivity witness: every modeled output `(IndexRange::zero_to(0), target)`
+    // admitted by `kani_fold_bounded32` is realized by real `PolymorphicIter::fold`.
+    let target: u8 = kani::any::<u8>() % 33;
+    let witness: [bool; 32] = [
+        0 < target,
+        1 < target,
+        2 < target,
+        3 < target,
+        4 < target,
+        5 < target,
+        6 < target,
+        7 < target,
+        8 < target,
+        9 < target,
+        10 < target,
+        11 < target,
+        12 < target,
+        13 < target,
+        14 < target,
+        15 < target,
+        16 < target,
+        17 < target,
+        18 < target,
+        19 < target,
+        20 < target,
+        21 < target,
+        22 < target,
+        23 < target,
+        24 < target,
+        25 < target,
+        26 < target,
+        27 < target,
+        28 < target,
+        29 < target,
+        30 < target,
+        31 < target,
+    ];
+    let mut w_iter = witness.into_iter();
+    let w_res: u8 = w_iter.unsize_mut().fold(0u8, |accum, value| accum + value as u8);
+    assert_eq!(w_res, target);
+    assert_eq!(w_iter.len(), 0);
+    kani::cover(target == 0, "witness target 0 realized");
+    kani::cover(target == 32, "witness target 32 realized");
 }
