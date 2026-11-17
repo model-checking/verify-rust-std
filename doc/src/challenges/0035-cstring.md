@@ -1,4 +1,4 @@
-# Challenge 34: Safety of `CString`, the owned C string
+# Challenge 35: Safety of `CString`, the owned C string
 
 - **Status:** *Open*
 - **Solution:** *Option field to point to the PR that solved this challenge.*
