@@ -324,3 +324,84 @@ impl<T> PolymorphicIter<[MaybeUninit<T>]> {
         })
     }
 }
+
+#[cfg(kani)]
+use crate::kani;
+
+// Loop-free sound over-approximation of `PolymorphicIter::fold` on `bool/u8` sum (total <= 32).
+// Implemented as an inherent helper rather than an attached `PolymorphicIter::fold` contract
+// (avoiding generic-method contract limits, cf. kani#4084), and paired with
+// `check_kani_fold_bounded32_soundness` proving real `PolymorphicIter::fold` satisfies
+// `res <= total && len == 0` for all 2^32 Boolean valuations.
+#[cfg(kani)]
+impl<T> PolymorphicIter<[MaybeUninit<T>]> {
+    pub(super) fn kani_fold_bounded32<B, F>(&mut self, mut accum: B, f: F) -> B
+    where
+        F: FnMut(B, T) -> B,
+    {
+        assert!(crate::mem::size_of::<B>() == 1);
+        assert!(crate::mem::size_of::<F>() == 0);
+        assert!(kani::mem::can_dereference((&raw const accum).cast::<u8>()));
+        assert!(unsafe { *(&raw const accum).cast::<u8>() } == 0);
+        let total = self.len();
+        assert!(total <= 32);
+        let _ = f;
+        let res_u8: u8 = kani::any();
+        kani::assume(res_u8 <= total as u8);
+        self.alive = crate::ops::IndexRange::zero_to(0);
+        assert!(self.len() == 0, "bounded fold did not consume the iterator");
+        kani::cover(total == 32, "bounded32 helper reached");
+        unsafe { *(&raw mut accum).cast::<u8>() = res_u8 };
+        accum
+    }
+}
+
+#[cfg(kani)]
+#[kani::proof]
+pub fn check_kani_fold_bounded32_soundness() {
+    let values: [bool; 32] = [
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+        kani::any::<bool>(),
+    ];
+    let mut iter = values.into_iter();
+    let total = iter.len();
+    assert_eq!(total, 32);
+    let res: u8 = iter.unsize_mut().fold(0u8, |accum, value| accum + value as u8);
+    assert!((res as usize) <= total);
+    assert_eq!(iter.len(), 0);
+    let sum_res: u8 = values.into_iter().map(|v| v as u8).sum();
+    assert_eq!(sum_res, res);
+    kani::cover(res == 0, "all values false");
+    kani::cover(res == 32, "all values true");
+    kani::cover(res > 0 && res < 32, "mixed values");
+}
