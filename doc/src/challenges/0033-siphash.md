@@ -2,8 +2,8 @@
 
 - **Status:** *Open*
 - **Solution:** *Option field to point to the PR that solved this challenge.*
-- **Tracking Issue:** [#NNN](https://github.com/model-checking/verify-rust-std/issues/NNN)
-- **Start date:** *YYYY/MM/DD*
+- **Tracking Issue:** [#767](https://github.com/model-checking/verify-rust-std/issues/767)
+- **Start date:** *2026/11/17*
 - **Reward:** *TBD*
 
 -------------------
