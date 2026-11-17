@@ -1800,11 +1800,6 @@ pub(super) mod verify {
         }
     }
 
-    // number of ModelSearcher::next_match_back calls (spec of the trailing-empty-piece skip)
-    pub(super) static mut NMB_CALLS: usize = 0;
-    // results (the reported match) of the first two ModelSearcher::next_match_back calls
-    pub(super) static mut NMB_RES: [Option<(usize, usize)>; 2] = [None, None];
-
     // Challenge Assumption (4): valid UTF-8 strings. Generates an unbounded symbolic &str
     // with symbolic length up to MAX_ALLOCATION_BYTES.
     fn any_haystack() -> &'static str {
@@ -1903,7 +1898,7 @@ pub(super) mod verify {
         n >= k && is_valid_first_utf8_char(&b[n - k..]) && raw_utf8_char_width(b[n - k]) == k
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, Copy)]
     pub struct ModelPattern;
 
     pub struct ModelSearcher<'a> {
@@ -1911,6 +1906,8 @@ pub(super) mod verify {
         pub front: usize,
         pub back: usize,
         pub last_match: Option<(usize, usize)>,
+        pub nmb_calls: usize,
+        pub nmb_res: [Option<(usize, usize)>; 2],
     }
 
     // See verify-rust-std#753 (rust-lang/rust#165681): `Pattern` is still a safe trait on
@@ -1918,7 +1915,14 @@ pub(super) mod verify {
     impl Pattern for ModelPattern {
         type Searcher<'a> = ModelSearcher<'a>;
         fn into_searcher(self, haystack: &str) -> ModelSearcher<'_> {
-            ModelSearcher { haystack, front: 0, back: haystack.len(), last_match: None }
+            ModelSearcher {
+                haystack,
+                front: 0,
+                back: haystack.len(),
+                last_match: None,
+                nmb_calls: 0,
+                nmb_res: [None, None],
+            }
         }
     }
 
@@ -1985,8 +1989,8 @@ pub(super) mod verify {
         }
 
         fn next_match_back(&mut self) -> Option<(usize, usize)> {
-            let call = unsafe { NMB_CALLS };
-            unsafe { NMB_CALLS += 1 };
+            let call = self.nmb_calls;
+            self.nmb_calls = call.saturating_add(1);
             let result = if kani::any() {
                 self.back = self.front;
                 None
@@ -1999,7 +2003,7 @@ pub(super) mod verify {
             };
             self.last_match = result;
             if call < 2 {
-                unsafe { NMB_RES[call] = result };
+                self.nmb_res[call] = result;
             }
             result
         }
@@ -2022,7 +2026,6 @@ pub(super) mod verify {
         let s = any_haystack();
         let mut m = any_split(s).matcher;
         let (lo, hi) = (m.front, m.back);
-        unsafe { NMB_CALLS = 0 };
         let direction: u8 = kani::any();
         let step = match direction % 4 {
             0 => m.next(),
@@ -2056,6 +2059,94 @@ pub(super) mod verify {
         cover!(matches!(step, SearchStep::Match(_, _)));
     }
 
+    #[kani::proof]
+    pub fn check_str_iter_initial_invariants() {
+        let s = any_haystack();
+        let n: usize = kani::any();
+
+        let sp = s.split(ModelPattern);
+        assert!(split_invariant(&sp.0));
+        assert_eq!(sp.0.start, 0);
+        assert_eq!(sp.0.end, s.len());
+        assert!(sp.0.allow_trailing_empty);
+        assert!(!sp.0.finished);
+        let sp_rem = sp.remainder().unwrap();
+        assert!(sp_rem.as_ptr() == s.as_ptr() && sp_rem.len() == s.len());
+
+        let rsp = s.rsplit(ModelPattern);
+        assert!(split_invariant(&rsp.0));
+        assert!(rsp.0.allow_trailing_empty);
+        assert!(!rsp.0.finished);
+        let rsp_rem = rsp.remainder().unwrap();
+        assert!(rsp_rem.as_ptr() == s.as_ptr() && rsp_rem.len() == s.len());
+
+        let spi = s.split_inclusive(ModelPattern);
+        assert!(split_invariant(&spi.0));
+        assert!(!spi.0.allow_trailing_empty);
+        assert!(!spi.0.finished);
+        let spi_rem = spi.remainder().unwrap();
+        assert!(spi_rem.as_ptr() == s.as_ptr() && spi_rem.len() == s.len());
+
+        let st = s.split_terminator(ModelPattern);
+        assert!(split_invariant(&st.0));
+        assert!(!st.0.allow_trailing_empty);
+        assert!(!st.0.finished);
+        let st_rem = st.remainder().unwrap();
+        assert!(st_rem.as_ptr() == s.as_ptr() && st_rem.len() == s.len());
+
+        let rst = s.rsplit_terminator(ModelPattern);
+        assert!(split_invariant(&rst.0));
+        assert!(!rst.0.allow_trailing_empty);
+        assert!(!rst.0.finished);
+        let rst_rem = rst.remainder().unwrap();
+        assert!(rst_rem.as_ptr() == s.as_ptr() && rst_rem.len() == s.len());
+
+        let sn = s.splitn(n, ModelPattern);
+        assert!(split_invariant(&sn.0.iter));
+        assert_eq!(sn.0.count, n);
+        let sn_rem = sn.remainder().unwrap();
+        assert!(sn_rem.as_ptr() == s.as_ptr() && sn_rem.len() == s.len());
+
+        let rsn = s.rsplitn(n, ModelPattern);
+        assert!(split_invariant(&rsn.0.iter));
+        assert_eq!(rsn.0.count, n);
+        let rsn_rem = rsn.remainder().unwrap();
+        assert!(rsn_rem.as_ptr() == s.as_ptr() && rsn_rem.len() == s.len());
+
+        let mt = s.matches(ModelPattern);
+        assert!(searcher_invariant(&mt.0.0));
+        assert_eq!(mt.0.0.front, 0);
+        assert_eq!(mt.0.0.back, s.len());
+
+        let rmt = s.rmatches(ModelPattern);
+        assert!(searcher_invariant(&rmt.0.0));
+        assert_eq!(rmt.0.0.front, 0);
+        assert_eq!(rmt.0.0.back, s.len());
+
+        let mi = s.match_indices(ModelPattern);
+        assert!(searcher_invariant(&mi.0.0));
+        assert_eq!(mi.0.0.front, 0);
+        assert_eq!(mi.0.0.back, s.len());
+
+        let rmi = s.rmatch_indices(ModelPattern);
+        assert!(searcher_invariant(&rmi.0.0));
+        assert_eq!(rmi.0.0.front, 0);
+        assert_eq!(rmi.0.0.back, s.len());
+
+        let ws = s.split_ascii_whitespace();
+        assert!(!ws.inner.iter.iter.finished);
+        let ws_rem = ws.remainder().unwrap();
+        assert!(ws_rem.as_ptr() == s.as_ptr() && ws_rem.len() == s.len());
+
+        let chs = s.chars();
+        let chs_str = chs.as_str();
+        assert!(chs_str.as_ptr() == s.as_ptr() && chs_str.len() == s.len());
+
+        cover!(s.is_empty());
+        cover!(!s.is_empty() && s.len() <= 32);
+        cover!(s.len() > (1usize << 48));
+    }
+
     fn split_invariant(it: &SplitInternal<'_, ModelPattern>) -> bool {
         searcher_invariant(&it.matcher)
             && it.start <= it.matcher.front
@@ -2083,7 +2174,7 @@ pub(super) mod verify {
     }
 
     // Exact spec of one next_back / next_back_inclusive call, from the matches the searcher
-    // reported (NMB_CALLS searches, NMB_RES results).  Piece = s[b..end] and new end = a
+    // recorded (nmb_calls searches, nmb_res results). Piece = s[b..end] and new end = a
     // (exclusive) or b (inclusive); with !allow_trailing_empty the first search may only produce
     // the (skipped) empty trailing piece, then a second search follows.
     fn assert_next_back_spec(
@@ -2096,9 +2187,9 @@ pub(super) mod verify {
         skip: bool,
         inclusive: bool,
     ) {
-        let n = unsafe { NMB_CALLS };
-        let r1 = unsafe { NMB_RES[0] };
-        let r2 = unsafe { NMB_RES[1] };
+        let n = split.matcher.nmb_calls;
+        let r1 = split.matcher.nmb_res[0];
+        let r2 = split.matcher.nmb_res[1];
         if was_finished {
             assert!(res.is_none());
             assert_eq!(n, 0);
@@ -2172,7 +2263,14 @@ pub(super) mod verify {
         let split = SplitInternal {
             start,
             end,
-            matcher: ModelSearcher { haystack: s, front, back, last_match: None },
+            matcher: ModelSearcher {
+                haystack: s,
+                front,
+                back,
+                last_match: None,
+                nmb_calls: 0,
+                nmb_res: [None, None],
+            },
             allow_trailing_empty: kani::any(),
             finished: kani::any(),
         };
@@ -2346,22 +2444,75 @@ pub(super) mod verify {
         cover!(raw_utf8_char_width(b) == 0);
     }
 
-    // Verify `Chars::advance_by` via an independent `Chars::nth` caller on a 10-byte
-    // multi-width (1/2/3/4-byte) UTF-8 literal with unbounded `k`.
+    unsafe fn write_utf8_scalar(dst: *mut u8, off: usize, ch: char) -> usize {
+        let u = ch as u32;
+        if u < 0x80 {
+            unsafe { *dst.add(off) = u as u8 };
+            1
+        } else if u < 0x800 {
+            unsafe {
+                *dst.add(off) = (0xC0 | (u >> 6)) as u8;
+                *dst.add(off + 1) = (0x80 | (u & 0x3F)) as u8;
+            }
+            2
+        } else if u < 0x10000 {
+            unsafe {
+                *dst.add(off) = (0xE0 | (u >> 12)) as u8;
+                *dst.add(off + 1) = (0x80 | ((u >> 6) & 0x3F)) as u8;
+                *dst.add(off + 2) = (0x80 | (u & 0x3F)) as u8;
+            }
+            3
+        } else {
+            unsafe {
+                *dst.add(off) = (0xF0 | (u >> 18)) as u8;
+                *dst.add(off + 1) = (0x80 | ((u >> 12) & 0x3F)) as u8;
+                *dst.add(off + 2) = (0x80 | ((u >> 6) & 0x3F)) as u8;
+                *dst.add(off + 3) = (0x80 | (u & 0x3F)) as u8;
+            }
+            4
+        }
+    }
+
+    // Verify `Chars::advance_by` via an independent `Chars::nth` caller over an 8-byte buffer
+    // with two arbitrary Unicode scalars (`kani::any::<char>()`) at fixed offsets 0 and 4,
+    // symbolic ASCII fill bytes, and unbounded `k`, with zero concrete string/char literals.
     #[kani::proof]
     #[kani::stub(crate::str::validations::utf8_char_width, stub_utf8_char_width)]
     pub fn check_chars_nth_caller() {
-        let s = "a\u{00E9}\u{20AC}\u{1F600}";
+        let c0: char = kani::any();
+        let c1: char = kani::any();
         let k: usize = kani::any();
+
+        let p = unsafe { malloc(8) };
+        kani::assume(!p.is_null());
+        unsafe {
+            *p = kani::any::<u8>() & 0x7F;
+            *p.add(1) = kani::any::<u8>() & 0x7F;
+            *p.add(2) = kani::any::<u8>() & 0x7F;
+            *p.add(3) = kani::any::<u8>() & 0x7F;
+            *p.add(4) = kani::any::<u8>() & 0x7F;
+            *p.add(5) = kani::any::<u8>() & 0x7F;
+            *p.add(6) = kani::any::<u8>() & 0x7F;
+            *p.add(7) = kani::any::<u8>() & 0x7F;
+        }
+        let _w0 = unsafe { write_utf8_scalar(p, 0, c0) };
+        let _w1 = unsafe { write_utf8_scalar(p, 4, c1) };
+
+        let s = unsafe { crate::str::from_utf8_unchecked(crate::slice::from_raw_parts(p, 8)) };
         let res = s.chars().nth(k);
+        let mut res_len = 0usize;
         if let Some(ch) = res {
             let u = ch as u32;
             assert!(u <= 0x10FFFF && !(0xD800..=0xDFFF).contains(&u));
+            assert!(ch == c0 || ch == c1 || ch.is_ascii());
+            res_len = ch.len_utf8();
         }
-        cover!(k == 0 && res == Some('a'));
-        cover!(k == 2 && res == Some('\u{20AC}'));
-        cover!(k == 3 && res == Some('\u{1F600}'));
-        cover!(res.is_none());
+        cover!(res_len == 1);
+        cover!(res_len == 2);
+        cover!(res_len == 3);
+        cover!(res_len == 4);
+        cover!(k >= 32 && res.is_none());
+        cover!(k > 0 && res == Some(c1));
     }
 
     #[kani::proof_for_contract(Bytes::__iterator_get_unchecked)]
@@ -2492,8 +2643,6 @@ pub(super) mod verify {
         let skip_trailing = !split.allow_trailing_empty;
         let was_finished = split.finished;
         let (so, eo) = (split.start, split.end);
-        unsafe { NMB_CALLS = 0 };
-        unsafe { NMB_RES = [None, None] };
         let res = split.next_back();
         assert!(split_invariant(&split));
         assert_next_back_spec(s, &split, res, so, eo, was_finished, skip_trailing, false);
@@ -2502,7 +2651,7 @@ pub(super) mod verify {
         if skip_trailing {
             if let Some(sub) = res {
                 if sub.is_empty() {
-                    assert!(unsafe { NMB_CALLS } >= 2);
+                    assert!(split.matcher.nmb_calls >= 2);
                 }
             }
         }
@@ -2526,15 +2675,13 @@ pub(super) mod verify {
         let skip_trailing = !split.allow_trailing_empty;
         let was_finished = split.finished;
         let (so, eo) = (split.start, split.end);
-        unsafe { NMB_CALLS = 0 };
-        unsafe { NMB_RES = [None, None] };
         let res = split.next_back_inclusive();
         assert!(split_invariant(&split));
         assert_next_back_spec(s, &split, res, so, eo, was_finished, skip_trailing, true);
         if skip_trailing {
             if let Some(sub) = res {
                 if sub.is_empty() {
-                    assert!(unsafe { NMB_CALLS } >= 2);
+                    assert!(split.matcher.nmb_calls >= 2);
                 }
             }
         }
