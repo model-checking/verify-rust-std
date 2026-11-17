@@ -3402,3 +3402,13 @@ mod verify {
     check_iter_with_ty!(verify_char, char, 50);
     check_iter_with_ty!(verify_tup, (char, u8), 50);
 }
+
+#[cfg(kani)]
+impl<'a, T> Iter<'a, T> {
+    /// Exposes the raw cursor and end pointers for sibling `core::str::iter` Kani invariants.
+    pub(crate) fn kani_parts_for_ch22(&self) -> (*const T, *const T) {
+        // NonNull<T> is transparent over its pointer; T is Sized here.
+        let cursor = unsafe { crate::mem::transmute::<NonNull<T>, *const T>(self.ptr) };
+        (cursor, self.end_or_len)
+    }
+}
