@@ -3045,13 +3045,14 @@ mod verify {
     fn swap_with_arbitrary_ptrs<T: kani::Arbitrary>(harness: impl Fn(*mut T, *mut T)) {
         let mut generator1 = kani::PointerGenerator::<100>::new();
         let mut generator2 = kani::PointerGenerator::<100>::new();
-        let kani::ArbitraryPointer { ptr: x, status: x_status, .. } =
+        let kani::ArbitraryPointer { ptr: x, status: x_status, is_initialized: x_init, .. } =
             generator1.any_alloc_status::<T>();
-        let kani::ArbitraryPointer { ptr: y, status: y_status, .. } = if kani::any() {
-            generator1.any_alloc_status::<T>()
-        } else {
-            generator2.any_alloc_status::<T>()
-        };
+        let kani::ArbitraryPointer { ptr: y, status: y_status, is_initialized: y_init, .. } =
+            if kani::any() {
+                generator1.any_alloc_status::<T>()
+            } else {
+                generator2.any_alloc_status::<T>()
+            };
         kani::assume(
             x_status != kani::AllocationStatus::Dangling
                 && x_status != kani::AllocationStatus::DeadObject,
@@ -3060,6 +3061,12 @@ mod verify {
             y_status != kani::AllocationStatus::Dangling
                 && y_status != kani::AllocationStatus::DeadObject,
         );
+        // `swap` requires `can_dereference(x)` and `can_dereference(y)`: an in-bounds pointee must
+        // hold a valid, hence initialized, `T`. Under `-Z uninit-checks` that precondition is
+        // asserted rather than assumed (Kani cannot assume initialization), so exclude the
+        // uninitialized pointees the generator may produce, as the precondition does.
+        kani::assume(x_init || x_status != kani::AllocationStatus::InBounds);
+        kani::assume(y_init || y_status != kani::AllocationStatus::InBounds);
         // Non-vacuity witness for the assumed pointer space.
         kani::cover(true, "swap contract: the arbitrary-pointer input space is non-empty");
         harness(x, y);
