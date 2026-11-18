@@ -2,7 +2,7 @@
 
 - **Status:** *Open*
 - **Solution:** *Option field to point to the PR that solved this challenge.*
-- **Tracking Issue:** *Link to issue*
+- **Tracking Issue:** [#773](https://github.com/model-checking/verify-rust-std/issues/773)
 - **Start date:** *2026/11/17*
 - **Reward:** *TBD*
 
