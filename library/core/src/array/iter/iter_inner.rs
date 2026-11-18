@@ -209,9 +209,11 @@ impl<T> PolymorphicIter<[MaybeUninit<T>]> {
             ($k:expr) => {
                 if start + $k < end {
                     let idx = start + $k;
-                    let _ = self.alive.take_prefix(1);
-                    // SAFETY: take_prefix removed an initialized element from the
-                    // alive range, transferring its ownership to the callback.
+                    // A direct range assignment keeps the model's write target
+                    // visible to CBMC's loop-frame inference.
+                    self.alive = IndexRange::kani_from_bounds(idx + 1, end);
+                    // SAFETY: The range update transfers the initialized
+                    // element's ownership to the callback.
                     let ptr = data.wrapping_add(idx);
                     let elem = unsafe { crate::intrinsics::read_via_copy(ptr) };
                     accum = f(accum, elem);

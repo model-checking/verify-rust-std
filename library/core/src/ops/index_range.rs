@@ -40,6 +40,13 @@ impl IndexRange {
         IndexRange { start: 0, end }
     }
 
+    // The fold model uses this constructor inside a contracted loop.
+    #[cfg(kani)]
+    pub(crate) fn kani_from_bounds(start: usize, end: usize) -> Self {
+        assert!(start <= end);
+        Self { start, end }
+    }
+
     #[inline]
     pub(crate) const fn start(&self) -> usize {
         self.start
