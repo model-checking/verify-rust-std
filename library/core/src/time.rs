@@ -1565,6 +1565,10 @@ impl<'a> Sum<&'a Duration> for Duration {
 ///
 /// A prefix and postfix may be added. The whole thing is padded
 /// to the formatter's `width`, if specified.
+// Upstream moved this out of `Debug::fmt` (nightly-2026-11-12), so Flux now checks it; its
+// buffer indexing depends on the documented `divisor`/`fractional_part` bounds, which have
+// no Flux spec yet.
+#[cfg_attr(flux, flux::trusted)]
 fn fmt_decimal(
     f: &mut fmt::Formatter<'_>,
     integer_part: u64,

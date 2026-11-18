@@ -150,6 +150,9 @@
 #![feature(pin_macro_internals)]
 #![feature(prelude_import)]
 #![feature(register_tool)]
+// Flux injects `#![feature(register_tool)]` itself, which core now also enables (for
+// `#![register_tool(lint)]`); allow the duplicate under Flux only.
+#![cfg_attr(flux, allow(duplicate_features))]
 #![feature(repr_simd)]
 #![feature(rustc_attrs)]
 #![feature(rustdoc_internals)]
