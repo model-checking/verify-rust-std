@@ -422,7 +422,6 @@ mod verify {
     // (at most 32 bits) and the callback count. Compare the actual implementation
     // directly with the model; neither implementation is stubbed in this proof.
     #[kani::proof]
-    #[kani::unwind(33)]
     fn check_consuming_fold_model() {
         let flags: [bool; 32] = kani::any();
         let start: usize = kani::any();
@@ -438,6 +437,7 @@ mod verify {
         let actual: &mut PolymorphicIter<[MaybeUninit<bool>]> = &mut actual;
         let model: &mut PolymorphicIter<[MaybeUninit<bool>]> = &mut model;
         let observe = |(sum, trace, calls): (u8, u64, u8), flag: bool| {
+            assert!(calls < 32, "fold called the callback more than 32 times");
             (sum + flag as u8, (trace << 1) | flag as u64, calls + 1)
         };
         let expected = actual.fold((0, 0, 0), observe);

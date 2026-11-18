@@ -1686,23 +1686,33 @@ mod verify {
     unsafe extern "C" {
         fn malloc(size: usize) -> *mut u8;
         fn __CPROVER_havoc_object(p: *mut crate::ffi::c_void);
+        fn __CPROVER_havoc_slice(p: *mut u8, len: usize);
     }
 
     fn symbolic_text() -> &'static str {
+        symbolic_text_with_storage::<false>()
+    }
+
+    fn symbolic_text_with_storage<const ALLOCATE_EMPTY: bool>() -> &'static str {
         let len: usize = kani::any();
         kani::assume(len <= MAX_ALLOCATION_BYTES);
-        let p = if len == 0 {
+        let p = if len == 0 && !ALLOCATE_EMPTY {
             // An aligned nonnull dangling pointer is sufficient for an empty str.
             1usize as *mut u8
         } else {
-            let p = unsafe { malloc(len) };
+            let storage_len = if ALLOCATE_EMPTY { len.max(1) } else { len };
+            let p = unsafe { malloc(storage_len) };
             kani::assume(!p.is_null());
             // Initialize the shadow-memory state, then give every byte an
             // independent arbitrary initialized value. Neither builtin unwinds
             // a Rust loop over the symbolic length.
             unsafe {
-                p.write_bytes(0, len);
-                __CPROVER_havoc_object(p.cast());
+                p.write_bytes(0, storage_len);
+                if ALLOCATE_EMPTY {
+                    __CPROVER_havoc_slice(p, storage_len);
+                } else {
+                    __CPROVER_havoc_object(p.cast());
+                }
             }
             p
         };
@@ -1855,21 +1865,6 @@ mod verify {
         assert!(modeled_utf8_width(byte) == super::super::validations::utf8_char_width(byte));
     }
 
-    #[kani::proof]
-    fn check_slice_view_model() {
-        let bytes = symbolic_text().as_bytes();
-        let (start, end): (usize, usize) = kani::any();
-        kani::assume(start <= end && end <= bytes.len());
-        let iter = bytes[start..end].iter();
-        let (actual, model) = (iter.as_slice(), iter.kani_as_slice_from_end());
-        assert!(actual.as_ptr() == model.as_ptr() && actual.len() == model.len());
-        let index: usize = kani::any();
-        if index < actual.len() {
-            assert!(actual[index] == model[index]);
-        }
-        kani::cover(start < end && bytes.len() == MAX_ALLOCATION_BYTES, "largest input");
-    }
-
     // Read the representation as integers before requiring any typed bool value.
     pub(super) fn flags_valid(flags: *const [bool; 32]) -> bool {
         let bytes = unsafe { crate::intrinsics::read_via_copy(flags as *const [u8; 32]) };
@@ -1883,11 +1878,11 @@ mod verify {
         crate::array::iter::iter_inner::PolymorphicIter::kani_fold_at_most_32
     )]
     #[kani::stub(crate::str::validations::utf8_char_width, modeled_utf8_width)]
-    #[kani::stub(crate::slice::Iter::as_slice, crate::slice::Iter::kani_as_slice_from_end)]
     fn harness_chars_advance_by() {
         // Every valid Chars state is a fresh iterator over its remaining valid
         // string. Both the length and requested character count are symbolic.
-        let text = symbolic_text();
+        // Use one allocation path for the entry view as the loops abstract the cursor.
+        let text = symbolic_text_with_storage::<true>();
         let mut chars = text.chars();
         let n: usize = kani::any(); // No request/count bound.
         let result = chars.advance_by(n);
@@ -1929,7 +1924,6 @@ mod verify {
         crate::array::iter::iter_inner::PolymorphicIter::kani_fold_at_most_32
     )]
     #[kani::stub(crate::str::validations::utf8_char_width, modeled_utf8_width)]
-    #[kani::stub(crate::slice::Iter::as_slice, crate::slice::Iter::kani_as_slice_from_end)]
     fn harness_chars_advance_by_empty() {
         let address: NonZero<usize> = kani::any();
         let ptr = crate::ptr::without_provenance(address.get());
@@ -2423,7 +2417,6 @@ mod verify {
         }
 
         #[kani::proof]
-        #[kani::unwind(33)]
         fn check_sum_32_real() {
             check_sum_flags();
         }
@@ -2437,6 +2430,7 @@ mod verify {
             check_sum_flags();
         }
 
+        const MAX_SEARCH_BYTES: usize = 16;
         const UTF8_PAD: usize = 4;
 
         fn verifier_utf8_valid<const N: usize>(buf: &[u8; N], len: usize) -> bool {
@@ -2494,20 +2488,68 @@ mod verify {
         }
 
         fn verifier_last_byte(needle: u8, bytes: &[u8]) -> Option<usize> {
-            let mut index = bytes.len();
-            while index > 0 {
-                index -= 1;
-                if bytes[index] == needle {
+            verifier_find_byte(needle, bytes, true)
+        }
+
+        fn verifier_first_byte(needle: u8, bytes: &[u8]) -> Option<usize> {
+            verifier_find_byte(needle, bytes, false)
+        }
+
+        fn verifier_find_byte(needle: u8, bytes: &[u8], reverse: bool) -> Option<usize> {
+            assert!(bytes.len() <= MAX_SEARCH_BYTES);
+            for offset in 0..MAX_SEARCH_BYTES {
+                let index = if reverse { MAX_SEARCH_BYTES - 1 - offset } else { offset };
+                if let Some(&byte) = bytes.get(index)
+                    && byte == needle
+                {
                     return Some(index);
                 }
             }
             None
         }
 
+        fn verifier_slice_eq<T: PartialEq<U>, U>(left: &[T], right: &[U]) -> bool {
+            if left.len() != right.len() {
+                return false;
+            }
+            assert!(left.len() <= MAX_SEARCH_BYTES);
+            for index in 0..MAX_SEARCH_BYTES {
+                if index < left.len() && left[index] != right[index] {
+                    return false;
+                }
+            }
+            true
+        }
+
+        fn fixed_char_search_step_budget() -> Option<usize> {
+            // Each continued step consumes at least one byte. A final empty probe can return.
+            Some(MAX_SEARCH_BYTES + 1)
+        }
+
+        fn check_byte_slice_dependencies_at<const LEN: usize>() {
+            let left: [u8; LEN] = kani::any();
+            let right: [u8; LEN] = kani::any();
+            let needle: u8 = kani::any();
+            let actual_first = crate::slice::memchr::memchr(needle, &left);
+            assert_eq!(verifier_first_byte(needle, &left), actual_first);
+            assert_eq!(verifier_slice_eq(&left, &right), left[..] == right[..]);
+        }
+
         #[kani::proof]
-        #[kani::unwind(20)]
+        fn check_byte_slice_dependencies() {
+            // Exercise the real dependency bodies with every concrete length in the domain.
+            const { assert!(MAX_SEARCH_BYTES == 16) }
+            macro_rules! check_lengths {
+                ($($len:literal),+ $(,)?) => {
+                    $(check_byte_slice_dependencies_at::<$len>();)+
+                };
+            }
+            check_lengths!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
+        }
+
+        #[kani::proof]
         fn harness_reverse_byte_model() {
-            let bytes: [u8; 16] = kani::any();
+            let bytes: [u8; MAX_SEARCH_BYTES] = kani::any();
             let len: usize = kani::any();
             // INPUT-LENGTH: only prefixes of this initialized array are inputs.
             // INPUT DOMAIN: allocated prefix or index extent.
@@ -2519,10 +2561,9 @@ mod verify {
                 assert!(index < len);
                 assert_eq!(bytes[index], needle);
             }
-            for index in 0..len {
-                if result.is_none_or(|last| last < index) {
-                    assert_ne!(bytes[index], needle);
-                }
+            let index: usize = kani::any();
+            if index < len && result.is_none_or(|last| last < index) {
+                assert_ne!(bytes[index], needle);
             }
             kani::cover(result.is_some(), "byte model: matching byte");
             kani::cover(result.is_none(), "byte model: no match");
@@ -2532,7 +2573,7 @@ mod verify {
         }
 
         fn assert_char_searcher_direction(reverse: bool) {
-            let buf: [u8; 16 + UTF8_PAD] = kani::any();
+            let buf: [u8; MAX_SEARCH_BYTES + UTF8_PAD] = kani::any();
             let s = verifier_nondet_utf8(&buf);
             let (front, back) = any_window(s);
             let needle: char = kani::any();
@@ -2547,14 +2588,23 @@ mod verify {
         }
 
         #[kani::proof]
-        #[kani::unwind(18)]
+        #[kani::stub(
+            crate::str::pattern::verify::char_search_step_budget,
+            fixed_char_search_step_budget
+        )]
+        #[kani::stub(<[u8] as crate::cmp::PartialEq<[u8]>>::eq, verifier_slice_eq)]
+        #[kani::stub(crate::slice::memchr::memchr, verifier_first_byte)]
         fn harness_char_searcher_forward_refinement() {
             assert_char_searcher_direction(false);
             kani::cover(true, "C22-END: harness_char_searcher_forward_refinement completed");
         }
 
         #[kani::proof]
-        #[kani::unwind(18)]
+        #[kani::stub(
+            crate::str::pattern::verify::char_search_step_budget,
+            fixed_char_search_step_budget
+        )]
+        #[kani::stub(<[u8] as crate::cmp::PartialEq<[u8]>>::eq, verifier_slice_eq)]
         #[kani::stub(crate::slice::memchr::memrchr, verifier_last_byte)]
         fn harness_char_searcher_reverse_refinement() {
             assert_char_searcher_direction(true);

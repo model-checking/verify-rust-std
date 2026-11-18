@@ -170,10 +170,10 @@ impl<T> AsRef<[T]> for Iter<'_, T> {
 
 #[cfg(kani)]
 impl<'a, T> Iter<'a, T> {
-    /// The field updated by forward iteration of non-ZSTs. Exposing its address
-    /// lets a loop contract name it without relying on the layout of `Iter`.
-    pub(crate) fn kani_cursor_slot(&mut self) -> *mut NonNull<T> {
-        &raw mut self.ptr
+    /// Expose the updated cursor as a raw pointer for Kani's loop write set.
+    pub(crate) fn kani_cursor_slot(&mut self) -> *mut *const T {
+        // NonNull<T> is transparent over its pointer.
+        (&raw mut self.ptr).cast()
     }
 
     /// Clause-only copy: CBMC adds a write-set parameter to ordinary calls,
@@ -189,20 +189,6 @@ impl<'a, T> Iter<'a, T> {
         let ptr = unsafe { &raw const (*this).ptr } as *const *const T;
         let end = unsafe { &raw const (*this).end_or_len };
         unsafe { (crate::intrinsics::read_via_copy(ptr), crate::intrinsics::read_via_copy(end)) }
-    }
-
-    /// A model of `as_slice` for byte-sized elements in a loop that havocs the
-    /// cursor. Rebuild it from the endpoint, which retains its points-to set.
-    pub(crate) fn kani_as_slice_from_end(&self) -> &'a [T] {
-        assert!(size_of::<T>() == 1);
-        let ptr = unsafe { mem::transmute::<NonNull<T>, *const T>(self.ptr) };
-        let end = self.end_or_len;
-        let len = (end as usize).wrapping_sub(ptr as usize);
-        assert!(len <= isize::MAX as usize);
-        let start = end.wrapping_sub(len);
-        assert!(start == ptr);
-        // SAFETY: The iterator's live range has the same pointer and length.
-        unsafe { &*crate::ptr::slice_from_raw_parts(start, len) }
     }
 }
 

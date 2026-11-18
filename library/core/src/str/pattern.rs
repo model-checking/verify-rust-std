@@ -442,7 +442,11 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
     }
     #[inline]
     fn next_match(&mut self) -> Option<(usize, usize)> {
+        #[cfg(kani)]
+        let mut step_budget = verify::char_search_step_budget();
         loop {
+            #[cfg(kani)]
+            verify::take_char_search_step(&mut step_budget);
             // get the haystack after the last character found
             let bytes = self.haystack.as_bytes().get(self.finger..self.finger_back)?;
             // the last byte of the utf8 encoded needle
@@ -510,7 +514,11 @@ unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
     #[inline]
     fn next_match_back(&mut self) -> Option<(usize, usize)> {
         let haystack = self.haystack.as_bytes();
+        #[cfg(kani)]
+        let mut step_budget = verify::char_search_step_budget();
         loop {
+            #[cfg(kani)]
+            verify::take_char_search_step(&mut step_budget);
             // get the haystack up to but not including the last character searched
             let bytes = haystack.get(self.finger..self.finger_back)?;
             // the last byte of the utf8 encoded needle
@@ -2104,6 +2112,19 @@ unsafe fn small_slice_eq(x: &[u8], y: &[u8]) -> bool {
 #[unstable(feature = "kani", issue = "none")]
 pub mod verify {
     use super::*;
+
+    // A regression can enable a checked local budget for the search loop.
+    #[inline(never)]
+    pub(in crate::str) fn char_search_step_budget() -> Option<usize> {
+        None
+    }
+
+    pub(super) fn take_char_search_step(budget: &mut Option<usize>) {
+        if let Some(remaining) = budget {
+            assert!(*remaining > 0, "CharSearcher exceeded the regression step budget");
+            *remaining -= 1;
+        }
+    }
 
     #[cfg(all(kani, target_arch = "x86_64"))] // only called on x86
     #[kani::proof]
