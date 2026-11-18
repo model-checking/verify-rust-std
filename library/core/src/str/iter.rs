@@ -2636,8 +2636,12 @@ pub(super) mod verify {
         cover!(res.is_none());
     }
 
+    // Covers `SplitInternal::next_back`'s first-search arm, the one that asks the pattern
+    // matcher for a match backwards (`self.matcher.next_match_back()`). `SplitInternal` has no
+    // method of that name (issue #279 notes the challenge page's wording); the harness name
+    // follows the call it exercises.
     #[kani::proof]
-    pub fn check_split_internal_next_match_back() {
+    pub fn check_split_internal_next_back_via_matcher() {
         let s = any_haystack();
         let mut split = any_split(s);
         let skip_trailing = !split.allow_trailing_empty;
@@ -2903,7 +2907,7 @@ pub(super) mod verify {
     #[kani::stub(crate::str::validations::utf8_char_width, stub_utf8_char_width)]
     #[kani::stub(
         crate::array::iter::iter_inner::PolymorphicIter::fold,
-        crate::array::iter::iter_inner::PolymorphicIter::kani_fold_bounded32
+        crate::array::iter::iter_inner::PolymorphicIter::kani_fold_arity32
     )]
     pub fn check_chars_advance_by() {
         let s = any_haystack();

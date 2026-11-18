@@ -328,14 +328,20 @@ impl<T> PolymorphicIter<[MaybeUninit<T>]> {
 #[cfg(kani)]
 use crate::kani;
 
-// Loop-free sound over-approximation of `PolymorphicIter::fold` on `bool/u8` sum (total <= 32).
+// Loop-free model of `PolymorphicIter::fold` for one array chunk, on a `bool`/`u8` sum.
+//
+// "32" is the ARITY of the chunk (`as_chunks::<32>()` yields chunks of exactly 32 elements),
+// NOT a bound on the input string: `Chars::advance_by` still takes a `str` of symbolic length
+// up to `MAX_ALLOCATION_BYTES`. The model is exact at that arity -- `check_kani_fold_arity32_soundness`
+// shows real `PolymorphicIter::fold` over a 32-element chunk always returns `res <= total` and
+// consumes the iterator, and the same harness shows every value the model admits is realized by
+// the real `fold` for some 32-Boolean valuation (range surjectivity).
+//
 // Implemented as an inherent helper rather than an attached `PolymorphicIter::fold` contract
-// (avoiding generic-method contract limits, cf. kani#4084), and paired with
-// `check_kani_fold_bounded32_soundness` proving real `PolymorphicIter::fold` satisfies
-// `res <= total && len == 0` for all 2^32 Boolean valuations.
+// (avoiding generic-method contract limits, cf. kani#4084).
 #[cfg(kani)]
 impl<T> PolymorphicIter<[MaybeUninit<T>]> {
-    pub(super) fn kani_fold_bounded32<B, F>(&mut self, mut accum: B, f: F) -> B
+    pub(super) fn kani_fold_arity32<B, F>(&mut self, mut accum: B, f: F) -> B
     where
         F: FnMut(B, T) -> B,
     {
@@ -357,7 +363,7 @@ impl<T> PolymorphicIter<[MaybeUninit<T>]> {
 
 #[cfg(kani)]
 #[kani::proof]
-pub fn check_kani_fold_bounded32_soundness() {
+pub fn check_kani_fold_arity32_soundness() {
     let values: [bool; 32] = [
         kani::any::<bool>(),
         kani::any::<bool>(),
@@ -405,7 +411,7 @@ pub fn check_kani_fold_bounded32_soundness() {
     kani::cover(res > 0 && res < 32, "mixed values");
 
     // Range surjectivity witness: every modeled output `(IndexRange::zero_to(0), target)`
-    // admitted by `kani_fold_bounded32` is realized by real `PolymorphicIter::fold`.
+    // admitted by `kani_fold_arity32` is realized by real `PolymorphicIter::fold`.
     let target: u8 = kani::any::<u8>() % 33;
     let witness: [bool; 32] = [
         0 < target,
