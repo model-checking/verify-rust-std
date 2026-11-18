@@ -1,13 +1,9 @@
 #![allow(clippy::enum_clike_unportable_variant)]
 
-<<<<<<< HEAD
 use safety::{ensures, invariant, requires};
 
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::MetaSized;
-=======
->>>>>>> subtree/library
 use crate::num::NonZero;
 #[cfg(kani)]
 use crate::ub_checks::Invariant;

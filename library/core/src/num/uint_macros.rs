@@ -1842,12 +1842,8 @@ macro_rules! uint_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
-<<<<<<< HEAD
-        #[requires((self & other) == 0)]
-        pub const unsafe fn unchecked_disjoint_bitor(self, other: Self) -> Self {
-=======
+        #[requires((self & rhs) == 0)]
         pub const unsafe fn unchecked_disjoint_bitor(self, rhs: Self) -> Self {
->>>>>>> subtree/library
             assert_unsafe_precondition!(
                 check_language_ub,
                 concat!(stringify!($SelfT), "::unchecked_disjoint_bitor cannot bitor overlapping ones"),

@@ -431,7 +431,7 @@ impl<T: PointeeSized> NonNull<T> {
     #[rustc_const_stable(feature = "const_nonnull_as_ptr", since = "1.32.0")]
     #[must_use]
     #[inline(always)]
-<<<<<<< HEAD
+    #[lint::never_returns_null_ptr]
     // Ensures the address of the resulting pointer is the same as the
     // original. `addr_eq` (rather than `==`) makes this well-defined for
     // wide pointers too: comparing `*mut dyn Trait` with `==` also compares
@@ -440,9 +440,6 @@ impl<T: PointeeSized> NonNull<T> {
     // conversion that trivially preserves metadata. The transmute mirrors the
     // body; `self.pointer` is a pattern type this contract cannot use directly.
     #[ensures(|result: &*mut T| core::ptr::addr_eq(*result, unsafe { mem::transmute::<Self, *mut T>(self) }))]
-=======
-    #[lint::never_returns_null_ptr]
->>>>>>> subtree/library
     pub const fn as_ptr(self) -> *mut T {
         // This is a transmute for the same reasons as `NonZero::get`.
 
@@ -1737,13 +1734,9 @@ impl<T> NonNull<[T]> {
     #[inline]
     #[must_use]
     #[unstable(feature = "slice_ptr_get", issue = "74265")]
-<<<<<<< HEAD
-    #[rustc_never_returns_null_ptr]
+    #[lint::never_returns_null_ptr]
     // Address preservation; see as_ptr regarding the use of addr_eq.
     #[ensures(|result: &*mut T| core::ptr::addr_eq(*result, self.as_ptr()))]
-=======
-    #[lint::never_returns_null_ptr]
->>>>>>> subtree/library
     pub const fn as_mut_ptr(self) -> *mut T {
         self.as_non_null_ptr().as_ptr()
     }
