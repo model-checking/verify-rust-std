@@ -5157,14 +5157,7 @@ mod verify {
         };
     }
 
-    gen_assume_init_harness!(harness_rc_assume_init_i8, i8);
-    gen_assume_init_harness!(harness_rc_assume_init_i16, i16);
-    gen_assume_init_harness!(harness_rc_assume_init_i32, i32);
-    gen_assume_init_harness!(harness_rc_assume_init_i64, i64);
-    gen_assume_init_harness!(harness_rc_assume_init_i128, i128);
     gen_assume_init_harness!(harness_rc_assume_init_u8, u8);
-    gen_assume_init_harness!(harness_rc_assume_init_u16, u16);
-    gen_assume_init_harness!(harness_rc_assume_init_u32, u32);
     gen_assume_init_harness!(harness_rc_assume_init_u64, u64);
     gen_assume_init_harness!(harness_rc_assume_init_u128, u128);
     gen_assume_init_harness!(harness_rc_assume_init_unit, ());
@@ -5190,14 +5183,7 @@ mod verify {
         };
     }
 
-    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_i8, i8);
-    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_i16, i16);
-    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_i32, i32);
-    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_i64, i64);
-    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_i128, i128);
     gen_assume_init_slice_harness!(harness_rc_assume_init_slice_u8, u8);
-    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_u16, u16);
-    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_u32, u32);
     gen_assume_init_slice_harness!(harness_rc_assume_init_slice_u64, u64);
     gen_assume_init_slice_harness!(harness_rc_assume_init_slice_u128, u128);
     gen_assume_init_slice_harness!(harness_rc_assume_init_slice_unit, ());
@@ -5233,14 +5219,7 @@ mod verify {
         };
     }
 
-    gen_from_raw_sized_harness!(harness_rc_from_raw_i8, i8);
-    gen_from_raw_sized_harness!(harness_rc_from_raw_i16, i16);
-    gen_from_raw_sized_harness!(harness_rc_from_raw_i32, i32);
-    gen_from_raw_sized_harness!(harness_rc_from_raw_i64, i64);
-    gen_from_raw_sized_harness!(harness_rc_from_raw_i128, i128);
     gen_from_raw_sized_harness!(harness_rc_from_raw_u8, u8);
-    gen_from_raw_sized_harness!(harness_rc_from_raw_u16, u16);
-    gen_from_raw_sized_harness!(harness_rc_from_raw_u32, u32);
     gen_from_raw_sized_harness!(harness_rc_from_raw_u64, u64);
     gen_from_raw_sized_harness!(harness_rc_from_raw_u128, u128);
     gen_from_raw_sized_harness!(harness_rc_from_raw_bool, bool);
@@ -5248,8 +5227,6 @@ mod verify {
     gen_from_raw_sized_harness!(harness_rc_from_raw_array, [u8; 4]);
 
     gen_from_raw_unsized_harness!(harness_rc_from_raw_vec_u8, [u8]);
-    gen_from_raw_unsized_harness!(harness_rc_from_raw_vec_u16, [u16]);
-    gen_from_raw_unsized_harness!(harness_rc_from_raw_vec_u32, [u32]);
     gen_from_raw_unsized_harness!(harness_rc_from_raw_vec_u64, [u64]);
     gen_from_raw_unsized_harness!(harness_rc_from_raw_vec_u128, [u128]);
 
@@ -5294,14 +5271,7 @@ mod verify {
         };
     }
 
-    gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_i8, i8);
-    gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_i16, i16);
-    gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_i32, i32);
-    gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_i64, i64);
-    gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_i128, i128);
     gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_u8, u8);
-    gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_u16, u16);
-    gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_u32, u32);
     gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_u64, u64);
     gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_u128, u128);
     gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_bool, bool);
@@ -5309,8 +5279,6 @@ mod verify {
     gen_increment_strong_count_sized_harness!(harness_rc_increment_strong_count_array, [u8; 4]);
 
     gen_increment_strong_count_unsized_harness!(harness_rc_increment_strong_count_vec_u8, [u8]);
-    gen_increment_strong_count_unsized_harness!(harness_rc_increment_strong_count_vec_u16, [u16]);
-    gen_increment_strong_count_unsized_harness!(harness_rc_increment_strong_count_vec_u32, [u32]);
     gen_increment_strong_count_unsized_harness!(harness_rc_increment_strong_count_vec_u64, [u64]);
     gen_increment_strong_count_unsized_harness!(harness_rc_increment_strong_count_vec_u128, [u128]);
 
@@ -5355,14 +5323,7 @@ mod verify {
         };
     }
 
-    gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_i8, i8);
-    gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_i16, i16);
-    gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_i32, i32);
-    gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_i64, i64);
-    gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_i128, i128);
     gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_u8, u8);
-    gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_u16, u16);
-    gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_u32, u32);
     gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_u64, u64);
     gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_u128, u128);
     gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_bool, bool);
@@ -5370,8 +5331,6 @@ mod verify {
     gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_array, [u8; 4]);
 
     gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_vec_u8, [u8]);
-    gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_vec_u16, [u16]);
-    gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_vec_u32, [u32]);
     gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_vec_u64, [u64]);
     gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_vec_u128, [u128]);
 
@@ -5405,14 +5364,7 @@ mod verify {
         };
     }
 
-    gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_i8, i8);
-    gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_i16, i16);
-    gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_i32, i32);
-    gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_i64, i64);
-    gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_i128, i128);
     gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_u8, u8);
-    gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_u16, u16);
-    gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_u32, u32);
     gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_u64, u64);
     gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_u128, u128);
     gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_unit, ());
@@ -5420,8 +5372,6 @@ mod verify {
     gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_array, [u8; 4]);
 
     gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_vec_u8, [u8]);
-    gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_vec_u16, [u16]);
-    gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_vec_u32, [u32]);
     gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_vec_u64, [u64]);
     gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_vec_u128, [u128]);
 
@@ -5466,14 +5416,7 @@ mod verify {
         };
     }
 
-    gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_i8, i8);
-    gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_i16, i16);
-    gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_i32, i32);
-    gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_i64, i64);
-    gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_i128, i128);
     gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_u8, u8);
-    gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_u16, u16);
-    gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_u32, u32);
     gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_u64, u64);
     gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_u128, u128);
     gen_increment_strong_count_in_sized_harness!(harness_rc_increment_strong_count_in_bool, bool);
@@ -5486,14 +5429,6 @@ mod verify {
     gen_increment_strong_count_in_unsized_harness!(
         harness_rc_increment_strong_count_in_vec_u8,
         [u8]
-    );
-    gen_increment_strong_count_in_unsized_harness!(
-        harness_rc_increment_strong_count_in_vec_u16,
-        [u16]
-    );
-    gen_increment_strong_count_in_unsized_harness!(
-        harness_rc_increment_strong_count_in_vec_u32,
-        [u32]
     );
     gen_increment_strong_count_in_unsized_harness!(
         harness_rc_increment_strong_count_in_vec_u64,
@@ -5543,14 +5478,7 @@ mod verify {
         };
     }
 
-    gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_i8, i8);
-    gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_i16, i16);
-    gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_i32, i32);
-    gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_i64, i64);
-    gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_i128, i128);
     gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_u8, u8);
-    gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_u16, u16);
-    gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_u32, u32);
     gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_u64, u64);
     gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_u128, u128);
     gen_decrement_strong_count_in_sized_harness!(harness_rc_decrement_strong_count_in_bool, bool);
@@ -5563,14 +5491,6 @@ mod verify {
     gen_decrement_strong_count_in_unsized_harness!(
         harness_rc_decrement_strong_count_in_vec_u8,
         [u8]
-    );
-    gen_decrement_strong_count_in_unsized_harness!(
-        harness_rc_decrement_strong_count_in_vec_u16,
-        [u16]
-    );
-    gen_decrement_strong_count_in_unsized_harness!(
-        harness_rc_decrement_strong_count_in_vec_u32,
-        [u32]
     );
     gen_decrement_strong_count_in_unsized_harness!(
         harness_rc_decrement_strong_count_in_vec_u64,
@@ -5621,14 +5541,7 @@ mod verify {
         };
     }
 
-    gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_i8, i8);
-    gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_i16, i16);
-    gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_i32, i32);
-    gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_i64, i64);
-    gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_i128, i128);
     gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_u8, u8);
-    gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_u16, u16);
-    gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_u32, u32);
     gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_u64, u64);
     gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_u128, u128);
     gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_bool, bool);
@@ -5636,8 +5549,6 @@ mod verify {
     gen_get_mut_unchecked_sized_harness!(harness_rc_get_mut_unchecked_array, [u8; 4]);
 
     gen_get_mut_unchecked_unsized_harness!(harness_rc_get_mut_unchecked_vec_u8, [u8]);
-    gen_get_mut_unchecked_unsized_harness!(harness_rc_get_mut_unchecked_vec_u16, [u16]);
-    gen_get_mut_unchecked_unsized_harness!(harness_rc_get_mut_unchecked_vec_u32, [u32]);
     gen_get_mut_unchecked_unsized_harness!(harness_rc_get_mut_unchecked_vec_u64, [u64]);
     gen_get_mut_unchecked_unsized_harness!(harness_rc_get_mut_unchecked_vec_u128, [u128]);
 
@@ -5673,14 +5584,7 @@ mod verify {
         };
     }
 
-    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_i8, i8);
-    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_i16, i16);
-    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_i32, i32);
-    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_i64, i64);
-    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_i128, i128);
     gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_u8, u8);
-    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_u16, u16);
-    gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_u32, u32);
     gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_u64, u64);
     gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_u128, u128);
     gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_bool, bool);
@@ -5688,9 +5592,6 @@ mod verify {
     gen_downcast_unchecked_harness!(harness_rc_downcast_unchecked_array, [u8; 4]);
 
     gen_downcast_unchecked_vec_harness!(harness_rc_downcast_unchecked_vec_u8, u8);
-    gen_downcast_unchecked_vec_harness!(harness_rc_downcast_unchecked_vec_u16, u16);
-    gen_downcast_unchecked_vec_harness!(harness_rc_downcast_unchecked_vec_u32, u32);
-    gen_downcast_unchecked_vec_harness!(harness_rc_downcast_unchecked_vec_u64, u64);
     gen_downcast_unchecked_vec_harness!(harness_rc_downcast_unchecked_vec_u128, u128);
 
     // Weak::from_raw harnesses.
@@ -5725,14 +5626,7 @@ mod verify {
         };
     }
 
-    gen_weak_from_raw_sized_harness!(harness_weak_from_raw_i8, i8);
-    gen_weak_from_raw_sized_harness!(harness_weak_from_raw_i16, i16);
-    gen_weak_from_raw_sized_harness!(harness_weak_from_raw_i32, i32);
-    gen_weak_from_raw_sized_harness!(harness_weak_from_raw_i64, i64);
-    gen_weak_from_raw_sized_harness!(harness_weak_from_raw_i128, i128);
     gen_weak_from_raw_sized_harness!(harness_weak_from_raw_u8, u8);
-    gen_weak_from_raw_sized_harness!(harness_weak_from_raw_u16, u16);
-    gen_weak_from_raw_sized_harness!(harness_weak_from_raw_u32, u32);
     gen_weak_from_raw_sized_harness!(harness_weak_from_raw_u64, u64);
     gen_weak_from_raw_sized_harness!(harness_weak_from_raw_u128, u128);
     gen_weak_from_raw_sized_harness!(harness_weak_from_raw_bool, bool);
@@ -5740,8 +5634,6 @@ mod verify {
     gen_weak_from_raw_sized_harness!(harness_weak_from_raw_array, [u8; 4]);
 
     gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_vec_u8, [u8]);
-    gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_vec_u16, [u16]);
-    gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_vec_u32, [u32]);
     gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_vec_u64, [u64]);
     gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_vec_u128, [u128]);
 
@@ -5790,14 +5682,7 @@ mod verify {
         };
     }
 
-    gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_i8, i8);
-    gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_i16, i16);
-    gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_i32, i32);
-    gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_i64, i64);
-    gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_i128, i128);
     gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_u8, u8);
-    gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_u16, u16);
-    gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_u32, u32);
     gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_u64, u64);
     gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_u128, u128);
     gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_bool, bool);
@@ -5805,8 +5690,6 @@ mod verify {
     gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_array, [u8; 4]);
 
     gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_vec_u8, [u8]);
-    gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_vec_u16, [u16]);
-    gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_vec_u32, [u32]);
     gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_vec_u64, [u64]);
     gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_vec_u128, [u128]);
 
@@ -5895,18 +5778,6 @@ mod verify {
         u8
     );
     gen_get_mut_sized_harness!(
-        harness_get_mut_u16_unique_some,
-        harness_get_mut_u16_shared_none,
-        harness_get_mut_u16_weak_present_none,
-        u16
-    );
-    gen_get_mut_sized_harness!(
-        harness_get_mut_u32_unique_some,
-        harness_get_mut_u32_shared_none,
-        harness_get_mut_u32_weak_present_none,
-        u32
-    );
-    gen_get_mut_sized_harness!(
         harness_get_mut_u64_unique_some,
         harness_get_mut_u64_shared_none,
         harness_get_mut_u64_weak_present_none,
@@ -5935,18 +5806,6 @@ mod verify {
         harness_get_mut_vec_u8_shared_none,
         harness_get_mut_vec_u8_weak_present_none,
         [u8]
-    );
-    gen_get_mut_unsized_harness!(
-        harness_get_mut_vec_u16_unique_some,
-        harness_get_mut_vec_u16_shared_none,
-        harness_get_mut_vec_u16_weak_present_none,
-        [u16]
-    );
-    gen_get_mut_unsized_harness!(
-        harness_get_mut_vec_u32_unique_some,
-        harness_get_mut_vec_u32_shared_none,
-        harness_get_mut_vec_u32_weak_present_none,
-        [u32]
     );
     gen_get_mut_unsized_harness!(
         harness_get_mut_vec_u64_unique_some,
@@ -6059,18 +5918,6 @@ mod verify {
         u8
     );
     gen_make_mut_sized_harness!(
-        harness_make_mut_u16_unique,
-        harness_make_mut_u16_shared,
-        harness_make_mut_u16_weak_present,
-        u16
-    );
-    gen_make_mut_sized_harness!(
-        harness_make_mut_u32_unique,
-        harness_make_mut_u32_shared,
-        harness_make_mut_u32_weak_present,
-        u32
-    );
-    gen_make_mut_sized_harness!(
         harness_make_mut_u64_unique,
         harness_make_mut_u64_shared,
         harness_make_mut_u64_weak_present,
@@ -6100,18 +5947,6 @@ mod verify {
         harness_make_mut_vec_u8_shared,
         harness_make_mut_vec_u8_weak_present,
         u8
-    );
-    gen_make_mut_unsized_harness!(
-        harness_make_mut_vec_u16_unique,
-        harness_make_mut_vec_u16_shared,
-        harness_make_mut_vec_u16_weak_present,
-        u16
-    );
-    gen_make_mut_unsized_harness!(
-        harness_make_mut_vec_u32_unique,
-        harness_make_mut_vec_u32_shared,
-        harness_make_mut_vec_u32_weak_present,
-        u32
     );
     gen_make_mut_unsized_harness!(
         harness_make_mut_vec_u64_unique,
@@ -6179,35 +6014,13 @@ mod verify {
         };
     }
 
-    gen_downcast_harness!(harness_downcast_i8_success, harness_downcast_i8_failure, i8);
-    gen_downcast_harness!(harness_downcast_i16_success, harness_downcast_i16_failure, i16);
-    gen_downcast_harness!(harness_downcast_i32_success, harness_downcast_i32_failure, i32);
-    gen_downcast_harness!(harness_downcast_i64_success, harness_downcast_i64_failure, i64);
-    gen_downcast_harness!(harness_downcast_i128_success, harness_downcast_i128_failure, i128);
     gen_downcast_harness!(harness_downcast_u8_success, harness_downcast_u8_failure, u8);
-    gen_downcast_harness!(harness_downcast_u16_success, harness_downcast_u16_failure, u16);
-    gen_downcast_harness!(harness_downcast_u32_success, harness_downcast_u32_failure, u32);
     gen_downcast_harness!(harness_downcast_u64_success, harness_downcast_u64_failure, u64);
     gen_downcast_harness!(harness_downcast_u128_success, harness_downcast_u128_failure, u128);
     gen_downcast_harness!(harness_downcast_arr4_success, harness_downcast_arr4_failure, [u8; 4]);
     gen_downcast_harness!(harness_downcast_unit_success, harness_downcast_unit_failure, ());
 
     gen_downcast_vec_harness!(harness_downcast_vec_u8_success, harness_downcast_vec_u8_failure, u8);
-    gen_downcast_vec_harness!(
-        harness_downcast_vec_u16_success,
-        harness_downcast_vec_u16_failure,
-        u16
-    );
-    gen_downcast_vec_harness!(
-        harness_downcast_vec_u32_success,
-        harness_downcast_vec_u32_failure,
-        u32
-    );
-    gen_downcast_vec_harness!(
-        harness_downcast_vec_u64_success,
-        harness_downcast_vec_u64_failure,
-        u64
-    );
     gen_downcast_vec_harness!(
         harness_downcast_vec_u128_success,
         harness_downcast_vec_u128_failure,
@@ -6251,8 +6064,6 @@ mod verify {
     }
 
     gen_from_box_in_sized_harness!(harness_from_box_in_u8, u8);
-    gen_from_box_in_sized_harness!(harness_from_box_in_u16, u16);
-    gen_from_box_in_sized_harness!(harness_from_box_in_u32, u32);
     gen_from_box_in_sized_harness!(harness_from_box_in_u64, u64);
     gen_from_box_in_sized_harness!(harness_from_box_in_u128, u128);
     gen_from_box_in_sized_harness!(harness_from_box_in_unit, ());
@@ -6260,8 +6071,6 @@ mod verify {
     gen_from_box_in_sized_harness!(harness_from_box_in_bool, bool);
 
     gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u8, [u8]);
-    gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u16, [u16]);
-    gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u32, [u32]);
     gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u64, [u64]);
     gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u128, [u128]);
 
@@ -6362,16 +6171,6 @@ mod verify {
         u8
     );
     gen_weak_as_ptr_sized_harness!(
-        harness_weak_as_ptr_u16_live,
-        harness_weak_as_ptr_u16_dangling,
-        u16
-    );
-    gen_weak_as_ptr_sized_harness!(
-        harness_weak_as_ptr_u32_live,
-        harness_weak_as_ptr_u32_dangling,
-        u32
-    );
-    gen_weak_as_ptr_sized_harness!(
         harness_weak_as_ptr_u64_live,
         harness_weak_as_ptr_u64_dangling,
         u64
@@ -6403,16 +6202,6 @@ mod verify {
         [u8]
     );
     gen_weak_as_ptr_unsized_harness!(
-        harness_weak_as_ptr_vec_u16_live,
-        harness_weak_as_ptr_vec_u16_dangling,
-        [u16]
-    );
-    gen_weak_as_ptr_unsized_harness!(
-        harness_weak_as_ptr_vec_u32_live,
-        harness_weak_as_ptr_vec_u32_dangling,
-        [u32]
-    );
-    gen_weak_as_ptr_unsized_harness!(
         harness_weak_as_ptr_vec_u64_live,
         harness_weak_as_ptr_vec_u64_dangling,
         [u64]
@@ -6423,8 +6212,6 @@ mod verify {
         [u128]
     );
     gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_u8_expired, u8);
-    gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_u16_expired, u16);
-    gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_u32_expired, u32);
     gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_u64_expired, u64);
     gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_u128_expired, u128);
     gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_unit_expired, ());
@@ -6566,16 +6353,6 @@ mod verify {
         u8
     );
     gen_weak_into_raw_with_allocator_sized_harness!(
-        harness_weak_into_raw_with_allocator_u16_live,
-        harness_weak_into_raw_with_allocator_u16_dangling,
-        u16
-    );
-    gen_weak_into_raw_with_allocator_sized_harness!(
-        harness_weak_into_raw_with_allocator_u32_live,
-        harness_weak_into_raw_with_allocator_u32_dangling,
-        u32
-    );
-    gen_weak_into_raw_with_allocator_sized_harness!(
         harness_weak_into_raw_with_allocator_u64_live,
         harness_weak_into_raw_with_allocator_u64_dangling,
         u64
@@ -6602,16 +6379,6 @@ mod verify {
         [u8]
     );
     gen_weak_into_raw_with_allocator_unsized_harness!(
-        harness_weak_into_raw_with_allocator_vec_u16_live,
-        harness_weak_into_raw_with_allocator_vec_u16_dangling,
-        [u16]
-    );
-    gen_weak_into_raw_with_allocator_unsized_harness!(
-        harness_weak_into_raw_with_allocator_vec_u32_live,
-        harness_weak_into_raw_with_allocator_vec_u32_dangling,
-        [u32]
-    );
-    gen_weak_into_raw_with_allocator_unsized_harness!(
         harness_weak_into_raw_with_allocator_vec_u64_live,
         harness_weak_into_raw_with_allocator_vec_u64_dangling,
         [u64]
@@ -6624,14 +6391,6 @@ mod verify {
     gen_weak_into_raw_with_allocator_expired_harness!(
         harness_weak_into_raw_with_allocator_u8_expired,
         u8
-    );
-    gen_weak_into_raw_with_allocator_expired_harness!(
-        harness_weak_into_raw_with_allocator_u16_expired,
-        u16
-    );
-    gen_weak_into_raw_with_allocator_expired_harness!(
-        harness_weak_into_raw_with_allocator_u32_expired,
-        u32
     );
     gen_weak_into_raw_with_allocator_expired_harness!(
         harness_weak_into_raw_with_allocator_u64_expired,
@@ -6793,18 +6552,6 @@ mod verify {
         u8
     );
     gen_weak_upgrade_sized_harness!(
-        harness_weak_upgrade_u16_live,
-        harness_weak_upgrade_u16_strong_zero,
-        harness_weak_upgrade_u16_dangling,
-        u16
-    );
-    gen_weak_upgrade_sized_harness!(
-        harness_weak_upgrade_u32_live,
-        harness_weak_upgrade_u32_strong_zero,
-        harness_weak_upgrade_u32_dangling,
-        u32
-    );
-    gen_weak_upgrade_sized_harness!(
         harness_weak_upgrade_u64_live,
         harness_weak_upgrade_u64_strong_zero,
         harness_weak_upgrade_u64_dangling,
@@ -6840,18 +6587,6 @@ mod verify {
         harness_weak_upgrade_vec_u8_strong_zero,
         harness_weak_upgrade_vec_u8_dangling,
         [u8]
-    );
-    gen_weak_upgrade_unsized_harness!(
-        harness_weak_upgrade_vec_u16_live,
-        harness_weak_upgrade_vec_u16_strong_zero,
-        harness_weak_upgrade_vec_u16_dangling,
-        [u16]
-    );
-    gen_weak_upgrade_unsized_harness!(
-        harness_weak_upgrade_vec_u32_live,
-        harness_weak_upgrade_vec_u32_strong_zero,
-        harness_weak_upgrade_vec_u32_dangling,
-        [u32]
     );
     gen_weak_upgrade_unsized_harness!(
         harness_weak_upgrade_vec_u64_live,
@@ -6979,18 +6714,6 @@ mod verify {
         u8
     );
     gen_weak_inner_sized_harness!(
-        harness_weak_inner_u16_some,
-        harness_weak_inner_u16_none,
-        harness_weak_inner_u16_expired,
-        u16
-    );
-    gen_weak_inner_sized_harness!(
-        harness_weak_inner_u32_some,
-        harness_weak_inner_u32_none,
-        harness_weak_inner_u32_expired,
-        u32
-    );
-    gen_weak_inner_sized_harness!(
         harness_weak_inner_u64_some,
         harness_weak_inner_u64_none,
         harness_weak_inner_u64_expired,
@@ -7025,18 +6748,6 @@ mod verify {
         harness_weak_inner_vec_u8_none,
         harness_weak_inner_vec_u8_expired,
         [u8]
-    );
-    gen_weak_inner_unsized_harness!(
-        harness_weak_inner_vec_u16_some,
-        harness_weak_inner_vec_u16_none,
-        harness_weak_inner_vec_u16_expired,
-        [u16]
-    );
-    gen_weak_inner_unsized_harness!(
-        harness_weak_inner_vec_u32_some,
-        harness_weak_inner_vec_u32_none,
-        harness_weak_inner_vec_u32_expired,
-        [u32]
     );
     gen_weak_inner_unsized_harness!(
         harness_weak_inner_vec_u64_some,
@@ -7216,18 +6927,6 @@ mod verify {
         u8
     );
     gen_drop_weak_sized_harness!(
-        harness_drop_weak_u16_live,
-        harness_drop_weak_u16_after_strong_drop,
-        harness_drop_weak_u16_dangling,
-        u16
-    );
-    gen_drop_weak_sized_harness!(
-        harness_drop_weak_u32_live,
-        harness_drop_weak_u32_after_strong_drop,
-        harness_drop_weak_u32_dangling,
-        u32
-    );
-    gen_drop_weak_sized_harness!(
         harness_drop_weak_u64_live,
         harness_drop_weak_u64_after_strong_drop,
         harness_drop_weak_u64_dangling,
@@ -7262,18 +6961,6 @@ mod verify {
         harness_drop_weak_vec_u8_after_strong_drop,
         harness_drop_weak_vec_u8_dangling,
         [u8]
-    );
-    gen_drop_weak_unsized_harness!(
-        harness_drop_weak_vec_u16_live,
-        harness_drop_weak_vec_u16_after_strong_drop,
-        harness_drop_weak_vec_u16_dangling,
-        [u16]
-    );
-    gen_drop_weak_unsized_harness!(
-        harness_drop_weak_vec_u32_live,
-        harness_drop_weak_vec_u32_after_strong_drop,
-        harness_drop_weak_vec_u32_dangling,
-        [u32]
     );
     gen_drop_weak_unsized_harness!(
         harness_drop_weak_vec_u64_live,
@@ -7349,8 +7036,6 @@ mod verify {
     }
 
     gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_u8, u8);
-    gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_u16, u16);
-    gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_u32, u32);
     gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_u64, u64);
     gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_u128, u128);
     gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_unit, ());
@@ -7358,8 +7043,6 @@ mod verify {
     gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_bool, bool);
 
     gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_vec_u8, [u8]);
-    gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_vec_u16, [u16]);
-    gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_vec_u32, [u32]);
     gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_vec_u64, [u64]);
     gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_vec_u128, [u128]);
 
@@ -7424,8 +7107,6 @@ mod verify {
     }
 
     gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_u8, u8);
-    gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_u16, u16);
-    gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_u32, u32);
     gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_u64, u64);
     gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_u128, u128);
     gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_unit, ());
@@ -7433,8 +7114,6 @@ mod verify {
     gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_bool, bool);
 
     gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_vec_u8, [u8]);
-    gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_vec_u16, [u16]);
-    gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_vec_u32, [u32]);
     gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_vec_u64, [u64]);
     gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_vec_u128, [u128]);
 
@@ -7484,8 +7163,6 @@ mod verify {
     }
 
     gen_uniquerc_into_rc_sized_harness!(harness_uniquerc_into_rc_u8, u8);
-    gen_uniquerc_into_rc_sized_harness!(harness_uniquerc_into_rc_u16, u16);
-    gen_uniquerc_into_rc_sized_harness!(harness_uniquerc_into_rc_u32, u32);
     gen_uniquerc_into_rc_sized_harness!(harness_uniquerc_into_rc_u64, u64);
     gen_uniquerc_into_rc_sized_harness!(harness_uniquerc_into_rc_u128, u128);
     gen_uniquerc_into_rc_sized_harness!(harness_uniquerc_into_rc_bool, bool);
@@ -7522,8 +7199,6 @@ mod verify {
     }
 
     gen_downgrade_sized_harness!(harness_uniquerc_downgrade_u8, u8);
-    gen_downgrade_sized_harness!(harness_uniquerc_downgrade_u16, u16);
-    gen_downgrade_sized_harness!(harness_uniquerc_downgrade_u32, u32);
     gen_downgrade_sized_harness!(harness_uniquerc_downgrade_u64, u64);
     gen_downgrade_sized_harness!(harness_uniquerc_downgrade_u128, u128);
     gen_downgrade_sized_harness!(harness_uniquerc_downgrade_unit, ());
@@ -7564,8 +7239,6 @@ mod verify {
     }
 
     gen_deref_mut_sized_harness!(harness_uniquerc_deref_mut_u8, u8);
-    gen_deref_mut_sized_harness!(harness_uniquerc_deref_mut_u16, u16);
-    gen_deref_mut_sized_harness!(harness_uniquerc_deref_mut_u32, u32);
     gen_deref_mut_sized_harness!(harness_uniquerc_deref_mut_u64, u64);
     gen_deref_mut_sized_harness!(harness_uniquerc_deref_mut_u128, u128);
     gen_deref_mut_sized_harness!(harness_uniquerc_deref_mut_bool, bool);
@@ -7595,8 +7268,6 @@ mod verify {
     }
 
     gen_deref_sized_harness!(harness_uniquerc_deref_u8, u8);
-    gen_deref_sized_harness!(harness_uniquerc_deref_u16, u16);
-    gen_deref_sized_harness!(harness_uniquerc_deref_u32, u32);
     gen_deref_sized_harness!(harness_uniquerc_deref_u64, u64);
     gen_deref_sized_harness!(harness_uniquerc_deref_u128, u128);
     gen_deref_sized_harness!(harness_uniquerc_deref_bool, bool);
@@ -7677,16 +7348,6 @@ mod verify {
         u8
     );
     gen_drop_unique_rc_sized_harness!(
-        harness_drop_unique_rc_u16_unique,
-        harness_drop_unique_rc_u16_weak_present,
-        u16
-    );
-    gen_drop_unique_rc_sized_harness!(
-        harness_drop_unique_rc_u32_unique,
-        harness_drop_unique_rc_u32_weak_present,
-        u32
-    );
-    gen_drop_unique_rc_sized_harness!(
         harness_drop_unique_rc_u64_unique,
         harness_drop_unique_rc_u64_weak_present,
         u64
@@ -7752,8 +7413,6 @@ mod verify {
     }
 
     gen_unique_rc_uninit_new_sized_harness!(harness_unique_rc_uninit_new_u8, u8);
-    gen_unique_rc_uninit_new_sized_harness!(harness_unique_rc_uninit_new_u16, u16);
-    gen_unique_rc_uninit_new_sized_harness!(harness_unique_rc_uninit_new_u32, u32);
     gen_unique_rc_uninit_new_sized_harness!(harness_unique_rc_uninit_new_u64, u64);
     gen_unique_rc_uninit_new_sized_harness!(harness_unique_rc_uninit_new_u128, u128);
     gen_unique_rc_uninit_new_sized_harness!(harness_unique_rc_uninit_new_unit, ());
@@ -7761,8 +7420,6 @@ mod verify {
     gen_unique_rc_uninit_new_sized_harness!(harness_unique_rc_uninit_new_bool, bool);
 
     gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_slice_u8, [u8]);
-    gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_slice_u16, [u16]);
-    gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_slice_u32, [u32]);
     gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_slice_u64, [u64]);
     gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_slice_u128, [u128]);
 
@@ -7813,8 +7470,6 @@ mod verify {
     }
 
     gen_data_ptr_sized_harness!(harness_data_ptr_u8, u8);
-    gen_data_ptr_sized_harness!(harness_data_ptr_u16, u16);
-    gen_data_ptr_sized_harness!(harness_data_ptr_u32, u32);
     gen_data_ptr_sized_harness!(harness_data_ptr_u64, u64);
     gen_data_ptr_sized_harness!(harness_data_ptr_u128, u128);
     gen_data_ptr_sized_harness!(harness_data_ptr_unit, ());
@@ -7822,8 +7477,6 @@ mod verify {
     gen_data_ptr_sized_harness!(harness_data_ptr_bool, bool);
 
     gen_data_ptr_unsized_harness!(harness_data_ptr_slice_u8, [u8]);
-    gen_data_ptr_unsized_harness!(harness_data_ptr_slice_u16, [u16]);
-    gen_data_ptr_unsized_harness!(harness_data_ptr_slice_u32, [u32]);
     gen_data_ptr_unsized_harness!(harness_data_ptr_slice_u64, [u64]);
     gen_data_ptr_unsized_harness!(harness_data_ptr_slice_u128, [u128]);
 
@@ -7865,8 +7518,6 @@ mod verify {
     }
 
     gen_unique_rc_uninit_drop_sized_harness!(harness_unique_rc_uninit_drop_u8, u8);
-    gen_unique_rc_uninit_drop_sized_harness!(harness_unique_rc_uninit_drop_u16, u16);
-    gen_unique_rc_uninit_drop_sized_harness!(harness_unique_rc_uninit_drop_u32, u32);
     gen_unique_rc_uninit_drop_sized_harness!(harness_unique_rc_uninit_drop_u64, u64);
     gen_unique_rc_uninit_drop_sized_harness!(harness_unique_rc_uninit_drop_u128, u128);
     gen_unique_rc_uninit_drop_sized_harness!(harness_unique_rc_uninit_drop_unit, ());
@@ -7874,8 +7525,6 @@ mod verify {
     gen_unique_rc_uninit_drop_sized_harness!(harness_unique_rc_uninit_drop_bool, bool);
 
     gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_slice_u8, [u8]);
-    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_slice_u16, [u16]);
-    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_slice_u32, [u32]);
     gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_slice_u64, [u64]);
     gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_slice_u128, [u128]);
 
@@ -7910,8 +7559,6 @@ mod verify {
     }
 
     gen_inner_sized_harness!(harness_inner_u8, u8);
-    gen_inner_sized_harness!(harness_inner_u16, u16);
-    gen_inner_sized_harness!(harness_inner_u32, u32);
     gen_inner_sized_harness!(harness_inner_u64, u64);
     gen_inner_sized_harness!(harness_inner_u128, u128);
     gen_inner_sized_harness!(harness_inner_unit, ());
@@ -7919,8 +7566,6 @@ mod verify {
     gen_inner_sized_harness!(harness_inner_bool, bool);
 
     gen_inner_unsized_harness!(harness_inner_vec_u8, [u8]);
-    gen_inner_unsized_harness!(harness_inner_vec_u16, [u16]);
-    gen_inner_unsized_harness!(harness_inner_vec_u32, [u32]);
     gen_inner_unsized_harness!(harness_inner_vec_u64, [u64]);
     gen_inner_unsized_harness!(harness_inner_vec_u128, [u128]);
 
@@ -7983,8 +7628,6 @@ mod verify {
     }
 
     gen_into_inner_with_allocator_harness!(harness_into_inner_with_allocator_u8, u8);
-    gen_into_inner_with_allocator_harness!(harness_into_inner_with_allocator_u16, u16);
-    gen_into_inner_with_allocator_harness!(harness_into_inner_with_allocator_u32, u32);
     gen_into_inner_with_allocator_harness!(harness_into_inner_with_allocator_u64, u64);
     gen_into_inner_with_allocator_harness!(harness_into_inner_with_allocator_u128, u128);
     gen_into_inner_with_allocator_harness!(harness_into_inner_with_allocator_unit, ());
@@ -7992,14 +7635,6 @@ mod verify {
     gen_into_inner_with_allocator_harness!(harness_into_inner_with_allocator_bool, bool);
 
     gen_into_inner_with_allocator_unsized_harness!(harness_into_inner_with_allocator_vec_u8, [u8]);
-    gen_into_inner_with_allocator_unsized_harness!(
-        harness_into_inner_with_allocator_vec_u16,
-        [u16]
-    );
-    gen_into_inner_with_allocator_unsized_harness!(
-        harness_into_inner_with_allocator_vec_u32,
-        [u32]
-    );
     gen_into_inner_with_allocator_unsized_harness!(
         harness_into_inner_with_allocator_vec_u64,
         [u64]
@@ -8028,8 +7663,6 @@ mod verify {
     }
 
     gen_rc_new_harness!(harness_rc_new_u8, u8);
-    gen_rc_new_harness!(harness_rc_new_u16, u16);
-    gen_rc_new_harness!(harness_rc_new_u32, u32);
     gen_rc_new_harness!(harness_rc_new_u64, u64);
     gen_rc_new_harness!(harness_rc_new_u128, u128);
     gen_rc_new_harness!(harness_rc_new_unit, ());
@@ -8055,8 +7688,6 @@ mod verify {
     }
 
     gen_rc_new_uninit_harness!(harness_rc_new_uninit_u8, u8);
-    gen_rc_new_uninit_harness!(harness_rc_new_uninit_u16, u16);
-    gen_rc_new_uninit_harness!(harness_rc_new_uninit_u32, u32);
     gen_rc_new_uninit_harness!(harness_rc_new_uninit_u64, u64);
     gen_rc_new_uninit_harness!(harness_rc_new_uninit_u128, u128);
     gen_rc_new_uninit_harness!(harness_rc_new_uninit_unit, ());
@@ -8085,8 +7716,6 @@ mod verify {
     }
 
     gen_rc_new_zeroed_harness!(harness_rc_new_zeroed_u8, u8);
-    gen_rc_new_zeroed_harness!(harness_rc_new_zeroed_u16, u16);
-    gen_rc_new_zeroed_harness!(harness_rc_new_zeroed_u32, u32);
     gen_rc_new_zeroed_harness!(harness_rc_new_zeroed_u64, u64);
     gen_rc_new_zeroed_harness!(harness_rc_new_zeroed_u128, u128);
     gen_rc_new_zeroed_harness!(harness_rc_new_zeroed_unit, ());
@@ -8116,8 +7745,6 @@ mod verify {
     }
 
     gen_new_uninit_in_harness!(harness_new_uninit_in_u8, u8);
-    gen_new_uninit_in_harness!(harness_new_uninit_in_u16, u16);
-    gen_new_uninit_in_harness!(harness_new_uninit_in_u32, u32);
     gen_new_uninit_in_harness!(harness_new_uninit_in_u64, u64);
     gen_new_uninit_in_harness!(harness_new_uninit_in_u128, u128);
     gen_new_uninit_in_harness!(harness_new_uninit_in_unit, ());
@@ -8147,8 +7774,6 @@ mod verify {
     }
 
     gen_new_zeroed_in_harness!(harness_new_zeroed_in_u8, u8);
-    gen_new_zeroed_in_harness!(harness_new_zeroed_in_u16, u16);
-    gen_new_zeroed_in_harness!(harness_new_zeroed_in_u32, u32);
     gen_new_zeroed_in_harness!(harness_new_zeroed_in_u64, u64);
     gen_new_zeroed_in_harness!(harness_new_zeroed_in_u128, u128);
     gen_new_zeroed_in_harness!(harness_new_zeroed_in_unit, ());
@@ -8189,8 +7814,6 @@ mod verify {
     }
 
     gen_new_cyclic_in_harness!(harness_new_cyclic_in_u8, u8);
-    gen_new_cyclic_in_harness!(harness_new_cyclic_in_u16, u16);
-    gen_new_cyclic_in_harness!(harness_new_cyclic_in_u32, u32);
     gen_new_cyclic_in_harness!(harness_new_cyclic_in_u64, u64);
     gen_new_cyclic_in_harness!(harness_new_cyclic_in_u128, u128);
     gen_new_cyclic_in_harness!(harness_new_cyclic_in_unit, ());
@@ -8258,8 +7881,6 @@ mod verify {
     }
 
     gen_try_new_in_harness!(harness_try_new_in_u8, u8);
-    gen_try_new_in_harness!(harness_try_new_in_u16, u16);
-    gen_try_new_in_harness!(harness_try_new_in_u32, u32);
     gen_try_new_in_harness!(harness_try_new_in_u64, u64);
     gen_try_new_in_harness!(harness_try_new_in_u128, u128);
     gen_try_new_in_harness!(harness_try_new_in_unit, ());
@@ -8267,8 +7888,6 @@ mod verify {
     gen_try_new_in_harness!(harness_try_new_in_bool, bool);
 
     gen_try_new_in_vec_harness!(harness_try_new_in_vec_u8, u8);
-    gen_try_new_in_vec_harness!(harness_try_new_in_vec_u16, u16);
-    gen_try_new_in_vec_harness!(harness_try_new_in_vec_u32, u32);
     gen_try_new_in_vec_harness!(harness_try_new_in_vec_u64, u64);
     gen_try_new_in_vec_harness!(harness_try_new_in_vec_u128, u128);
 
@@ -8305,8 +7924,6 @@ mod verify {
     }
 
     gen_try_new_uninit_in_harness!(harness_try_new_uninit_in_u8, u8);
-    gen_try_new_uninit_in_harness!(harness_try_new_uninit_in_u16, u16);
-    gen_try_new_uninit_in_harness!(harness_try_new_uninit_in_u32, u32);
     gen_try_new_uninit_in_harness!(harness_try_new_uninit_in_u64, u64);
     gen_try_new_uninit_in_harness!(harness_try_new_uninit_in_u128, u128);
     gen_try_new_uninit_in_harness!(harness_try_new_uninit_in_unit, ());
@@ -8346,8 +7963,6 @@ mod verify {
     }
 
     gen_try_new_zeroed_in_harness!(harness_try_new_zeroed_in_u8, u8);
-    gen_try_new_zeroed_in_harness!(harness_try_new_zeroed_in_u16, u16);
-    gen_try_new_zeroed_in_harness!(harness_try_new_zeroed_in_u32, u32);
     gen_try_new_zeroed_in_harness!(harness_try_new_zeroed_in_u64, u64);
     gen_try_new_zeroed_in_harness!(harness_try_new_zeroed_in_u128, u128);
     gen_try_new_zeroed_in_harness!(harness_try_new_zeroed_in_unit, ());
@@ -8393,8 +8008,6 @@ mod verify {
     }
 
     gen_pin_in_harness!(harness_pin_in_u8, u8);
-    gen_pin_in_harness!(harness_pin_in_u16, u16);
-    gen_pin_in_harness!(harness_pin_in_u32, u32);
     gen_pin_in_harness!(harness_pin_in_u64, u64);
     gen_pin_in_harness!(harness_pin_in_u128, u128);
     gen_pin_in_harness!(harness_pin_in_unit, ());
@@ -8429,8 +8042,6 @@ mod verify {
     }
 
     gen_new_uninit_slice_harness!(harness_new_uninit_slice_u8, u8);
-    gen_new_uninit_slice_harness!(harness_new_uninit_slice_u16, u16);
-    gen_new_uninit_slice_harness!(harness_new_uninit_slice_u32, u32);
     gen_new_uninit_slice_harness!(harness_new_uninit_slice_u64, u64);
     gen_new_uninit_slice_harness!(harness_new_uninit_slice_u128, u128);
     gen_new_uninit_slice_harness!(harness_new_uninit_slice_unit, ());
@@ -8464,8 +8075,6 @@ mod verify {
     }
 
     gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_u8, u8);
-    gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_u16, u16);
-    gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_u32, u32);
     gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_u64, u64);
     gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_u128, u128);
     gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_unit, ());
@@ -8513,8 +8122,6 @@ mod verify {
     }
 
     gen_into_array_slice_harness!(harness_into_array_slice_u8, u8);
-    gen_into_array_slice_harness!(harness_into_array_slice_u16, u16);
-    gen_into_array_slice_harness!(harness_into_array_slice_u32, u32);
     gen_into_array_slice_harness!(harness_into_array_slice_u64, u64);
     gen_into_array_slice_harness!(harness_into_array_slice_u128, u128);
     gen_into_array_slice_harness!(harness_into_array_slice_unit, ());
@@ -8560,8 +8167,6 @@ mod verify {
     }
 
     gen_pin_harness!(harness_pin_u8, u8);
-    gen_pin_harness!(harness_pin_u16, u16);
-    gen_pin_harness!(harness_pin_u32, u32);
     gen_pin_harness!(harness_pin_u64, u64);
     gen_pin_harness!(harness_pin_u128, u128);
     gen_pin_harness!(harness_pin_unit, ());
@@ -8597,8 +8202,6 @@ mod verify {
     }
 
     gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_u8, u8);
-    gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_u16, u16);
-    gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_u32, u32);
     gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_u64, u64);
     gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_u128, u128);
     gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_unit, ());
@@ -8673,8 +8276,6 @@ mod verify {
     }
 
     gen_try_new_harness!(harness_try_new_u8, u8);
-    gen_try_new_harness!(harness_try_new_u16, u16);
-    gen_try_new_harness!(harness_try_new_u32, u32);
     gen_try_new_harness!(harness_try_new_u64, u64);
     gen_try_new_harness!(harness_try_new_u128, u128);
     gen_try_new_harness!(harness_try_new_unit, ());
@@ -8682,8 +8283,6 @@ mod verify {
     gen_try_new_harness!(harness_try_new_array, [u8; 4]);
 
     gen_try_new_vec_harness!(harness_try_new_vec_u8, u8);
-    gen_try_new_vec_harness!(harness_try_new_vec_u16, u16);
-    gen_try_new_vec_harness!(harness_try_new_vec_u32, u32);
     gen_try_new_vec_harness!(harness_try_new_vec_u64, u64);
     gen_try_new_vec_harness!(harness_try_new_vec_u128, u128);
 
@@ -8718,8 +8317,6 @@ mod verify {
     }
 
     gen_try_new_uninit_harness!(harness_try_new_uninit_u8, u8);
-    gen_try_new_uninit_harness!(harness_try_new_uninit_u16, u16);
-    gen_try_new_uninit_harness!(harness_try_new_uninit_u32, u32);
     gen_try_new_uninit_harness!(harness_try_new_uninit_u64, u64);
     gen_try_new_uninit_harness!(harness_try_new_uninit_u128, u128);
     gen_try_new_uninit_harness!(harness_try_new_uninit_unit, ());
@@ -8757,8 +8354,6 @@ mod verify {
     }
 
     gen_try_new_zeroed_harness!(harness_try_new_zeroed_u8, u8);
-    gen_try_new_zeroed_harness!(harness_try_new_zeroed_u16, u16);
-    gen_try_new_zeroed_harness!(harness_try_new_zeroed_u32, u32);
     gen_try_new_zeroed_harness!(harness_try_new_zeroed_u64, u64);
     gen_try_new_zeroed_harness!(harness_try_new_zeroed_u128, u128);
     gen_try_new_zeroed_harness!(harness_try_new_zeroed_unit, ());
@@ -8974,18 +8569,6 @@ mod verify {
         u8
     );
     gen_try_unwrap_harness!(
-        harness_try_unwrap_u16_unique,
-        harness_try_unwrap_u16_shared,
-        harness_try_unwrap_u16_weak_present,
-        u16
-    );
-    gen_try_unwrap_harness!(
-        harness_try_unwrap_u32_unique,
-        harness_try_unwrap_u32_shared,
-        harness_try_unwrap_u32_weak_present,
-        u32
-    );
-    gen_try_unwrap_harness!(
         harness_try_unwrap_u64_unique,
         harness_try_unwrap_u64_shared,
         harness_try_unwrap_u64_weak_present,
@@ -9021,18 +8604,6 @@ mod verify {
         harness_try_unwrap_vec_u8_shared,
         harness_try_unwrap_vec_u8_weak_present,
         u8
-    );
-    gen_try_unwrap_vec_harness!(
-        harness_try_unwrap_vec_u16_unique,
-        harness_try_unwrap_vec_u16_shared,
-        harness_try_unwrap_vec_u16_weak_present,
-        u16
-    );
-    gen_try_unwrap_vec_harness!(
-        harness_try_unwrap_vec_u32_unique,
-        harness_try_unwrap_vec_u32_shared,
-        harness_try_unwrap_vec_u32_weak_present,
-        u32
     );
     gen_try_unwrap_vec_harness!(
         harness_try_unwrap_vec_u64_unique,
@@ -9072,8 +8643,6 @@ mod verify {
     }
 
     gen_new_zeroed_slice_in_harness!(harness_new_zeroed_slice_in_u8, u8);
-    gen_new_zeroed_slice_in_harness!(harness_new_zeroed_slice_in_u16, u16);
-    gen_new_zeroed_slice_in_harness!(harness_new_zeroed_slice_in_u32, u32);
     gen_new_zeroed_slice_in_harness!(harness_new_zeroed_slice_in_u64, u64);
     gen_new_zeroed_slice_in_harness!(harness_new_zeroed_slice_in_u128, u128);
     gen_new_zeroed_slice_in_harness!(harness_new_zeroed_slice_in_unit, ());
@@ -9130,8 +8699,6 @@ mod verify {
     }
 
     gen_as_ptr_harness!(harness_rc_as_ptr_u8, u8);
-    gen_as_ptr_harness!(harness_rc_as_ptr_u16, u16);
-    gen_as_ptr_harness!(harness_rc_as_ptr_u32, u32);
     gen_as_ptr_harness!(harness_rc_as_ptr_u64, u64);
     gen_as_ptr_harness!(harness_rc_as_ptr_u128, u128);
     gen_as_ptr_harness!(harness_rc_as_ptr_unit, ());
@@ -9139,8 +8706,6 @@ mod verify {
     gen_as_ptr_harness!(harness_rc_as_ptr_bool, bool);
 
     gen_as_ptr_unsized_harness!(harness_rc_as_ptr_vec_u8, [u8]);
-    gen_as_ptr_unsized_harness!(harness_rc_as_ptr_vec_u16, [u16]);
-    gen_as_ptr_unsized_harness!(harness_rc_as_ptr_vec_u32, [u32]);
     gen_as_ptr_unsized_harness!(harness_rc_as_ptr_vec_u64, [u64]);
     gen_as_ptr_unsized_harness!(harness_rc_as_ptr_vec_u128, [u128]);
 
@@ -9173,8 +8738,6 @@ mod verify {
     }
 
     gen_from_slice_copy_harness!(harness_from_slice_copy_u8, u8);
-    gen_from_slice_copy_harness!(harness_from_slice_copy_u16, u16);
-    gen_from_slice_copy_harness!(harness_from_slice_copy_u32, u32);
     gen_from_slice_copy_harness!(harness_from_slice_copy_u64, u64);
     gen_from_slice_copy_harness!(harness_from_slice_copy_u128, u128);
     gen_from_slice_copy_harness!(harness_from_slice_copy_unit, ());
@@ -9231,8 +8794,6 @@ mod verify {
     }
 
     gen_from_slice_clone_harness!(harness_from_slice_clone_u8, u8);
-    gen_from_slice_clone_harness!(harness_from_slice_clone_u16, u16);
-    gen_from_slice_clone_harness!(harness_from_slice_clone_u32, u32);
     gen_from_slice_clone_harness!(harness_from_slice_clone_u64, u64);
     gen_from_slice_clone_harness!(harness_from_slice_clone_u128, u128);
     gen_from_slice_clone_harness!(harness_from_slice_clone_unit, ());
@@ -9273,8 +8834,6 @@ mod verify {
     }
 
     gen_to_rc_slice_harness!(harness_to_rc_slice_u8, u8);
-    gen_to_rc_slice_harness!(harness_to_rc_slice_u16, u16);
-    gen_to_rc_slice_harness!(harness_to_rc_slice_u32, u32);
     gen_to_rc_slice_harness!(harness_to_rc_slice_u64, u64);
     gen_to_rc_slice_harness!(harness_to_rc_slice_u128, u128);
     gen_to_rc_slice_harness!(harness_to_rc_slice_unit, ());
@@ -9333,8 +8892,6 @@ mod verify {
     }
 
     gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_u8, u8);
-    gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_u16, u16);
-    gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_u32, u32);
     gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_u64, u64);
     gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_u128, u128);
     gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_unit, ());
@@ -9467,18 +9024,6 @@ mod verify {
         u8
     );
     gen_drop_rc_sized!(
-        harness_drop_rc_u16_unique,
-        harness_drop_rc_u16_shared,
-        harness_drop_rc_u16_weak_present,
-        u16
-    );
-    gen_drop_rc_sized!(
-        harness_drop_rc_u32_unique,
-        harness_drop_rc_u32_shared,
-        harness_drop_rc_u32_weak_present,
-        u32
-    );
-    gen_drop_rc_sized!(
         harness_drop_rc_u64_unique,
         harness_drop_rc_u64_shared,
         harness_drop_rc_u64_weak_present,
@@ -9514,18 +9059,6 @@ mod verify {
         harness_drop_rc_vec_u8_shared,
         harness_drop_rc_vec_u8_weak_present,
         [u8]
-    );
-    gen_drop_rc_unsized!(
-        harness_drop_rc_vec_u16_unique,
-        harness_drop_rc_vec_u16_shared,
-        harness_drop_rc_vec_u16_weak_present,
-        [u16]
-    );
-    gen_drop_rc_unsized!(
-        harness_drop_rc_vec_u32_unique,
-        harness_drop_rc_vec_u32_shared,
-        harness_drop_rc_vec_u32_weak_present,
-        [u32]
     );
     gen_drop_rc_unsized!(
         harness_drop_rc_vec_u64_unique,
@@ -9595,8 +9128,6 @@ mod verify {
     }
 
     gen_clone_rc_sized_harness!(harness_clone_rc_u8, u8);
-    gen_clone_rc_sized_harness!(harness_clone_rc_u16, u16);
-    gen_clone_rc_sized_harness!(harness_clone_rc_u32, u32);
     gen_clone_rc_sized_harness!(harness_clone_rc_u64, u64);
     gen_clone_rc_sized_harness!(harness_clone_rc_u128, u128);
     gen_clone_rc_sized_harness!(harness_clone_rc_unit, ());
@@ -9604,8 +9135,6 @@ mod verify {
     gen_clone_rc_sized_harness!(harness_clone_rc_bool, bool);
 
     gen_clone_rc_unsized_harness!(harness_clone_rc_vec_u8, [u8]);
-    gen_clone_rc_unsized_harness!(harness_clone_rc_vec_u16, [u16]);
-    gen_clone_rc_unsized_harness!(harness_clone_rc_vec_u32, [u32]);
     gen_clone_rc_unsized_harness!(harness_clone_rc_vec_u64, [u64]);
     gen_clone_rc_unsized_harness!(harness_clone_rc_vec_u128, [u128]);
 
@@ -9645,8 +9174,6 @@ mod verify {
     }
 
     gen_rc_default_harness!(harness_rc_default_u8, u8);
-    gen_rc_default_harness!(harness_rc_default_u16, u16);
-    gen_rc_default_harness!(harness_rc_default_u32, u32);
     gen_rc_default_harness!(harness_rc_default_u64, u64);
     gen_rc_default_harness!(harness_rc_default_u128, u128);
     gen_rc_default_harness!(harness_rc_default_unit, ());
@@ -9654,8 +9181,6 @@ mod verify {
     gen_rc_default_harness!(harness_rc_default_bool, bool);
 
     gen_rc_default_vec_harness!(harness_rc_default_vec_u8, u8);
-    gen_rc_default_vec_harness!(harness_rc_default_vec_u16, u16);
-    gen_rc_default_vec_harness!(harness_rc_default_vec_u32, u32);
     gen_rc_default_vec_harness!(harness_rc_default_vec_u64, u64);
     gen_rc_default_vec_harness!(harness_rc_default_vec_u128, u128);
 
@@ -9721,8 +9246,6 @@ mod verify {
     }
 
     gen_from_vec_harness!(harness_from_vec_u8, u8);
-    gen_from_vec_harness!(harness_from_vec_u16, u16);
-    gen_from_vec_harness!(harness_from_vec_u32, u32);
     gen_from_vec_harness!(harness_from_vec_u64, u64);
     gen_from_vec_harness!(harness_from_vec_u128, u128);
     gen_from_vec_harness!(harness_from_vec_unit, ());
@@ -9831,8 +9354,6 @@ mod verify {
     }
 
     gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_u8, u8);
-    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_u16, u16);
-    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_u32, u32);
     gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_u64, u64);
     gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_u128, u128);
     gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_unit, ());
@@ -9840,8 +9361,6 @@ mod verify {
     gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_array, [u8; 4]);
 
     gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_vec_u8, [u8]);
-    gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_vec_u16, [u16]);
-    gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_vec_u32, [u32]);
     gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_vec_u64, [u64]);
     gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_vec_u128, [u128]);
 }
