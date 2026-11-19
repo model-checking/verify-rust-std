@@ -1063,13 +1063,17 @@ mod verify {
         let c_str: &CStr = unsafe { &*(slice as *const [u8] as *const CStr) };
 
         let len = slice.len();
-        // Oracle #1 (structural): valid iff the FIRST nul sits at the final
-        // index. Phrased with `position` — not the invariant's own form — so
-        // this is an independent cross-check, not a restatement.
-        let first_nul_at_end = match slice.iter().position(|&b| b == 0) {
-            Some(pos) => pos == len - 1,
-            None => false,
-        };
+        // Oracle #1 scans backwards to find the first NUL independently of
+        // the constructor's forward search.
+        let mut first_nul = None;
+        let mut i = len;
+        while i != 0 {
+            i -= 1;
+            if slice[i] == 0 {
+                first_nul = Some(i);
+            }
+        }
+        let first_nul_at_end = first_nul.is_some_and(|pos| pos + 1 == len);
         assert_eq!(c_str.is_safe(), first_nul_at_end);
 
         // Oracle #2 (semantic): the invariant accepts exactly the byte
