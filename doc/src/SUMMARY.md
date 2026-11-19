@@ -48,3 +48,4 @@
   - [29: Safety of `boxed`](./challenges/0029-boxed.md)
   - [30: Safety and Correctness of Integer Logarithms](./challenges/0030-integer-logarithms.md)
   - [31: Verify the safety of `BinaryHeap` functions](./challenges/0031-binary-heap.md)
+  - [35: Safety of `CString`, the owned C string](./challenges/0035-cstring.md)
