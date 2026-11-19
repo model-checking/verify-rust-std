@@ -65,7 +65,9 @@ verification is not repeated here.
 ### Assumptions
 
 - `core::ptr` intrinsics and `core::mem::MaybeUninit` may be assumed correct, and their existing
-  verified contracts may be reused. Deductive tools may rely on their own specifications of these.
+  verified contracts may be reused. Deductive tools may rely on their own specifications of these
+  primitives and on Rust's documented array/tuple layout guarantees (in particular the size and
+  alignment of the stack buffer `([usize; 32], [T; 0])`).
 - The safety precondition of each function is the one in its `# Safety` documentation: the range
   `[mid - left, mid + right)` is valid for reading and writing elements of `T`. For non-zero-sized `T`
   this includes the usual requirement that the byte size of the range does not exceed `isize::MAX`.
@@ -93,16 +95,12 @@ reading and writing afterwards:
 | `ptr_rotate_gcd` | `core::slice::rotate` |
 | `ptr_rotate_swap` | `core::slice::rotate` |
 
-Prove the absence of undefined behavior in these functions, including the early returns for
-zero-sized `T` and for `left == 0` or `right == 0`, and all three dispatch branches of
-`ptr_rotate`. For `ptr_rotate` on inputs that take the memmove branch, and for
-`ptr_rotate_memmove` itself, this must hold for arbitrary `left` and `right` (unbounded: no fixed
-bound on `left + right` other than the one in the precondition). For the gcd and block-swap
-strategies it must hold for every split with `left + right <= B`, with `B >= 24` stated in the
-solution (the dispatcher's whole small-total region for the gcd strategy), for the reason given
-under functional correctness below; a proof for arbitrary `left` and `right` exceeds this
-criterion and is welcome. `const_min` is safe code with no unsafe operations; its result is the
-smaller of its arguments, which the dispatch proof may rely on.
+Prove the absence of undefined behavior in all four functions for arbitrary `left` and `right`
+(unbounded: no fixed bound on `left + right` other than the one in the precondition), including the
+early returns for zero-sized `T` and for `left == 0` or `right == 0`, all three dispatch branches of
+`ptr_rotate`, and both the default and `optimize_for_size` configurations. `const_min` is safe code
+with no unsafe operations; its result is the smaller of its arguments, which the dispatch proof may
+rely on.
 
 The verification must hold for generic `T` (what satisfies this clause is to be decided in
 [issue #734](https://github.com/model-checking/verify-rust-std/issues/734)). In particular it must
@@ -110,17 +108,11 @@ cover zero-sized `T`, sizes that do and do not divide the memmove buffer, alignm
 elements larger than the buffer, types with a validity invariant (such as `NonZero`), and types with a
 destructor, for each of which the safety argument takes a different branch somewhere in the file.
 
-Prove functional correctness of the rotation: after `ptr_rotate(left, mid, right)`, the element at
-each position `j` of `[mid - left, mid + right)` is the element previously at position
-`(j + left) mod (left + right)` of that range. This must be proved for each of the three strategies.
-For the memmove strategy it must be proved for arbitrary `left` and `right`. For the gcd and
-block-swap strategies, whose loop invariants in a bounded model checker cannot name the input
-arrangement of a generic `T`, it is enough to prove it for every `left` and `right` with
-`left + right <= B`, where `B` is stated in the solution and `B >= 24` (so the whole input range in
-which the dispatcher prefers the gcd strategy for small totals is included), for element types whose
-values can be told apart. Solutions that prove the rotation postcondition for arbitrary `left` and
-`right` for all three strategies (for example with ghost state in a deductive tool) are welcome and
-exceed this criterion. The same bound `B` may be used for the safety proof of those two strategies, as stated above.
+Prove functional correctness of the rotation for arbitrary `left` and `right` across all three
+strategies and `ptr_rotate`: after `ptr_rotate(left, mid, right)`, the element at each position `j`
+of `[mid - left, mid + right)` is the element previously at position `(j + left) mod (left + right)`
+of that range (equivalently, `append(drop(left, xs), take(left, xs))`), with every element of `T`
+preserved (no element duplicated, lost, invalidated, or leaked).
 
 ### List of UBs
 
