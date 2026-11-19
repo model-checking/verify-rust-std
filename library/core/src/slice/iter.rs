@@ -1465,10 +1465,10 @@ impl<'a, T> Iterator for Windows<'a, T> {
         && (crate::ub_checks::can_dereference(*result as *const [T]))
     })]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        // SAFETY: the caller guarantees that `idx` selects a window in `self.v`.
-        // Its byte offset fits in an isize because self.v is a valid slice. For a ZST,
-        // that offset is zero even when the element index exceeds isize::MAX.
-        // The returned subslice is valid for the lifetime 'a of self.v.
+        // SAFETY: since the caller guarantees that `i` is in bounds,
+        // which means that `i` cannot overflow an `isize`, and the
+        // slice created by `from_raw_parts` is a subslice of `self.v`
+        // thus is guaranteed to be valid for the lifetime `'a` of `self.v`.
         unsafe { from_raw_parts(self.v.as_ptr().add(idx), self.size.get()) }
     }
 }
@@ -1628,11 +1628,13 @@ impl<'a, T> Iterator for Chunks<'a, T> {
     })]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
         let start = idx * self.chunk_size;
-        // SAFETY: the caller guarantees that idx is a valid chunk index, so start
-        // is in bounds of self.v and its multiplication cannot overflow usize. The
-        // chosen len keeps the whole result within self.v. The byte offset fits in
-        // isize; for a ZST it is zero even if start exceeds isize::MAX. The returned
-        // subslice is therefore valid for the lifetime 'a of self.v.
+        // SAFETY: the caller guarantees that `i` is in bounds,
+        // which means that `start` must be in bounds of the
+        // underlying `self.v` slice, and we made sure that `len`
+        // is also in bounds of `self.v`. Thus, `start` cannot overflow
+        // an `isize`, and the slice constructed by `from_raw_parts`
+        // is a subslice of `self.v` which is guaranteed to be valid
+        // for the lifetime `'a` of `self.v`.
         unsafe {
             let len = cmp::min(self.v.len().unchecked_sub(start), self.chunk_size);
             from_raw_parts(self.v.as_ptr().add(start), len)
@@ -2353,10 +2355,10 @@ impl<'a, T, const N: usize> Iterator for ArrayWindows<'a, T, N> {
     }
 
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        // SAFETY: the caller guarantees that idx selects a full array in self.v.
-        // Its byte offset fits in isize; for a ZST it is zero even when idx exceeds
-        // isize::MAX. The array created by cast_array stays within self.v and is
-        // valid for its lifetime 'a.
+        // SAFETY: since the caller guarantees that `idx` is in bounds,
+        // which means that `idx` cannot overflow an `isize`, and the
+        // "slice" created by `cast_array` is a subslice of `self.v`
+        // thus is guaranteed to be valid for the lifetime `'a` of `self.v`.
         unsafe { &*self.v.as_ptr().add(idx).cast_array() }
     }
 }
@@ -3385,9 +3387,8 @@ impl<'a, T: 'a + fmt::Debug, P> fmt::Debug for ChunkByMut<'a, T, P> {
 mod verify {
     //! Unbounded input models and Kani safety harnesses for Challenge 18.
     //!
-    //! See `doc/src/challenges/0018-verification-notes.md` for the function map,
-    //! checked assumptions, solver choices and limitations. The concrete type and
-    //! array-width instantiations are not a tool-level polymorphic proof.
+    //! Slice lengths and skip counts are symbolic. Element types and
+    //! array-window widths use concrete instantiations.
 
     use super::*;
     use crate::ffi::c_int;
@@ -3783,6 +3784,146 @@ mod verify {
             unsafe { crate::slice::from_raw_parts(ptr, 0) }
         }
     }
+
+    // Preserve the upstream checks for iterator APIs and types outside the
+    // symbolic suites. The fixed-size arrays belong to these regression proofs.
+    fn any_iter<T>(orig_slice: &[T]) -> Iter<'_, T> {
+        Iter::new(any_slice(orig_slice))
+    }
+
+    /// Macro that generates a harness for a given `Iter` method.
+    ///
+    /// Takes the name of the harness, the element type, and an expression to check.
+    macro_rules! check_safe_abstraction {
+        ($harness:ident, $ty:ty, $call:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                let array: [$ty; MAX_LEN] = kani::any();
+                let mut iter = any_iter(&array);
+                let target = $call;
+                target(&mut iter);
+                assert!(iter.is_safe());
+                kani::cover(true, "iterator remains safe after the call");
+            }
+        };
+    }
+
+    macro_rules! check_iter_wrappers {
+        ($ty:ty) => {
+            #[kani::proof]
+            fn check_default() {
+                let iter: Iter<'_, $ty> = Iter::default();
+                assert!(iter.is_safe());
+                kani::cover(iter.is_empty(), "default iterator is empty");
+            }
+
+            // Public functions that call safe abstraction `make_slice`.
+            check_safe_abstraction!(check_as_slice, $ty, |iter: &mut Iter<'_, $ty>| {
+                iter.as_slice();
+            });
+            check_safe_abstraction!(check_as_ref, $ty, |iter: &mut Iter<'_, $ty>| {
+                iter.as_ref();
+            });
+            // Ensure that clone always generates a safe object.
+            check_safe_abstraction!(check_clone, $ty, |iter: &mut Iter<'_, $ty>| {
+                assert!(iter.clone().is_safe());
+            });
+        };
+    }
+
+    /// Macro that generates a harness for a given unsafe `Iter` method.
+    ///
+    /// Takes:
+    /// 1. The name of the harness
+    /// 2. the element type
+    /// 3. the target function
+    /// 4. the optional arguments.
+    macro_rules! check_unsafe_contracts {
+        ($harness:ident, $ty:ty, $func:ident($($arg:expr),*)) => {
+            #[kani::proof_for_contract(Iter::$func)]
+            fn $harness() {
+                let array: [$ty; MAX_LEN] = kani::any();
+                let mut iter = any_iter(&array);
+                let _ = unsafe { iter.$func($($arg),*) };
+                kani::cover(true, "iterator contract exercised");
+            }
+        };
+    }
+
+    macro_rules! check_iter_with_ty {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = 50;
+
+                check_iter_wrappers!($ty);
+
+                #[kani::proof]
+                fn check_new_iter() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter(&array);
+                    assert!(iter.is_safe());
+                    kani::cover(true, "iterator construction reached");
+                }
+
+                /// Count consumes the value, thus, invoke it directly.
+                #[kani::proof]
+                fn check_count() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter(&array);
+                    iter.count();
+                    kani::cover(true, "iterator count reached");
+                }
+
+                check_unsafe_contracts!(check_next_back_unchecked, $ty, next_back_unchecked());
+                check_unsafe_contracts!(check_post_inc_start, $ty, post_inc_start(kani::any()));
+                check_unsafe_contracts!(check_pre_dec_end, $ty, pre_dec_end(kani::any()));
+
+                check_safe_abstraction!(check_advance_back_by, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.advance_back_by(kani::any());
+                });
+                check_safe_abstraction!(check_is_empty, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.is_empty();
+                });
+                check_safe_abstraction!(check_len, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.len();
+                });
+                check_safe_abstraction!(check_size_hint, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.size_hint();
+                });
+                check_safe_abstraction!(check_nth, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.nth(kani::any());
+                });
+                check_safe_abstraction!(check_advance_by, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.advance_by(kani::any());
+                });
+                check_safe_abstraction!(check_next_back, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.next_back();
+                });
+                check_safe_abstraction!(check_nth_back, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.nth_back(kani::any());
+                });
+                check_safe_abstraction!(check_next, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.next();
+                });
+            }
+        };
+    }
+
+    mod verify_unit {
+        use super::*;
+        const MAX_LEN: usize = isize::MAX as usize;
+        check_iter_wrappers!(());
+    }
+
+    mod verify_u8 {
+        use super::*;
+        const MAX_LEN: usize = u32::MAX as usize;
+        check_iter_wrappers!(u8);
+    }
+
+    check_iter_with_ty!(verify_char, char);
+    check_iter_with_ty!(verify_tup, (char, u8));
 
     // Challenge 18 asks for access safety, not full iterator semantics. All
     // lengths and positive chunk sizes are symbolic; no loop over a slice is
