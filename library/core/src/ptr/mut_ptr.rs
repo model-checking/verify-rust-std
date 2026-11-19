@@ -1970,6 +1970,21 @@ impl<T> *mut [T] {
     /// ```
     #[inline(always)]
     #[unstable(feature = "raw_slice_split", issue = "95595")]
+    #[cfg_attr(kani, kani::modifies())]
+    #[requires(
+        mid <= self.len()
+            && !self.as_mut_ptr().is_null()
+            && crate::ub_checks::can_write(self)
+    )]
+    #[ensures(|parts: &(*mut [T], *mut [T])| {
+        let (head, tail) = *parts;
+        head.as_mut_ptr() == self.as_mut_ptr()
+            && head.len() == mid
+            && tail.as_mut_ptr() == self.as_mut_ptr().wrapping_add(mid)
+            && tail.len() == self.len().saturating_sub(mid)
+            && crate::ub_checks::can_write(head)
+            && crate::ub_checks::can_write(tail)
+    })]
     pub unsafe fn split_at_mut_unchecked(self, mid: usize) -> (*mut [T], *mut [T]) {
         let len = self.len();
         let ptr = self.as_mut_ptr();

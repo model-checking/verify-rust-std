@@ -302,7 +302,9 @@ macro_rules! iterator {
                 // contract per loop). The validity clause is trivial for all-bit-pattern types.
                 #[cfg_attr(kani, kani::loop_invariant(i < len && (
                     (const { crate::slice::iter::verify::element_validity_kind::<T>() == 0 })
-                    || unsafe { crate::slice::iter::verify::valid_elements(proof_ptr, len) }
+                    || unsafe { crate::slice::iter::verify::loop_elements_valid(proof_ptr, len) }
+                ) && crate::slice::iter::verify::CallbackState::invariant(
+                    &f, proof_ptr as *const (), i
                 )))]
                 // The verification callbacks modify the accumulator and closure state;
                 // only IterMut callbacks may modify slice elements. Explicit framing avoids treating one-past-end pointers
@@ -310,7 +312,7 @@ macro_rules! iterator {
                 // remain enabled: callbacks writing through other captures need more frame
                 // targets before they can be verified with this annotation.
                 #[cfg_attr(kani, kani::loop_modifies(
-                    &i, &acc, &f
+                    &i, &acc, crate::slice::iter::verify::CallbackState::frame(&f)
                     $(, crate::ptr::slice_from_raw_parts_mut(proof_ptr as *$mut_ T, len))?
                 ))]
                 loop {
@@ -343,18 +345,22 @@ macro_rules! iterator {
                 let initial_ptr = self.ptr.as_ptr();
                 #[cfg(kani)]
                 let mut consumed = 0;
-                #[cfg_attr(kani, kani::loop_invariant(unsafe {
+                #[cfg_attr(kani, kani::loop_invariant((unsafe {
                     crate::slice::iter::verify::iter_state_matches(
                         &raw const self.ptr, self.end_or_len as *const T,
                         initial_ptr, initial_len, consumed, 0
                     )
+                }) && crate::slice::iter::verify::CallbackState::invariant(
+                    &f, initial_ptr as *const (), consumed
+                ) && unsafe {
+                    crate::slice::iter::verify::loop_elements_valid(initial_ptr, initial_len)
                 }))]
                 // Give element-writing callbacks the whole initial mutable region. Inferred
                 // targets based on the current element depend on the loop's moving pointer.
-                // Writes through other closure captures need additional frame targets; the
-                // retained-reference harness records that separate limitation explicitly.
+                // The callback supplies its writable state separately, including
+                // captured referents when it has them. Its capture pointers are preserved.
                 #[cfg_attr(kani, kani::loop_modifies(
-                    &consumed, &self, &f
+                    &consumed, &self, crate::slice::iter::verify::CallbackState::frame(&f)
                     $(, crate::ptr::slice_from_raw_parts_mut(initial_ptr as *$mut_ T, initial_len))?
                 ))]
                 while let Some(x) = self.next() {
@@ -450,11 +456,10 @@ macro_rules! iterator {
                     crate::slice::iter::verify::iter_state_matches(
                         &raw const self.ptr, self.end_or_len as *const T, initial_ptr, n, i, 0
                     )
+                    && crate::slice::iter::verify::loop_elements_valid(initial_ptr, n)
                 }))]
-                // These proof callbacks modify only the iterator, index, closure state and
-                // (for IterMut) elements. Other captured writes require additional targets.
                 #[cfg_attr(kani, kani::loop_modifies(
-                    &i, &*self, &predicate
+                    &i, &*self, crate::slice::iter::verify::CallbackState::predicate_frame(&predicate)
                     $(, crate::ptr::slice_from_raw_parts_mut(initial_ptr as *$mut_ T, n))?
                 ))]
                 while let Some(x) = self.next() {
@@ -485,9 +490,10 @@ macro_rules! iterator {
                     crate::slice::iter::verify::iter_state_matches(
                         &raw const self.ptr, self.end_or_len as *const T, initial_ptr, n, 0, n - i
                     )
+                    && crate::slice::iter::verify::loop_elements_valid(initial_ptr, n)
                 }))]
                 #[cfg_attr(kani, kani::loop_modifies(
-                    &i, &*self, &predicate
+                    &i, &*self, crate::slice::iter::verify::CallbackState::predicate_frame(&predicate)
                     $(, crate::ptr::slice_from_raw_parts_mut(initial_ptr as *$mut_ T, n))?
                 ))]
                 while let Some(x) = self.next_back() {
