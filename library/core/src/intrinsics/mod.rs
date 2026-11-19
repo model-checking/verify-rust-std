@@ -4795,7 +4795,11 @@ mod verify {
     #[kani::proof]
     fn check_transmute_unchecked_ref_address() {
         let mut generator = PointerGenerator::<10000>::new();
-        let arb_ptr: *const bool = generator.any_in_bounds().ptr;
+        let arb = generator.any_in_bounds::<bool>();
+        // A reference must point to a valid value, and `any_in_bounds` may return a pointer to
+        // uninitialized memory.
+        kani::assume(arb.is_initialized);
+        let arb_ptr: *const bool = arb.ptr;
         let arb_ref: &bool = unsafe { &*(arb_ptr) };
         let arb_ref_2: &u8 = unsafe { transmute_unchecked(arb_ref) };
         assert_eq!(arb_ref as *const bool, arb_ref_2 as *const u8 as *const bool);
@@ -4807,7 +4811,11 @@ mod verify {
     fn check_transmute_unchecked_slice_metadata() {
         const MAX_SIZE: usize = 32;
         let mut generator = PointerGenerator::<10000>::new();
-        let arb_arr_ptr: *const [bool; MAX_SIZE] = generator.any_in_bounds().ptr;
+        let arb = generator.any_in_bounds::<[bool; MAX_SIZE]>();
+        // A reference must point to a valid value, and `any_in_bounds` may return a pointer to
+        // uninitialized memory.
+        kani::assume(arb.is_initialized);
+        let arb_arr_ptr: *const [bool; MAX_SIZE] = arb.ptr;
         let arb_slice = kani::slice::any_slice_of_array(unsafe { &*(arb_arr_ptr) });
         //The following prevents taking redundant slices:
         kani::assume(arb_slice.as_ptr() == arb_arr_ptr as *const bool);
@@ -4903,7 +4911,11 @@ mod verify {
     #[kani::proof]
     fn check_transmute_ref_address() {
         let mut generator = PointerGenerator::<10000>::new();
-        let arb_ptr: *const bool = generator.any_in_bounds().ptr;
+        let arb = generator.any_in_bounds::<bool>();
+        // A reference must point to a valid value, and `any_in_bounds` may return a pointer to
+        // uninitialized memory.
+        kani::assume(arb.is_initialized);
+        let arb_ptr: *const bool = arb.ptr;
         let arb_ref: &bool = unsafe { &*(arb_ptr) };
         let arb_ref_2: &u8 = unsafe { transmute(arb_ref) };
         assert_eq!(arb_ref as *const bool, arb_ref_2 as *const u8 as *const bool);
@@ -4915,7 +4927,11 @@ mod verify {
     fn check_transmute_slice_metadata() {
         const MAX_SIZE: usize = 32;
         let mut generator = PointerGenerator::<10000>::new();
-        let arb_arr_ptr: *const [bool; MAX_SIZE] = generator.any_in_bounds().ptr;
+        let arb = generator.any_in_bounds::<[bool; MAX_SIZE]>();
+        // A reference must point to a valid value, and `any_in_bounds` may return a pointer to
+        // uninitialized memory.
+        kani::assume(arb.is_initialized);
+        let arb_arr_ptr: *const [bool; MAX_SIZE] = arb.ptr;
         let arb_slice = kani::slice::any_slice_of_array(unsafe { &*(arb_arr_ptr) });
         //The following prevents taking redundant slices:
         kani::assume(arb_slice.as_ptr() == arb_arr_ptr as *const bool);
