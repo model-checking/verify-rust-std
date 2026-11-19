@@ -75,14 +75,27 @@ impl<'a> Iterator for Chars<'a> {
                 bytes_skipped += CHUNK_SIZE;
 
                 let mut start_bytes = [false; CHUNK_SIZE];
-
                 #[safety::loop_invariant(verify::flags_valid(&raw const start_bytes))]
                 #[cfg_attr(kani, kani::loop_modifies(&raw mut start_bytes))]
                 for i in 0..CHUNK_SIZE {
+                    // Check the update and its frame at an arbitrary flag index.
+                    #[cfg(kani)]
+                    let (slot, expected) = {
+                        let slot = kani::any::<u8>() as usize % CHUNK_SIZE;
+                        (slot, if slot == i { chunk[i] & 0xc0 != 0x80 } else { start_bytes[slot] })
+                    };
                     start_bytes[i] = !super::validations::utf8_is_cont_byte(chunk[i]);
+                    #[cfg(kani)]
+                    assert!(start_bytes[slot] == expected);
                 }
 
+                // Each of the 32 iterations writes its flag and preserves the others.
+                #[cfg(kani)]
+                let expected_remainder =
+                    remainder - verify::chunk_start_count(input, chunk, bytes_skipped, start_bytes);
                 remainder -= start_bytes.into_iter().map(|i| i as u8).sum::<u8>() as usize;
+                #[cfg(kani)]
+                assert!(remainder == expected_remainder);
             }
 
             // SAFETY: The amount of bytes exists since we just iterated over them,
@@ -1872,6 +1885,22 @@ mod verify {
         (lo | hi) & !0x0101_0101_0101_0101_0101_0101_0101_0101 == 0
     }
 
+    pub(super) fn chunk_start_count(
+        input: &[u8],
+        chunk: &[u8; 32],
+        skipped: usize,
+        flags: [bool; 32],
+    ) -> usize {
+        assert!(32 <= skipped && skipped <= input.len());
+        assert!(chunk.as_ptr() == input.as_ptr().wrapping_add(skipped - 32));
+        // Each true flag has one set bit in its representation.
+        count_flag_words(unsafe { crate::intrinsics::transmute(flags) }) as usize
+    }
+
+    fn count_flag_words(words: [u128; 2]) -> u32 {
+        words[0].count_ones() + words[1].count_ones()
+    }
+
     #[kani::proof]
     #[kani::stub(
         crate::array::iter::iter_inner::PolymorphicIter::fold,
@@ -2033,10 +2062,14 @@ mod verify {
     // prefix respectively. No double-ended matching semantics are required.
     struct ModelPattern;
 
+    type SearchMatch = Option<(usize, usize)>;
+
     struct ModelSearcher<'a> {
         haystack: &'a str,
         front: usize,
         back: usize,
+        // Split harnesses choose the responses before calling the target.
+        match_plan: Option<&'a [SearchMatch]>,
     }
 
     // Issue #753: into_searcher must preserve the passed haystack by pointer AND
@@ -2047,7 +2080,7 @@ mod verify {
         type Searcher<'a> = ModelSearcher<'a>;
 
         fn into_searcher(self, haystack: &str) -> ModelSearcher<'_> {
-            ModelSearcher { haystack, front: 0, back: haystack.len() }
+            ModelSearcher { haystack, front: 0, back: haystack.len(), match_plan: None }
         }
     }
 
@@ -2070,6 +2103,27 @@ mod verify {
         kani::assume(s.is_char_boundary(a) && s.is_char_boundary(b));
         kani::cover(true, "C22-A09: any_match_range assumption admitted");
         (a, b)
+    }
+
+    fn any_search_match(s: &str, front: usize, back: usize) -> SearchMatch {
+        kani::any::<bool>().then(|| any_match_range(s, front, back))
+    }
+
+    impl ModelSearcher<'_> {
+        fn choose_match(&mut self) -> SearchMatch {
+            let Some(plan) = self.match_plan else {
+                return any_search_match(self.haystack, self.front, self.back);
+            };
+            let Some((&matched, rest)) = plan.split_first() else {
+                panic!("unexpected split search");
+            };
+            self.match_plan = Some(rest);
+            if let Some((a, b)) = matched {
+                assert!(self.front <= a && a <= b && b <= self.back);
+                assert!(self.haystack.is_char_boundary(a) && self.haystack.is_char_boundary(b));
+            }
+            matched
+        }
     }
 
     // SAFETY: next emits adjacent, in-bounds UTF-8 ranges. The next_match
@@ -2095,16 +2149,11 @@ mod verify {
             }
         }
 
-        fn next_match(&mut self) -> Option<(usize, usize)> {
+        fn next_match(&mut self) -> SearchMatch {
             assert!(type_invariant_searcher(self));
-            if kani::any() {
-                let range = any_match_range(self.haystack, self.front, self.back);
-                self.front = range.1;
-                Some(range)
-            } else {
-                self.front = self.back;
-                None
-            }
+            let matched = self.choose_match();
+            self.front = matched.map_or(self.back, |(_, end)| end);
+            matched
         }
     }
 
@@ -2131,16 +2180,11 @@ mod verify {
             }
         }
 
-        fn next_match_back(&mut self) -> Option<(usize, usize)> {
+        fn next_match_back(&mut self) -> SearchMatch {
             assert!(type_invariant_searcher(self));
-            if kani::any() {
-                let range = any_match_range(self.haystack, self.front, self.back);
-                self.back = range.0;
-                Some(range)
-            } else {
-                self.back = self.front;
-                None
-            }
+            let matched = self.choose_match();
+            self.back = matched.map_or(self.front, |(start, _)| start);
+            matched
         }
     }
 
@@ -2159,7 +2203,7 @@ mod verify {
         SplitInternal {
             start,
             end,
-            matcher: ModelSearcher { haystack: s, front, back },
+            matcher: ModelSearcher { haystack: s, front, back, match_plan: None },
             allow_trailing_empty: kani::any(),
             finished: kani::any(),
         }
@@ -2170,23 +2214,25 @@ mod verify {
         assert!(same_slice(searcher.haystack(), s));
     }
 
-    fn check_split_frame(s: &str, iter: &SplitInternal<'_, ModelPattern>) {
-        assert!(type_invariant_split(iter));
-        assert!(same_slice(iter.matcher.haystack(), s));
-    }
-
     fn check_piece(s: &str, piece: &str) -> usize {
         let start = checked_offset(s, piece);
         check_range(s, piece, start, start + piece.len());
         start
     }
 
-    // Closure of the safety invariant supports arbitrarily long iterator histories;
-    // exact matching contents, call counts and character ranks are not required.
-    fn check_split(s: &str, iter: &SplitInternal<'_, ModelPattern>, result: Option<&str>) {
-        check_split_frame(s, iter);
-        if let Some(part) = result {
-            check_piece(s, part);
+    // Closure of the safety invariant supports arbitrarily long iterator histories.
+    fn check_split(
+        s: &str,
+        iter: &SplitInternal<'_, ModelPattern>,
+        result: Option<&str>,
+        expected: SearchMatch,
+    ) {
+        assert!(type_invariant_split(iter));
+        assert!(same_slice(iter.matcher.haystack(), s));
+        assert!(iter.matcher.match_plan.is_some_and(<[_]>::is_empty));
+        assert!(result.is_some() == expected.is_some());
+        if let (Some(part), Some((start, end))) = (result, expected) {
+            check_range(s, part, start, end);
         }
         kani::cover(result.is_none(), "split: no remaining piece");
         kani::cover(result.is_some_and(str::is_empty), "split: empty piece");
@@ -2209,7 +2255,7 @@ mod verify {
     fn harness_searcher_protocol() {
         let s = symbolic_text();
         let (front, back) = any_window(s);
-        let mut searcher = ModelSearcher { haystack: s, front, back };
+        let mut searcher = ModelSearcher { haystack: s, front, back, match_plan: None };
         let reverse: bool = kani::any();
         let result = if reverse { searcher.next_match_back() } else { searcher.next_match() };
         check_searcher(s, &searcher);
@@ -2273,48 +2319,101 @@ mod verify {
     fn harness_split_get_end() {
         let s = symbolic_text();
         let mut iter = any_split(s);
+        iter.matcher.match_plan = Some(&[]);
+        let (start, end, trailing) = (iter.start, iter.end, iter.allow_trailing_empty);
+        let search_window = (iter.matcher.front, iter.matcher.back);
+        let expected = (!iter.finished && (trailing || start < end)).then_some((start, end));
         let result = iter.get_end();
-        check_split(s, &iter, result);
+        assert!(iter.finished);
+        assert!((iter.start, iter.end, iter.allow_trailing_empty) == (start, end, trailing));
+        assert!((iter.matcher.front, iter.matcher.back) == search_window);
+        check_split(s, &iter, result, expected);
+    }
+
+    fn check_split_step<const BACK: bool, const INCLUSIVE: bool>() -> Option<SearchMatch> {
+        let s = symbolic_text();
+        let mut iter = any_split(s);
+        let (start, end) = (iter.start, iter.end);
+        let (finished, trailing) = (iter.finished, iter.allow_trailing_empty);
+        let (front, back) = (iter.matcher.front, iter.matcher.back);
+        let first = if finished { None } else { any_search_match(s, front, back) };
+        let split_at = |(a, b)| if INCLUSIVE { b } else { a };
+
+        // The reverse iterator suppresses one initial empty piece. A match
+        // that ends at the window end leaves the searcher bounded by its start.
+        let discarded = if BACK && !trailing { first.filter(|&(_, b)| b == end) } else { None };
+        let second = discarded.and_then(|(a, _)| any_search_match(s, front, a));
+        let steps = [first, second];
+        let count = usize::from(!finished) + usize::from(discarded.is_some());
+        iter.matcher.match_plan = Some(&steps[..count]);
+
+        let piece_end = discarded.map_or(end, split_at);
+        let matched = if discarded.is_some() { second } else { first };
+        let (expected, new_start, new_end) = match (finished, BACK, matched) {
+            (true, _, _) => (None, start, end),
+            (_, false, Some((a, b))) => (Some((start, split_at((a, b)))), b, end),
+            (_, true, Some((a, b))) => (Some((b, piece_end)), start, split_at((a, b))),
+            (_, _, None) => {
+                let keep_empty = trailing || discarded.is_some();
+                ((keep_empty || start < piece_end).then_some((start, piece_end)), start, piece_end)
+            }
+        };
+        let search_window = if finished {
+            (front, back)
+        } else if BACK {
+            (front, matched.map_or(front, |(a, _)| a))
+        } else {
+            (matched.map_or(back, |(_, b)| b), back)
+        };
+
+        let result = match (BACK, INCLUSIVE) {
+            (false, false) => iter.next(),
+            (false, true) => iter.next_inclusive(),
+            (true, false) => iter.next_back(),
+            (true, true) => iter.next_back_inclusive(),
+        };
+        assert!((iter.start, iter.end) == (new_start, new_end));
+        assert!((iter.matcher.front, iter.matcher.back) == search_window);
+        assert!(iter.finished == (finished || matched.is_none()));
+        assert!(iter.allow_trailing_empty == (trailing || (BACK && !finished)));
+        check_split(s, &iter, result, expected);
+        discarded.is_some().then_some(second)
     }
 
     #[kani::proof]
     fn harness_split_next() {
-        let s = symbolic_text();
-        let mut iter = any_split(s);
-        let result = iter.next();
-        check_split(s, &iter, result);
+        let _ = check_split_step::<false, false>();
     }
 
     #[kani::proof]
     fn harness_split_next_inclusive() {
-        let s = symbolic_text();
-        let mut iter = any_split(s);
-        let result = iter.next_inclusive();
-        check_split(s, &iter, result);
+        let _ = check_split_step::<false, true>();
+    }
+
+    fn check_split_back_step<const INCLUSIVE: bool>() {
+        let after_empty = check_split_step::<true, INCLUSIVE>();
+        kani::cover(matches!(after_empty, Some(Some(_))), "matched after trailing empty");
+        kani::cover(matches!(after_empty, Some(None)), "exhausted after trailing empty");
     }
 
     #[kani::proof]
     fn harness_split_next_back() {
-        let s = symbolic_text();
-        let mut iter = any_split(s);
-        let result = iter.next_back();
-        check_split(s, &iter, result);
+        check_split_back_step::<false>();
     }
 
     #[kani::proof]
     fn harness_split_next_back_inclusive() {
-        let s = symbolic_text();
-        let mut iter = any_split(s);
-        let result = iter.next_back_inclusive();
-        check_split(s, &iter, result);
+        check_split_back_step::<true>();
     }
 
     #[kani::proof]
     fn harness_split_remainder() {
         let s = symbolic_text();
-        let iter = any_split(s);
+        let mut iter = any_split(s);
+        iter.matcher.match_plan = Some(&[]);
+        let expected = (!iter.finished).then_some((iter.start, iter.end));
         let result = iter.remainder();
-        check_split(s, &iter, result);
+        check_split(s, &iter, result, expected);
     }
 
     #[kani::proof]
@@ -2406,13 +2505,12 @@ mod verify {
 
         use super::super::super::pattern::verify::assert_char_searcher_step;
         use super::*;
-        use crate::mem;
 
         fn check_sum_flags() {
             let flags: [bool; 32] = kani::any();
-            let words: [u128; 2] = unsafe { mem::transmute(flags) };
+            let words = unsafe { crate::intrinsics::transmute(flags) };
             let result = flags.into_iter().map(|flag| flag as u8).sum::<u8>();
-            assert!(result as u32 == words[0].count_ones() + words[1].count_ones());
+            assert!(result as u32 == count_flag_words(words));
             kani::cover(result == 32, "all flags consumed after sum assertion");
         }
 
