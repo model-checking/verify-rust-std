@@ -82,13 +82,31 @@ impl<'a> Iterator for Chars<'a> {
 
                 let mut start_bytes = [false; CHUNK_SIZE];
 
+                #[cfg(kani)]
+                let rem_before_chunk = remainder;
+
                 #[cfg_attr(kani, kani::loop_modifies(&raw mut start_bytes))]
-                #[cfg_attr(kani, kani::loop_invariant(kani::index <= CHUNK_SIZE && (chunk as *const [u8; 32] as usize) != 0 && verify::bool32_valid(&raw const start_bytes)))]
+                #[cfg_attr(kani, kani::loop_invariant(
+                    kani::index <= CHUNK_SIZE
+                        && (chunk as *const [u8; 32] as usize) != 0
+                        && verify::bool32_valid(&raw const start_bytes)
+                ))]
                 for i in 0..CHUNK_SIZE {
                     start_bytes[i] = !super::validations::utf8_is_cont_byte(chunk[i]);
+                    #[cfg(kani)]
+                    kani::assert(
+                        start_bytes[i] == !super::validations::utf8_is_cont_byte(chunk[i]),
+                        "fill loop records !utf8_is_cont_byte(chunk[i])",
+                    );
                 }
 
                 remainder -= start_bytes.into_iter().map(|i| i as u8).sum::<u8>() as usize;
+                #[cfg(kani)]
+                kani::assert(
+                    remainder
+                        == rem_before_chunk - (verify::sum_bool32(&raw const start_bytes) as usize),
+                    "chunk remainder decremented by exact start_bytes count",
+                );
             }
 
             // SAFETY: The amount of bytes exists since we just iterated over them,
@@ -113,6 +131,11 @@ impl<'a> Iterator for Chars<'a> {
             }
         }
 
+        // Instantiate Challenge Assumption (4) (valid UTF-8) at the loop-4 entry offset on
+        // the immutable entry slice `original` so `kani_char_loop_inv` remains side-effect-free.
+        #[cfg(kani)]
+        verify::assume_original_utf8_at(original, self.kani_offset(original));
+
         #[cfg_attr(kani, kani::loop_modifies((&raw mut self.iter).cast::<*const u8>(), &raw mut remainder))]
         #[safety::loop_invariant(self.kani_char_loop_inv(remainder, original, initial_remainder))]
         while (remainder > 0) && (self.iter.len() > 0) {
@@ -122,6 +145,10 @@ impl<'a> Iterator for Chars<'a> {
             // SAFETY: utf8 validity requires that the string must contain
             // the continuation bytes (if any)
             unsafe { self.iter.advance_by(slurp).unwrap_unchecked() };
+            // Instantiate Challenge Assumption (4) at the newly reached offset on `original`
+            // (after the unsafe step, never before it).
+            #[cfg(kani)]
+            verify::assume_original_utf8_at(original, self.kani_offset(original));
         }
 
         NonZero::new(remainder).map_or(Ok(()), Err)
@@ -207,6 +234,36 @@ impl<'a> Chars<'a> {
     }
 
     #[cfg(kani)]
+    pub(super) fn kani_offset(&self, original: &[u8]) -> usize {
+        let p = original as *const [u8] as *const u8;
+        let (ptr, _) = self.raw_parts();
+        crate::intrinsics::wrapping_sub(ptr as usize, p as usize)
+    }
+
+    #[cfg(kani)]
+    pub(super) fn kani_valid_utf8_step(original: &[u8], cur: usize) -> bool {
+        if cur >= original.len() {
+            return true;
+        }
+        let b = original[cur];
+        if (b as i8) < -64 {
+            return false;
+        }
+        let width = match b {
+            0x00..=0x7F => 1usize,
+            0xC2..=0xDF => 2,
+            0xE0..=0xEF => 3,
+            0xF0..=0xF4 => 4,
+            _ => 0,
+        };
+        if width == 0 || width > original.len() - cur {
+            return false;
+        }
+        let next = cur + width;
+        next == original.len() || !((original[next] as i8) < -64)
+    }
+
+    #[cfg(kani)]
     pub(super) fn kani_char_loop_inv(
         &self,
         remainder: usize,
@@ -216,27 +273,11 @@ impl<'a> Chars<'a> {
         let (p, total_len) = (original as *const [u8] as *const u8, original.len());
         let (ptr, end) = self.raw_parts();
         let cur = crate::intrinsics::wrapping_sub(ptr as usize, p as usize);
-        // Challenge Assumption (4) expanded in scalar form at boundary `cur`.
-        if cur <= total_len {
-            if cur < original.len() && !((original[cur] as i8) < -64) {
-                let width = match original[cur] {
-                    0x00..=0x7F => 1usize,
-                    0xC2..=0xDF => 2,
-                    0xE0..=0xEF => 3,
-                    0xF0..=0xF4 => 4,
-                    _ => 0,
-                };
-                kani::assume(width > 0 && width <= original.len() - cur);
-                let next = cur + width;
-                kani::assume(next == original.len() || !((original[next] as i8) < -64));
-            }
-        }
-        // `remainder` chars still to skip out of the entry count: the chars skipped so far
-        // (`initial_remainder - remainder`) are at most the bytes consumed (a char has at least one byte).
-        // Entry of the loop checks this against the chunk loop's bookkeeping.
+        // Side-effect-free invariant: zero `kani::assume` calls. Challenge Assumption (4)
+        // is instantiated outside the invariant predicate on the immutable slice `original`.
         let r0 = initial_remainder;
         cur <= total_len
-            && (cur == total_len || !((original[cur] as i8) < -64))
+            && Self::kani_valid_utf8_step(original, cur)
             && remainder <= r0
             && r0 - remainder <= cur
             && ptr == unsafe { crate::intrinsics::arith_offset(p, cur as isize) }
@@ -1811,7 +1852,7 @@ pub(super) mod verify {
     // algorithm is at a boundary, advances correctly, or returns the right result.
     pub(super) fn assume_original_utf8_at(original: &[u8], pos: usize) {
         if pos < original.len() && !validations::utf8_is_cont_byte(original[pos]) {
-            let width = validations::utf8_char_width(original[pos]);
+            let width = raw_utf8_char_width(original[pos]);
             kani::assume(width > 0 && width <= original.len() - pos);
             let next = pos + width;
             kani::assume(next == original.len() || !validations::utf8_is_cont_byte(original[next]));
@@ -2496,12 +2537,17 @@ pub(super) mod verify {
     #[kani::proof_for_contract(Bytes::__iterator_get_unchecked)]
     pub fn check_bytes_iterator_get_unchecked() {
         let s = any_haystack();
-        let mut bytes = s.bytes();
+        let lo: usize = kani::any();
+        let hi: usize = kani::any();
+        kani::assume(lo <= hi && hi <= s.len());
+        // `Bytes` advances byte-by-byte, so `lo` and `hi` need not be UTF-8 char boundaries.
+        let mut bytes = Bytes(s.as_bytes()[lo..hi].iter().copied());
         let idx: usize = kani::any();
         let val = unsafe { bytes.__iterator_get_unchecked(idx) };
-        assert_eq!(val, s.as_bytes()[idx]);
+        assert_eq!(val, s.as_bytes()[lo + idx]);
+        cover!(lo == 0 && idx == 0);
         cover!(idx > 0);
-        cover!(idx == 0);
+        cover!(lo > 0 && !s.is_char_boundary(lo));
     }
 
     #[kani::proof]
@@ -2530,11 +2576,13 @@ pub(super) mod verify {
         let mut split = any_split(s);
         let was_finished = split.finished;
         let (so, eo) = (split.start, split.end);
+        let orig_back = split.matcher.back;
         // next/next_inclusive never write allow_trailing_empty (neither the match arm nor get_end does)
         let ate0 = split.allow_trailing_empty;
         let res = split.next();
         assert_eq!(split.allow_trailing_empty, ate0);
         assert!(split_invariant(&split));
+        assert_eq!(split.matcher.back, orig_back);
         // a finished iterator yields nothing and stays finished; None means finished
         if was_finished {
             assert!(res.is_none() && split.finished);
@@ -2542,19 +2590,21 @@ pub(super) mod verify {
         if res.is_none() {
             assert!(split.finished);
         }
-        // exact piece and new start, from the match the searcher reported (None: get_end)
+        // exact piece, new start, and matcher cursor, from the match the searcher reported (None: get_end)
         assert_eq!(split.end, eo);
         match split.matcher.last_match {
             Some((a, b)) => {
                 assert!(!was_finished);
                 assert_piece(s, res.unwrap(), so, a);
                 assert_eq!(split.start, b);
+                assert_eq!(split.matcher.front, b);
                 assert!(!split.finished);
             }
             None => {
                 assert_eq!(split.start, so);
                 if !was_finished {
                     assert!(split.finished);
+                    assert_eq!(split.matcher.front, orig_back);
                     assert_eq!(res.is_some(), split.allow_trailing_empty || eo > so);
                     if let Some(sub) = res {
                         assert_piece(s, sub, so, eo);
@@ -2576,11 +2626,13 @@ pub(super) mod verify {
         let mut split = any_split(s);
         let was_finished = split.finished;
         let (so, eo) = (split.start, split.end);
+        let orig_back = split.matcher.back;
         // next/next_inclusive never write allow_trailing_empty (neither the match arm nor get_end does)
         let ate0 = split.allow_trailing_empty;
         let res = split.next_inclusive();
         assert_eq!(split.allow_trailing_empty, ate0);
         assert!(split_invariant(&split));
+        assert_eq!(split.matcher.back, orig_back);
         if was_finished {
             assert!(res.is_none() && split.finished);
         }
@@ -2593,12 +2645,14 @@ pub(super) mod verify {
                 assert!(!was_finished);
                 assert_piece(s, res.unwrap(), so, b);
                 assert_eq!(split.start, b);
+                assert_eq!(split.matcher.front, b);
                 assert!(!split.finished);
             }
             None => {
                 assert_eq!(split.start, so);
                 if !was_finished {
                     assert!(split.finished);
+                    assert_eq!(split.matcher.front, orig_back);
                     assert_eq!(res.is_some(), split.allow_trailing_empty || eo > so);
                     if let Some(sub) = res {
                         assert_piece(s, sub, so, eo);
@@ -2811,14 +2865,10 @@ pub(super) mod verify {
     // The fill-loop caller supplies live, initialized 32-byte local storage.
     // This predicate checks representation validity only, not allocation.
     pub(super) fn bool32_valid(ptr: *const [bool; 32]) -> bool {
-        // Reading initialized storage as u8 permits every representation;
-        // bitwise OR <= 1 holds iff every byte is 0 or 1.
-        let b = unsafe { &*(ptr as *const [u8; 32]) };
-        ((b[0] | b[1] | b[2] | b[3] | b[4] | b[5] | b[6] | b[7])
-            | (b[8] | b[9] | b[10] | b[11] | b[12] | b[13] | b[14] | b[15])
-            | (b[16] | b[17] | b[18] | b[19] | b[20] | b[21] | b[22] | b[23])
-            | (b[24] | b[25] | b[26] | b[27] | b[28] | b[29] | b[30] | b[31]))
-            <= 1
+        // Reading initialized 32-byte storage as `[u64; 4]` via `read_unaligned`
+        // (align 1, 32 bytes): every byte is 0x00 or 0x01 iff bits 1..=7 are all 0.
+        let w: [u64; 4] = unsafe { crate::ptr::read_unaligned(ptr.cast::<[u64; 4]>()) };
+        ((w[0] | w[1] | w[2] | w[3]) & 0xFEFE_FEFE_FEFE_FEFE) == 0
     }
 
     #[kani::proof]
@@ -2881,6 +2931,22 @@ pub(super) mod verify {
         cover!(count > 32 && count < isize::MAX as usize);
     }
 
+    // Exact left-associated sum of a 32-element Boolean array (0..=32), matching the exact
+    // addition order of `Iterator::sum` / `kani_fold_arity32` so SAT checks equivalence directly.
+    // Exact row-first SWAR sum of a 32-element Boolean array (0..=32) via 1 unaligned load.
+    // Every input byte is 0 or 1, so each 8-byte word folds cleanly with zero inter-byte carry.
+    pub(super) fn sum_bool32(ptr: *const [bool; 32]) -> u8 {
+        #[inline(always)]
+        fn fold8(w: u64) -> u8 {
+            let s = w.wrapping_add(w >> 32);
+            let s = s.wrapping_add(s >> 16);
+            let s = s.wrapping_add(s >> 8);
+            (s & 0xFF) as u8
+        }
+        let w: [u64; 4] = unsafe { crate::ptr::read_unaligned(ptr.cast::<[u64; 4]>()) };
+        fold8(w[0]).wrapping_add(fold8(w[1])).wrapping_add(fold8(w[2])).wrapping_add(fold8(w[3]))
+    }
+
     #[kani::proof]
     #[kani::stub(crate::str::validations::utf8_char_width, stub_utf8_char_width)]
     #[kani::stub(
@@ -2899,6 +2965,9 @@ pub(super) mod verify {
         let res = chars.advance_by(remainder);
         let consumed = total_len - chars.iter.len();
         assert!(consumed <= total_len);
+        let tail = chars.as_str();
+        kani::assert(tail.len() == total_len - consumed, "remaining str length");
+        kani::assert(tail.as_ptr() == unsafe { s.as_ptr().add(consumed) }, "remaining str pointer");
         match res {
             // `remainder` chars were skipped, each takes at least one byte
             Ok(()) => assert!(consumed >= remainder),
