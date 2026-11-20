@@ -6,7 +6,7 @@ This repository is a fork of the Rust standard library used exclusively for form
 
 ## Approved Verification Tools
 
-Only these tools are accepted: **Kani**, **VeriFast**, **Flux**, and **ESBMC (GOTO-Transcoder)**. Flag any PR that uses a tool not on this list — it must go through a separate tool application process first.
+Only these tools are accepted: **Kani**, **VeriFast**, **Flux**, and **ESBMC**. Flag any PR that uses a tool not on this list — it must go through a separate tool application process first.
 
 ---
 
@@ -33,7 +33,7 @@ These PRs solve open verification challenges. Apply the strictest review criteri
 - **No unjustified assumptions.** Every `#[kani::assume]`, `requires`, or equivalent precondition must be justified by the function's documented safety contract or API invariants. Flag assumptions that over-constrain inputs to make verification pass.
 - **Contracts must reflect documented safety conditions.** Cross-reference preconditions and postconditions against the function's `# Safety` doc comments and the [official std library documentation](https://doc.rust-lang.org/std/).
 - **Harnesses must cover meaningful input ranges**, not just trivial or degenerate cases.
-- **Verification must actually run in CI** using one of the approved tools. Check that the relevant workflow (kani.yml, verifast.yml, flux.yml, goto-transcoder.yml) executes the new proofs.
+- **Verification must actually run in CI** using one of the approved tools. Check that the relevant workflow (kani.yml, verifast.yml, flux.yml, esbmc.yml) executes the new proofs.
 
 ### Code Quality for the Rust Standard Library
 - Code should be **idiomatic Rust** and match the style of the surrounding standard library code.
