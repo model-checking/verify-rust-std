@@ -5117,11 +5117,6 @@ mod kani_rc_harness_helpers {
             .is_ok()
     }
 
-    pub(super) fn nondet_rc_slice<T>(vec: &Vec<T>) -> &[T] {
-        kani::assume(rc_slice_layout_ok::<T>(vec.len()));
-        vec.as_slice()
-    }
-
     pub(super) fn verifier_nondet_vec_rc<T>() -> Vec<T> {
         let vec = verifier_nondet_vec();
         kani::assume(rc_slice_layout_ok::<T>(vec.len()));
@@ -5207,8 +5202,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem]>::from_raw)]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let rc: Rc<[$elem]> = Rc::from(vec);
+                let values: [$elem; 16] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$elem]> = Rc::from(&values[..slice_len]);
                 let ptr: *const [$elem] = Rc::into_raw(rc);
                 let _: Rc<[$elem]> = unsafe { Rc::from_raw(ptr) };
                 kani::cover(
@@ -5255,8 +5251,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem]>::increment_strong_count)]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let rc: Rc<[$elem]> = Rc::from(vec);
+                let values: [$elem; 16] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$elem]> = Rc::from(&values[..slice_len]);
                 let ptr: *const [$elem] = Rc::into_raw(rc);
                 unsafe {
                     Rc::<[$elem]>::increment_strong_count(ptr);
@@ -5307,8 +5304,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem]>::decrement_strong_count)]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let rc: Rc<[$elem]> = Rc::from(vec);
+                let values: [$elem; 16] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$elem]> = Rc::from(&values[..slice_len]);
                 let ptr: *const [$elem] = Rc::into_raw(rc);
                 unsafe {
                     Rc::<[$elem]>::increment_strong_count(ptr);
@@ -5352,8 +5350,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem], Global>::from_raw_in)]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 16] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let (ptr, alloc): (*const [$elem], Global) = Rc::into_raw_with_allocator(rc);
                 let _: Rc<[$elem], Global> = unsafe { Rc::from_raw_in(ptr, alloc) };
                 kani::cover(
@@ -5400,8 +5399,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem], Global>::increment_strong_count_in)]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 16] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let (ptr, _alloc): (*const [$elem], Global) = Rc::into_raw_with_allocator(rc);
                 unsafe {
                     Rc::<[$elem], Global>::increment_strong_count_in(ptr, Global);
@@ -5463,8 +5463,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem], Global>::decrement_strong_count_in)]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 16] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let rc2: Rc<[$elem], Global> = rc.clone();
                 let (ptr, alloc): (*const [$elem], Global) = Rc::into_raw_with_allocator(rc2);
                 unsafe {
@@ -5525,8 +5526,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Rc::<[$elem]>::get_mut_unchecked)]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let mut rc: Rc<[$elem]> = Rc::from(vec);
+                let values: [$elem; 16] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let mut rc: Rc<[$elem]> = Rc::from(&values[..slice_len]);
                 unsafe {
                     let data: &mut [$elem] = Rc::get_mut_unchecked(&mut rc);
                     kani::cover(
@@ -7624,8 +7626,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let slice: &[$elem] = nondet_rc_slice(&vec);
+                let values: [$elem; 16] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let slice: &[$elem] = &values[..slice_len];
                 // Call the target function: this harness verifies `UniqueRcUninit::new` for a slice.
                 let mut uninit: UniqueRcUninit<[$elem], Global> =
                     UniqueRcUninit::new(slice, Global);
@@ -7675,8 +7678,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                let vec = verifier_nondet_vec::<$elem>();
-                let slice = nondet_rc_slice(&vec);
+                let values: [$elem; 16] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let slice = &values[..slice_len];
                 let mut uninit: UniqueRcUninit<[$elem], Global> =
                     UniqueRcUninit::new(slice, Global);
                 // Compare the complete raw value-field pointer, including slice metadata.
@@ -7728,8 +7732,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                let vec = verifier_nondet_vec::<$elem>();
-                let slice = nondet_rc_slice(&vec);
+                let values: [$elem; 16] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let slice = &values[..slice_len];
                 let uninit: UniqueRcUninit<[$elem], Global> = UniqueRcUninit::new(slice, Global);
                 // `drop` must have ownership of the allocator token in order to deallocate.
                 assert!(uninit.alloc.is_some());
@@ -7774,8 +7779,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 16] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 // Call the target function: this harness verifies `Rc::inner` for a slice.
                 let inner = rc.inner();
                 assert!(inner.strong() == 1);
@@ -7832,8 +7838,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 16] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let expected_ptr = Rc::as_ptr(&rc);
 
                 // Call the target function: this harness verifies
@@ -8968,12 +8975,13 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$ty>();
-                let source_len = vec.len();
+                let values: [$ty; 16] = kani::any();
+                let source_len = kani::any_where(|len: &usize| *len <= values.len());
+                let source = &values[..source_len];
 
                 // For these TrivialClone types, this dispatches to `Rc::copy_from_slice`.
                 // Call the target function through the RcFromSlice specialization.
-                let rc = <Rc<[$ty], Global> as RcFromSlice<$ty>>::from_slice(vec.as_slice());
+                let rc = <Rc<[$ty], Global> as RcFromSlice<$ty>>::from_slice(source);
 
                 let ptr = Rc::as_ptr(&rc);
                 assert!(!ptr.is_null());
