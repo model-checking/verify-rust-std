@@ -7910,7 +7910,6 @@ mod verify {
     // Rc::new_uninit harnesses.
     macro_rules! gen_rc_new_uninit_harness {
         ($name:ident, $ty:ty) => {
-            #[kani::proof]
             pub fn $name() {
                 // Call the target function: this harness verifies `Rc::new_uninit`.
                 let rc: Rc<mem::MaybeUninit<$ty>> = Rc::<$ty>::new_uninit();
@@ -7935,7 +7934,6 @@ mod verify {
     // Rc::new_zeroed harnesses.
     macro_rules! gen_rc_new_zeroed_harness {
         ($name:ident, $ty:ty) => {
-            #[kani::proof]
             pub fn $name() {
                 // Call the target function: this harness verifies `Rc::new_zeroed`.
                 let rc: Rc<mem::MaybeUninit<$ty>> = Rc::<$ty>::new_zeroed();
@@ -7963,7 +7961,6 @@ mod verify {
     // Rc::new_uninit_in harnesses.
     macro_rules! gen_new_uninit_in_harness {
         ($name:ident, $ty:ty) => {
-            #[kani::proof]
             pub fn $name() {
                 // Call the target function: this harness verifies `Rc::new_uninit_in`.
                 let rc: Rc<mem::MaybeUninit<$ty>, Global> =
@@ -7992,7 +7989,6 @@ mod verify {
     // Rc::new_zeroed_in harnesses.
     macro_rules! gen_new_zeroed_in_harness {
         ($name:ident, $ty:ty) => {
-            #[kani::proof]
             pub fn $name() {
                 // Call the target function: this harness verifies `Rc::new_zeroed_in`.
                 let rc: Rc<mem::MaybeUninit<$ty>, Global> =
@@ -8017,6 +8013,49 @@ mod verify {
     gen_new_zeroed_in_harness!(harness_new_zeroed_in_unit, ());
     gen_new_zeroed_in_harness!(harness_new_zeroed_in_array, [u8; 4]);
     gen_new_zeroed_in_harness!(harness_new_zeroed_in_bool, bool);
+
+    proof_for_cases!(
+        harness_rc_uninit_allocation_u8,
+        0 => harness_rc_new_uninit_u8,
+        1 => harness_new_uninit_in_u8,
+        2 => harness_rc_new_zeroed_u8,
+        _ => harness_new_zeroed_in_u8,
+    );
+    proof_for_cases!(
+        harness_rc_uninit_allocation_u64,
+        0 => harness_rc_new_uninit_u64,
+        1 => harness_new_uninit_in_u64,
+        2 => harness_rc_new_zeroed_u64,
+        _ => harness_new_zeroed_in_u64,
+    );
+    proof_for_cases!(
+        harness_rc_uninit_allocation_u128,
+        0 => harness_rc_new_uninit_u128,
+        1 => harness_new_uninit_in_u128,
+        2 => harness_rc_new_zeroed_u128,
+        _ => harness_new_zeroed_in_u128,
+    );
+    proof_for_cases!(
+        harness_rc_uninit_allocation_unit,
+        0 => harness_rc_new_uninit_unit,
+        1 => harness_new_uninit_in_unit,
+        2 => harness_rc_new_zeroed_unit,
+        _ => harness_new_zeroed_in_unit,
+    );
+    proof_for_cases!(
+        harness_rc_uninit_allocation_bool,
+        0 => harness_rc_new_uninit_bool,
+        1 => harness_new_uninit_in_bool,
+        2 => harness_rc_new_zeroed_bool,
+        _ => harness_new_zeroed_in_bool,
+    );
+    proof_for_cases!(
+        harness_rc_uninit_allocation_array,
+        0 => harness_rc_new_uninit_array,
+        1 => harness_new_uninit_in_array,
+        2 => harness_rc_new_zeroed_array,
+        _ => harness_new_zeroed_in_array,
+    );
 
     // Rc::new_cyclic_in harnesses.
     macro_rules! gen_new_cyclic_in_harness {
@@ -8132,7 +8171,6 @@ mod verify {
     // Rc::try_new_uninit_in harnesses.
     macro_rules! gen_try_new_uninit_in_harness {
         ($name:ident, $ty:ty) => {
-            #[kani::proof]
             pub fn $name() {
                 // Call the target function: this harness verifies `Rc::try_new_uninit_in`.
                 match Rc::<$ty, Global>::try_new_uninit_in(Global) {
@@ -8171,7 +8209,6 @@ mod verify {
     // Rc::try_new_zeroed_in harnesses.
     macro_rules! gen_try_new_zeroed_in_harness {
         ($name:ident, $ty:ty) => {
-            #[kani::proof]
             pub fn $name() {
                 // Call the target function: this harness verifies `Rc::try_new_zeroed_in`.
                 match Rc::<$ty, Global>::try_new_zeroed_in(Global) {
@@ -8206,6 +8243,49 @@ mod verify {
     gen_try_new_zeroed_in_harness!(harness_try_new_zeroed_in_unit, ());
     gen_try_new_zeroed_in_harness!(harness_try_new_zeroed_in_array, [u8; 4]);
     gen_try_new_zeroed_in_harness!(harness_try_new_zeroed_in_bool, bool);
+
+    proof_for_cases!(
+        harness_rc_try_uninit_allocation_u8,
+        0 => harness_try_new_uninit_u8,
+        1 => harness_try_new_uninit_in_u8,
+        2 => harness_try_new_zeroed_u8,
+        _ => harness_try_new_zeroed_in_u8,
+    );
+    proof_for_cases!(
+        harness_rc_try_uninit_allocation_u64,
+        0 => harness_try_new_uninit_u64,
+        1 => harness_try_new_uninit_in_u64,
+        2 => harness_try_new_zeroed_u64,
+        _ => harness_try_new_zeroed_in_u64,
+    );
+    proof_for_cases!(
+        harness_rc_try_uninit_allocation_u128,
+        0 => harness_try_new_uninit_u128,
+        1 => harness_try_new_uninit_in_u128,
+        2 => harness_try_new_zeroed_u128,
+        _ => harness_try_new_zeroed_in_u128,
+    );
+    proof_for_cases!(
+        harness_rc_try_uninit_allocation_unit,
+        0 => harness_try_new_uninit_unit,
+        1 => harness_try_new_uninit_in_unit,
+        2 => harness_try_new_zeroed_unit,
+        _ => harness_try_new_zeroed_in_unit,
+    );
+    proof_for_cases!(
+        harness_rc_try_uninit_allocation_bool,
+        0 => harness_try_new_uninit_bool,
+        1 => harness_try_new_uninit_in_bool,
+        2 => harness_try_new_zeroed_bool,
+        _ => harness_try_new_zeroed_in_bool,
+    );
+    proof_for_cases!(
+        harness_rc_try_uninit_allocation_array,
+        0 => harness_try_new_uninit_array,
+        1 => harness_try_new_uninit_in_array,
+        2 => harness_try_new_zeroed_array,
+        _ => harness_try_new_zeroed_in_array,
+    );
 
     // Rc::pin_in harnesses.
     macro_rules! gen_pin_in_harness {
@@ -8256,7 +8336,6 @@ mod verify {
     // Rc::new_uninit_slice harnesses.
     macro_rules! gen_new_uninit_slice_harness {
         ($name:ident, $ty:ty) => {
-            #[kani::proof]
             pub fn $name() {
                 let len = kani::any_where(|l: &usize| rc_slice_layout_ok::<$ty>(*l));
 
@@ -8289,7 +8368,6 @@ mod verify {
     // Rc::new_zeroed_slice harnesses.
     macro_rules! gen_new_zeroed_slice_harness {
         ($name:ident, $elem_ty:ty) => {
-            #[kani::proof]
             pub fn $name() {
                 let len = kani::any_where(|l: &usize| rc_slice_layout_ok::<$elem_ty>(*l));
 
@@ -8416,7 +8494,6 @@ mod verify {
     // Rc::new_uninit_slice_in harnesses.
     macro_rules! gen_new_uninit_slice_in_harness {
         ($name:ident, $ty:ty) => {
-            #[kani::proof]
             pub fn $name() {
                 let len = kani::any_where(|l: &usize| rc_slice_layout_ok::<$ty>(*l));
 
@@ -8528,7 +8605,6 @@ mod verify {
     // Rc::try_new_uninit harnesses.
     macro_rules! gen_try_new_uninit_harness {
         ($name:ident, $ty:ty) => {
-            #[kani::proof]
             pub fn $name() {
                 // Call the target function: this harness verifies `Rc::try_new_uninit`.
                 match Rc::<$ty>::try_new_uninit() {
@@ -8565,7 +8641,6 @@ mod verify {
     // Rc::try_new_zeroed harnesses.
     macro_rules! gen_try_new_zeroed_harness {
         ($name:ident, $ty:ty) => {
-            #[kani::proof]
             pub fn $name() {
                 // Call the target function: this harness verifies `Rc::try_new_zeroed`.
                 match Rc::<$ty>::try_new_zeroed() {
@@ -8883,7 +8958,6 @@ mod verify {
     // Rc::new_zeroed_slice_in harnesses.
     macro_rules! gen_new_zeroed_slice_in_harness {
         ($name:ident, $elem_ty:ty) => {
-            #[kani::proof]
             pub fn $name() {
                 type T = $elem_ty;
                 let len = kani::any_where(|l: &usize| rc_slice_layout_ok::<T>(*l));
@@ -8910,6 +8984,49 @@ mod verify {
     gen_new_zeroed_slice_in_harness!(harness_new_zeroed_slice_in_unit, ());
     gen_new_zeroed_slice_in_harness!(harness_new_zeroed_slice_in_bool, bool);
     gen_new_zeroed_slice_in_harness!(harness_new_zeroed_slice_in_array, [u8; 4]);
+
+    proof_for_cases!(
+        harness_rc_slice_allocation_u8,
+        0 => harness_new_uninit_slice_u8,
+        1 => harness_new_uninit_slice_in_u8,
+        2 => harness_new_zeroed_slice_u8,
+        _ => harness_new_zeroed_slice_in_u8,
+    );
+    proof_for_cases!(
+        harness_rc_slice_allocation_u64,
+        0 => harness_new_uninit_slice_u64,
+        1 => harness_new_uninit_slice_in_u64,
+        2 => harness_new_zeroed_slice_u64,
+        _ => harness_new_zeroed_slice_in_u64,
+    );
+    proof_for_cases!(
+        harness_rc_slice_allocation_u128,
+        0 => harness_new_uninit_slice_u128,
+        1 => harness_new_uninit_slice_in_u128,
+        2 => harness_new_zeroed_slice_u128,
+        _ => harness_new_zeroed_slice_in_u128,
+    );
+    proof_for_cases!(
+        harness_rc_slice_allocation_unit,
+        0 => harness_new_uninit_slice_unit,
+        1 => harness_new_uninit_slice_in_unit,
+        2 => harness_new_zeroed_slice_unit,
+        _ => harness_new_zeroed_slice_in_unit,
+    );
+    proof_for_cases!(
+        harness_rc_slice_allocation_bool,
+        0 => harness_new_uninit_slice_bool,
+        1 => harness_new_uninit_slice_in_bool,
+        2 => harness_new_zeroed_slice_bool,
+        _ => harness_new_zeroed_slice_in_bool,
+    );
+    proof_for_cases!(
+        harness_rc_slice_allocation_array,
+        0 => harness_new_uninit_slice_array,
+        1 => harness_new_uninit_slice_in_array,
+        2 => harness_new_zeroed_slice_array,
+        _ => harness_new_zeroed_slice_in_array,
+    );
 
     // Rc::as_ptr harnesses.
     macro_rules! gen_as_ptr_harness {
