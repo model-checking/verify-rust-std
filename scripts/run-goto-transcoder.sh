@@ -10,7 +10,7 @@ supported_regex=$2
 unsupported_regex=neg
 
 # ESBMC reads CBMC goto binaries directly since v8.4, so Kani's output needs no conversion.
-esbmc_url=https://github.com/esbmc/esbmc/releases/download/v8.5/esbmc-linux.zip
+esbmc_url=https://github.com/esbmc/esbmc/releases/download/v8.6/esbmc-linux.zip
 esbmc=esbmc/release/bin/esbmc
 
 contract_folder=$target/deps
@@ -49,7 +49,9 @@ while IFS= read -r line; do
         continue
     fi
     echo "Processing: $contract"
-    $esbmc --binary $contract_folder/$line --function $contract < /dev/null
+    # A failed reachability_check or cover means "reachable" or "satisfiable", not a bug.
+    $esbmc --binary $contract_folder/$line --function $contract \
+        --ignore-property-class reachability_check --ignore-property-class cover < /dev/null
     checked=$((checked + 1))
 done < "_contracts.txt"
 
