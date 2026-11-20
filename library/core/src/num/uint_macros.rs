@@ -1905,6 +1905,7 @@ macro_rules! uint_impl {
                       without modifying the original"]
         #[inline]
         #[track_caller]
+        #[ensures(|result: &u32| imp::int_log10::is_ilog(self as u128, 2, *result))]
         pub const fn ilog2(self) -> u32 {
             if let Some(log) = self.checked_ilog2() {
                 log
@@ -1930,6 +1931,7 @@ macro_rules! uint_impl {
                       without modifying the original"]
         #[inline]
         #[track_caller]
+        #[ensures(|result: &u32| imp::int_log10::is_ilog(self as u128, 10, *result))]
         pub const fn ilog10(self) -> u32 {
             if let Some(log) = self.checked_ilog10() {
                 log
@@ -2028,6 +2030,10 @@ macro_rules! uint_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result: &Option<u32>| match *result {
+            Some(log) => imp::int_log10::is_ilog(self as u128, 2, log),
+            None => self == 0,
+        })]
         pub const fn checked_ilog2(self) -> Option<u32> {
             match NonZero::new(self) {
                 Some(x) => Some(x.ilog2()),
@@ -2049,6 +2055,10 @@ macro_rules! uint_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result: &Option<u32>| match *result {
+            Some(log) => imp::int_log10::is_ilog(self as u128, 10, log),
+            None => self == 0,
+        })]
         pub const fn checked_ilog10(self) -> Option<u32> {
             match NonZero::new(self) {
                 Some(x) => Some(x.ilog10()),

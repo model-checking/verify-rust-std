@@ -3623,6 +3623,7 @@ macro_rules! int_impl {
                       without modifying the original"]
         #[inline]
         #[track_caller]
+        #[ensures(|result: &u32| self > 0 && imp::int_log10::is_ilog(self as u128, 2, *result))]
         pub const fn ilog2(self) -> u32 {
             if let Some(log) = self.checked_ilog2() {
                 log
@@ -3648,6 +3649,7 @@ macro_rules! int_impl {
                       without modifying the original"]
         #[inline]
         #[track_caller]
+        #[ensures(|result: &u32| self > 0 && imp::int_log10::is_ilog(self as u128, 10, *result))]
         pub const fn ilog10(self) -> u32 {
             if let Some(log) = self.checked_ilog10() {
                 log
@@ -3702,6 +3704,10 @@ macro_rules! int_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result: &Option<u32>| match *result {
+            Some(log) => self > 0 && imp::int_log10::is_ilog(self as u128, 2, log),
+            None => self <= 0,
+        })]
         pub const fn checked_ilog2(self) -> Option<u32> {
             if self <= 0 {
                 None
@@ -3726,6 +3732,10 @@ macro_rules! int_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result: &Option<u32>| match *result {
+            Some(log) => self > 0 && imp::int_log10::is_ilog(self as u128, 10, log),
+            None => self <= 0,
+        })]
         pub const fn checked_ilog10(self) -> Option<u32> {
             imp::int_log10::$ActualT(self as $ActualT)
         }
