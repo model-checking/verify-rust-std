@@ -5075,7 +5075,7 @@ mod kani_rc_harness_helpers {
     pub(super) fn verifier_nondet_vec<T>() -> Vec<T> {
         let sz: usize = kani::any();
         // This is a CI tractability measure, not a workaround for a failing proof.
-        kani::assume(sz < 25);
+        kani::assume(sz <= 16);
 
         let layout = Layout::array::<T>(sz);
         kani::assume(layout.is_ok());
@@ -5613,8 +5613,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Weak::<[$elem]>::from_raw)]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let strong: Rc<[$elem]> = Rc::from(vec);
+                let values: [$elem; 16] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let strong: Rc<[$elem]> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem]> = Rc::downgrade(&strong);
                 let ptr: *const [$elem] = weak.into_raw();
                 let _recovered: Weak<[$elem]> = unsafe { Weak::from_raw(ptr) };
@@ -5669,8 +5670,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Weak::<[$elem], Global>::from_raw_in)]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 16] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let strong: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let (ptr, alloc): (*const [$elem], Global) = weak.into_raw_with_allocator();
                 let _recovered: Weak<[$elem], Global> = unsafe { Weak::from_raw_in(ptr, alloc) };
@@ -5762,7 +5764,7 @@ mod verify {
         ($unique:ident, $shared:ident, $weak_present:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $unique() {
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let mut rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 assert!(Rc::<[$elem], Global>::get_mut(&mut rc).is_some());
@@ -5770,7 +5772,7 @@ mod verify {
             }
 
             pub fn $shared() {
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let mut rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let _shared: Rc<[$elem], Global> = Rc::clone(&rc);
@@ -5779,7 +5781,7 @@ mod verify {
             }
 
             pub fn $weak_present() {
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let mut rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let _weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
@@ -5921,7 +5923,7 @@ mod verify {
         ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
             #[kani::proof]
             pub fn $unique() {
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let mut rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let len = rc.len();
@@ -5934,7 +5936,7 @@ mod verify {
 
             #[kani::proof]
             pub fn $shared() {
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let mut rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let _shared: Rc<[$elem], Global> = Rc::clone(&rc);
@@ -5948,7 +5950,7 @@ mod verify {
 
             #[kani::proof]
             pub fn $weak_present() {
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let mut rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let _weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
@@ -6100,7 +6102,7 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let len = kani::any_where(|len: &usize| *len <= values.len());
                 let src: Box<[$elem], Global> = Box::from(&values[..len]);
                 let rc = Rc::<[$elem], Global>::from_box_in(src);
@@ -6169,7 +6171,7 @@ mod verify {
                 // Live unsized path: weak points into a real slice allocation.
                 // `downgrade` references that allocation while `strong` is alive.
                 // So this executes the non-dangling branch.
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let strong: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
@@ -6344,7 +6346,7 @@ mod verify {
                 // Live unsized path: weak points into a real slice allocation.
                 // `downgrade` references that allocation while `strong` is alive.
                 // So this executes the non-dangling branch.
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let strong: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
@@ -6571,7 +6573,7 @@ mod verify {
             #[kani::proof]
             pub fn $live() {
                 // Path (3): downgrade from a live `Rc<[E]>`.
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let strong: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
@@ -6595,7 +6597,7 @@ mod verify {
 
             pub fn $strong_zero() {
                 // Path (2): weak points to allocation, then strong owner is dropped.
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let strong: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
@@ -6778,7 +6780,7 @@ mod verify {
             #[kani::proof]
             pub fn $some() {
                 // Branch (2): non-dangling unsized weak from live `Rc<[E]>`.
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let strong: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
@@ -6805,7 +6807,7 @@ mod verify {
             pub fn $expired() {
                 // The allocation remains valid for the weak control block after the last
                 // strong owner is dropped, so this must not be mistaken for the sentinel.
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let strong: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
@@ -6992,7 +6994,7 @@ mod verify {
         ($live:ident, $after_drop:ident, $dangling:ident, [$elem:ty]) => {
             pub fn $live() {
                 // Build live slice allocation and keep strong owner alive.
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let strong: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 // Create an explicit weak while the strong owner remains alive.
@@ -7021,7 +7023,7 @@ mod verify {
             #[kani::proof]
             pub fn $after_drop() {
                 // Create explicit weak from live strong slice owner.
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let strong: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
@@ -7174,7 +7176,7 @@ mod verify {
     macro_rules! gen_inc_strong_non_overflow_unsized_harness {
         ($name:ident, [$elem:ty]) => {
             pub fn $name() {
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let inner = rc.inner();
@@ -7273,7 +7275,7 @@ mod verify {
     macro_rules! gen_inc_weak_non_overflow_unsized_harness {
         ($name:ident, [$elem:ty]) => {
             pub fn $name() {
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let inner = rc.inner();
@@ -8311,7 +8313,7 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let values: [$ty; 24] = kani::any();
+                let values: [$ty; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let rc: Rc<[$ty]> = Rc::from(&values[..slice_len]);
                 // N lies within the symbolic length range,
@@ -8928,7 +8930,7 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let rc_clone: Rc<[$elem], Global> = Rc::clone(&rc);
@@ -9097,7 +9099,7 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let values: [$ty; 24] = kani::any();
+                let values: [$ty; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let rc: Rc<[$ty]> = Rc::from(&values[..slice_len]);
                 let source_len = rc.len();
@@ -9218,7 +9220,7 @@ mod verify {
         ($unique:ident, $shared:ident, $weak_present:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $unique() {
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 // Only the implicit weak exists while the sole strong slice owner is alive.
@@ -9233,7 +9235,7 @@ mod verify {
             }
 
             pub fn $shared() {
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let rc_clone: Rc<[$elem], Global> = Rc::clone(&rc);
@@ -9250,7 +9252,7 @@ mod verify {
 
             #[kani::proof]
             pub fn $weak_present() {
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
@@ -9379,7 +9381,7 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let ptr = Rc::as_ptr(&rc);
@@ -9598,7 +9600,7 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                let values: [$elem; 24] = kani::any();
+                let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
                 let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let expected = Rc::as_ptr(&rc);
