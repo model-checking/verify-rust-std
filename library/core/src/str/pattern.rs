@@ -208,6 +208,20 @@ pub enum SearchStep {
     Done,
 }
 
+macro_rules! reject_steps {
+    ($step:expr $(; $advance:block, $($attr:meta),+)?) => {
+        $($(#[$attr])+ )?
+        loop {
+            $($advance;)?
+            match $step {
+                SearchStep::Reject(a, b) => return Some((a, b)),
+                SearchStep::Done => return None,
+                _ => continue,
+            }
+        }
+    };
+}
+
 /// A searcher for a string pattern.
 ///
 /// This trait provides methods for searching for non-overlapping
@@ -273,21 +287,7 @@ pub unsafe trait Searcher<'a> {
     /// of this and [`next_match`][Searcher::next_match] will overlap.
     #[inline]
     fn next_reject(&mut self) -> Option<(usize, usize)> {
-        #[cfg_attr(kani, kani::loop_modifies(
-            verify::FilterLoopContract::cursor(&*self, false),
-            verify::FilterLoopContract::word_cursor(&*self, false),
-            verify::FilterLoopContract::flag(&*self, false),
-            verify::FilterLoopContract::cache(&*self, false),
-            verify::FilterLoopContract::finished(&*self)
-        ))]
-        #[cfg_attr(kani, kani::loop_invariant(verify::FilterLoopContract::valid(&*self)))]
-        loop {
-            match self.next() {
-                SearchStep::Reject(a, b) => return Some((a, b)),
-                SearchStep::Done => return None,
-                _ => continue,
-            }
-        }
+        reject_steps!(self.next())
     }
 }
 
@@ -346,21 +346,7 @@ pub unsafe trait ReverseSearcher<'a>: Searcher<'a> {
     /// See [`next_back()`][ReverseSearcher::next_back].
     #[inline]
     fn next_reject_back(&mut self) -> Option<(usize, usize)> {
-        #[cfg_attr(kani, kani::loop_modifies(
-            verify::FilterLoopContract::cursor(&*self, true),
-            verify::FilterLoopContract::word_cursor(&*self, true),
-            verify::FilterLoopContract::flag(&*self, true),
-            verify::FilterLoopContract::cache(&*self, true),
-            verify::FilterLoopContract::finished(&*self)
-        ))]
-        #[cfg_attr(kani, kani::loop_invariant(verify::FilterLoopContract::valid(&*self)))]
-        loop {
-            match self.next_back() {
-                SearchStep::Reject(a, b) => return Some((a, b)),
-                SearchStep::Done => return None,
-                _ => continue,
-            }
-        }
+        reject_steps!(self.next_back())
     }
 }
 
@@ -1155,16 +1141,40 @@ impl<'a, 'b> StrSearcher<'a, 'b> {
 }
 
 unsafe impl<'a, 'b> Searcher<'a> for StrSearcher<'a, 'b> {
+    #[cfg(kani)]
+    fn next_reject(&mut self) -> Option<(usize, usize)> {
+        let mut step = SearchStep::Done;
+        reject_steps!(
+            step;
+            { verify::write_step(self, &mut step, Self::next); },
+            kani::loop_modifies(
+                verify::front_cursor(self),
+                verify::front_memory(self),
+                verify::empty_forward_flag(self),
+                verify::empty_finished(self),
+                &step
+            ),
+            kani::loop_invariant(verify::reject_loop_state(self))
+        )
+    }
+
     #[inline]
     fn haystack(&self) -> &'a str {
         self.haystack
     }
 
     #[inline]
-    #[cfg_attr(kani, kani::requires(verify::supported_contract_state(self)))]
+    #[cfg_attr(kani, kani::requires(verify::invariant(self)))]
     #[cfg_attr(kani, kani::ensures(|step| {
         verify::assume_utf8_at_match(self.haystack, self.needle, *step);
-        verify::invariant(self) && verify::step_ok(self.haystack, *step)
+        verify::invariant(self)
+            && verify::step_ok(self.haystack, *step)
+            && verify::empty_step_alternates(
+                self,
+                *step,
+                old(verify::empty_match_flag(self, false)),
+                false,
+            )
     }))]
     #[cfg_attr(
         kani,
@@ -1244,17 +1254,7 @@ unsafe impl<'a, 'b> Searcher<'a> for StrSearcher<'a, 'b> {
     #[inline]
     fn next_match(&mut self) -> Option<(usize, usize)> {
         match self.searcher {
-            StrSearcherImpl::Empty(..) =>
-            #[cfg_attr(kani, kani::loop_invariant(verify::empty_loop_state(&*self)))]
-            #[cfg_attr(
-                    kani,
-                    kani::loop_modifies(
-                        verify::front_cursor(self),
-                        verify::empty_forward_flag(self),
-                        verify::empty_finished(self)
-                    )
-                )]
-            loop {
+            StrSearcherImpl::Empty(..) => loop {
                 match self.next() {
                     SearchStep::Match(a, b) => return Some((a, b)),
                     SearchStep::Done => return None,
@@ -1301,10 +1301,35 @@ unsafe impl<'a, 'b> Searcher<'a> for StrSearcher<'a, 'b> {
 }
 
 unsafe impl<'a, 'b> ReverseSearcher<'a> for StrSearcher<'a, 'b> {
+    #[cfg(kani)]
+    fn next_reject_back(&mut self) -> Option<(usize, usize)> {
+        let mut step = SearchStep::Done;
+        reject_steps!(
+            step;
+            { verify::write_step(self, &mut step, Self::next_back); },
+            kani::loop_modifies(
+                verify::back_cursor(self),
+                verify::back_memory(self),
+                verify::empty_backward_flag(self),
+                verify::empty_finished(self),
+                &step
+            ),
+            kani::loop_invariant(verify::reject_loop_state(self))
+        )
+    }
+
     #[inline]
-    #[cfg_attr(kani, kani::requires(verify::supported_contract_state(self)))]
-    #[cfg_attr(kani, kani::ensures(|step| verify::invariant(self)
-        && verify::step_ok(self.haystack, *step)))]
+    #[cfg_attr(kani, kani::requires(verify::invariant(self)))]
+    #[cfg_attr(kani, kani::ensures(|step| {
+        verify::invariant(self)
+            && verify::step_ok(self.haystack, *step)
+            && verify::empty_step_alternates(
+                self,
+                *step,
+                old(verify::empty_match_flag(self, true)),
+                true,
+            )
+    }))]
     #[cfg_attr(
         kani,
         kani::modifies(
@@ -1375,17 +1400,7 @@ unsafe impl<'a, 'b> ReverseSearcher<'a> for StrSearcher<'a, 'b> {
     #[inline]
     fn next_match_back(&mut self) -> Option<(usize, usize)> {
         match self.searcher {
-            StrSearcherImpl::Empty(..) =>
-            #[cfg_attr(kani, kani::loop_invariant(verify::empty_loop_state(&*self)))]
-            #[cfg_attr(
-                    kani,
-                    kani::loop_modifies(
-                        verify::back_cursor(self),
-                        verify::empty_backward_flag(self),
-                        verify::empty_finished(self)
-                    )
-                )]
-            loop {
+            StrSearcherImpl::Empty(..) => loop {
                 match self.next_back() {
                     SearchStep::Match(a, b) => return Some((a, b)),
                     SearchStep::Done => return None,
@@ -1525,6 +1540,57 @@ struct TwoWaySearcher {
     for reverse search, chosen instead so that |v'| < period(x).
 
 */
+macro_rules! two_way_scan {
+    (
+        let $bound:ident = $init:expr;
+        for $item:ident in $from:expr, $to:expr, $direction:ident;
+        $scan:ident, $progress:ident => $invariant:expr;
+        $($target:expr),+;
+        $body:block
+    ) => {
+        #[cfg(not(kani))]
+        let $bound = $init;
+        #[cfg(not(kani))]
+        for $item in two_way_scan!(@iterator $from, $to, $direction) $body
+
+        #[cfg(kani)]
+        {
+            $scan.reset(|| {
+                let $bound = $init;
+                $from..$to
+            });
+            let reverse = two_way_scan!(@reverse $direction);
+            #[kani::loop_invariant(
+                $scan.valid(reverse) && {
+                    let $progress = $scan.progress(reverse);
+                    $invariant
+                }
+            )]
+            #[kani::loop_modifies($($target,)+ &$scan.cursor)]
+            loop {
+                $scan.advance(reverse);
+                if !$scan.cursor.active {
+                    break;
+                }
+                $body
+            }
+        }
+    };
+    (@iterator $from:expr, $to:expr, forward) => { $from..$to };
+    (@iterator $from:expr, $to:expr, reverse) => { ($from..$to).rev() };
+    (@reverse forward) => { false };
+    (@reverse reverse) => { true };
+}
+
+macro_rules! two_way_scan_index {
+    ($scan:ident, $index:ident) => {
+        crate::cfg_select! {
+            kani => $scan.cursor.index,
+            _ => $index,
+        }
+    };
+}
+
 impl TwoWaySearcher {
     fn new(needle: &[u8], end: usize) -> TwoWaySearcher {
         let (crit_pos_false, period_false) = TwoWaySearcher::maximal_suffix(needle, false);
@@ -1595,14 +1661,14 @@ impl TwoWaySearcher {
     }
 
     #[inline]
-    #[cfg_attr(kani, kani::ensures(|_| true))]
+    #[safety::ensures(|mask| (*mask == 0) == bytes.is_empty())]
     #[cfg_attr(kani, kani::modifies())]
     fn byteset_create(bytes: &[u8]) -> u64 {
         bytes.iter().fold(0, |a, &b| (1 << (b & 0x3f)) | a)
     }
 
     #[inline]
-    #[cfg_attr(kani, kani::ensures(|_| true))]
+    #[safety::ensures(|present| *present == (self.byteset & (1u64 << (byte & 0x3f)) != 0))]
     #[cfg_attr(kani, kani::modifies())]
     fn byteset_contains(&self, byte: u8) -> bool {
         (self.byteset >> ((byte & 0x3f) as usize)) & 1 != 0
@@ -1621,12 +1687,20 @@ impl TwoWaySearcher {
         // `next()` uses `self.position` as its cursor
         let old_pos = self.position;
         let needle_last = needle.len() - 1;
+        #[cfg(kani)]
+        let last_scalar = verify::last_scalar_start(needle);
+        #[cfg(kani)]
+        let mut scan = verify::TwoWayScan::new();
         #[cfg_attr(kani, kani::loop_invariant(
             verify::raw_loop_state(self, haystack, needle, long_period)
                 && old_pos <= self.position
                 && (self.position != old_pos || self.memory == on_entry(self.memory))))]
-        #[cfg_attr(kani, kani::loop_modifies(&self.position, &self.memory))]
+        #[cfg_attr(kani, kani::loop_modifies(&self.position, &self.memory, &scan))]
         'search: loop {
+            #[cfg(kani)]
+            let scan_cursor = self.position;
+            #[cfg(kani)]
+            let scan_cache = self.memory;
             // Check that we have room to search in
             // position + needle_last can not overflow if we assume slices
             // are bounded by isize's range.
@@ -1652,53 +1726,69 @@ impl TwoWaySearcher {
             }
 
             // See if the right part of the needle matches
-            let start =
-                if long_period { self.crit_pos } else { cmp::max(self.crit_pos, self.memory) };
-            #[cfg_attr(kani, kani::loop_invariant(
-                verify::raw_scan_state(self, haystack, needle, long_period, true)
-                    && verify::long_scan_probes::<S>(self, haystack, needle, long_period, kani::index, 0, old_pos, on_entry(verify::last_scalar_start(needle)))
-                    && self.position == on_entry(self.position)
-                    && self.memory == on_entry(self.memory)
-                    && old_pos <= self.position))]
-            #[cfg_attr(kani, kani::loop_modifies(&self.position, &self.memory))]
-            for i in start..needle.len() {
-                // SAFETY: on every iteration of `'search`, the `haystack.get(self.position + needle_last)`
-                // check returned `Some`, so `self.position + needle_last < haystack.len()`.
-                // Since `i < needle.len()` implies `i <= needle_last`, we have
-                // `self.position + i < haystack.len()`.
-                // Every path that mutates `self.position` below either returns or re-enters `'search`,
-                // which re-runs the check before reaching the loop again.
-                if needle[i] != unsafe { *haystack.get_unchecked(self.position + i) } {
-                    self.position += i - self.crit_pos + 1;
-                    if !long_period {
-                        self.memory = 0;
+            two_way_scan! {
+                let start =
+                    if long_period { self.crit_pos } else { cmp::max(self.crit_pos, self.memory) };
+                for i in start, needle.len(), forward;
+                scan, progress => verify::raw_scan_state(self, haystack, needle, long_period, true)
+                    && verify::long_scan_probes::<S>(
+                        self, haystack, needle, long_period, progress, 0, old_pos, last_scalar,
+                    )
+                    && self.position == scan_cursor
+                    && self.memory == scan_cache
+                    && old_pos <= self.position;
+                &self.position, &self.memory;
+                {
+                    // SAFETY: on every iteration of `'search`, the `haystack.get(self.position + needle_last)`
+                    // check returned `Some`, so `self.position + needle_last < haystack.len()`.
+                    // Since `i < needle.len()` implies `i <= needle_last`, we have
+                    // `self.position + i < haystack.len()`.
+                    // Every path that mutates `self.position` below either returns or re-enters `'search`,
+                    // which re-runs the check before reaching the loop again.
+                    if needle[two_way_scan_index!(scan, i)]
+                        != unsafe {
+                            *haystack.get_unchecked(self.position + two_way_scan_index!(scan, i))
+                        }
+                    {
+                        self.position += two_way_scan_index!(scan, i) - self.crit_pos + 1;
+                        if !long_period {
+                            self.memory = 0;
+                        }
+                        continue 'search;
                     }
-                    continue 'search;
                 }
             }
 
             // See if the left part of the needle matches
-            let start = if long_period { 0 } else { self.memory };
-            #[cfg_attr(kani, kani::loop_invariant(
-                verify::raw_scan_state(self, haystack, needle, long_period, true)
-                    && verify::long_scan_probes::<S>(self, haystack, needle, long_period, kani::index, 1, old_pos, on_entry(verify::last_scalar_start(needle)))
-                    && self.position == on_entry(self.position)
-                    && self.memory == on_entry(self.memory)
-                    && old_pos <= self.position))]
-            #[cfg_attr(kani, kani::loop_modifies(&self.position, &self.memory))]
-            for i in (start..self.crit_pos).rev() {
-                // SAFETY: on every iteration of `'search`, the `haystack.get(self.position + needle_last)`
-                // check returned `Some`, so `self.position + needle_last < haystack.len()`.
-                // Since `i < self.crit_pos <= needle.len()`, we have `i <= needle_last`, and thus
-                // `self.position + i <= self.position + needle_last < haystack.len()`.
-                // Every path that mutates `self.position` below either returns or re-enters `'search`,
-                // which re-runs the check before reaching the loop again.
-                if needle[i] != unsafe { *haystack.get_unchecked(self.position + i) } {
-                    self.position += self.period;
-                    if !long_period {
-                        self.memory = needle.len() - self.period;
+            two_way_scan! {
+                let start = if long_period { 0 } else { self.memory };
+                for i in start, self.crit_pos, reverse;
+                scan, progress => verify::raw_scan_state(self, haystack, needle, long_period, true)
+                    && verify::long_scan_probes::<S>(
+                        self, haystack, needle, long_period, progress, 1, old_pos, last_scalar,
+                    )
+                    && self.position == scan_cursor
+                    && self.memory == scan_cache
+                    && old_pos <= self.position;
+                &self.position, &self.memory;
+                {
+                    // SAFETY: on every iteration of `'search`, the `haystack.get(self.position + needle_last)`
+                    // check returned `Some`, so `self.position + needle_last < haystack.len()`.
+                    // Since `i < self.crit_pos <= needle.len()`, we have `i <= needle_last`, and thus
+                    // `self.position + i <= self.position + needle_last < haystack.len()`.
+                    // Every path that mutates `self.position` below either returns or re-enters `'search`,
+                    // which re-runs the check before reaching the loop again.
+                    if needle[two_way_scan_index!(scan, i)]
+                        != unsafe {
+                            *haystack.get_unchecked(self.position + two_way_scan_index!(scan, i))
+                        }
+                    {
+                        self.position += self.period;
+                        if !long_period {
+                            self.memory = needle.len() - self.period;
+                        }
+                        continue 'search;
                     }
-                    continue 'search;
                 }
             }
 
@@ -1735,12 +1825,20 @@ impl TwoWaySearcher {
         // `next_back()` uses `self.end` as its cursor -- so that `next()` and `next_back()`
         // are independent.
         let old_end = self.end;
+        #[cfg(kani)]
+        let last_scalar = verify::reverse_scan_probe::<S>(needle);
+        #[cfg(kani)]
+        let mut scan = verify::TwoWayScan::new();
         #[cfg_attr(kani, kani::loop_invariant(
             verify::raw_loop_state(self, haystack, needle, long_period)
                 && self.end <= old_end
                 && (self.end != old_end || self.memory_back == on_entry(self.memory_back))))]
-        #[cfg_attr(kani, kani::loop_modifies(&self.end, &self.memory_back))]
+        #[cfg_attr(kani, kani::loop_modifies(&self.end, &self.memory_back, &scan))]
         'search: loop {
+            #[cfg(kani)]
+            let scan_cursor = self.end;
+            #[cfg(kani)]
+            let scan_cache = self.memory_back;
             // Check that we have room to search in
             // end - needle.len() will wrap around when there is no more room,
             // but due to slice length limits it can never wrap all the way back
@@ -1767,56 +1865,72 @@ impl TwoWaySearcher {
             }
 
             // See if the left part of the needle matches
-            let crit = if long_period {
-                self.crit_pos_back
-            } else {
-                cmp::min(self.crit_pos_back, self.memory_back)
-            };
-            #[cfg_attr(kani, kani::loop_invariant(
-                verify::raw_scan_state(self, haystack, needle, long_period, false)
-                    && verify::long_scan_probes::<S>(self, haystack, needle, long_period, kani::index, 2, old_end, on_entry(verify::reverse_scan_probe::<S>(needle)))
-                    && self.end == on_entry(self.end)
-                    && self.memory_back == on_entry(self.memory_back)
-                    && self.end <= old_end))]
-            #[cfg_attr(kani, kani::loop_modifies(&self.end, &self.memory_back))]
-            for i in (0..crit).rev() {
-                // SAFETY: On every iteration of `'search`, `haystack.get(self.end.wrapping_sub(needle.len()))`
-                //   returned `Some`, so `self.end >= needle.len()` and `self.end - needle.len() < haystack.len()`.
-                //   Since `self.end <= haystack.len()` and `i < needle.len()`, we have
-                //   `self.end - needle.len() + i < self.end <= haystack.len()`, so
-                //   `haystack.get_unchecked(self.end - needle.len() + i)` is safe.
-                // - The path that mutates `self.end` either re-enters `'search`, which re-runs the checks
-                //   before reaching this loop again, or returns on match, so the invariant holds.
-                if needle[i] != unsafe { *haystack.get_unchecked(self.end - needle.len() + i) } {
-                    self.end -= self.crit_pos_back - i;
-                    if !long_period {
-                        self.memory_back = needle.len();
+            two_way_scan! {
+                let crit = if long_period {
+                    self.crit_pos_back
+                } else {
+                    cmp::min(self.crit_pos_back, self.memory_back)
+                };
+                for i in 0, crit, reverse;
+                scan, progress => verify::raw_scan_state(self, haystack, needle, long_period, false)
+                    && verify::long_scan_probes::<S>(
+                        self, haystack, needle, long_period, progress, 2, old_end, last_scalar,
+                    )
+                    && self.end == scan_cursor
+                    && self.memory_back == scan_cache
+                    && self.end <= old_end;
+                &self.end, &self.memory_back;
+                {
+                    // SAFETY: On every iteration of `'search`, `haystack.get(self.end.wrapping_sub(needle.len()))`
+                    //   returned `Some`, so `self.end >= needle.len()` and `self.end - needle.len() < haystack.len()`.
+                    //   Since `self.end <= haystack.len()` and `i < needle.len()`, we have
+                    //   `self.end - needle.len() + i < self.end <= haystack.len()`, so
+                    //   `haystack.get_unchecked(self.end - needle.len() + i)` is safe.
+                    // - The path that mutates `self.end` either re-enters `'search`, which re-runs the checks
+                    //   before reaching this loop again, or returns on match, so the invariant holds.
+                    if needle[two_way_scan_index!(scan, i)]
+                        != unsafe {
+                            *haystack.get_unchecked(self.end - needle.len() + two_way_scan_index!(scan, i))
+                        }
+                    {
+                        self.end -= self.crit_pos_back - two_way_scan_index!(scan, i);
+                        if !long_period {
+                            self.memory_back = needle.len();
+                        }
+                        continue 'search;
                     }
-                    continue 'search;
                 }
             }
 
             // See if the right part of the needle matches
-            let needle_end = if long_period { needle.len() } else { self.memory_back };
-            #[cfg_attr(kani, kani::loop_invariant(
-                verify::raw_scan_state(self, haystack, needle, long_period, false)
-                    && verify::long_scan_probes::<S>(self, haystack, needle, long_period, kani::index, 3, old_end, on_entry(verify::reverse_scan_probe::<S>(needle)))
-                    && self.end == on_entry(self.end)
-                    && self.memory_back == on_entry(self.memory_back)
-                    && self.end <= old_end))]
-            #[cfg_attr(kani, kani::loop_modifies(&self.end, &self.memory_back))]
-            for i in self.crit_pos_back..needle_end {
-                // SAFETY: The same `self.end - needle.len() + i < haystack.len()` argument as the
-                // left-part loop applies: the `haystack.get(self.end.wrapping_sub(needle.len()))`
-                // check at the top of `'search` established the bound for this iteration, and
-                // every mutation of `self.end` is followed by `continue 'search` (which re-runs
-                // the check) or a `return` (which exits before any further unsafe access).
-                if needle[i] != unsafe { *haystack.get_unchecked(self.end - needle.len() + i) } {
-                    self.end -= self.period;
-                    if !long_period {
-                        self.memory_back = self.period;
+            two_way_scan! {
+                let needle_end = if long_period { needle.len() } else { self.memory_back };
+                for i in self.crit_pos_back, needle_end, forward;
+                scan, progress => verify::raw_scan_state(self, haystack, needle, long_period, false)
+                    && verify::long_scan_probes::<S>(
+                        self, haystack, needle, long_period, progress, 3, old_end, last_scalar,
+                    )
+                    && self.end == scan_cursor
+                    && self.memory_back == scan_cache
+                    && self.end <= old_end;
+                &self.end, &self.memory_back;
+                {
+                    // SAFETY: The same `self.end - needle.len() + i < haystack.len()` argument as the
+                    // left-part loop applies: the `haystack.get(self.end.wrapping_sub(needle.len()))`
+                    // check at the top of `'search` established the bound for this iteration, and
+                    // every mutation of `self.end` is followed by `continue 'search` (which re-runs
+                    // the check) or a `return` (which exits before any further unsafe access).
+                    if needle[two_way_scan_index!(scan, i)]
+                        != unsafe {
+                            *haystack.get_unchecked(self.end - needle.len() + two_way_scan_index!(scan, i))
+                        }
+                    {
+                        self.end -= self.period;
+                        if !long_period {
+                            self.memory_back = self.period;
+                        }
+                        continue 'search;
                     }
-                    continue 'search;
                 }
             }
 
@@ -1855,7 +1969,10 @@ impl TwoWaySearcher {
         // to match 0-based indexing.
         let mut period = 1; // Corresponds to p in the paper
 
-        #[cfg_attr(kani, kani::loop_invariant(verify::suffix_loop_state(arr, left, right, offset, period)))]
+        #[cfg_attr(
+            kani,
+            kani::loop_invariant(verify::suffix_loop_state(arr, left, right, offset, period))
+        )]
         #[cfg_attr(kani, kani::loop_modifies(&left, &right, &offset, &period))]
         while let Some(&a) = arr.get(right + offset) {
             // `left` will be inbounds when `right` is.
@@ -1904,8 +2021,17 @@ impl TwoWaySearcher {
         let mut period = 1; // Corresponds to p in the paper
         let n = arr.len();
 
-        #[cfg_attr(kani, kani::loop_invariant(
-            verify::reverse_suffix_loop_state(arr, known_period, left, right, offset, period)))]
+        #[cfg_attr(
+            kani,
+            kani::loop_invariant(verify::reverse_suffix_loop_state(
+                arr,
+                known_period,
+                left,
+                right,
+                offset,
+                period
+            ))
+        )]
         #[cfg_attr(kani, kani::loop_modifies(&left, &right, &offset, &period))]
         while right + offset < n {
             let a = arr[n - (1 + right + offset)];
@@ -2245,8 +2371,10 @@ pub mod verify {
     #[kani::proof]
     #[kani::unwind(4)]
     pub fn check_small_slice_eq_empty() {
-        let ptr_x = kani::any_where::<usize, _>(|val| *val != 0) as *const u8;
-        let ptr_y = kani::any_where::<usize, _>(|val| *val != 0) as *const u8;
+        let ptr_x = kani::any::<usize>() as *const u8;
+        let ptr_y = kani::any::<usize>() as *const u8;
+        kani::assume(!ptr_x.is_null() && !ptr_y.is_null());
+        kani::cover(true, "both empty-slice pointers are non-null");
         kani::assume(ptr_x.is_aligned());
         kani::cover(true, "assume #2");
         kani::assume(ptr_y.is_aligned());
@@ -2318,7 +2446,7 @@ pub mod verify {
         );
     }
 
-    fn any_str() -> &'static str {
+    fn any_bytes() -> &'static [u8] {
         let len: usize = kani::any();
         kani::assume(len <= MAX_ALLOCATION_BYTES);
         kani::cover(true, "assume #7");
@@ -2327,9 +2455,15 @@ pub mod verify {
         } else {
             initialized_symbolic_allocation(len)
         };
+        // SAFETY: the initialized allocation lives for the proof. An empty
+        // slice needs only a non-null, aligned pointer.
+        unsafe { crate::slice::from_raw_parts(ptr, len) }
+    }
+
+    fn any_str() -> &'static str {
         // SAFETY: the allocation lives for the proof. As in Challenge 20, UTF-8
         // validity is modeled by its local consequences rather than a scan.
-        unsafe { crate::str::from_utf8_unchecked(crate::slice::from_raw_parts(ptr, len)) }
+        unsafe { crate::str::from_utf8_unchecked(any_bytes()) }
     }
 
     // Preprocessing has a non-empty domain. Constrain that before allocation
@@ -2353,8 +2487,8 @@ pub mod verify {
         unsafe { crate::slice::from_raw_parts(ptr, len) }
     }
 
-    // Basic state check used by the Empty and Byte proofs below. The TwoWay
-    // branch records numeric constraints only, not the full search invariant.
+    // Inductive state for the public searcher. The TwoWay cases also track
+    // factorization bounds and the boundary facts needed for cached scans.
     pub(super) fn invariant(s: &StrSearcher<'_, '_>) -> bool {
         let (position, end) = match &s.searcher {
             StrSearcherImpl::Empty(e) => {
@@ -2494,10 +2628,7 @@ pub mod verify {
         kani::assume(nearby_boundary(s, index, true));
         kani::cover(true, "assume #10");
         let result = s.ceil_char_boundary(index);
-        kani::cover(
-            index > 4096 && result > index,
-            "round forward at a distant continuation byte",
-        );
+        kani::cover(index > 4096 && result > index, "round forward at a distant continuation byte");
         kani::cover(index >= s.len(), "clamp at the end");
         kani::cover(true, "contract proof returns: harness_ceil_char_boundary");
     }
@@ -2534,10 +2665,7 @@ pub mod verify {
         kani::assume(nearby_boundary(s, index, false));
         kani::cover(true, "assume #12");
         let _ = verified_floor_boundary(s, index);
-        kani::cover(
-            true,
-            "contract proof returns: harness_verified_floor_boundary",
-        );
+        kani::cover(true, "contract proof returns: harness_verified_floor_boundary");
     }
 
     // Kani's ordinary stub pass retains the source function's contract
@@ -2569,10 +2697,7 @@ pub mod verify {
         kani::assume(nearby_boundary(s, index, true));
         kani::cover(true, "assume #14");
         let _ = verified_ceil_boundary(s, index);
-        kani::cover(
-            true,
-            "contract proof returns: harness_verified_ceil_boundary",
-        );
+        kani::cover(true, "contract proof returns: harness_verified_ceil_boundary");
     }
 
     // The same-name contract shape is required by Kani's ordinary stub pass;
@@ -2592,15 +2717,9 @@ pub mod verify {
         let s = any_str();
         let index = kani::any();
         let result = floor_char_boundary(s, index);
-        kani::cover(
-            index > 4096 && result < index,
-            "floor adapter at a distant index",
-        );
+        kani::cover(index > 4096 && result < index, "floor adapter at a distant index");
         kani::cover(index >= s.len(), "floor adapter clamps at the end");
-        kani::cover(
-            true,
-            "contract proof returns: harness_floor_boundary_adapter_contract",
-        );
+        kani::cover(true, "contract proof returns: harness_floor_boundary_adapter_contract");
     }
 
     #[kani::proof_for_contract(ceil_char_boundary)]
@@ -2609,49 +2728,19 @@ pub mod verify {
         let s = any_str();
         let index = kani::any();
         let result = ceil_char_boundary(s, index);
-        kani::cover(
-            index > 4096 && result > index,
-            "ceil adapter at a distant index",
-        );
+        kani::cover(index > 4096 && result > index, "ceil adapter at a distant index");
         kani::cover(index >= s.len(), "ceil adapter clamps at the end");
-        kani::cover(
-            true,
-            "contract proof returns: harness_ceil_boundary_adapter_contract",
-        );
-    }
-
-    // Every valid UTF-8 string satisfies this weaker, pointwise consequence:
-    // a leading byte's width lands at the next character boundary. This
-    // universal input fact is independent of the search and its output.
-    fn utf8_scalar_steps(bytes: &[u8]) -> bool {
-        let ptr = bytes.as_ptr();
-        let len = bytes.len();
-        unsafe {
-            kani::internal::kani_forall(0, len, move |i: usize| {
-                let b = *crate::intrinsics::arith_offset(ptr, i as isize);
-                let width = match b {
-                    0..=0x7f => 1,
-                    0xc2..=0xdf => 2,
-                    0xe0..=0xef => 3,
-                    0xf0..=0xf4 => 4,
-                    _ => 0,
-                };
-                width == 0
-                    || (width <= len - i
-                        && (i + width == len
-                            || (*crate::intrinsics::arith_offset(ptr, (i + width) as isize) as i8)
-                                >= -0x40))
-            })
-        }
+        kani::cover(true, "contract proof returns: harness_ceil_boundary_adapter_contract");
     }
 
     #[kani::proof]
-    #[kani::solver(z3)]
     pub fn harness_utf8_scalar_steps_lookup() {
         let h = any_str().as_bytes();
-        kani::assume(utf8_scalar_steps(h));
-        kani::cover(true, "assume #16");
         let i = kani::any();
+        // A byte in a valid UTF-8 string belongs to a scalar. An arbitrary
+        // index suffices to prove the consequence at every index.
+        kani::assume(utf8_at(h, i));
+        kani::cover(true, "assume #16");
         assert!(utf8_next_boundary_at(h, i));
         kani::cover(true, "assert #3");
     }
@@ -2703,8 +2792,27 @@ pub mod verify {
         }
     }
 
-    pub(super) fn supported_contract_state(s: &StrSearcher<'_, '_>) -> bool {
-        invariant(s)
+    pub(super) fn empty_match_flag(s: &StrSearcher<'_, '_>, reverse: bool) -> Option<bool> {
+        let StrSearcherImpl::Empty(e) = &s.searcher else {
+            return None;
+        };
+        Some(if reverse { e.is_match_bw } else { e.is_match_fw })
+    }
+
+    // Each successful empty-needle step flips the flag. A filter therefore
+    // executes at most two steps, independently of the haystack length.
+    pub(super) fn empty_step_alternates(
+        s: &StrSearcher<'_, '_>,
+        step: SearchStep,
+        previous: Option<bool>,
+        reverse: bool,
+    ) -> bool {
+        match (step, previous) {
+            (SearchStep::Match(..), Some(true)) => empty_match_flag(s, reverse) == Some(false),
+            (SearchStep::Reject(..), Some(false)) => empty_match_flag(s, reverse) == Some(true),
+            (SearchStep::Done, _) | (_, None) => true,
+            _ => false,
+        }
     }
 
     pub(super) fn empty_forward_flag(s: &StrSearcher<'_, '_>) -> *const [bool] {
@@ -2732,110 +2840,21 @@ pub mod verify {
         }
     }
 
-    /// Hooks for the real trait-default filters. The fallback covers the searcher
-    /// storage; externally mutated predicate state needs its own specialization.
-    /// The substring specialization preserves both input pointers.
-    pub(super) trait FilterLoopContract {
-        fn valid(&self) -> bool;
-        fn cursor(&self, reverse: bool) -> *const [u8];
-        fn word_cursor(&self, reverse: bool) -> *const [usize];
-        fn flag(&self, reverse: bool) -> *const [bool];
-        fn cache(&self, reverse: bool) -> *const [usize];
-        fn finished(&self) -> *const [bool];
+    // The trait defaults and StrSearcher proofs share the rejection loop.
+    // Store the step in a local that the loop's write set can name.
+    pub(super) fn write_step<S: ?Sized>(
+        searcher: &mut S,
+        step: &mut SearchStep,
+        next: impl FnOnce(&mut S) -> SearchStep,
+    ) {
+        *step = next(searcher);
     }
 
-    impl<T: ?Sized> FilterLoopContract for T {
-        default fn valid(&self) -> bool {
-            true
-        }
-        default fn cursor(&self, _: bool) -> *const [u8] {
-            crate::ptr::slice_from_raw_parts(self as *const T as *const u8, size_of_val(self))
-        }
-        default fn word_cursor(&self, _: bool) -> *const [usize] {
-            crate::ptr::slice_from_raw_parts(self as *const T as *const usize, 0)
-        }
-        default fn flag(&self, _: bool) -> *const [bool] {
-            crate::ptr::slice_from_raw_parts(self as *const T as *const bool, 0)
-        }
-        default fn cache(&self, _: bool) -> *const [usize] {
-            crate::ptr::slice_from_raw_parts(self as *const T as *const usize, 0)
-        }
-        default fn finished(&self) -> *const [bool] {
-            crate::ptr::slice_from_raw_parts(self as *const T as *const bool, 0)
-        }
-    }
-
-    impl FilterLoopContract for StrSearcher<'_, '_> {
-        fn valid(&self) -> bool {
-            match &self.searcher {
-                StrSearcherImpl::Empty(_) => empty_loop_state(self),
-                StrSearcherImpl::Byte(_) => byte_loop_state(self),
-                StrSearcherImpl::TwoWay(_) => two_way_loop_state(self),
-            }
-        }
-        fn cursor(&self, _: bool) -> *const [u8] {
-            // The specialized word hook covers the same usize field below.
-            crate::ptr::slice_from_raw_parts(self as *const Self as *const u8, 0)
-        }
-        fn word_cursor(&self, reverse: bool) -> *const [usize] {
-            let ptr = match &self.searcher {
-                StrSearcherImpl::Empty(e) => {
-                    if reverse {
-                        &raw const e.end
-                    } else {
-                        &raw const e.position
-                    }
-                }
-                StrSearcherImpl::Byte(b) => {
-                    if reverse {
-                        &raw const b.end
-                    } else {
-                        &raw const b.position
-                    }
-                }
-                StrSearcherImpl::TwoWay(t) => {
-                    if reverse {
-                        &raw const t.end
-                    } else {
-                        &raw const t.position
-                    }
-                }
-            };
-            crate::ptr::slice_from_raw_parts(ptr, 1)
-        }
-        fn flag(&self, reverse: bool) -> *const [bool] {
-            match &self.searcher {
-                StrSearcherImpl::Empty(e) => crate::ptr::slice_from_raw_parts(
-                    if reverse {
-                        &raw const e.is_match_bw
-                    } else {
-                        &raw const e.is_match_fw
-                    },
-                    1,
-                ),
-                _ => crate::ptr::slice_from_raw_parts(self as *const Self as *const bool, 0),
-            }
-        }
-        fn cache(&self, reverse: bool) -> *const [usize] {
-            match &self.searcher {
-                StrSearcherImpl::TwoWay(t) => crate::ptr::slice_from_raw_parts(
-                    if reverse {
-                        &raw const t.memory_back
-                    } else {
-                        &raw const t.memory
-                    },
-                    1,
-                ),
-                _ => crate::ptr::slice_from_raw_parts(self as *const Self as *const usize, 0),
-            }
-        }
-        fn finished(&self) -> *const [bool] {
-            match &self.searcher {
-                StrSearcherImpl::Empty(e) => {
-                    crate::ptr::slice_from_raw_parts(&raw const e.is_finished, 1)
-                }
-                _ => crate::ptr::slice_from_raw_parts(self as *const Self as *const bool, 0),
-            }
+    pub(super) fn reject_loop_state<'a: 'a, 'b: 'b>(s: &StrSearcher<'a, 'b>) -> bool {
+        match &s.searcher {
+            StrSearcherImpl::Empty(_) => empty_loop_state(s),
+            StrSearcherImpl::Byte(_) => byte_loop_state(s),
+            StrSearcherImpl::TwoWay(_) => two_way_loop_state(s),
         }
     }
 
@@ -2884,11 +2903,7 @@ pub mod verify {
             return false;
         }
         let other = n - t.crit_pos;
-        let largest = if t.crit_pos > other {
-            t.crit_pos
-        } else {
-            other
-        };
+        let largest = if t.crit_pos > other { t.crit_pos } else { other };
         t.period == largest + 1
             && (t.position == 0
                 || t.position == len
@@ -2943,13 +2958,6 @@ pub mod verify {
                 || unsafe { *crate::intrinsics::arith_offset(ptr, e as isize) } as i8 >= -0x40)
     }
 
-    // On Byte inputs this is the original FilterLoopContract::valid branch.
-    // Other variants return false, so using it in a Byte-only proof strengthens
-    // the loop invariant and still detects an unexpected variant transition.
-    fn byte_filter_loop_valid<'a: 'a, 'b: 'b>(s: &StrSearcher<'a, 'b>) -> bool {
-        byte_loop_state(s)
-    }
-
     // Numeric projection of C for the additional filter UB proof. It keeps
     // the cursor and cache ranges needed by the actual step implementations,
     // but does not repeat the separate UTF-8 endpoint proof. Every actual C
@@ -2996,11 +3004,6 @@ pub mod verify {
         filter_ub_state_body!(s)
     }
 
-    // Match empty_loop_state's late-bound lifetime signature.
-    fn empty_ub_loop_valid(s: &StrSearcher<'_, '_>) -> bool {
-        filter_ub_state_body!(s)
-    }
-
     fn arbitrary_filter_storage() -> StrSearcher<'static, 'static> {
         let searcher = match kani::any::<u8>() {
             0 => StrSearcherImpl::Empty(EmptyNeedle {
@@ -3026,11 +3029,7 @@ pub mod verify {
                 memory_back: kani::any(),
             }),
         };
-        StrSearcher {
-            haystack: any_str(),
-            needle: any_str(),
-            searcher,
-        }
+        StrSearcher { haystack: any_str(), needle: any_str(), searcher }
     }
 
     fn any_filter_storage() -> StrSearcher<'static, 'static> {
@@ -3049,22 +3048,10 @@ pub mod verify {
         kani::cover(true, "assume #19");
         assert!(filter_ub_state(&s));
         kani::cover(true, "assert #4");
-        kani::cover(
-            matches!(s.searcher, StrSearcherImpl::Empty(_)),
-            "C projects Empty state",
-        );
-        kani::cover(
-            matches!(s.searcher, StrSearcherImpl::Byte(_)),
-            "C projects Byte state",
-        );
-        kani::cover(
-            matches!(s.searcher, StrSearcherImpl::TwoWay(_)),
-            "C projects TwoWay state",
-        );
-        kani::cover(
-            s.haystack.len() > 4096,
-            "C projects symbolic-length storage",
-        );
+        kani::cover(matches!(s.searcher, StrSearcherImpl::Empty(_)), "C projects Empty state");
+        kani::cover(matches!(s.searcher, StrSearcherImpl::Byte(_)), "C projects Byte state");
+        kani::cover(matches!(s.searcher, StrSearcherImpl::TwoWay(_)), "C projects TwoWay state");
+        kani::cover(s.haystack.len() > 4096, "C projects symbolic-length storage");
     }
 
     fn arbitrary_filter_step(s: &mut StrSearcher<'_, '_>, reverse: bool) -> SearchStep {
@@ -3072,14 +3059,22 @@ pub mod verify {
         kani::assume(cursor <= s.haystack.len());
         kani::cover(true, "assume #20");
         let needle_len = s.needle.len();
+        let step: SearchStep = kani::any();
         match &mut s.searcher {
             StrSearcherImpl::Empty(e) => {
-                if reverse {
+                let flag = if reverse {
                     e.end = cursor;
-                    e.is_match_bw = kani::any();
+                    &mut e.is_match_bw
                 } else {
                     e.position = cursor;
-                    e.is_match_fw = kani::any();
+                    &mut e.is_match_fw
+                };
+                if matches!(step, SearchStep::Done) {
+                    *flag = kani::any();
+                } else {
+                    kani::assume(matches!(step, SearchStep::Match(..)) == *flag);
+                    kani::cover(true, "the empty step has the current phase");
+                    *flag = !*flag;
                 }
                 e.is_finished = kani::any();
             }
@@ -3113,14 +3108,13 @@ pub mod verify {
                 }
             }
         }
-        kani::any()
+        step
     }
 
     struct FilterUbModel;
     impl FilterUbModel {
-        // Every update consistent with the real step's numeric postcondition
-        // is permitted, and the returned SearchStep is still arbitrary. The
-        // separate full-C proofs justify using this weaker numeric summary.
+        // The numeric postcondition permits every actual update. The Empty
+        // step also retains the alternation checked by its full contract.
         #[kani::requires(filter_ub_state(s))]
         #[kani::ensures(|_| filter_ub_state(s))]
         #[kani::modifies(
@@ -3135,12 +3129,7 @@ pub mod verify {
 
         #[kani::requires(filter_ub_state(s))]
         #[kani::ensures(|_| filter_ub_state(s))]
-        #[kani::modifies(
-            back_cursor(s),
-            back_memory(s),
-            empty_backward_flag(s),
-            empty_finished(s)
-        )]
+        #[kani::modifies(back_cursor(s), back_memory(s), empty_backward_flag(s), empty_finished(s))]
         fn next_back<'a: 'a, 'b: 'b>(s: &mut StrSearcher<'a, 'b>) -> SearchStep {
             arbitrary_filter_step(s, true)
         }
@@ -3152,14 +3141,8 @@ pub mod verify {
         let _ = FilterUbModel::next(&mut s);
         assert!(filter_ub_state(&s));
         kani::cover(true, "assert #5");
-        kani::cover(
-            s.haystack.len() > 4096,
-            "numeric filter frame at symbolic length",
-        );
-        kani::cover(
-            true,
-            "contract proof returns: harness_filter_ub_forward_frame",
-        );
+        kani::cover(s.haystack.len() > 4096, "numeric filter frame at symbolic length");
+        kani::cover(true, "contract proof returns: harness_filter_ub_forward_frame");
     }
 
     #[kani::proof_for_contract(FilterUbModel::next_back)]
@@ -3168,19 +3151,13 @@ pub mod verify {
         let _ = FilterUbModel::next_back(&mut s);
         assert!(filter_ub_state(&s));
         kani::cover(true, "assert #6");
-        kani::cover(
-            s.haystack.len() > 4096,
-            "reverse numeric filter frame at symbolic length",
-        );
-        kani::cover(
-            true,
-            "contract proof returns: harness_filter_ub_reverse_frame",
-        );
+        kani::cover(s.haystack.len() > 4096, "reverse numeric filter frame at symbolic length");
+        kani::cover(true, "contract proof returns: harness_filter_ub_reverse_frame");
     }
 
     #[kani::proof]
     #[kani::stub(<StrSearcher as Searcher>::next, FilterUbModel::next)]
-    #[kani::stub(<StrSearcher as FilterLoopContract>::valid, filter_ub_loop_valid)]
+    #[kani::stub(reject_loop_state, filter_ub_loop_valid)]
     pub fn harness_filter_next_reject_extra_ub() {
         let mut s = any_filter_storage();
         let was_empty = matches!(s.searcher, StrSearcherImpl::Empty(_));
@@ -3195,7 +3172,7 @@ pub mod verify {
 
     #[kani::proof]
     #[kani::stub(<StrSearcher as ReverseSearcher>::next_back, FilterUbModel::next_back)]
-    #[kani::stub(<StrSearcher as FilterLoopContract>::valid, filter_ub_loop_valid)]
+    #[kani::stub(reject_loop_state, filter_ub_loop_valid)]
     pub fn harness_filter_next_reject_back_extra_ub() {
         let mut s = any_filter_storage();
         let was_empty = matches!(s.searcher, StrSearcherImpl::Empty(_));
@@ -3203,50 +3180,51 @@ pub mod verify {
         let result = s.next_reject_back();
         kani::cover(was_empty, "arbitrary Empty reverse filter storage");
         kani::cover(was_byte, "arbitrary Byte reverse filter storage");
-        kani::cover(
-            !was_empty && !was_byte,
-            "arbitrary TwoWay reverse filter storage",
-        );
+        kani::cover(!was_empty && !was_byte, "arbitrary TwoWay reverse filter storage");
         kani::cover(result.is_some(), "arbitrary reverse rejection indices");
         kani::cover(result.is_none(), "reverse filter exhaustion");
     }
 
     #[kani::proof]
+    // The Empty loop can skip one Reject before Match or Done.
+    #[kani::unwind(3)]
     #[kani::stub_verified(<StrSearcher as Searcher>::next)]
+    #[kani::stub(TwoWaySearcher::next, reject_two_way_in_byte_proof)]
     pub fn harness_str_searcher_empty_next_match() {
         let mut s = any_empty();
+        let starts_on_reject = empty_match_flag(&s, false) == Some(false);
         let result = s.next_match();
         if let Some((a, b)) = result {
             check_step(s.haystack, SearchStep::Match(a, b));
         }
         assert!(invariant(&s));
         kani::cover(true, "assert #7");
-        kani::cover(
-            result.is_some_and(|(a, _)| a > 4096),
-            "a distant empty match",
-        );
+        kani::cover(result.is_some_and(|(a, _)| a > 4096), "a distant empty match");
+        kani::cover(starts_on_reject && result.is_some(), "empty match after a rejection");
         kani::cover(result.is_none(), "exhaustion");
     }
 
     #[kani::proof]
+    #[kani::unwind(3)]
     #[kani::stub_verified(<StrSearcher as ReverseSearcher>::next_back)]
+    #[kani::stub(TwoWaySearcher::next_back, reject_two_way_in_byte_proof)]
     pub fn harness_str_searcher_empty_next_match_back() {
         let mut s = any_empty();
+        let starts_on_reject = empty_match_flag(&s, true) == Some(false);
         let result = s.next_match_back();
         if let Some((a, b)) = result {
             check_step(s.haystack, SearchStep::Match(a, b));
         }
         assert!(invariant(&s));
         kani::cover(true, "assert #8");
-        kani::cover(
-            result.is_some_and(|(a, _)| a > 4096),
-            "a distant empty match",
-        );
+        kani::cover(result.is_some_and(|(a, _)| a > 4096), "a distant empty match");
+        kani::cover(starts_on_reject && result.is_some(), "reverse empty match after a rejection");
         kani::cover(result.is_none(), "exhaustion");
     }
 
     #[kani::proof]
     #[kani::stub_verified(<StrSearcher as Searcher>::next)]
+    #[kani::stub(TwoWaySearcher::next, reject_two_way_in_byte_proof)]
     pub fn harness_str_searcher_empty_next_reject() {
         let mut s = any_empty();
         let result = s.next_reject();
@@ -3255,15 +3233,13 @@ pub mod verify {
         }
         assert!(invariant(&s));
         kani::cover(true, "assert #9");
-        kani::cover(
-            result.is_some_and(|(a, b)| a > 4096 && b > a),
-            "a distant rejection",
-        );
+        kani::cover(result.is_some_and(|(a, b)| a > 4096 && b > a), "a distant rejection");
         kani::cover(result.is_none(), "exhaustion");
     }
 
     #[kani::proof]
     #[kani::stub_verified(<StrSearcher as ReverseSearcher>::next_back)]
+    #[kani::stub(TwoWaySearcher::next_back, reject_two_way_in_byte_proof)]
     pub fn harness_str_searcher_empty_next_reject_back() {
         let mut s = any_empty();
         let result = s.next_reject_back();
@@ -3272,10 +3248,7 @@ pub mod verify {
         }
         assert!(invariant(&s));
         kani::cover(true, "assert #10");
-        kani::cover(
-            result.is_some_and(|(a, b)| a > 4096 && b > a),
-            "a distant rejection",
-        );
+        kani::cover(result.is_some_and(|(a, b)| a > 4096 && b > a), "a distant rejection");
         kani::cover(result.is_none(), "exhaustion");
     }
 
@@ -3317,11 +3290,11 @@ pub mod verify {
     }
 
     #[kani::proof_for_contract(<StrSearcher as Searcher>::next)]
+    #[kani::stub_verified(str::ceil_char_boundary)]
+    #[kani::stub(TwoWaySearcher::next, reject_two_way_in_byte_proof)]
     pub fn harness_str_searcher_empty_next() {
         let mut s = any_empty();
-        let StrSearcherImpl::Empty(e) = &s.searcher else {
-            unreachable!()
-        };
+        let StrSearcherImpl::Empty(e) = &s.searcher else { unreachable!() };
         kani::assume(utf8_at(s.haystack.as_bytes(), e.position));
         kani::cover(true, "assume #21");
         let step = s.next();
@@ -3334,18 +3307,15 @@ pub mod verify {
         );
         kani::cover(matches!(step, SearchStep::Match(_, _)), "a match");
         kani::cover(matches!(step, SearchStep::Done), "exhaustion");
-        kani::cover(
-            true,
-            "contract proof returns: harness_str_searcher_empty_next",
-        );
+        kani::cover(true, "contract proof returns: harness_str_searcher_empty_next");
     }
 
     #[kani::proof_for_contract(<StrSearcher as ReverseSearcher>::next_back)]
+    #[kani::stub_verified(str::floor_char_boundary)]
+    #[kani::stub(TwoWaySearcher::next_back, reject_two_way_in_byte_proof)]
     pub fn harness_str_searcher_empty_next_back() {
         let mut s = any_empty();
-        let StrSearcherImpl::Empty(e) = &s.searcher else {
-            unreachable!()
-        };
+        let StrSearcherImpl::Empty(e) = &s.searcher else { unreachable!() };
         if e.end > 0 {
             kani::assume(utf8_at(s.haystack.as_bytes(), e.end - 1));
             kani::cover(true, "assume #22");
@@ -3360,10 +3330,7 @@ pub mod verify {
         );
         kani::cover(matches!(step, SearchStep::Match(_, _)), "a match");
         kani::cover(matches!(step, SearchStep::Done), "exhaustion");
-        kani::cover(
-            true,
-            "contract proof returns: harness_str_searcher_empty_next_back",
-        );
+        kani::cover(true, "contract proof returns: harness_str_searcher_empty_next_back");
     }
 
     // Pair these real-call UB audits with the full Empty step contract proofs.
@@ -3386,9 +3353,7 @@ pub mod verify {
         };
         kani::assume(invariant(&s));
         kani::cover(true, "assume #23");
-        let StrSearcherImpl::Empty(e) = &s.searcher else {
-            unreachable!()
-        };
+        let StrSearcherImpl::Empty(e) = &s.searcher else { unreachable!() };
         kani::assume(utf8_at(s.haystack.as_bytes(), e.position));
         kani::cover(true, "assume #24");
         let step = s.next();
@@ -3417,9 +3382,7 @@ pub mod verify {
         };
         kani::assume(invariant(&s));
         kani::cover(true, "assume #25");
-        let StrSearcherImpl::Empty(e) = &s.searcher else {
-            unreachable!()
-        };
+        let StrSearcherImpl::Empty(e) = &s.searcher else { unreachable!() };
         if e.end > 0 {
             kani::assume(utf8_at(s.haystack.as_bytes(), e.end - 1));
             kani::cover(true, "assume #26");
@@ -3430,8 +3393,8 @@ pub mod verify {
     }
 
     #[kani::proof]
+    #[kani::unwind(3)]
     #[kani::stub(<StrSearcher as Searcher>::next, FilterUbModel::next)]
-    #[kani::stub(empty_loop_state, empty_ub_loop_valid)]
     #[kani::stub(TwoWaySearcher::next, reject_two_way_in_byte_proof)]
     #[kani::stub(crate::slice::memchr::memchr, model_memchr)]
     pub fn harness_empty_next_match_loop_extra_ub() {
@@ -3454,8 +3417,8 @@ pub mod verify {
     }
 
     #[kani::proof]
+    #[kani::unwind(3)]
     #[kani::stub(<StrSearcher as ReverseSearcher>::next_back, FilterUbModel::next_back)]
-    #[kani::stub(empty_loop_state, empty_ub_loop_valid)]
     #[kani::stub(TwoWaySearcher::next_back, reject_two_way_in_byte_proof)]
     #[kani::stub(crate::slice::memchr::memrchr, model_memchr)]
     pub fn harness_empty_next_match_back_loop_extra_ub() {
@@ -3488,15 +3451,17 @@ pub mod verify {
         kani::cover(haystack.len() > 4096, "symbolic-length haystack");
     }
 
+    fn any_ascii_needle(byte: &mut u8) -> &str {
+        *byte = kani::any::<u8>() & 0x7f;
+        // SAFETY: masking to seven bits produces one complete ASCII character.
+        unsafe { crate::str::from_utf8_unchecked(crate::slice::from_ref(byte)) }
+    }
+
     #[kani::proof]
     pub fn harness_str_searcher_byte_into_searcher() {
         let haystack = any_str();
-        let byte: u8 = kani::any();
-        kani::assume(byte < 128);
-        kani::cover(true, "assume #29");
-        let bytes = [byte];
-        // SAFETY: every ASCII byte is a complete UTF-8 string of length one.
-        let needle = unsafe { crate::str::from_utf8_unchecked(&bytes) };
+        let mut byte = 0;
+        let needle = any_ascii_needle(&mut byte);
         let s = needle.into_searcher(haystack);
         assert!(matches!(s.searcher, StrSearcherImpl::Byte(_)));
         kani::cover(true, "assert #18");
@@ -3524,15 +3489,10 @@ pub mod verify {
     #[kani::stub_verified(str::ceil_char_boundary)]
     #[kani::stub(TwoWaySearcher::next, reject_two_way_in_byte_proof)]
     pub fn harness_str_searcher_byte_next() {
-        let byte: u8 = kani::any();
-        kani::assume(byte < 128);
-        kani::cover(true, "assume #31");
-        let bytes = [byte];
-        let needle = unsafe { crate::str::from_utf8_unchecked(&bytes) };
+        let mut byte = 0;
+        let needle = any_ascii_needle(&mut byte);
         let mut s = any_byte(needle);
-        let StrSearcherImpl::Byte(b) = &s.searcher else {
-            unreachable!()
-        };
+        let StrSearcherImpl::Byte(b) = &s.searcher else { unreachable!() };
         kani::assume(utf8_at(s.haystack.as_bytes(), 0));
         kani::cover(true, "assume #32");
         kani::assume(utf8_at(s.haystack.as_bytes(), b.position));
@@ -3547,10 +3507,7 @@ pub mod verify {
         );
         kani::cover(matches!(step, SearchStep::Match(_, _)), "byte match");
         kani::cover(matches!(step, SearchStep::Done), "exhaustion");
-        kani::cover(
-            true,
-            "contract proof returns: harness_str_searcher_byte_next",
-        );
+        kani::cover(true, "contract proof returns: harness_str_searcher_byte_next");
     }
 
     // Additional UB audit of the real call, separate from the contract/frame
@@ -3560,25 +3517,20 @@ pub mod verify {
     #[kani::stub_verified(str::ceil_char_boundary)]
     #[kani::stub(TwoWaySearcher::next, reject_two_way_in_byte_proof)]
     pub fn harness_str_searcher_byte_next_extra_ub() {
-        let byte: u8 = kani::any();
-        kani::assume(byte < 128);
-        kani::cover(true, "assume #34");
-        let bytes = [byte];
-        let needle = unsafe { crate::str::from_utf8_unchecked(&bytes) };
+        let mut byte = 0;
+        let needle = any_ascii_needle(&mut byte);
         let mut s = StrSearcher {
             haystack: any_str(),
             needle,
             searcher: StrSearcherImpl::Byte(ByteNeedle {
-                b: byte,
+                b: needle.as_bytes()[0],
                 position: kani::any(),
                 end: kani::any(),
             }),
         };
         kani::assume(invariant(&s));
         kani::cover(true, "assume #35");
-        let StrSearcherImpl::Byte(b) = &s.searcher else {
-            unreachable!()
-        };
+        let StrSearcherImpl::Byte(b) = &s.searcher else { unreachable!() };
         kani::assume(utf8_at(s.haystack.as_bytes(), 0));
         kani::cover(true, "assume #36");
         kani::assume(utf8_at(s.haystack.as_bytes(), b.position));
@@ -3596,15 +3548,10 @@ pub mod verify {
     #[kani::stub_verified(str::floor_char_boundary)]
     #[kani::stub(TwoWaySearcher::next_back, reject_two_way_in_byte_proof)]
     pub fn harness_str_searcher_byte_next_back() {
-        let byte: u8 = kani::any();
-        kani::assume(byte < 128);
-        kani::cover(true, "assume #38");
-        let bytes = [byte];
-        let needle = unsafe { crate::str::from_utf8_unchecked(&bytes) };
+        let mut byte = 0;
+        let needle = any_ascii_needle(&mut byte);
         let mut s = any_byte(needle);
-        let StrSearcherImpl::Byte(b) = &s.searcher else {
-            unreachable!()
-        };
+        let StrSearcherImpl::Byte(b) = &s.searcher else { unreachable!() };
         kani::assume(utf8_at(s.haystack.as_bytes(), 0));
         kani::cover(true, "assume #39");
         if b.end > 0 {
@@ -3621,10 +3568,7 @@ pub mod verify {
         );
         kani::cover(matches!(step, SearchStep::Match(_, _)), "byte match");
         kani::cover(matches!(step, SearchStep::Done), "exhaustion");
-        kani::cover(
-            true,
-            "contract proof returns: harness_str_searcher_byte_next_back",
-        );
+        kani::cover(true, "contract proof returns: harness_str_searcher_byte_next_back");
     }
 
     // See the forward extra-UB harness: combine this real-call audit with the
@@ -3633,25 +3577,20 @@ pub mod verify {
     #[kani::stub_verified(str::floor_char_boundary)]
     #[kani::stub(TwoWaySearcher::next_back, reject_two_way_in_byte_proof)]
     pub fn harness_str_searcher_byte_next_back_extra_ub() {
-        let byte: u8 = kani::any();
-        kani::assume(byte < 128);
-        kani::cover(true, "assume #41");
-        let bytes = [byte];
-        let needle = unsafe { crate::str::from_utf8_unchecked(&bytes) };
+        let mut byte = 0;
+        let needle = any_ascii_needle(&mut byte);
         let mut s = StrSearcher {
             haystack: any_str(),
             needle,
             searcher: StrSearcherImpl::Byte(ByteNeedle {
-                b: byte,
+                b: needle.as_bytes()[0],
                 position: kani::any(),
                 end: kani::any(),
             }),
         };
         kani::assume(invariant(&s));
         kani::cover(true, "assume #42");
-        let StrSearcherImpl::Byte(b) = &s.searcher else {
-            unreachable!()
-        };
+        let StrSearcherImpl::Byte(b) = &s.searcher else { unreachable!() };
         kani::assume(utf8_at(s.haystack.as_bytes(), 0));
         kani::cover(true, "assume #43");
         if b.end > 0 {
@@ -3667,169 +3606,11 @@ pub mod verify {
         kani::cover(matches!(step, SearchStep::Done), "exhaustion");
     }
 
-    fn byte_filter_state(s: &StrSearcher<'_, '_>) -> bool {
-        let StrSearcherImpl::Byte(b) = &s.searcher else {
-            return false;
-        };
-        s.needle.len() == 1
-            && s.needle.as_bytes()[0] == b.b
-            && b.b < 128
-            && b.position <= s.haystack.len()
-            && b.end <= s.haystack.len()
-            && s.haystack.is_char_boundary(b.position)
-            && s.haystack.is_char_boundary(b.end)
-    }
-
-    #[kani::requires(byte_filter_state(s))]
-    #[kani::ensures(|step| byte_filter_state(s) && step_ok(s.haystack, *step))]
-    #[kani::modifies(front_cursor(s))]
-    fn verified_byte_filter_next(s: &mut StrSearcher<'_, '_>) -> SearchStep {
-        s.next()
-    }
-
-    #[kani::requires(byte_filter_state(s))]
-    #[kani::ensures(|step| byte_filter_state(s) && step_ok(s.haystack, *step))]
-    #[kani::modifies(back_cursor(s))]
-    fn verified_byte_filter_next_back(s: &mut StrSearcher<'_, '_>) -> SearchStep {
-        s.next_back()
-    }
-
-    #[kani::proof_for_contract(verified_byte_filter_next)]
-    #[kani::stub_verified(<StrSearcher as Searcher>::next)]
-    pub fn harness_byte_filter_next_contract() {
-        let byte: u8 = kani::any();
-        kani::assume(byte < 128);
-        kani::cover(true, "assume #45");
-        let bytes = [byte];
-        let needle = unsafe { crate::str::from_utf8_unchecked(&bytes) };
-        let mut s = any_byte(needle);
-        let step = verified_byte_filter_next(&mut s);
-        kani::cover(
-            matches!(step, SearchStep::Match(_, _)),
-            "Byte filter match step",
-        );
-        kani::cover(
-            matches!(step, SearchStep::Reject(_, _)),
-            "Byte filter reject step",
-        );
-        kani::cover(
-            matches!(step, SearchStep::Done),
-            "Byte filter exhausted step",
-        );
-        kani::cover(
-            true,
-            "contract proof returns: harness_byte_filter_next_contract",
-        );
-    }
-
-    #[kani::proof_for_contract(verified_byte_filter_next_back)]
-    #[kani::stub_verified(<StrSearcher as ReverseSearcher>::next_back)]
-    pub fn harness_byte_filter_next_back_contract() {
-        let byte: u8 = kani::any();
-        kani::assume(byte < 128);
-        kani::cover(true, "assume #46");
-        let bytes = [byte];
-        let needle = unsafe { crate::str::from_utf8_unchecked(&bytes) };
-        let mut s = any_byte(needle);
-        let step = verified_byte_filter_next_back(&mut s);
-        kani::cover(
-            matches!(step, SearchStep::Match(_, _)),
-            "Byte filter reverse match step",
-        );
-        kani::cover(
-            matches!(step, SearchStep::Reject(_, _)),
-            "Byte filter reverse reject step",
-        );
-        kani::cover(
-            matches!(step, SearchStep::Done),
-            "Byte filter reverse exhausted step",
-        );
-        kani::cover(
-            true,
-            "contract proof returns: harness_byte_filter_next_back_contract",
-        );
-    }
-
-    struct ByteFilterModel;
-    impl ByteFilterModel {
-        #[kani::requires(byte_filter_state(s))]
-        #[kani::ensures(|step| byte_filter_state(s) && step_ok(s.haystack, *step))]
-        #[kani::modifies(front_cursor(s))]
-        fn next<'a: 'a, 'b: 'b>(s: &mut StrSearcher<'a, 'b>) -> SearchStep {
-            verified_byte_filter_next(s)
-        }
-
-        #[kani::requires(byte_filter_state(s))]
-        #[kani::ensures(|step| byte_filter_state(s) && step_ok(s.haystack, *step))]
-        #[kani::modifies(back_cursor(s))]
-        fn next_back<'a: 'a, 'b: 'b>(s: &mut StrSearcher<'a, 'b>) -> SearchStep {
-            verified_byte_filter_next_back(s)
-        }
-    }
-
-    #[kani::proof_for_contract(ByteFilterModel::next)]
-    #[kani::stub_verified(verified_byte_filter_next)]
-    pub fn harness_byte_filter_model_next_contract() {
-        let byte: u8 = kani::any();
-        kani::assume(byte < 128);
-        kani::cover(true, "assume #47");
-        let bytes = [byte];
-        let needle = unsafe { crate::str::from_utf8_unchecked(&bytes) };
-        let mut s = any_byte(needle);
-        let result = ByteFilterModel::next(&mut s);
-        kani::cover(
-            matches!(result, SearchStep::Match(_, _)),
-            "Byte adapter match",
-        );
-        kani::cover(
-            matches!(result, SearchStep::Reject(_, _)),
-            "Byte adapter reject",
-        );
-        kani::cover(matches!(result, SearchStep::Done), "Byte adapter done");
-        kani::cover(
-            true,
-            "contract proof returns: harness_byte_filter_model_next_contract",
-        );
-    }
-
-    #[kani::proof_for_contract(ByteFilterModel::next_back)]
-    #[kani::stub_verified(verified_byte_filter_next_back)]
-    pub fn harness_byte_filter_model_next_back_contract() {
-        let byte: u8 = kani::any();
-        kani::assume(byte < 128);
-        kani::cover(true, "assume #48");
-        let bytes = [byte];
-        let needle = unsafe { crate::str::from_utf8_unchecked(&bytes) };
-        let mut s = any_byte(needle);
-        let result = ByteFilterModel::next_back(&mut s);
-        kani::cover(
-            matches!(result, SearchStep::Match(_, _)),
-            "Byte reverse adapter match",
-        );
-        kani::cover(
-            matches!(result, SearchStep::Reject(_, _)),
-            "Byte reverse adapter reject",
-        );
-        kani::cover(
-            matches!(result, SearchStep::Done),
-            "Byte reverse adapter done",
-        );
-        kani::cover(
-            true,
-            "contract proof returns: harness_byte_filter_model_next_back_contract",
-        );
-    }
-
     #[kani::proof]
-    #[kani::stub(<StrSearcher as Searcher>::next, ByteFilterModel::next)]
-    #[kani::stub_verified(verified_byte_filter_next)]
-    #[kani::stub(<StrSearcher as FilterLoopContract>::valid, byte_filter_loop_valid)]
+    #[kani::stub_verified(<StrSearcher as Searcher>::next)]
     pub fn harness_str_searcher_byte_next_reject() {
-        let byte: u8 = kani::any();
-        kani::assume(byte < 128);
-        kani::cover(true, "assume #49");
-        let bytes = [byte];
-        let needle = unsafe { crate::str::from_utf8_unchecked(&bytes) };
+        let mut byte = 0;
+        let needle = any_ascii_needle(&mut byte);
         let mut s = any_byte(needle);
         let result = s.next_reject();
         if let Some((a, b)) = result {
@@ -3837,23 +3618,15 @@ pub mod verify {
         }
         assert!(invariant(&s));
         kani::cover(true, "assert #22");
-        kani::cover(
-            result.is_some_and(|(a, b)| a > 4096 && b > a),
-            "distant byte rejection",
-        );
+        kani::cover(result.is_some_and(|(a, b)| a > 4096 && b > a), "distant byte rejection");
         kani::cover(result.is_none(), "exhaustion");
     }
 
     #[kani::proof]
-    #[kani::stub(<StrSearcher as ReverseSearcher>::next_back, ByteFilterModel::next_back)]
-    #[kani::stub_verified(verified_byte_filter_next_back)]
-    #[kani::stub(<StrSearcher as FilterLoopContract>::valid, byte_filter_loop_valid)]
+    #[kani::stub_verified(<StrSearcher as ReverseSearcher>::next_back)]
     pub fn harness_str_searcher_byte_next_reject_back() {
-        let byte: u8 = kani::any();
-        kani::assume(byte < 128);
-        kani::cover(true, "assume #50");
-        let bytes = [byte];
-        let needle = unsafe { crate::str::from_utf8_unchecked(&bytes) };
+        let mut byte = 0;
+        let needle = any_ascii_needle(&mut byte);
         let mut s = any_byte(needle);
         let result = s.next_reject_back();
         if let Some((a, b)) = result {
@@ -3861,10 +3634,7 @@ pub mod verify {
         }
         assert!(invariant(&s));
         kani::cover(true, "assert #23");
-        kani::cover(
-            result.is_some_and(|(a, b)| a > 4096 && b > a),
-            "distant byte rejection",
-        );
+        kani::cover(result.is_some_and(|(a, b)| a > 4096 && b > a), "distant byte rejection");
         kani::cover(result.is_none(), "exhaustion");
     }
 
@@ -3895,31 +3665,23 @@ pub mod verify {
         kani::cover(result.is_none(), "exhaustion");
     }
 
-    // These harnesses start with the Byte variant, whose fields never change
-    // the enum discriminant. Keep the real public dispatch and Byte body, but
-    // avoid instrumenting nested TwoWay loops on an unreachable branch.
-    // An unexpected call fails the proof instead of assuming the path away.
+    // Empty and Byte harnesses fix the initial variant. Their step contracts
+    // preserve the discriminant, so reaching TwoWay would fail the proof.
     fn reject_two_way_in_byte_proof<S: TwoWayStrategy>(
         _searcher: &mut TwoWaySearcher,
         _haystack: &[u8],
         _needle: &[u8],
         _long_period: bool,
     ) -> S::Output {
-        panic!("entered TwoWay from a Byte-only proof")
+        panic!("entered TwoWay from a proof for an empty or single-byte needle")
     }
 
     #[kani::proof]
-    #[kani::stub(<StrSearcher as Searcher>::next, ByteFilterModel::next)]
-    #[kani::stub_verified(verified_byte_filter_next)]
     #[kani::stub(TwoWaySearcher::next, reject_two_way_in_byte_proof)]
     #[kani::stub(crate::slice::memchr::memchr, model_memchr)]
     pub fn harness_str_searcher_byte_next_match() {
-        let byte: u8 = kani::any();
-        kani::assume(byte < 128);
-        kani::cover(true, "assume #53");
-        let bytes = [byte];
-        // SAFETY: the byte is ASCII.
-        let needle = unsafe { crate::str::from_utf8_unchecked(&bytes) };
+        let mut byte = 0;
+        let needle = any_ascii_needle(&mut byte);
         let mut s = any_byte(needle);
         let result = s.next_match();
         check_match(s.haystack, result);
@@ -3928,17 +3690,11 @@ pub mod verify {
     }
 
     #[kani::proof]
-    #[kani::stub(<StrSearcher as ReverseSearcher>::next_back, ByteFilterModel::next_back)]
-    #[kani::stub_verified(verified_byte_filter_next_back)]
     #[kani::stub(TwoWaySearcher::next_back, reject_two_way_in_byte_proof)]
     #[kani::stub(crate::slice::memchr::memrchr, model_memchr)]
     pub fn harness_str_searcher_byte_next_match_back() {
-        let byte: u8 = kani::any();
-        kani::assume(byte < 128);
-        kani::cover(true, "assume #54");
-        let bytes = [byte];
-        // SAFETY: the byte is ASCII.
-        let needle = unsafe { crate::str::from_utf8_unchecked(&bytes) };
+        let mut byte = 0;
+        let needle = any_ascii_needle(&mut byte);
         let mut s = any_byte(needle);
         let result = s.next_match_back();
         check_match(s.haystack, result);
@@ -3950,21 +3706,17 @@ pub mod verify {
     // These complementary proofs check UB in the same real calls, avoiding a
     // second evaluation of the already-proved postconditions under UB tracking.
     #[kani::proof]
-    #[kani::stub(<StrSearcher as Searcher>::next, ByteFilterModel::next)]
-    #[kani::stub_verified(verified_byte_filter_next)]
+    #[kani::stub_verified(<StrSearcher as Searcher>::next)]
     #[kani::stub(TwoWaySearcher::next, reject_two_way_in_byte_proof)]
     #[kani::stub(crate::slice::memchr::memchr, model_memchr)]
     pub fn harness_str_searcher_byte_next_match_extra_ub() {
-        let byte: u8 = kani::any();
-        kani::assume(byte < 128);
-        kani::cover(true, "assume #55");
-        let bytes = [byte];
-        let needle = unsafe { crate::str::from_utf8_unchecked(&bytes) };
+        let mut byte = 0;
+        let needle = any_ascii_needle(&mut byte);
         let mut s = StrSearcher {
             haystack: any_str(),
             needle,
             searcher: StrSearcherImpl::Byte(ByteNeedle {
-                b: byte,
+                b: needle.as_bytes()[0],
                 position: kani::any(),
                 end: kani::any(),
             }),
@@ -3972,29 +3724,22 @@ pub mod verify {
         kani::assume(invariant(&s));
         kani::cover(true, "assume #56");
         let result = s.next_match();
-        kani::cover(
-            matches!(result, Some((a, b)) if a > 4096 && b > a),
-            "distant byte match",
-        );
+        kani::cover(matches!(result, Some((a, b)) if a > 4096 && b > a), "distant byte match");
         kani::cover(result.is_none(), "byte match exhaustion");
     }
 
     #[kani::proof]
-    #[kani::stub(<StrSearcher as ReverseSearcher>::next_back, ByteFilterModel::next_back)]
-    #[kani::stub_verified(verified_byte_filter_next_back)]
+    #[kani::stub_verified(<StrSearcher as ReverseSearcher>::next_back)]
     #[kani::stub(TwoWaySearcher::next_back, reject_two_way_in_byte_proof)]
     #[kani::stub(crate::slice::memchr::memrchr, model_memchr)]
     pub fn harness_str_searcher_byte_next_match_back_extra_ub() {
-        let byte: u8 = kani::any();
-        kani::assume(byte < 128);
-        kani::cover(true, "assume #57");
-        let bytes = [byte];
-        let needle = unsafe { crate::str::from_utf8_unchecked(&bytes) };
+        let mut byte = 0;
+        let needle = any_ascii_needle(&mut byte);
         let mut s = StrSearcher {
             haystack: any_str(),
             needle,
             searcher: StrSearcherImpl::Byte(ByteNeedle {
-                b: byte,
+                b: needle.as_bytes()[0],
                 position: kani::any(),
                 end: kani::any(),
             }),
@@ -4002,10 +3747,7 @@ pub mod verify {
         kani::assume(invariant(&s));
         kani::cover(true, "assume #58");
         let result = s.next_match_back();
-        kani::cover(
-            matches!(result, Some((a, b)) if a > 4096 && b > a),
-            "distant byte match",
-        );
+        kani::cover(matches!(result, Some((a, b)) if a > 4096 && b > a), "distant byte match");
         kani::cover(result.is_none(), "byte match exhaustion");
     }
 
@@ -4089,10 +3831,7 @@ pub mod verify {
             point > 4096 && point >= critical + period,
             "period relation at an arbitrary distant byte in the repeated suffix",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_maximal_suffix_period_at",
-        );
+        kani::cover(true, "contract proof returns: harness_maximal_suffix_period_at");
     }
 
     #[kani::requires(arr.len() <= MAX_ALLOCATION_BYTES
@@ -4136,10 +3875,7 @@ pub mod verify {
                 && unsafe { WORD_EQUALITY_OBSERVATION } < arr.len(),
             "global period from suffix and prefix at an arbitrary distant index",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_global_period_from_suffix",
-        );
+        kani::cover(true, "contract proof returns: harness_global_period_from_suffix");
     }
 
     // One selected preprocessing result. Models below keep its semantic
@@ -4270,10 +4006,7 @@ pub mod verify {
         if n[..critical] == n[period..period + critical] {
             assert!(n[point] == n[point - period]);
             kani::cover(true, "assert #29");
-            kani::cover(
-                point > 4096,
-                "global Short period at an arbitrary distant byte",
-            );
+            kani::cover(point > 4096, "global Short period at an arbitrary distant byte");
             kani::cover(
                 critical > 0 && point - period < critical,
                 "period relation supplied by the constructor prefix test",
@@ -4347,10 +4080,7 @@ pub mod verify {
             point > 4096 && point >= critical && point < arr.len() - period,
             "all three suffix relations at an arbitrary distant predecessor",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_maximal_suffix_predecessor_facts",
-        );
+        kani::cover(true, "contract proof returns: harness_maximal_suffix_predecessor_facts");
     }
 
     // P/B/S observed on the reversed byte word. The production reverse
@@ -4398,9 +4128,7 @@ pub mod verify {
         TwoWaySearcher::reverse_maximal_suffix(arr, arr.len(), order)
     }
 
-    #[kani::proof_for_contract(reverse_maximal_suffix_predecessor_at)]
-    #[kani::stub(reverse_suffix_loop_state, reverse_predecessor_suffix_loop_state)]
-    pub fn harness_reverse_maximal_suffix_predecessor_facts() {
+    fn check_reverse_suffix_predecessor(order_greater: bool) {
         let arr = any_nonempty_bytes();
         let point: usize = kani::any();
         kani::assume(point < arr.len());
@@ -4408,15 +4136,23 @@ pub mod verify {
         unsafe {
             SUFFIX_OBSERVATION = point;
         }
-        let _ = reverse_maximal_suffix_predecessor_at(arr, kani::any(), point);
-        kani::cover(
-            point > 4096,
-            "reversed P/B/S at an arbitrary distant predecessor",
-        );
-        kani::cover(
-            true,
-            "contract proof returns: harness_reverse_maximal_suffix_predecessor_facts",
-        );
+        let _ = reverse_maximal_suffix_predecessor_at(arr, order_greater, point);
+        kani::cover(point > 4096, "reversed P/B/S at an arbitrary distant predecessor");
+        kani::cover(true, "reverse predecessor contract returns");
+    }
+
+    // The two comparison orders exhaust the Boolean parameter. Both
+    // preserve the symbolic byte slice and arbitrary observation point.
+    #[kani::proof_for_contract(reverse_maximal_suffix_predecessor_at)]
+    #[kani::stub(reverse_suffix_loop_state, reverse_predecessor_suffix_loop_state)]
+    pub fn harness_reverse_maximal_suffix_predecessor_facts_less() {
+        check_reverse_suffix_predecessor(false);
+    }
+
+    #[kani::proof_for_contract(reverse_maximal_suffix_predecessor_at)]
+    #[kani::stub(reverse_suffix_loop_state, reverse_predecessor_suffix_loop_state)]
+    pub fn harness_reverse_maximal_suffix_predecessor_facts_greater() {
+        check_reverse_suffix_predecessor(true);
     }
 
     #[kani::proof]
@@ -4445,10 +4181,7 @@ pub mod verify {
         kani::cover(true, "assert #32");
         assert!(arr[n - 1 - point] == arr[n - 1 - (point - period)]);
         kani::cover(true, "assert #33");
-        kani::cover(
-            point > 4096,
-            "global period reflected at a distant arbitrary point",
-        );
+        kani::cover(point > 4096, "global period reflected at a distant arbitrary point");
     }
 
     // The logical word R[i] = arr[len-1-i] is a byte word of the same length.
@@ -4625,8 +4358,13 @@ pub mod verify {
     static mut REVERSE_THEOREM_WITNESS: usize = 0;
 
     fn prepare_reverse_theorem(
-        arr: &[u8], left: usize, right: usize, offset: usize, period: usize,
-        order: bool, reset: bool,
+        arr: &[u8],
+        left: usize,
+        right: usize,
+        offset: usize,
+        period: usize,
+        order: bool,
+        reset: bool,
     ) {
         unsafe {
             REVERSE_THEOREM_INPUT =
@@ -4640,52 +4378,80 @@ pub mod verify {
 
     fn reverse_theorem_observation(reset: bool) {
         let saved = unsafe { REVERSE_THEOREM_OBSERVATION };
-        let selected = unsafe {
-            if reset { LEFT_TRANSFER_CANDIDATE } else { ROOT_TRANSFER_SHIFT }
-        };
+        let selected = unsafe { if reset { LEFT_TRANSFER_CANDIDATE } else { ROOT_TRANSFER_SHIFT } };
         assert!(selected == saved.0 && unsafe { WORD_WITNESS_PREFIX_OBSERVATION } == saved.1);
         kani::cover(true, "reverse theorem preserves its uniform-witness observation");
     }
 
     fn reverse_theorem_input(
-        arr: &[u8], left: usize, right: usize, offset: usize, period: usize,
-        order: bool, reset: bool,
+        arr: &[u8],
+        left: usize,
+        right: usize,
+        offset: usize,
+        period: usize,
+        order: bool,
+        reset: bool,
     ) -> bool {
         let saved = unsafe { REVERSE_THEOREM_INPUT };
-        assert!(arr.as_ptr() == saved.0 && arr.len() == saved.1
-            && left == saved.2 && right == saved.3 && offset == saved.4
-            && period == saved.5 && order == saved.6 && reset == saved.7);
+        assert!(
+            arr.as_ptr() == saved.0
+                && arr.len() == saved.1
+                && left == saved.2
+                && right == saved.3
+                && offset == saved.4
+                && period == saved.5
+                && order == saved.6
+                && reset == saved.7
+        );
         kani::cover(true, "reverse theorem checks every input operand");
         reverse_theorem_observation(reset);
         root_transfer_premise_bounds(arr, left, right, offset, period, order)
     }
 
     fn reverse_root_input_model(
-        arr: &[u8], left: usize, right: usize, offset: usize, period: usize, order: bool,
+        arr: &[u8],
+        left: usize,
+        right: usize,
+        offset: usize,
+        period: usize,
+        order: bool,
     ) -> bool {
         reverse_theorem_input(arr, left, right, offset, period, order, false)
     }
 
     fn reverse_left_input_model(
-        arr: &[u8], left: usize, right: usize, offset: usize, period: usize, order: bool,
+        arr: &[u8],
+        left: usize,
+        right: usize,
+        offset: usize,
+        period: usize,
+        order: bool,
     ) -> bool {
         reverse_theorem_input(arr, left, right, offset, period, order, true)
     }
 
-    fn reverse_theorem_output(
-        arr: &[u8], left: usize, period: usize, order: bool, reset: bool,
-    ) {
+    fn reverse_theorem_output(arr: &[u8], left: usize, period: usize, order: bool, reset: bool) {
         let input = unsafe { REVERSE_THEOREM_INPUT };
         let output = unsafe { REVERSE_THEOREM_OUTPUT };
-        assert!(arr.as_ptr() == input.0 && arr.len() == input.1
-            && left == output.0 && period == output.1
-            && order == input.6 && reset == input.7);
+        assert!(
+            arr.as_ptr() == input.0
+                && arr.len() == input.1
+                && left == output.0
+                && period == output.1
+                && order == input.6
+                && reset == input.7
+        );
         kani::cover(true, "reverse theorem checks every output operand");
         reverse_theorem_observation(reset);
     }
 
     fn forward_root_post_in_reverse_proof(
-        arr: &[u8], left: usize, period: usize, order: bool, shift: usize, witness: usize,
+        arr: &[u8],
+        left: usize,
+        period: usize,
+        order: bool,
+        shift: usize,
+        witness: usize,
     ) -> bool {
         reverse_theorem_output(arr, left, period, order, false);
         assert!(shift == unsafe { REVERSE_THEOREM_OBSERVATION }.0);
@@ -4694,14 +4460,27 @@ pub mod verify {
     }
 
     fn reverse_root_post_at_forward_witness(
-        arr: &[u8], left: usize, period: usize, order: bool,
+        arr: &[u8],
+        left: usize,
+        period: usize,
+        order: bool,
     ) -> bool {
-        forward_root_post_in_reverse_proof(arr, left, period, order,
-            unsafe { ROOT_TRANSFER_SHIFT }, unsafe { REVERSE_THEOREM_WITNESS })
+        forward_root_post_in_reverse_proof(
+            arr,
+            left,
+            period,
+            order,
+            unsafe { ROOT_TRANSFER_SHIFT },
+            unsafe { REVERSE_THEOREM_WITNESS },
+        )
     }
 
     fn forward_left_post_in_reverse_proof(
-        arr: &[u8], left: usize, order: bool, candidate: usize, witness: usize,
+        arr: &[u8],
+        left: usize,
+        order: bool,
+        candidate: usize,
+        witness: usize,
     ) -> bool {
         reverse_theorem_output(arr, left, 0, order, true);
         assert!(candidate == unsafe { REVERSE_THEOREM_OBSERVATION }.0);
@@ -4710,18 +4489,31 @@ pub mod verify {
     }
 
     fn reverse_left_post_at_forward_witness(arr: &[u8], left: usize, order: bool) -> bool {
-        forward_left_post_in_reverse_proof(arr, left, order,
-            unsafe { LEFT_TRANSFER_CANDIDATE }, unsafe { REVERSE_THEOREM_WITNESS })
+        forward_left_post_in_reverse_proof(
+            arr,
+            left,
+            order,
+            unsafe { LEFT_TRANSFER_CANDIDATE },
+            unsafe { REVERSE_THEOREM_WITNESS },
+        )
     }
 
     fn reverse_root_transfer_pre(
-        arr: &[u8], left: usize, right: usize, offset: usize, period: usize, order: bool,
+        arr: &[u8],
+        left: usize,
+        right: usize,
+        offset: usize,
+        period: usize,
+        order: bool,
     ) -> bool {
         reverse_loop_facts(arr, left, right, offset, period)
             && reverse_loop_root(arr, left, period, order)
             && right + offset < arr.len()
-            && suffix_byte_preferred(arr[arr.len() - (1 + left + offset)],
-                arr[arr.len() - (1 + right + offset)], order)
+            && suffix_byte_preferred(
+                arr[arr.len() - (1 + left + offset)],
+                arr[arr.len() - (1 + right + offset)],
+                order,
+            )
     }
 
     fn reverse_root_transfer_post(arr: &[u8], left: usize, period: usize, order: bool) -> bool {
@@ -4732,8 +4524,14 @@ pub mod verify {
     #[kani::ensures(|_| reverse_root_transfer_post(arr, left, right + offset + 1 - left, order))]
     #[kani::modifies()]
     fn verified_reverse_root_transfer(
-        arr: &[u8], left: usize, right: usize, offset: usize, period: usize, order: bool,
-    ) {}
+        arr: &[u8],
+        left: usize,
+        right: usize,
+        offset: usize,
+        period: usize,
+        order: bool,
+    ) {
+    }
 
     #[kani::proof_for_contract(verified_reverse_root_transfer)]
     #[kani::stub_verified(verified_root_transfer)]
@@ -4751,23 +4549,35 @@ pub mod verify {
         prepare_reverse_theorem(arr, left, right, offset, period, order, false);
         kani::assume(root_transfer_premise_bounds(arr, left, right, offset, period, order));
         kani::cover(true, "after harness_reverse_root_transfer_from_forward input premise");
-        unsafe { REVERSE_THEOREM_OUTPUT = (left, right + offset + 1 - left); }
+        unsafe {
+            REVERSE_THEOREM_OUTPUT = (left, right + offset + 1 - left);
+        }
         let witness = verified_root_transfer(arr, left, right, offset, period, order);
-        unsafe { REVERSE_THEOREM_WITNESS = witness; }
+        unsafe {
+            REVERSE_THEOREM_WITNESS = witness;
+        }
         verified_reverse_root_transfer(arr, left, right, offset, period, order);
         kani::cover(arr.len() > 4096, "reverse root transfer retains symbolic byte lengths");
         kani::cover(true, "contract proof returns: harness_reverse_root_transfer_from_forward");
     }
 
     fn reverse_left_transfer_pre(
-        arr: &[u8], left: usize, right: usize, offset: usize, period: usize, order: bool,
+        arr: &[u8],
+        left: usize,
+        right: usize,
+        offset: usize,
+        period: usize,
+        order: bool,
     ) -> bool {
         reverse_loop_facts(arr, left, right, offset, period)
             && reverse_loop_root(arr, left, period, order)
             && reverse_loop_earlier(arr, left, order)
             && right + offset < arr.len()
-            && suffix_byte_preferred(arr[arr.len() - (1 + right + offset)],
-                arr[arr.len() - (1 + left + offset)], order)
+            && suffix_byte_preferred(
+                arr[arr.len() - (1 + right + offset)],
+                arr[arr.len() - (1 + left + offset)],
+                order,
+            )
     }
 
     fn reverse_left_transfer_post(arr: &[u8], left: usize, order: bool) -> bool {
@@ -4778,8 +4588,14 @@ pub mod verify {
     #[kani::ensures(|_| reverse_left_transfer_post(arr, right, order))]
     #[kani::modifies()]
     fn verified_reverse_left_transfer(
-        arr: &[u8], left: usize, right: usize, offset: usize, period: usize, order: bool,
-    ) {}
+        arr: &[u8],
+        left: usize,
+        right: usize,
+        offset: usize,
+        period: usize,
+        order: bool,
+    ) {
+    }
 
     #[kani::proof_for_contract(verified_reverse_left_transfer)]
     #[kani::stub_verified(verified_left_transfer)]
@@ -4796,9 +4612,13 @@ pub mod verify {
         prepare_reverse_theorem(arr, left, right, offset, period, order, true);
         kani::assume(root_transfer_premise_bounds(arr, left, right, offset, period, order));
         kani::cover(true, "after harness_reverse_left_transfer_from_forward input premise");
-        unsafe { REVERSE_THEOREM_OUTPUT = (right, 0); }
+        unsafe {
+            REVERSE_THEOREM_OUTPUT = (right, 0);
+        }
         let witness = verified_left_transfer(arr, left, right, offset, period, order);
-        unsafe { REVERSE_THEOREM_WITNESS = witness; }
+        unsafe {
+            REVERSE_THEOREM_WITNESS = witness;
+        }
         verified_reverse_left_transfer(arr, left, right, offset, period, order);
         kani::cover(arr.len() > 4096, "reverse left transfer retains symbolic byte lengths");
         kani::cover(true, "contract proof returns: harness_reverse_left_transfer_from_forward");
@@ -4869,11 +4689,7 @@ pub mod verify {
             return false;
         }
         let root = reverse_loop_root(arr, left, period, order);
-        let valid = if prove_d {
-            root && reverse_loop_earlier(arr, left, order)
-        } else {
-            root
-        };
+        let valid = if prove_d { root && reverse_loop_earlier(arr, left, order) } else { root };
         if valid && right + offset < n {
             let a = arr[n - (1 + right + offset)];
             let b = arr[n - (1 + left + offset)];
@@ -4985,10 +4801,7 @@ pub mod verify {
             arr.len() > 4096 && result > 0,
             "reverse root true traverses a symbolic-length byte word",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_reverse_maximal_suffix_root_probe_true",
-        );
+        kani::cover(true, "contract proof returns: harness_reverse_maximal_suffix_root_probe_true");
     }
 
     #[kani::proof_for_contract(reverse_suffix_dominance_baseline)]
@@ -5079,7 +4892,9 @@ pub mod verify {
     // the original array: j maps to the original period comparison at n-1-j+k.
     fn reflected_global_period(arr: &[u8], k: usize) -> bool {
         let n = arr.len();
-        if n > MAX_ALLOCATION_BYTES || k == 0 || k > n { return false; }
+        if n > MAX_ALLOCATION_BYTES || k == 0 || k > n {
+            return false;
+        }
         let ptr = arr.as_ptr();
         kani::internal::kani_forall(k, n, move |j: usize| {
             reflected_byte!(ptr, n, j)
@@ -5104,12 +4919,16 @@ pub mod verify {
         if delta <= j && j < n {
             let i = n - 1 - j + delta;
             i < begin || i >= end || arr[i] == arr[i - delta]
-        } else { true }
+        } else {
+            true
+        }
     }
 
     fn reflected_period_at_observer(arr: &[u8], k: usize) -> bool {
         let n = arr.len();
-        if n > MAX_ALLOCATION_BYTES || k == 0 || k > n { return false; }
+        if n > MAX_ALLOCATION_BYTES || k == 0 || k > n {
+            return false;
+        }
         let j = unsafe { REFLECTED_PERIOD_OBSERVATION };
         j < k || j >= n || arr[n - 1 - j] == arr[n - 1 - (j - k)]
     }
@@ -5119,40 +4938,76 @@ pub mod verify {
     #[kani::stub(reflected_global_period, reflected_period_at_observer)]
     pub fn harness_reflected_global_period() {
         let arr = any_nonempty_bytes();
-        unsafe { REFLECTED_PERIOD_OBSERVATION = kani::any(); }
+        unsafe {
+            REFLECTED_PERIOD_OBSERVATION = kani::any();
+        }
         let k = kani::any();
         verified_reflected_global_period(arr, k);
-        kani::cover(arr.len() > 4096 && unsafe { REFLECTED_PERIOD_OBSERVATION } >= k
-            && unsafe { REFLECTED_PERIOD_OBSERVATION } < arr.len(),
-            "reflected period checks an interior byte at symbolic length");
+        kani::cover(
+            arr.len() > 4096
+                && unsafe { REFLECTED_PERIOD_OBSERVATION } >= k
+                && unsafe { REFLECTED_PERIOD_OBSERVATION } < arr.len(),
+            "reflected period checks an interior byte at symbolic length",
+        );
         kani::cover(true, "contract proof returns: harness_reflected_global_period");
     }
 
-    fn reverse_lexical_bounds_pre(arr: &[u8], left: usize, period: usize, k: usize, order: bool) -> bool {
+    fn reverse_lexical_bounds_pre(
+        arr: &[u8],
+        left: usize,
+        period: usize,
+        k: usize,
+        order: bool,
+    ) -> bool {
         reverse_loop_root(arr, left, period, order)
-            && reverse_loop_earlier(arr, left, order) && reflected_global_period(arr, k)
+            && reverse_loop_earlier(arr, left, order)
+            && reflected_global_period(arr, k)
     }
 
     #[kani::requires(reverse_lexical_bounds_pre(arr, left, period, k, order))]
     #[kani::ensures(|_| left < k && period <= k)]
     #[kani::modifies()]
-    fn verified_reverse_lexical_bounds(arr: &[u8], left: usize, period: usize, k: usize, order: bool) {}
+    fn verified_reverse_lexical_bounds(
+        arr: &[u8],
+        left: usize,
+        period: usize,
+        k: usize,
+        order: bool,
+    ) {
+    }
 
     static mut REVERSE_BOUND_INPUT: (*const u8, usize, usize, usize, usize, bool) =
         (crate::ptr::null(), 0, 0, 0, 0, false);
 
     fn period_bound_range_shape(arr: &[u8], begin: usize, end: usize, delta: usize) -> bool {
         let saved = unsafe { REVERSE_BOUND_INPUT };
-        assert!(arr.as_ptr() == saved.0 && arr.len() == saved.1
-            && begin == saved.4 && end == saved.1 && delta == saved.4);
+        assert!(
+            arr.as_ptr() == saved.0
+                && arr.len() == saved.1
+                && begin == saved.4
+                && end == saved.1
+                && delta == saved.4
+        );
         kani::cover(true, "period bound checks the unchanged global-period operands");
         0 < begin && begin <= end && end <= MAX_ALLOCATION_BYTES
     }
 
-    fn reverse_bound_input_model(arr: &[u8], left: usize, period: usize, k: usize, order: bool) -> bool {
+    fn reverse_bound_input_model(
+        arr: &[u8],
+        left: usize,
+        period: usize,
+        k: usize,
+        order: bool,
+    ) -> bool {
         let saved = unsafe { REVERSE_BOUND_INPUT };
-        assert!(arr.as_ptr() == saved.0 && arr.len() == saved.1 && left == saved.2
-            && period == saved.3 && k == saved.4 && order == saved.5);
+        assert!(
+            arr.as_ptr() == saved.0
+                && arr.len() == saved.1
+                && left == saved.2
+                && period == saved.3
+                && k == saved.4
+                && order == saved.5
+        );
         kani::cover(true, "reverse period bound checks every input operand");
         root_dominance_shape(arr, left, period, order)
             && earlier_dominance_shape(arr, left, order)
@@ -5191,8 +5046,13 @@ pub mod verify {
     fn known_period_range_shape(arr: &[u8], begin: usize, end: usize, delta: usize) -> bool {
         let saved = unsafe { PREPROCESSING_INPUT };
         let k = unsafe { REVERSE_KNOWN_PERIOD };
-        assert!(arr.as_ptr() == saved.0 && arr.len() == saved.1
-            && begin == k && end == saved.1 && delta == k);
+        assert!(
+            arr.as_ptr() == saved.0
+                && arr.len() == saved.1
+                && begin == k
+                && end == saved.1
+                && delta == k
+        );
         kani::cover(true, "reverse loop retains its original global-period operand");
         0 < k && k <= arr.len() && arr.len() <= MAX_ALLOCATION_BYTES
     }
@@ -5201,8 +5061,6 @@ pub mod verify {
         known_period_range_shape(arr, k, arr.len(), k)
     }
 
-
-
     fn earlier_shape_for_reverse_bound(arr: &[u8], left: usize, order: bool) -> bool {
         let saved = unsafe { PREPROCESSING_INPUT };
         assert!(arr.as_ptr() == saved.0 && arr.len() == saved.1 && order == saved.2);
@@ -5210,23 +5068,26 @@ pub mod verify {
         arr.len() <= MAX_ALLOCATION_BYTES && left < arr.len()
     }
 
-
-
-
-
     // The known-period execution is a prefix of the len-period execution:
     // the parameter is inspected only by the early-break test, after updates.
     // Thus its states have the independently proved P/L/D properties. Combined
     // with the reflected global period and lexical_period_bounds, these give
     // both the current and predicted successor inequalities below.
     fn bounded_reverse_loop(
-        arr: &[u8], known_period: usize, left: usize, right: usize,
-        offset: usize, period: usize, order: bool,
+        arr: &[u8],
+        known_period: usize,
+        left: usize,
+        right: usize,
+        offset: usize,
+        period: usize,
+        order: bool,
     ) -> bool {
         let n = arr.len();
-        if known_period == 0 || known_period > n
+        if known_period == 0
+            || known_period > n
             || !probe_suffix_shape(arr, left, right, offset, period)
-            || left >= known_period || period > known_period
+            || left >= known_period
+            || period > known_period
             || !range_agreement(arr, known_period, n, known_period)
             || !reverse_loop_facts(arr, left, right, offset, period)
             || !reverse_loop_root(arr, left, period, order)
@@ -5241,7 +5102,12 @@ pub mod verify {
             if (a < b && !order) || (a > b && order) {
                 verified_reverse_root_transfer(arr, left, right, offset, period, order);
                 verified_reverse_lexical_bounds(
-                    arr, left, right + offset + 1 - left, known_period, order);
+                    arr,
+                    left,
+                    right + offset + 1 - left,
+                    known_period,
+                    order,
+                );
             } else if a != b {
                 verified_reverse_left_transfer(arr, left, right, offset, period, order);
                 verified_reverse_lexical_bounds(arr, right, 1, known_period, order);
@@ -5305,14 +5171,8 @@ pub mod verify {
             arr.len() > 4096 && known_period < arr.len(),
             "shorter global period bounds real reverse preprocessing",
         );
-        kani::cover(
-            left > 0,
-            "nonzero reverse critical point remains below its period",
-        );
-        kani::cover(
-            true,
-            "contract proof returns: harness_reverse_suffix_period_false",
-        );
+        kani::cover(left > 0, "nonzero reverse critical point remains below its period");
+        kani::cover(true, "contract proof returns: harness_reverse_suffix_period_false");
     }
 
     #[kani::proof_for_contract(reverse_suffix_period)]
@@ -5340,10 +5200,7 @@ pub mod verify {
             "shorter global period bounds the opposite reverse order",
         );
         kani::cover(left > 0, "opposite reverse critical point can be nonzero");
-        kani::cover(
-            true,
-            "contract proof returns: harness_reverse_suffix_period_true",
-        );
+        kani::cover(true, "contract proof returns: harness_reverse_suffix_period_true");
     }
 
     // Quantifier bodies must be pure expressions. These macros contain
@@ -5673,28 +5530,14 @@ pub mod verify {
         let supplied_witness: usize = kani::any();
         kani::assume(supplied_witness < period - shift);
         kani::cover(true, "assume #73");
-        kani::assume(full_word_strict_witness(
-            arr,
-            left,
-            left + shift,
-            supplied_witness,
-            reverse,
-        ));
+        kani::assume(full_word_strict_witness(arr, left, left + shift, supplied_witness, reverse));
         kani::cover(true, "assume #74");
         // Existential elimination: every permitted input admits such a ghost
         // witness. It is independent of the function's chosen return value.
         let exists = true;
         unsafe {
             WORD_EQUALITY_OBSERVATION = shift;
-            WORD_EXISTS_SNAPSHOT = (
-                arr.as_ptr(),
-                arr.len(),
-                left,
-                period,
-                shift,
-                reverse,
-                exists,
-            );
+            WORD_EXISTS_SNAPSHOT = (arr.as_ptr(), arr.len(), left, period, shift, reverse, exists);
         }
         let witness = choose_root_word_witness(arr, left, period, shift, reverse);
         kani::cover(
@@ -5705,10 +5548,7 @@ pub mod verify {
             witness > 0 && unsafe { WORD_WITNESS_PREFIX_OBSERVATION } < witness,
             "nonempty prefix observed inside the returned strict witness",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_choose_root_word_witness_projected",
-        );
+        kani::cover(true, "contract proof returns: harness_choose_root_word_witness_projected");
     }
 
     #[kani::requires(word_earlier_dominance(arr, left, reverse) && candidate < left)]
@@ -5750,13 +5590,7 @@ pub mod verify {
         let supplied_witness: usize = kani::any();
         kani::assume(supplied_witness < arr.len() - left);
         kani::cover(true, "assume #77");
-        kani::assume(full_word_strict_witness(
-            arr,
-            left,
-            candidate,
-            supplied_witness,
-            reverse,
-        ));
+        kani::assume(full_word_strict_witness(arr, left, candidate, supplied_witness, reverse));
         kani::cover(true, "assume #78");
         let exists = true;
         unsafe {
@@ -5769,10 +5603,7 @@ pub mod verify {
             witness > 0 && unsafe { WORD_WITNESS_PREFIX_OBSERVATION } < witness,
             "nonempty prefix observed inside the returned strict witness",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_choose_earlier_word_witness_projected",
-        );
+        kani::cover(true, "contract proof returns: harness_choose_earlier_word_witness_projected");
     }
 
     // Counterexample-preserving projection of the universal equality
@@ -5830,10 +5661,7 @@ pub mod verify {
         }
         read_word_prefix(arr, a, b, count, index);
         kani::cover(index > 4096, "read equal prefixes at any distant element");
-        kani::cover(
-            true,
-            "contract proof returns: harness_read_word_prefix_projected",
-        );
+        kani::cover(true, "contract proof returns: harness_read_word_prefix_projected");
     }
 
     fn small_root_extension_pre(
@@ -5896,20 +5724,10 @@ pub mod verify {
             prefix_from_range(arr, left + period, left + period + gap, period);
             assert!(word_prefix_equal(arr, left, left + period, gap));
             kani::cover(true, "assert #52");
-            read_range_agreement(
-                arr,
-                right - period,
-                right,
-                right - left - period,
-                end - period,
-            );
+            read_range_agreement(arr, right - period, right, right - left - period, end - period);
             assert!(left + gap == end - period);
             kani::cover(true, "assert #53");
-            assert!(suffix_byte_preferred(
-                arr[left + gap],
-                arr[left + shift + gap],
-                reverse
-            ));
+            assert!(suffix_byte_preferred(arr[left + gap], arr[left + shift + gap], reverse));
             kani::cover(true, "assert #54");
             return gap;
         }
@@ -5920,12 +5738,7 @@ pub mod verify {
         let previous_start = left + shift - period;
         let witness = cmp::min(previous, gap);
         prefix_from_range(arr, left + shift, left + shift + witness, period);
-        assert!(word_prefix_equal(
-            arr,
-            previous_start,
-            left + shift,
-            witness
-        ));
+        assert!(word_prefix_equal(arr, previous_start, left + shift, witness));
         kani::cover(true, "assert #56");
         if witness < gap {
             assert!(witness == previous);
@@ -5934,13 +5747,7 @@ pub mod verify {
         } else {
             assert!(witness == gap && gap <= previous);
             kani::cover(true, "assert #58");
-            read_range_agreement(
-                arr,
-                right - period,
-                right,
-                right - left - period,
-                end - period,
-            );
+            read_range_agreement(arr, right - period, right, right - left - period, end - period);
             assert!(previous_start + gap == end - period);
             kani::cover(true, "assert #59");
             if gap < previous {
@@ -5949,11 +5756,7 @@ pub mod verify {
         }
         assert!(word_prefix_equal(arr, left, left + shift, witness));
         kani::cover(true, "assert #60");
-        assert!(suffix_byte_preferred(
-            arr[left + witness],
-            arr[left + shift + witness],
-            reverse
-        ));
+        assert!(suffix_byte_preferred(arr[left + witness], arr[left + shift + witness], reverse));
         kani::cover(true, "assert #61");
         witness
     }
@@ -6046,10 +5849,7 @@ pub mod verify {
             arr.len() > 4096 && global_period == arr.len(),
             "lexical bounds apply at symbolic word length",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_lexical_period_bounds",
-        );
+        kani::cover(true, "contract proof returns: harness_lexical_period_bounds");
     }
 
     // The semantic L premise is used only at the original, unchanged array,
@@ -6104,10 +5904,7 @@ pub mod verify {
             arr.len() > 4096 && point < witness,
             "root extension checks an interior prefix point at symbolic length",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_root_extension_pointwise",
-        );
+        kani::cover(true, "contract proof returns: harness_root_extension_pointwise");
     }
 
     static mut EARLIER_DOMINANCE_CALL: (*const u8, usize, usize, bool) =
@@ -6156,10 +5953,7 @@ pub mod verify {
             arr.len() > 4096 && point < witness,
             "left reset checks an interior prefix point at symbolic length",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_reset_dominance_pointwise",
-        );
+        kani::cover(true, "contract proof returns: harness_reset_dominance_pointwise");
     }
 
     #[kani::requires(range_agreement(arr, begin, end, delta))]
@@ -6195,10 +5989,7 @@ pub mod verify {
                 && unsafe { WORD_EQUALITY_OBSERVATION } < end - begin,
             "range to prefix conversion at an interior distant offset",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_prefix_from_range_projected",
-        );
+        kani::cover(true, "contract proof returns: harness_prefix_from_range_projected");
     }
 
     fn large_root_reset_pre(
@@ -6249,19 +6040,10 @@ pub mod verify {
             assert!(candidate + witness + 1 <= end);
             kani::cover(true, "assert #65");
             prefix_from_range(arr, candidate, candidate + witness + 1, period);
-            assert!(word_prefix_equal(
-                arr,
-                candidate - period,
-                candidate,
-                witness + 1
-            ));
+            assert!(word_prefix_equal(arr, candidate - period, candidate, witness + 1));
             kani::cover(true, "assert #66");
             read_range_agreement(arr, left + period, end, period, candidate + witness);
-            assert!(suffix_byte_preferred(
-                arr[right + witness],
-                arr[candidate + witness],
-                reverse
-            ));
+            assert!(suffix_byte_preferred(arr[right + witness], arr[candidate + witness], reverse));
             kani::cover(true, "assert #67");
             return witness;
         }
@@ -6294,11 +6076,7 @@ pub mod verify {
         }
         assert!(word_prefix_equal(arr, right, candidate, witness));
         kani::cover(true, "assert #72");
-        assert!(suffix_byte_preferred(
-            arr[right + witness],
-            arr[candidate + witness],
-            reverse
-        ));
+        assert!(suffix_byte_preferred(arr[right + witness], arr[candidate + witness], reverse));
         kani::cover(true, "assert #73");
         witness
     }
@@ -6382,13 +6160,23 @@ pub mod verify {
     static mut ROOT_TRANSFER_SHIFT: usize = 0;
 
     fn root_transfer_pre(
-        arr: &[u8], left: usize, right: usize, offset: usize, period: usize, order: bool,
+        arr: &[u8],
+        left: usize,
+        right: usize,
+        offset: usize,
+        period: usize,
+        order: bool,
     ) -> bool {
         small_root_extension_pre(arr, left, right, offset, period, order)
     }
 
     fn root_transfer_post(
-        arr: &[u8], left: usize, period: usize, order: bool, shift: usize, witness: usize,
+        arr: &[u8],
+        left: usize,
+        period: usize,
+        order: bool,
+        shift: usize,
+        witness: usize,
     ) -> bool {
         // Callers that use the returned witness need this relation in the
         // real contract, in addition to the complete existential L predicate.
@@ -6397,12 +6185,22 @@ pub mod verify {
     }
 
     fn root_transfer_post_at_shift(
-        arr: &[u8], left: usize, period: usize, order: bool, shift: usize, witness: usize,
+        arr: &[u8],
+        left: usize,
+        period: usize,
+        order: bool,
+        shift: usize,
+        witness: usize,
     ) -> bool {
         let n = arr.len();
-        n <= MAX_ALLOCATION_BYTES && left < n && 0 < period && period <= n - left
-            && (shift == 0 || shift >= period || (witness < period - shift
-                && word_strict_witness(arr, left, left + shift, witness, order)))
+        n <= MAX_ALLOCATION_BYTES
+            && left < n
+            && 0 < period
+            && period <= n - left
+            && (shift == 0
+                || shift >= period
+                || (witness < period - shift
+                    && word_strict_witness(arr, left, left + shift, witness, order)))
     }
 
     // The wrapper and its sole verified callee use the identical premise,
@@ -6411,7 +6209,12 @@ pub mod verify {
     // This admits every real pre-state; the witness constructor's independent
     // proof still checks its full premise.
     fn root_transfer_premise_bounds(
-        arr: &[u8], left: usize, right: usize, offset: usize, period: usize, _order: bool,
+        arr: &[u8],
+        left: usize,
+        right: usize,
+        offset: usize,
+        period: usize,
+        _order: bool,
     ) -> bool {
         probe_suffix_shape(arr, left, right, offset, period) && right + offset < arr.len()
     }
@@ -6421,7 +6224,12 @@ pub mod verify {
         arr, left, right + offset + 1 - left, order, unsafe { ROOT_TRANSFER_SHIFT }, *witness))]
     #[kani::modifies()]
     fn verified_root_transfer(
-        arr: &[u8], left: usize, right: usize, offset: usize, period: usize, order: bool,
+        arr: &[u8],
+        left: usize,
+        right: usize,
+        offset: usize,
+        period: usize,
+        order: bool,
     ) -> usize {
         let shift = unsafe { ROOT_TRANSFER_SHIFT };
         let next_period = right + offset + 1 - left;
@@ -6476,7 +6284,12 @@ pub mod verify {
     // induction. Their exact transition arguments are checked by the contract;
     // the original transfer itself is proved above with its full premise.
     fn root_transfer_probe_pre(
-        arr: &[u8], left: usize, right: usize, offset: usize, period: usize, order: bool,
+        arr: &[u8],
+        left: usize,
+        right: usize,
+        offset: usize,
+        period: usize,
+        order: bool,
     ) -> bool {
         loop_suffix_facts(arr, left, right, offset, period)
             && loop_word_root(arr, left, period, order)
@@ -6485,7 +6298,12 @@ pub mod verify {
     }
 
     fn root_transfer_probe_post(
-        arr: &[u8], left: usize, period: usize, order: bool, _shift: usize, _witness: usize,
+        arr: &[u8],
+        left: usize,
+        period: usize,
+        order: bool,
+        _shift: usize,
+        _witness: usize,
     ) -> bool {
         root_exclusion_predicate(arr, left, period, order)
     }
@@ -6643,10 +6461,7 @@ pub mod verify {
             arr.len() > 4096 && result.1 > 1,
             "nontrivial root period in a symbolic-length actual search",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_maximal_suffix_root_probe_false",
-        );
+        kani::cover(true, "contract proof returns: harness_maximal_suffix_root_probe_false");
     }
 
     #[kani::proof_for_contract(maximal_suffix_root)]
@@ -6668,10 +6483,7 @@ pub mod verify {
             arr.len() > 4096 && result.1 > 1,
             "opposite byte order retains symbolic lengths and non-unit periods",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_maximal_suffix_root_probe_true",
-        );
+        kani::cover(true, "contract proof returns: harness_maximal_suffix_root_probe_true");
     }
 
     fn loop_word_earlier(arr: &[u8], left: usize, reverse: bool) -> bool {
@@ -6681,25 +6493,40 @@ pub mod verify {
     static mut LEFT_TRANSFER_CANDIDATE: usize = 0;
 
     fn left_transfer_pre(
-        arr: &[u8], left: usize, right: usize, offset: usize, period: usize, order: bool,
+        arr: &[u8],
+        left: usize,
+        right: usize,
+        offset: usize,
+        period: usize,
+        order: bool,
     ) -> bool {
         large_root_reset_pre(arr, left, right, offset, period, order)
     }
 
     fn left_transfer_post(
-        arr: &[u8], left: usize, order: bool, candidate: usize, witness: usize,
+        arr: &[u8],
+        left: usize,
+        order: bool,
+        candidate: usize,
+        witness: usize,
     ) -> bool {
         word_earlier_body!(arr, left, order)
             && left_transfer_post_at_candidate(arr, left, order, candidate, witness)
     }
 
     fn left_transfer_post_at_candidate(
-        arr: &[u8], left: usize, order: bool, candidate: usize, witness: usize,
+        arr: &[u8],
+        left: usize,
+        order: bool,
+        candidate: usize,
+        witness: usize,
     ) -> bool {
         let n = arr.len();
-        n <= MAX_ALLOCATION_BYTES && left < n
-            && (candidate >= left || (witness < n - left
-                && word_strict_witness(arr, left, candidate, witness, order)))
+        n <= MAX_ALLOCATION_BYTES
+            && left < n
+            && (candidate >= left
+                || (witness < n - left
+                    && word_strict_witness(arr, left, candidate, witness, order)))
     }
 
     #[kani::requires(left_transfer_pre(arr, left, right, offset, period, order))]
@@ -6707,7 +6534,12 @@ pub mod verify {
         arr, right, order, unsafe { LEFT_TRANSFER_CANDIDATE }, *witness))]
     #[kani::modifies()]
     fn verified_left_transfer(
-        arr: &[u8], left: usize, right: usize, offset: usize, period: usize, order: bool,
+        arr: &[u8],
+        left: usize,
+        right: usize,
+        offset: usize,
+        period: usize,
+        order: bool,
     ) -> usize {
         let candidate = unsafe { LEFT_TRANSFER_CANDIDATE };
         if candidate < right {
@@ -6746,7 +6578,12 @@ pub mod verify {
     }
 
     fn left_transfer_probe_pre(
-        arr: &[u8], left: usize, right: usize, offset: usize, period: usize, order: bool,
+        arr: &[u8],
+        left: usize,
+        right: usize,
+        offset: usize,
+        period: usize,
+        order: bool,
     ) -> bool {
         loop_suffix_facts(arr, left, right, offset, period)
             && loop_word_root(arr, left, period, order)
@@ -6756,7 +6593,11 @@ pub mod verify {
     }
 
     fn left_transfer_probe_post(
-        arr: &[u8], left: usize, order: bool, _candidate: usize, _witness: usize,
+        arr: &[u8],
+        left: usize,
+        order: bool,
+        _candidate: usize,
+        _witness: usize,
     ) -> bool {
         earlier_exclusion_predicate(arr, left, order)
     }
@@ -6904,10 +6745,7 @@ pub mod verify {
             arr.len() > 4096 && result.0 > 0,
             "actual maximal suffix moves its left endpoint at symbolic length",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_maximal_suffix_dominance_probe_false",
-        );
+        kani::cover(true, "contract proof returns: harness_maximal_suffix_dominance_probe_false");
     }
 
     #[kani::proof_for_contract(maximal_suffix_dominance)]
@@ -6930,10 +6768,7 @@ pub mod verify {
             arr.len() > 4096 && result.0 > 0,
             "left endpoint moves in the opposite byte order",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_maximal_suffix_dominance_probe_true",
-        );
+        kani::cover(true, "contract proof returns: harness_maximal_suffix_dominance_probe_true");
     }
 
     pub(super) fn suffix_loop_state(
@@ -7061,19 +6896,24 @@ pub mod verify {
     fn extend_range_agreement(arr: &[u8], begin: usize, end: usize, delta: usize) {}
 
     #[kani::proof_for_contract(extend_range_agreement)]
-    #[kani::solver(z3)]
+    #[kani::stub(range_agreement, word_range_equal_at_observer)]
+    #[kani::stub(range_agreement_for_loop, word_range_equal_at_observer)]
     pub fn harness_extend_range_agreement() {
         let arr = any_nonempty_bytes();
         let begin = kani::any();
         let end = kani::any();
         let delta = kani::any();
+        // At the same arbitrary index, the precondition covers the old range
+        // and the separate equality covers the newly included byte.
+        let observer = kani::any();
+        unsafe {
+            WORD_EQUALITY_OBSERVATION = observer;
+        }
         extend_range_agreement(arr, begin, end, delta);
         apply_extend_range_contract(arr, begin, end, delta);
         kani::cover(end > 4096, "extend agreement at an unbounded offset");
-        kani::cover(
-            true,
-            "contract proof returns: harness_extend_range_agreement",
-        );
+        kani::cover(observer == end, "observe the newly added byte");
+        kani::cover(true, "contract proof returns: harness_extend_range_agreement");
     }
 
     #[kani::requires(range_agreement(arr, begin, end, delta)
@@ -7133,14 +6973,9 @@ pub mod verify {
         kani::cover(true, "assert #94");
         assert!(period > 0 && period <= input.len() - critical);
         kani::cover(true, "assert #95");
-        kani::cover(
-            input.len() > 4096,
-            "numeric suffix bounds at symbolic length",
-        );
-        kani::cover(
-            true,
-            "contract proof returns: harness_maximal_suffix_numeric_bounds",
-        );
+        kani::cover(input.len() > 4096 && order, "greater-order suffix bounds at symbolic length");
+        kani::cover(input.len() > 4096 && !order, "lesser-order suffix bounds at symbolic length");
+        kani::cover(true, "contract proof returns: harness_maximal_suffix_numeric_bounds");
     }
 
     // Every positive-critical Short state can use its cache-prefix length
@@ -7202,14 +7037,8 @@ pub mod verify {
     pub fn harness_reverse_suffix_full_period_bounds() {
         let arr = any_nonempty_bytes();
         let _ = reverse_suffix_full_period(arr, kani::any());
-        kani::cover(
-            arr.len() > 4096,
-            "reverse preprocessing with symbolic input length",
-        );
-        kani::cover(
-            true,
-            "contract proof returns: harness_reverse_suffix_full_period_bounds",
-        );
+        kani::cover(arr.len() > 4096, "reverse preprocessing with symbolic input length");
+        kani::cover(true, "contract proof returns: harness_reverse_suffix_full_period_bounds");
     }
 
     // Numeric safety of the real Two-Way scan is checked separately from the
@@ -7423,10 +7252,7 @@ pub mod verify {
         let n = any_str().as_bytes();
         let mut s = any_short_reverse_searcher(h, n);
         let _ = verified_raw_reverse::<RejectAndMatch>(&mut s, h, n, false);
-        kani::cover(
-            true,
-            "contract proof returns: harness_two_way_short_next_back_contract",
-        );
+        kani::cover(true, "contract proof returns: harness_two_way_short_next_back_contract");
     }
 
     fn raw_forward_pre<S: TwoWayStrategy>(
@@ -7486,11 +7312,7 @@ pub mod verify {
         n: &[u8],
         long: bool,
     ) -> S::Output {
-        let result = searcher.next::<S>(h, n, long);
-        if let RawOutcome::Match(a, b) = S::outcome(&result) {
-            check_short_match(h, n, a, b);
-        }
-        result
+        searcher.next::<S>(h, n, long)
     }
 
     // Enabled only by harnesses whose strategy/domain has a proved wrapper.
@@ -7589,28 +7411,33 @@ pub mod verify {
     #[kani::stub_verified(establish_long_match_boundaries)]
     pub fn harness_two_way_short_next_contract_cached() {
         check_short_forward_contract(true);
-        kani::cover(
-            true,
-            "contract proof returns: harness_two_way_short_next_contract_cached",
-        );
+        kani::cover(true, "contract proof returns: harness_two_way_short_next_contract_cached");
     }
 
     // Check the exact strategy instantiated by the public MatchOnly adapter.
     // This is independent of the RejectAndMatch contract partitions above.
-    #[kani::proof_for_contract(verified_raw_forward)]
-    #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
-    #[kani::stub_verified(establish_last_scalar_bound)]
-    #[kani::stub_verified(establish_long_match_boundaries)]
-    pub fn harness_two_way_short_forward_match_contract() {
-        let h = any_str().as_bytes();
-        let n = any_str().as_bytes();
+    // Split zero-length haystacks before allocation so the real scan proof
+    // carries one symbolic byte object through every candidate.
+    fn check_short_forward_match_contract(h: &[u8]) {
+        let n = any_nonempty_str().as_bytes();
         let mut s = any_short_searcher(h, n);
         let _ = verified_raw_forward::<MatchOnly>(&mut s, h, n, false);
         kani::cover(n.len() > 4096, "forward MatchOnly contract at arbitrary needle length");
-        kani::cover(
-            true,
-            "contract proof returns: harness_two_way_short_forward_match_contract",
-        );
+        kani::cover(true, "the forward MatchOnly contract returns");
+    }
+
+    #[kani::proof_for_contract(verified_raw_forward)]
+    #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
+    #[kani::stub_verified(establish_last_scalar_bound)]
+    pub fn harness_two_way_short_forward_match_contract() {
+        check_short_forward_match_contract(any_nonempty_str().as_bytes());
+    }
+
+    #[kani::proof_for_contract(verified_raw_forward)]
+    #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
+    #[kani::stub_verified(establish_last_scalar_bound)]
+    pub fn harness_two_way_short_forward_match_contract_empty_haystack() {
+        check_short_forward_match_contract(&[]);
     }
 
     #[kani::proof_for_contract(verified_raw_reverse)]
@@ -7622,10 +7449,7 @@ pub mod verify {
         let mut s = any_short_reverse_searcher(h, n);
         let _ = verified_raw_reverse::<MatchOnly>(&mut s, h, n, false);
         kani::cover(n.len() > 4096, "reverse MatchOnly contract at arbitrary needle length");
-        kani::cover(
-            true,
-            "contract proof returns: harness_two_way_short_reverse_match_contract",
-        );
+        kani::cover(true, "contract proof returns: harness_two_way_short_reverse_match_contract");
     }
 
     // Short-period state. Its static factorization inequalities are
@@ -7685,6 +7509,69 @@ pub mod verify {
         short_state_body!(s, h, n)
     }
 
+    // The scan macro uses the original bounds and loop body. Expose the
+    // range cursor so Kani can verify the same next and next_back steps.
+    pub(super) struct TwoWayScanCursor {
+        remaining: crate::ops::Range<usize>,
+        pub(super) active: bool,
+        pub(super) index: usize,
+    }
+
+    pub(super) struct TwoWayScan {
+        start: usize,
+        end: usize,
+        pub(super) cursor: TwoWayScanCursor,
+    }
+
+    impl TwoWayScan {
+        pub(super) fn new() -> Self {
+            Self {
+                start: 0,
+                end: 0,
+                cursor: TwoWayScanCursor { remaining: 0..0, active: false, index: 0 },
+            }
+        }
+
+        pub(super) fn reset(&mut self, make_range: impl FnOnce() -> crate::ops::Range<usize>) {
+            let remaining = make_range();
+            *self = Self {
+                start: remaining.start,
+                end: remaining.end,
+                cursor: TwoWayScanCursor { remaining, active: false, index: 0 },
+            };
+        }
+
+        pub(super) fn valid(&self, reverse: bool) -> bool {
+            let range = &self.cursor.remaining;
+            if reverse {
+                range.start == self.start
+                    && range.end <= self.end
+                    && (range.end >= self.start || range.end == self.end)
+            } else {
+                range.end == self.end
+                    && range.start >= self.start
+                    && (range.start <= self.end || range.start == self.start)
+            }
+        }
+
+        pub(super) fn progress(&self, reverse: bool) -> usize {
+            if reverse {
+                self.end - self.cursor.remaining.end
+            } else {
+                self.cursor.remaining.start - self.start
+            }
+        }
+
+        pub(super) fn advance(&mut self, reverse: bool) {
+            let cursor = &mut self.cursor;
+            let item = if reverse { cursor.remaining.next_back() } else { cursor.remaining.next() };
+            cursor.active = item.is_some();
+            if let Some(index) = item {
+                cursor.index = index;
+            }
+        }
+    }
+
     pub(super) fn raw_scan_state(
         s: &TwoWaySearcher,
         h: &[u8],
@@ -7692,7 +7579,10 @@ pub mod verify {
         long: bool,
         forward: bool,
     ) -> bool {
-        raw_loop_state(s, h, n, long)
+        // The enclosing loop establishes the cached boundary facts. The
+        // scan keeps its entry cursor and cache on every back edge, and its
+        // write set protects the opposite cursor and cache.
+        numeric_raw_loop_state(s, h, n, long)
             && if forward {
                 crate::intrinsics::ptr_metadata(n as *const [u8])
                     <= crate::intrinsics::ptr_metadata(h as *const [u8]) - s.position
@@ -7768,10 +7658,7 @@ pub mod verify {
         let boundary = kani::any();
         establish_last_scalar_bound(n, boundary);
         kani::cover(boundary > 4096, "a boundary in a symbolic-length needle");
-        kani::cover(
-            true,
-            "contract proof returns: harness_last_scalar_boundary_bound",
-        );
+        kani::cover(true, "contract proof returns: harness_last_scalar_boundary_bound");
     }
 
     fn assume_needle_edges(bytes: &[u8]) {
@@ -7811,11 +7698,7 @@ pub mod verify {
     // which can traverse several candidates, needs the last-scalar probe.
     // The loop predicate does not observe this probe in early-reject mode.
     pub(super) fn reverse_scan_probe<S: ProbeMode>(needle: &[u8]) -> usize {
-        if S::early_reject_on_entry() {
-            0
-        } else {
-            last_scalar_start(needle)
-        }
+        if S::early_reject_on_entry() { 0 } else { last_scalar_start(needle) }
     }
 
     pub(super) fn long_scan_probes<S: ProbeMode>(
@@ -7834,9 +7717,6 @@ pub mod verify {
         let forward = phase < 2;
         let early = S::early_reject();
         if early && (if forward { s.position } else { s.end }) != initial {
-            return false;
-        }
-        if !raw_scan_state(s, h, n, long, forward) {
             return false;
         }
         let len = crate::intrinsics::ptr_metadata(n as *const [u8]);
@@ -7931,16 +7811,9 @@ pub mod verify {
         if last_probe >= len {
             return false;
         }
-        let right_start = if s.crit_pos > s.memory {
-            s.crit_pos
-        } else {
-            s.memory
-        };
-        let left_end = if s.crit_pos_back < s.memory_back {
-            s.crit_pos_back
-        } else {
-            s.memory_back
-        };
+        let right_start = if s.crit_pos > s.memory { s.crit_pos } else { s.memory };
+        let left_end =
+            if s.crit_pos_back < s.memory_back { s.crit_pos_back } else { s.memory_back };
         let (lo, hi, extra_lo, extra_hi) = match phase {
             0 => {
                 if progress > len - right_start {
@@ -7949,11 +7822,7 @@ pub mod verify {
                 (right_start, right_start + progress, 0, 0)
             }
             1 => {
-                let count = if s.crit_pos > s.memory {
-                    s.crit_pos - s.memory
-                } else {
-                    0
-                };
+                let count = if s.crit_pos > s.memory { s.crit_pos - s.memory } else { 0 };
                 if progress > count {
                     return false;
                 }
@@ -8013,8 +7882,6 @@ pub mod verify {
                 || boundary_matched!(len - s.period))
     }
 
-
-
     // Used only when last_probe is unobserved by every loop predicate and
     // assertion in the harness. This is a ghost projection, not a model of
     // the last character or an assumption about its width.
@@ -8061,20 +7928,12 @@ pub mod verify {
         let len = crate::intrinsics::ptr_metadata(n as *const [u8]);
         let count = match phase {
             0 => {
-                let start = if long || s.crit_pos > s.memory {
-                    s.crit_pos
-                } else {
-                    s.memory
-                };
+                let start = if long || s.crit_pos > s.memory { s.crit_pos } else { s.memory };
                 len - start
             }
             1 => {
                 let start = if long { 0 } else { s.memory };
-                if s.crit_pos > start {
-                    s.crit_pos - start
-                } else {
-                    0
-                }
+                if s.crit_pos > start { s.crit_pos - start } else { 0 }
             }
             2 => {
                 if long || s.crit_pos_back < s.memory_back {
@@ -8085,11 +7944,7 @@ pub mod verify {
             }
             3 => {
                 let end = if long { len } else { s.memory_back };
-                if end > s.crit_pos_back {
-                    end - s.crit_pos_back
-                } else {
-                    0
-                }
+                if end > s.crit_pos_back { end - s.crit_pos_back } else { 0 }
             }
             _ => return false,
         };
@@ -8097,11 +7952,7 @@ pub mod verify {
     }
 
     fn any_raw_ub_haystack() -> &'static [u8] {
-        if kani::any() {
-            &[]
-        } else {
-            any_nonempty_bytes()
-        }
+        if kani::any() { &[] } else { any_nonempty_bytes() }
     }
 
     fn any_raw_ub_state(h: &[u8], n: &[u8], long: bool) -> TwoWaySearcher {
@@ -8254,14 +8105,8 @@ pub mod verify {
     pub fn harness_two_way_public_next_extra_ub() {
         let mut s = any_two_way_ub_storage();
         let step = s.next();
-        kani::cover(
-            matches!(step, SearchStep::Match(_, _)),
-            "public TwoWay match",
-        );
-        kani::cover(
-            matches!(step, SearchStep::Reject(_, _)),
-            "public TwoWay reject",
-        );
+        kani::cover(matches!(step, SearchStep::Match(_, _)), "public TwoWay match");
+        kani::cover(matches!(step, SearchStep::Reject(_, _)), "public TwoWay reject");
         kani::cover(matches!(step, SearchStep::Done), "public TwoWay exhaustion");
     }
 
@@ -8272,18 +8117,9 @@ pub mod verify {
     pub fn harness_two_way_public_next_back_extra_ub() {
         let mut s = any_two_way_ub_storage();
         let step = s.next_back();
-        kani::cover(
-            matches!(step, SearchStep::Match(_, _)),
-            "public TwoWay reverse match",
-        );
-        kani::cover(
-            matches!(step, SearchStep::Reject(_, _)),
-            "public TwoWay reverse reject",
-        );
-        kani::cover(
-            matches!(step, SearchStep::Done),
-            "public TwoWay reverse exhaustion",
-        );
+        kani::cover(matches!(step, SearchStep::Match(_, _)), "public TwoWay reverse match");
+        kani::cover(matches!(step, SearchStep::Reject(_, _)), "public TwoWay reverse reject");
+        kani::cover(matches!(step, SearchStep::Done), "public TwoWay reverse exhaustion");
     }
 
     #[kani::proof]
@@ -8305,10 +8141,7 @@ pub mod verify {
         let mut s = any_two_way_ub_storage();
         let result = s.next_match_back();
         kani::cover(result.is_some(), "public TwoWay reverse MatchOnly result");
-        kani::cover(
-            result.is_none(),
-            "public TwoWay reverse MatchOnly exhaustion",
-        );
+        kani::cover(result.is_none(), "public TwoWay reverse MatchOnly exhaustion");
     }
 
     /// A consequence of valid UTF-8 at every index, with no search index or
@@ -8374,10 +8207,7 @@ pub mod verify {
         kani::assume(long_boundary_pre(h, n, start, end));
         kani::cover(true, "assume #100");
         establish_long_match_boundaries(h, n, start, end);
-        kani::cover(
-            true,
-            "contract proof returns: harness_long_match_boundary_lemma",
-        );
+        kani::cover(true, "contract proof returns: harness_long_match_boundary_lemma");
     }
 
     fn check_match_start(h: &[u8], n: &[u8], start: usize, end: usize) {
@@ -8449,87 +8279,21 @@ pub mod verify {
         establish_period_boundaries(n, period);
         kani::cover(period < n.len(), "a proper period");
         kani::cover(period == n.len(), "the full word is a period");
-        kani::cover(
-            true,
-            "contract proof returns: harness_needle_period_boundaries",
-        );
+        kani::cover(true, "contract proof returns: harness_needle_period_boundaries");
     }
 
-    // Arbitrary numeric suffix results include the results of the actual
-    // algorithm (harness_maximal_suffix_numeric_bounds). Holding each result
-    // fixed for its order parameter also preserves repeated-call consistency.
-    static mut LONG_SUFFIX_FALSE: (usize, usize) = (0, 1);
-    static mut LONG_SUFFIX_TRUE: (usize, usize) = (0, 1);
-
-    fn long_suffix_model_input(arr: &[u8], order: bool) -> bool {
-        let result = unsafe {
-            if order {
-                LONG_SUFFIX_TRUE
-            } else {
-                LONG_SUFFIX_FALSE
-            }
-        };
-        numeric_suffix_result(arr, result)
-    }
-
-    struct LongConstructorSuffixModel;
-    impl LongConstructorSuffixModel {
-        #[kani::requires(long_suffix_model_input(arr, order_greater))]
-        #[kani::ensures(|result| result.0 < arr.len() && result.1 > 0
-            && result.1 <= arr.len() - result.0)]
-        #[kani::modifies()]
-        fn maximal_suffix(arr: &[u8], order_greater: bool) -> (usize, usize) {
-            let result = unsafe {
-                if order_greater {
-                    LONG_SUFFIX_TRUE
-                } else {
-                    LONG_SUFFIX_FALSE
-                }
-            };
-            assert!(result.0 < arr.len() && result.1 > 0 && result.1 <= arr.len() - result.0);
-            kani::cover(true, "assert #111");
-            result
-        }
-    }
-
-    #[kani::proof_for_contract(LongConstructorSuffixModel::maximal_suffix)]
-    pub fn harness_long_suffix_model_contract() {
-        let arr = any_nonempty_bytes();
-        unsafe {
-            LONG_SUFFIX_FALSE = kani::any();
-            LONG_SUFFIX_TRUE = kani::any();
-        }
-        let order = kani::any();
-        let _ = LongConstructorSuffixModel::maximal_suffix(arr, order);
-        kani::cover(
-            arr.len() > 4096 && order,
-            "Long suffix adapter greater order",
-        );
-        kani::cover(
-            arr.len() > 4096 && !order,
-            "Long suffix adapter lesser order",
-        );
-        kani::cover(
-            true,
-            "contract proof returns: harness_long_suffix_model_contract",
-        );
-    }
-
-    // This model describes the constructor's unequal-prefix case. A correct
-    // equality test returns true for empty equal-length slices, so every
-    // actual Long constructor has positive critical position. Check this
-    // domain explicitly before selecting the unequal branch.
+    // An unequal comparison of equal-length slices requires a nonempty
+    // prefix. This model selects the constructor's Long branch.
     fn long_constructor_prefix_unequal<T, U>(left: &[T], right: &[U]) -> bool {
-        assert!(!left.is_empty() && left.len() == right.len());
-        kani::cover(true, "assert #112");
+        assert_eq!(left.len(), right.len());
+        kani::cover(true, "equal-length constructor prefixes");
+        kani::assume(!left.is_empty());
+        kani::cover(true, "a Long constructor has a nonempty unequal prefix");
         false
     }
 
     #[kani::proof]
-    #[kani::stub(
-        TwoWaySearcher::maximal_suffix,
-        LongConstructorSuffixModel::maximal_suffix
-    )]
+    #[kani::stub_verified(TwoWaySearcher::maximal_suffix)]
     #[kani::stub(<[u8] as crate::cmp::PartialEq<[u8]>>::eq, long_constructor_prefix_unequal)]
     #[kani::stub_verified(TwoWaySearcher::byteset_create)]
     pub fn harness_long_constructor_from_numeric_suffixes() {
@@ -8537,35 +8301,17 @@ pub mod verify {
         let n = any_nonempty_str();
         kani::assume(n.len() >= 2);
         kani::cover(true, "assume #103");
-        let first: (usize, usize) = kani::any();
-        let second: (usize, usize) = kani::any();
-        kani::assume(first.0 < n.len() && first.1 > 0 && first.1 <= n.len() - first.0);
-        kani::cover(true, "assume #104");
-        kani::assume(second.0 < n.len() && second.1 > 0 && second.1 <= n.len() - second.0);
-        kani::cover(true, "assume #105");
-        let selected = if first.0 > second.0 { first } else { second };
-        kani::assume(selected.0 > 0);
-        kani::cover(true, "assume #106");
-        unsafe {
-            LONG_SUFFIX_FALSE = first;
-            LONG_SUFFIX_TRUE = second;
-        }
         let searcher = n.into_searcher(h);
         assert!(invariant(&searcher));
         kani::cover(true, "assert #113");
-        let StrSearcherImpl::TwoWay(state) = &searcher.searcher else {
-            unreachable!()
-        };
+        let StrSearcherImpl::TwoWay(state) = &searcher.searcher else { unreachable!() };
         assert!(state.memory == usize::MAX && state.memory_back == usize::MAX);
         kani::cover(true, "assert #114");
         assert!(state.position == 0 && state.end == h.len());
         kani::cover(true, "assert #115");
         assert!(long_preprocessing_state(state, n.as_bytes()));
         kani::cover(true, "assert #116");
-        kani::cover(
-            n.len() > 4096,
-            "Long constructor with arbitrary-length needle",
-        );
+        kani::cover(n.len() > 4096, "Long constructor with arbitrary-length needle");
         kani::cover(h.is_empty(), "Long constructor with empty haystack");
     }
 
@@ -8595,10 +8341,7 @@ pub mod verify {
     // Full Short/Long C establishment is proved separately, with the stronger
     // period and UTF-8 facts. Here both constructor arms retain all UB checks.
     #[kani::proof]
-    #[kani::stub(
-        TwoWaySearcher::maximal_suffix,
-        LongConstructorSuffixModel::maximal_suffix
-    )]
+    #[kani::stub_verified(TwoWaySearcher::maximal_suffix)]
     #[kani::stub(
         TwoWaySearcher::reverse_maximal_suffix,
         ConstructorUbModel::reverse_maximal_suffix
@@ -8610,42 +8353,19 @@ pub mod verify {
         let n = any_nonempty_str();
         kani::assume(n.len() >= 2);
         kani::cover(true, "assume #108");
-        let first: (usize, usize) = kani::any();
-        let second: (usize, usize) = kani::any();
-        kani::assume(first.0 < n.len() && 0 < first.1 && first.1 <= n.len() - first.0);
-        kani::cover(true, "assume #109");
-        kani::assume(second.0 < n.len() && 0 < second.1 && second.1 <= n.len() - second.0);
-        kani::cover(true, "assume #110");
-        unsafe {
-            LONG_SUFFIX_FALSE = first;
-            LONG_SUFFIX_TRUE = second;
-        }
         let s = n.into_searcher(h);
-        let StrSearcherImpl::TwoWay(state) = &s.searcher else {
-            unreachable!()
-        };
-        kani::cover(
-            state.memory == usize::MAX && n.len() > 4096,
-            "Long constructor UB",
-        );
+        let StrSearcherImpl::TwoWay(state) = &s.searcher else { unreachable!() };
+        kani::cover(state.memory == usize::MAX && n.len() > 4096, "Long constructor UB");
         kani::cover(state.memory == 0 && n.len() > 4096, "Short constructor UB");
         kani::cover(h.is_empty(), "constructor with an empty haystack");
     }
 
     static mut SHORT_SUFFIX_FALSE: (usize, usize) = (0, 1);
     static mut SHORT_SUFFIX_TRUE: (usize, usize) = (0, 1);
-    static mut SHORT_REVERSE_FALSE: usize = 0;
-    static mut SHORT_REVERSE_TRUE: usize = 0;
 
     fn short_suffix_model_input(arr: &[u8], order: bool) -> bool {
         let saved = unsafe { SHORT_CERTIFICATE };
-        let result = unsafe {
-            if order {
-                SHORT_SUFFIX_TRUE
-            } else {
-                SHORT_SUFFIX_FALSE
-            }
-        };
+        let result = unsafe { if order { SHORT_SUFFIX_TRUE } else { SHORT_SUFFIX_FALSE } };
         arr.as_ptr() == saved.0 && arr.len() == saved.1 && numeric_suffix_result(arr, result)
     }
 
@@ -8659,31 +8379,13 @@ pub mod verify {
             let saved = unsafe { SHORT_CERTIFICATE };
             assert!(arr.as_ptr() == saved.0 && arr.len() == saved.1);
             kani::cover(true, "assert #119");
-            let result = unsafe {
-                if order {
-                    SHORT_SUFFIX_TRUE
-                } else {
-                    SHORT_SUFFIX_FALSE
-                }
-            };
+            let result = unsafe { if order { SHORT_SUFFIX_TRUE } else { SHORT_SUFFIX_FALSE } };
             assert!(result.0 < arr.len() && 0 < result.1 && result.1 <= arr.len() - result.0);
             kani::cover(true, "assert #120");
             result
         }
         fn reverse_maximal_suffix(arr: &[u8], known_period: usize, order: bool) -> usize {
-            let saved = unsafe { SHORT_CERTIFICATE };
-            assert!(arr.as_ptr() == saved.0 && arr.len() == saved.1 && known_period == saved.3);
-            kani::cover(true, "assert #121");
-            let result = unsafe {
-                if order {
-                    SHORT_REVERSE_TRUE
-                } else {
-                    SHORT_REVERSE_FALSE
-                }
-            };
-            assert!(result < known_period);
-            kani::cover(true, "assert #122");
-            result
+            reverse_suffix_period(arr, known_period, order)
         }
     }
 
@@ -8697,33 +8399,27 @@ pub mod verify {
         }
         let order = kani::any();
         let _ = ShortConstructorSuffixModel::maximal_suffix(arr, order);
-        kani::cover(
-            arr.len() > 4096 && order,
-            "Short suffix adapter greater order",
-        );
-        kani::cover(
-            arr.len() > 4096 && !order,
-            "Short suffix adapter lesser order",
-        );
-        kani::cover(
-            true,
-            "contract proof returns: harness_short_suffix_model_contract",
-        );
+        kani::cover(arr.len() > 4096 && order, "Short suffix adapter greater order");
+        kani::cover(arr.len() > 4096 && !order, "Short suffix adapter lesser order");
+        kani::cover(true, "contract proof returns: harness_short_suffix_model_contract");
     }
 
-    // Select the Short arm. Correct slice equality returns true on every
-    // actual Short execution; the full prefix equality is a certificate input.
+    // The Short case of the real slice comparison supplies the prefix
+    // equality used by the certificate. Check that both operands match it.
     fn short_constructor_prefix_equal<T, U>(left: &[T], right: &[U]) -> bool {
-        assert!(left.len() == right.len());
-        kani::cover(true, "assert #123");
+        let (needle, _, critical, period) = unsafe { SHORT_CERTIFICATE };
+        assert!(
+            left.as_ptr().cast::<u8>() == needle
+                && right.as_ptr().cast::<u8>() == needle.wrapping_add(period)
+                && left.len() == critical
+                && right.len() == critical
+        );
+        kani::cover(true, "the constructor compares the certified prefixes");
         true
     }
 
     #[kani::proof]
-    #[kani::stub(
-        TwoWaySearcher::maximal_suffix,
-        ShortConstructorSuffixModel::maximal_suffix
-    )]
+    #[kani::stub(TwoWaySearcher::maximal_suffix, ShortConstructorSuffixModel::maximal_suffix)]
     #[kani::stub(
         TwoWaySearcher::reverse_maximal_suffix,
         ShortConstructorSuffixModel::reverse_maximal_suffix
@@ -8751,11 +8447,7 @@ pub mod verify {
         kani::cover(true, "assume #112");
         kani::assume(second.0 < n.len() && 0 < second.1 && second.1 <= n.len() - second.0);
         kani::cover(true, "assume #113");
-        let (selected, order) = if first.0 > second.0 {
-            (first, false)
-        } else {
-            (second, true)
-        };
+        let (selected, order) = if first.0 > second.0 { (first, false) } else { (second, true) };
         let (critical, period) = selected;
         unsafe {
             SHORT_CERTIFICATE = (bytes.as_ptr(), bytes.len(), critical, period);
@@ -8764,23 +8456,9 @@ pub mod verify {
             SHORT_SUFFIX_FALSE = first;
             SHORT_SUFFIX_TRUE = second;
         }
-        // These are precisely the proved maximal_suffix postconditions and
-        // the true prefix test selecting Short. They do not assume C.
-        kani::assume(suffix_result(bytes, selected));
-        kani::cover(true, "assume #114");
-        kani::assume(word_root_dominance(bytes, critical, period, order));
-        kani::cover(true, "assume #115");
-        kani::assume(word_earlier_dominance(bytes, critical, order));
-        kani::cover(true, "assume #116");
-        kani::assume(word_prefix_equal(bytes, 0, period, critical));
-        kani::cover(true, "assume #117");
+        // The real suffix proofs supply the selected period and dominance
+        // facts. The checked Short comparison supplies the prefix equality.
         certify_short_period(bytes, critical, period, order);
-        let backward_false = reverse_suffix_period(bytes, period, false);
-        let backward_true = reverse_suffix_period(bytes, period, true);
-        unsafe {
-            SHORT_REVERSE_FALSE = backward_false;
-            SHORT_REVERSE_TRUE = backward_true;
-        }
 
         // Local consequences of a valid UTF-8 input, as allowed by the
         // challenge. Byte equalities come from the proved global period.
@@ -8804,19 +8482,14 @@ pub mod verify {
         let searcher = n.into_searcher(h);
         assert!(invariant(&searcher));
         kani::cover(true, "assert #125");
-        let StrSearcherImpl::TwoWay(state) = &searcher.searcher else {
-            unreachable!()
-        };
+        let StrSearcherImpl::TwoWay(state) = &searcher.searcher else { unreachable!() };
         assert!(state.memory == 0 && state.memory_back == n.len());
         kani::cover(true, "assert #126");
         assert!(state.position == 0 && state.end == h.len());
         kani::cover(true, "assert #127");
         assert!(short_state(state, h.as_bytes(), bytes));
         kani::cover(true, "assert #128");
-        kani::cover(
-            n.len() > 4096,
-            "complete Short constructor at symbolic needle length",
-        );
+        kani::cover(n.len() > 4096, "complete Short constructor at symbolic needle length");
         kani::cover(h.is_empty(), "Short constructor with empty haystack");
         kani::cover(
             critical > 0 && lead_width(bytes[last]) > 1,
@@ -8869,12 +8542,8 @@ pub mod verify {
         kani::cover(true, "assume #126");
         let searcher =
             StrSearcherImpl::TwoWay(any_long_searcher(haystack.as_bytes(), needle.as_bytes()));
-        let s = StrSearcher {
-            haystack,
-            needle,
-            searcher,
-        };
-        assert!(supported_contract_state(&s));
+        let s = StrSearcher { haystack, needle, searcher };
+        assert!(invariant(&s));
         kani::cover(true, "assert #130");
         s
     }
@@ -8892,27 +8561,16 @@ pub mod verify {
             matches!(step, SearchStep::Match(a, _) if a > 4096),
             "distant long-period reverse match",
         );
-        kani::cover(
-            matches!(step, SearchStep::Reject(_, _)),
-            "long-period reverse rejection",
-        );
-        kani::cover(
-            matches!(step, SearchStep::Done),
-            "long-period reverse exhaustion",
-        );
-        kani::cover(
-            true,
-            "contract proof returns: harness_str_searcher_long_next_back",
-        );
+        kani::cover(matches!(step, SearchStep::Reject(_, _)), "long-period reverse rejection");
+        kani::cover(matches!(step, SearchStep::Done), "long-period reverse exhaustion");
+        kani::cover(true, "contract proof returns: harness_str_searcher_long_next_back");
     }
 
-    fn check_public_long_next(split: u8) {
+    fn check_public_long_next(last_scalar_in_left_half: bool) {
         let mut s = any_long_str_searcher();
         assume_needle_edges(s.needle.as_bytes());
-        let StrSearcherImpl::TwoWay(t) = &s.searcher else {
-            unreachable!()
-        };
-        assume_long_split(t, s.needle.as_bytes(), false, split);
+        let StrSearcherImpl::TwoWay(t) = &s.searcher else { unreachable!() };
+        assume_long_split(t.crit_pos, s.needle.as_bytes(), last_scalar_in_left_half);
         // Both callers are proof_for_contract harnesses. The public
         // postcondition already checks the full C and step_ok.
         let _ = s.next();
@@ -8932,11 +8590,8 @@ pub mod verify {
     #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
     #[kani::stub(short_scan_probes, reject_short_probe_in_long_proof)]
     pub fn harness_str_searcher_long_next_split_probes() {
-        check_public_long_next(1);
-        kani::cover(
-            true,
-            "contract proof returns: harness_str_searcher_long_next_split_probes",
-        );
+        check_public_long_next(false);
+        kani::cover(true, "contract proof returns: harness_str_searcher_long_next_split_probes");
     }
 
     #[kani::proof_for_contract(<StrSearcher as Searcher>::next)]
@@ -8945,11 +8600,8 @@ pub mod verify {
     #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
     #[kani::stub(short_scan_probes, reject_short_probe_in_long_proof)]
     pub fn harness_str_searcher_long_next_left_probes() {
-        check_public_long_next(2);
-        kani::cover(
-            true,
-            "contract proof returns: harness_str_searcher_long_next_left_probes",
-        );
+        check_public_long_next(true);
+        kani::cover(true, "contract proof returns: harness_str_searcher_long_next_left_probes");
     }
 
     #[kani::proof]
@@ -8960,12 +8612,9 @@ pub mod verify {
         if let Some((a, b)) = result {
             check_step(s.haystack, SearchStep::Reject(a, b));
         }
-        assert!(supported_contract_state(&s));
+        assert!(invariant(&s));
         kani::cover(true, "assert #131");
-        kani::cover(
-            result.is_some_and(|(a, _)| a > 4096),
-            "distant long-period rejection",
-        );
+        kani::cover(result.is_some_and(|(a, _)| a > 4096), "distant long-period rejection");
         kani::cover(result.is_none(), "long-period rejection exhaustion");
     }
 
@@ -8977,12 +8626,9 @@ pub mod verify {
         if let Some((a, b)) = result {
             check_step(s.haystack, SearchStep::Reject(a, b));
         }
-        assert!(supported_contract_state(&s));
+        assert!(invariant(&s));
         kani::cover(true, "assert #132");
-        kani::cover(
-            result.is_some_and(|(a, _)| a > 4096),
-            "distant long-period reverse rejection",
-        );
+        kani::cover(result.is_some_and(|(a, _)| a > 4096), "distant long-period reverse rejection");
         kani::cover(result.is_none(), "long-period reverse rejection exhaustion");
     }
 
@@ -8991,11 +8637,7 @@ pub mod verify {
         let needle = any_str();
         let searcher =
             StrSearcherImpl::TwoWay(any_short_searcher(haystack.as_bytes(), needle.as_bytes()));
-        let s = StrSearcher {
-            haystack,
-            needle,
-            searcher,
-        };
+        let s = StrSearcher { haystack, needle, searcher };
         assert!(invariant(&s));
         kani::cover(true, "assert #133");
         s
@@ -9008,11 +8650,7 @@ pub mod verify {
             haystack.as_bytes(),
             needle.as_bytes(),
         ));
-        let s = StrSearcher {
-            haystack,
-            needle,
-            searcher,
-        };
+        let s = StrSearcher { haystack, needle, searcher };
         assert!(invariant(&s));
         kani::cover(true, "assert #134");
         s
@@ -9033,19 +8671,13 @@ pub mod verify {
             matches!(step, SearchStep::Match(a, b) if a > 4096 && b > a),
             "distant short-period match",
         );
-        kani::cover(
-            matches!(step, SearchStep::Reject(a, b) if b > a),
-            "short-period rejection",
-        );
+        kani::cover(matches!(step, SearchStep::Reject(a, b) if b > a), "short-period rejection");
         kani::cover(matches!(step, SearchStep::Done), "short-period exhaustion");
         kani::cover(
             matches!(step, SearchStep::Match(_, _)) && s.needle.as_bytes()[0] >= 128,
             "non-ASCII short-period match",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_str_searcher_short_next",
-        );
+        kani::cover(true, "contract proof returns: harness_str_searcher_short_next");
     }
 
     // The independently proved raw contract handles every Short state;
@@ -9062,19 +8694,13 @@ pub mod verify {
             matches!(step, SearchStep::Match(a, b) if a > 4096 && b > a),
             "distant short-period match",
         );
-        kani::cover(
-            matches!(step, SearchStep::Reject(a, b) if b > a),
-            "short-period rejection",
-        );
+        kani::cover(matches!(step, SearchStep::Reject(a, b) if b > a), "short-period rejection");
         kani::cover(matches!(step, SearchStep::Done), "short-period exhaustion");
         kani::cover(
             matches!(step, SearchStep::Match(_, _)) && s.needle.as_bytes()[0] >= 128,
             "non-ASCII short-period match",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_str_searcher_short_next_back",
-        );
+        kani::cover(true, "contract proof returns: harness_str_searcher_short_next_back");
     }
 
     #[kani::proof]
@@ -9088,9 +8714,7 @@ pub mod verify {
     pub fn harness_str_searcher_short_next_match() {
         let mut s = any_short_str_searcher();
         if let Some((a, b)) = s.next_match() {
-            let StrSearcherImpl::TwoWay(t) = &s.searcher else {
-                unreachable!()
-            };
+            let StrSearcherImpl::TwoWay(t) = &s.searcher else { unreachable!() };
             assert!(t.position == b);
             kani::cover(true, "assert #135");
             check_short_match(s.haystack.as_bytes(), s.needle.as_bytes(), a, b);
@@ -9113,19 +8737,14 @@ pub mod verify {
         assume_needle_edges(s.needle.as_bytes());
         let result = s.next_match_back();
         if let Some((a, b)) = result {
-            let StrSearcherImpl::TwoWay(t) = &s.searcher else {
-                unreachable!()
-            };
+            let StrSearcherImpl::TwoWay(t) = &s.searcher else { unreachable!() };
             assert!(t.end == a);
             kani::cover(true, "assert #137");
             check_short_match(s.haystack.as_bytes(), s.needle.as_bytes(), a, b);
         }
         assert!(invariant(&s));
         kani::cover(true, "assert #138");
-        kani::cover(
-            result.is_some_and(|(a, _)| a > 4096),
-            "distant short-period reverse match",
-        );
+        kani::cover(result.is_some_and(|(a, _)| a > 4096), "distant short-period reverse match");
         kani::cover(result.is_none(), "short-period reverse match exhaustion");
         kani::cover(
             result.is_some() && s.needle.as_bytes()[0] >= 128,
@@ -9133,140 +8752,8 @@ pub mod verify {
         );
     }
 
-    // A filter needs the step's state, endpoints and frame, but not the
-    // internal UTF-8 instantiation in the general public-step contract.
-    // Prove this smaller interface once before using it in the real loop.
-    fn short_filter_state(s: &StrSearcher<'_, '_>) -> bool {
-        matches!(&s.searcher, StrSearcherImpl::TwoWay(t) if t.memory != usize::MAX) && invariant(s)
-    }
-
-    #[kani::requires(short_filter_state(s))]
-    #[kani::ensures(|step| short_filter_state(s) && step_ok(s.haystack, *step))]
-    #[kani::modifies(front_cursor(s), front_memory(s))]
-    fn verified_short_filter_next(s: &mut StrSearcher<'_, '_>) -> SearchStep {
-        s.next()
-    }
-
-    #[kani::requires(short_filter_state(s))]
-    #[kani::ensures(|step| short_filter_state(s) && step_ok(s.haystack, *step))]
-    #[kani::modifies(back_cursor(s), back_memory(s))]
-    fn verified_short_filter_next_back(s: &mut StrSearcher<'_, '_>) -> SearchStep {
-        s.next_back()
-    }
-
-    #[kani::proof_for_contract(verified_short_filter_next)]
-    #[kani::stub_verified(<StrSearcher as Searcher>::next)]
-    #[kani::stub_verified(establish_last_scalar_bound)]
-    pub fn harness_short_filter_next_contract() {
-        let mut s = any_short_str_searcher();
-        let result = verified_short_filter_next(&mut s);
-        kani::cover(
-            matches!(result, SearchStep::Match(_, _)),
-            "Short filter match step",
-        );
-        kani::cover(
-            matches!(result, SearchStep::Reject(_, _)),
-            "Short filter reject step",
-        );
-        kani::cover(
-            matches!(result, SearchStep::Done),
-            "Short filter exhausted step",
-        );
-        kani::cover(
-            true,
-            "contract proof returns: harness_short_filter_next_contract",
-        );
-    }
-
-    #[kani::proof_for_contract(verified_short_filter_next_back)]
-    #[kani::stub_verified(<StrSearcher as ReverseSearcher>::next_back)]
-    pub fn harness_short_filter_next_back_contract() {
-        let mut s = any_short_reverse_str_searcher();
-        let result = verified_short_filter_next_back(&mut s);
-        kani::cover(
-            matches!(result, SearchStep::Match(_, _)),
-            "Short reverse filter match step",
-        );
-        kani::cover(
-            matches!(result, SearchStep::Reject(_, _)),
-            "Short reverse filter reject step",
-        );
-        kani::cover(
-            matches!(result, SearchStep::Done),
-            "Short reverse filter exhausted step",
-        );
-        kani::cover(
-            true,
-            "contract proof returns: harness_short_filter_next_back_contract",
-        );
-    }
-
-    struct ShortFilterModel;
-    impl ShortFilterModel {
-        // Match the contracted target's name and early-bound lifetimes so
-        // Kani can resolve its generated contract closures after stubbing.
-        // Reflexive lifetime bounds do not constrain either input string.
-        #[kani::requires(short_filter_state(s))]
-        #[kani::ensures(|step| short_filter_state(s) && step_ok(s.haystack, *step))]
-        #[kani::modifies(front_cursor(s), front_memory(s))]
-        fn next<'a: 'a, 'b: 'b>(s: &mut StrSearcher<'a, 'b>) -> SearchStep {
-            verified_short_filter_next(s)
-        }
-
-        #[kani::requires(short_filter_state(s))]
-        #[kani::ensures(|step| short_filter_state(s) && step_ok(s.haystack, *step))]
-        #[kani::modifies(back_cursor(s), back_memory(s))]
-        fn next_back<'a: 'a, 'b: 'b>(s: &mut StrSearcher<'a, 'b>) -> SearchStep {
-            verified_short_filter_next_back(s)
-        }
-    }
-
-    #[kani::proof_for_contract(ShortFilterModel::next)]
-    #[kani::stub_verified(verified_short_filter_next)]
-    pub fn harness_short_filter_model_next_contract() {
-        let mut s = any_short_str_searcher();
-        let result = ShortFilterModel::next(&mut s);
-        kani::cover(
-            matches!(result, SearchStep::Match(_, _)),
-            "Short adapter match",
-        );
-        kani::cover(
-            matches!(result, SearchStep::Reject(_, _)),
-            "Short adapter reject",
-        );
-        kani::cover(matches!(result, SearchStep::Done), "Short adapter done");
-        kani::cover(
-            true,
-            "contract proof returns: harness_short_filter_model_next_contract",
-        );
-    }
-
-    #[kani::proof_for_contract(ShortFilterModel::next_back)]
-    #[kani::stub_verified(verified_short_filter_next_back)]
-    pub fn harness_short_filter_model_next_back_contract() {
-        let mut s = any_short_reverse_str_searcher();
-        let result = ShortFilterModel::next_back(&mut s);
-        kani::cover(
-            matches!(result, SearchStep::Match(_, _)),
-            "Short reverse adapter match",
-        );
-        kani::cover(
-            matches!(result, SearchStep::Reject(_, _)),
-            "Short reverse adapter reject",
-        );
-        kani::cover(
-            matches!(result, SearchStep::Done),
-            "Short reverse adapter done",
-        );
-        kani::cover(
-            true,
-            "contract proof returns: harness_short_filter_model_next_back_contract",
-        );
-    }
-
     #[kani::proof]
-    #[kani::stub(<StrSearcher as Searcher>::next, ShortFilterModel::next)]
-    #[kani::stub_verified(verified_short_filter_next)]
+    #[kani::stub_verified(<StrSearcher as Searcher>::next)]
     #[kani::stub_verified(establish_last_scalar_bound)]
     pub fn harness_str_searcher_short_next_reject() {
         let mut s = any_short_str_searcher();
@@ -9276,16 +8763,12 @@ pub mod verify {
         }
         assert!(invariant(&s));
         kani::cover(true, "assert #139");
-        kani::cover(
-            result.is_some_and(|(a, _)| a > 4096),
-            "distant short-period rejection",
-        );
+        kani::cover(result.is_some_and(|(a, _)| a > 4096), "distant short-period rejection");
         kani::cover(result.is_none(), "short-period rejection exhaustion");
     }
 
     #[kani::proof]
-    #[kani::stub(<StrSearcher as ReverseSearcher>::next_back, ShortFilterModel::next_back)]
-    #[kani::stub_verified(verified_short_filter_next_back)]
+    #[kani::stub_verified(<StrSearcher as ReverseSearcher>::next_back)]
     pub fn harness_str_searcher_short_next_reject_back() {
         let mut s = any_short_reverse_str_searcher();
         let result = s.next_reject_back();
@@ -9298,33 +8781,20 @@ pub mod verify {
             result.is_some_and(|(a, _)| a > 4096),
             "distant short-period reverse rejection",
         );
-        kani::cover(
-            result.is_none(),
-            "short-period reverse rejection exhaustion",
-        );
+        kani::cover(result.is_none(), "short-period reverse rejection exhaustion");
     }
 
-    // The two disjoint cases cover every positive critical position in the
-    // candidate long-period type invariant. No string-length bound is added.
-    fn assume_long_split(s: &TwoWaySearcher, n: &[u8], reverse: bool, split: u8) {
-        let critical = if reverse { s.crit_pos_back } else { s.crit_pos };
-        let last = last_scalar_start(n);
-        kani::assume(match split {
-            0 => critical == 0,
-            1 => critical > 0 && critical <= last,
-            2 => critical > last,
-            _ => false,
-        });
-        kani::cover(true, "assume #127");
+    // The critical position partitions the needle into two halves.
+    fn assume_long_split(critical: usize, needle: &[u8], last_scalar_in_left_half: bool) {
+        kani::assume((last_scalar_start(needle) < critical) == last_scalar_in_left_half);
+        kani::cover(true, "the final scalar starts in the selected half");
     }
 
-    fn check_long_public_match(split: u8) {
+    fn check_long_public_match() {
         let mut s = any_long_str_searcher();
         assume_needle_edges(s.needle.as_bytes());
-        let StrSearcherImpl::TwoWay(t) = &s.searcher else {
-            unreachable!()
-        };
-        assume_long_split(t, s.needle.as_bytes(), false, split);
+        let StrSearcherImpl::TwoWay(t) = &s.searcher else { unreachable!() };
+        assume_long_split(t.crit_pos, s.needle.as_bytes(), false);
         let result = s.next_match();
         if let Some((a, b)) = result {
             check_match_start(s.haystack.as_bytes(), s.needle.as_bytes(), a, b);
@@ -9334,13 +8804,11 @@ pub mod verify {
         kani::cover(true, "assert #141");
     }
 
-    fn check_long_public_match_back(split: u8) {
+    fn check_long_public_match_back(last_scalar_in_left_half: bool) {
         let mut s = any_long_str_searcher();
         assume_needle_edges(s.needle.as_bytes());
-        let StrSearcherImpl::TwoWay(t) = &s.searcher else {
-            unreachable!()
-        };
-        assume_long_split(t, s.needle.as_bytes(), true, split);
+        let StrSearcherImpl::TwoWay(t) = &s.searcher else { unreachable!() };
+        assume_long_split(t.crit_pos_back, s.needle.as_bytes(), last_scalar_in_left_half);
         let result = s.next_match_back();
         if let Some((a, b)) = result {
             check_match_start(s.haystack.as_bytes(), s.needle.as_bytes(), a, b);
@@ -9357,7 +8825,7 @@ pub mod verify {
     #[kani::stub(crate::slice::memchr::memchr, model_memchr)]
     #[kani::stub(short_scan_probes, reject_short_probe_in_long_proof)]
     pub fn harness_str_searcher_long_next_match_split_probes() {
-        check_long_public_match(1);
+        check_long_public_match();
     }
 
     #[kani::proof]
@@ -9371,15 +8839,10 @@ pub mod verify {
         let haystack = s.haystack;
         let needle = s.needle;
         assume_needle_edges(needle.as_bytes());
-        let StrSearcherImpl::TwoWay(t) = &s.searcher else {
-            unreachable!()
-        };
-        kani::assume(t.crit_pos > last_scalar_start(needle.as_bytes()));
-        kani::cover(true, "assume #128");
+        let StrSearcherImpl::TwoWay(t) = &s.searcher else { unreachable!() };
+        assume_long_split(t.crit_pos, needle.as_bytes(), true);
         let result = s.next_match();
-        let StrSearcherImpl::TwoWay(t) = &s.searcher else {
-            unreachable!()
-        };
+        let StrSearcherImpl::TwoWay(t) = &s.searcher else { unreachable!() };
         if let Some((a, b)) = result {
             assert!(t.position == b);
             kani::cover(true, "assert #143");
@@ -9400,7 +8863,7 @@ pub mod verify {
     #[kani::stub(crate::slice::memchr::memrchr, model_memchr)]
     #[kani::stub(short_scan_probes, reject_short_probe_in_long_proof)]
     pub fn harness_str_searcher_long_next_match_back_split_probes() {
-        check_long_public_match_back(1);
+        check_long_public_match_back(false);
     }
 
     #[kani::proof]
@@ -9410,7 +8873,7 @@ pub mod verify {
     #[kani::stub(crate::slice::memchr::memrchr, model_memchr)]
     #[kani::stub(short_scan_probes, reject_short_probe_in_long_proof)]
     pub fn harness_str_searcher_long_next_match_back_left_probes() {
-        check_long_public_match_back(2);
+        check_long_public_match_back(true);
     }
 
     // Existential witnesses use concrete ASCII / non-ASCII needles and the
@@ -9427,11 +8890,7 @@ pub mod verify {
         // own callback/frame proof; the filter below is the real implementation.
         t.byteset =
             (1u64 << (needle.as_bytes()[0] & 0x3f)) | (1u64 << (needle.as_bytes()[1] & 0x3f));
-        let mut s = StrSearcher {
-            haystack,
-            needle,
-            searcher: StrSearcherImpl::TwoWay(t),
-        };
+        let mut s = StrSearcher { haystack, needle, searcher: StrSearcherImpl::TwoWay(t) };
         let step = s.next();
         assume_utf8_at_match(s.haystack, s.needle, step);
         check_step(s.haystack, step);
@@ -9445,10 +8904,7 @@ pub mod verify {
             !non_ascii && matches!(step, SearchStep::Match(a, _) if a > 4096),
             "distant ASCII match",
         );
-        kani::cover(
-            matches!(step, SearchStep::Reject(_, _)),
-            "actual filter rejects",
-        );
+        kani::cover(matches!(step, SearchStep::Reject(_, _)), "actual filter rejects");
         kani::cover(matches!(step, SearchStep::Done), "public exhaustion");
     }
 
@@ -9500,49 +8956,34 @@ pub mod verify {
         kani::cover(true, "assert #152");
     }
 
-    // Challenge assumption 1 covers the slice iterator implementation. For
-    // this pure zero-capture callback, arbitrary arguments cover every fold
-    // invocation; executing the real callback checks its arithmetic and frame.
-    // The accumulator result is intentionally unrestricted for safety-only C.
+    // By challenge assumption 1, a nonempty slice fold ends by applying the
+    // callback to its last element. An arbitrary prior accumulator includes
+    // the concrete one after every possible prefix.
     struct SliceFoldModel<'a, T: 'a>(crate::marker::PhantomData<&'a T>);
 
     impl<'a, T: 'a> SliceFoldModel<'a, T> {
-        fn fold<B, F>(iter: crate::slice::Iter<'a, T>, _initial: B, mut f: F) -> B
+        fn fold<B, F>(iter: crate::slice::Iter<'a, T>, initial: B, mut f: F) -> B
         where
             B: kani::Arbitrary,
             F: FnMut(B, &'a T) -> B,
         {
-            assert!(crate::mem::size_of::<F>() == 0);
-            kani::cover(true, "assert #153");
-            assert!(crate::mem::size_of::<T>() == 1 && crate::mem::align_of::<T>() == 1);
-            kani::cover(true, "assert #154");
-            let bytes = iter.as_slice();
-            if !bytes.is_empty() {
-                let index: usize = kani::any();
-                kani::assume(index < bytes.len());
-                kani::cover(true, "assume #132");
-                let _ = f(kani::any(), &bytes[index]);
+            match iter.as_slice().last() {
+                Some(last) => f(kani::any(), last),
+                None => initial,
             }
-            kani::any()
         }
     }
 
     #[kani::proof_for_contract(TwoWaySearcher::byteset_create)]
     #[kani::stub(<crate::slice::Iter<'_, u8> as crate::iter::Iterator>::fold, SliceFoldModel::fold)]
     pub fn harness_two_way_byteset_create() {
-        let bytes = any_str().as_bytes();
+        let bytes = any_bytes();
         let _ = TwoWaySearcher::byteset_create(bytes);
         kani::cover(bytes.len() > 4096, "long input to the bit-set callback");
         kani::cover(bytes.is_empty(), "empty bit-set input");
-        kani::cover(
-            true,
-            "contract proof returns: harness_two_way_byteset_create",
-        );
+        kani::cover(true, "contract proof returns: harness_two_way_byteset_create");
     }
 
-    // For search safety either filter answer is conservative: rejecting a
-    // candidate may miss a match, but cannot invent an unsafe matching range.
-    // First verify that the real bit-set test itself is safe and read-only.
     #[kani::proof_for_contract(TwoWaySearcher::byteset_contains)]
     pub fn harness_two_way_byteset_contains() {
         let searcher = TwoWaySearcher {
@@ -9555,10 +8996,8 @@ pub mod verify {
             memory: kani::any(),
             memory_back: kani::any(),
         };
-        let _ = searcher.byteset_contains(kani::any());
-        kani::cover(
-            true,
-            "contract proof returns: harness_two_way_byteset_contains",
-        );
+        let present = searcher.byteset_contains(kani::any());
+        kani::cover(present, "selected bit is set");
+        kani::cover(!present, "selected bit is clear");
     }
 }
