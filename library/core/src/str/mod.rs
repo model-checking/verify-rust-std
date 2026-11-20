@@ -423,7 +423,10 @@ impl str {
     #[stable(feature = "round_char_boundary", since = "1.91.0")]
     #[rustc_const_stable(feature = "round_char_boundary", since = "1.91.0")]
     #[inline]
-    #[cfg_attr(kani, kani::requires(crate::str::pattern::verify::nearby_boundary(self, index, false)))]
+    #[cfg_attr(
+        kani,
+        kani::requires(crate::str::pattern::verify::nearby_boundary(self, index, false))
+    )]
     #[cfg_attr(kani, kani::ensures(|result| crate::str::pattern::verify::boundary_result(self, index, *result, false)))]
     #[cfg_attr(kani, kani::modifies())]
     pub const fn floor_char_boundary(&self, index: usize) -> usize {
@@ -483,7 +486,10 @@ impl str {
     #[stable(feature = "round_char_boundary", since = "1.91.0")]
     #[rustc_const_stable(feature = "round_char_boundary", since = "1.91.0")]
     #[inline]
-    #[cfg_attr(kani, kani::requires(crate::str::pattern::verify::nearby_boundary(self, index, true)))]
+    #[cfg_attr(
+        kani,
+        kani::requires(crate::str::pattern::verify::nearby_boundary(self, index, true))
+    )]
     #[cfg_attr(kani, kani::ensures(|result| crate::str::pattern::verify::boundary_result(self, index, *result, true)))]
     #[cfg_attr(kani, kani::modifies())]
     pub const fn ceil_char_boundary(&self, index: usize) -> usize {
