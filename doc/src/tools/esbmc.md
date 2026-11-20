@@ -7,7 +7,7 @@ step sits between Kani and ESBMC. ESBMC has a few differences to CBMC, including
 - CBMC's concurrency support is an entirely symbolic encoding of a concurrent program in one SAT formula, while ESBMC explores each interleaving individually using context-bounded verification.
 - ESBMC implements incremental-BMC and k-induction strategies.
 
-To install ESBMC, download `esbmc-linux.zip` from the [v8.6 release](https://github.com/esbmc/esbmc/releases/tag/v8.6) and unpack it;
+To install ESBMC, download `esbmc-linux.zip` from the [v8.7 release](https://github.com/esbmc/esbmc/releases/tag/v8.7) and unpack it;
 the binary is `release/bin/esbmc`. CI uses the same release.
 
 ESBMC also depends on Kani to generate the GOTO files. You can find more information about how to install it in [the installation section of the Kani book](https://model-checking.github.io/kani/install-guide.html).
@@ -44,7 +44,7 @@ esbmc --binary test__RNvCsjN3sjT3oKaE_4test4main.out --function _RNvCsjN3sjT3oKa
 CBMC goto-binary detected: linking ESBMC additions automatically
 [...]
 Solving with solver Bitwuzla 0.9.0
-Runtime decision procedure: 0.011s
+Runtime decision procedure: 0.013s
 Building error trace
 
 [Counterexample]

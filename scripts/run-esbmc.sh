@@ -10,7 +10,7 @@ supported_regex=$2
 unsupported_regex=neg
 
 # ESBMC reads CBMC goto binaries directly since v8.4, so Kani's output needs no conversion.
-esbmc_url=https://github.com/esbmc/esbmc/releases/download/v8.6/esbmc-linux.zip
+esbmc_url=https://github.com/esbmc/esbmc/releases/download/v8.7/esbmc-linux.zip
 esbmc=esbmc/release/bin/esbmc
 
 contract_folder=$target/deps
