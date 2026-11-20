@@ -29,10 +29,8 @@ jobs:
           submodules: true
 
       # Step 2: Generate contracts programs
-      # Kani's assertion reachability checks are `assert(false)` covers that only Kani's
-      # result parser understands; ESBMC reports every reachable one as a violation.
       - name: Generate contracts
-        run: ./scripts/run-kani.sh --kani-args --keep-temps --only-codegen --no-assertion-reach-checks --target-dir kani/contracts
+        run: ./scripts/run-kani.sh --kani-args --keep-temps --only-codegen --target-dir kani/contracts
 
       # Step 3: Run ESBMC on the GOTO binaries Kani generated
       - name: Run ESBMC
