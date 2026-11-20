@@ -6167,11 +6167,11 @@ mod verify {
             #[kani::proof]
             pub fn $live() {
                 // Live unsized path: weak points into a real slice allocation.
-                // `Rc::from(vec)` creates a real slice allocation.
                 // `downgrade` references that allocation while `strong` is alive.
                 // So this executes the non-dangling branch.
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let strong: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let ptr: *const [$elem] = Weak::<[$elem], Global>::as_ptr(&weak);
                 assert!(core::ptr::eq(ptr, Rc::as_ptr(&strong)));
@@ -7174,9 +7174,9 @@ mod verify {
     macro_rules! gen_inc_strong_non_overflow_unsized_harness {
         ($name:ident, [$elem:ty]) => {
             pub fn $name() {
-                // Build an unsized Rc<[T]> from a nondet vector.
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let inner = rc.inner();
                 let before = inner.strong();
                 // Same branch target as sized: ordinary increment without overflow.
@@ -7273,9 +7273,9 @@ mod verify {
     macro_rules! gen_inc_weak_non_overflow_unsized_harness {
         ($name:ident, [$elem:ty]) => {
             pub fn $name() {
-                // Build `Rc<[T]>` from nondeterministic vector input.
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let inner = rc.inner();
                 let before = inner.weak();
                 // Trigger path (1) on an unsized payload.
@@ -8928,8 +8928,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let rc_clone: Rc<[$elem], Global> = Rc::clone(&rc);
                 let strong_before = Rc::strong_count(&rc);
                 let weak_before = Rc::weak_count(&rc);
@@ -9378,8 +9379,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let ptr = Rc::as_ptr(&rc);
                 let strong_before = Rc::strong_count(&rc);
                 let weak_before = Rc::weak_count(&rc);
@@ -9596,8 +9598,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let expected = Rc::as_ptr(&rc);
                 let strong_before = Rc::strong_count(&rc);
                 let weak_before = Rc::weak_count(&rc);
