@@ -5734,17 +5734,14 @@ mod verify {
     // Rc::get_mut harnesses.
     macro_rules! gen_get_mut_sized_harness {
         (
-            $unique:ident, $shared:ident, $weak_present:ident, $ty:ty
-            $(, #[$non_unique_proof:meta])?
+            $proof:ident, $unique:ident, $shared:ident, $weak_present:ident, $ty:ty
         ) => {
-            #[kani::proof]
             pub fn $unique() {
                 let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
                 assert!(Rc::<$ty, Global>::get_mut(&mut rc).is_some());
                 kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
             }
 
-            $(#[$non_unique_proof])?
             pub fn $shared() {
                 let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
                 let _shared: Rc<$ty, Global> = Rc::clone(&rc);
@@ -5752,19 +5749,24 @@ mod verify {
                 kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
             }
 
-            $(#[$non_unique_proof])?
             pub fn $weak_present() {
                 let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
                 let _weak: Weak<$ty, Global> = Rc::downgrade(&rc);
                 assert!(Rc::<$ty, Global>::get_mut(&mut rc).is_none());
                 kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
             }
+
+            proof_for_cases!(
+                $proof,
+                0 => $unique,
+                1 => $shared,
+                _ => $weak_present,
+            );
         };
     }
 
     macro_rules! gen_get_mut_unsized_harness {
-        ($unique:ident, $shared:ident, $weak_present:ident, [$elem:ty]) => {
-            #[kani::proof]
+        ($proof:ident, $unique:ident, $shared:ident, $weak_present:ident, [$elem:ty]) => {
             pub fn $unique() {
                 let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
@@ -5790,86 +5792,72 @@ mod verify {
                 assert!(Rc::<[$elem], Global>::get_mut(&mut rc).is_none());
                 kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
             }
+
+            proof_for_cases!(
+                $proof,
+                0 => $unique,
+                1 => $shared,
+                _ => $weak_present,
+            );
         };
     }
 
     gen_get_mut_sized_harness!(
+        harness_get_mut_u8,
         harness_get_mut_u8_unique_some,
         harness_get_mut_u8_shared_none,
         harness_get_mut_u8_weak_present_none,
         u8
     );
     gen_get_mut_sized_harness!(
+        harness_get_mut_u64,
         harness_get_mut_u64_unique_some,
         harness_get_mut_u64_shared_none,
         harness_get_mut_u64_weak_present_none,
         u64
     );
     gen_get_mut_sized_harness!(
+        harness_get_mut_u128,
         harness_get_mut_u128_unique_some,
         harness_get_mut_u128_shared_none,
         harness_get_mut_u128_weak_present_none,
         u128
     );
     gen_get_mut_sized_harness!(
+        harness_get_mut_unit,
         harness_get_mut_unit_unique_some,
         harness_get_mut_unit_shared_none,
         harness_get_mut_unit_weak_present_none,
-        (),
-        #[kani::proof]
+        ()
     );
     gen_get_mut_sized_harness!(
+        harness_get_mut_arr,
         harness_get_mut_arr_unique_some,
         harness_get_mut_arr_shared_none,
         harness_get_mut_arr_weak_present_none,
-        [u8; 4],
-        #[kani::proof]
+        [u8; 4]
     );
 
-    proof_for_cases!(
-        harness_get_mut_sized_shared_none,
-        0 => harness_get_mut_u8_shared_none,
-        1 => harness_get_mut_u64_shared_none,
-        _ => harness_get_mut_u128_shared_none,
-    );
-
-    proof_for_cases!(
-        harness_get_mut_sized_weak_present_none,
-        0 => harness_get_mut_u8_weak_present_none,
-        1 => harness_get_mut_u64_weak_present_none,
-        _ => harness_get_mut_u128_weak_present_none,
-    );
     gen_get_mut_unsized_harness!(
+        harness_get_mut_vec_u8,
         harness_get_mut_vec_u8_unique_some,
         harness_get_mut_vec_u8_shared_none,
         harness_get_mut_vec_u8_weak_present_none,
         [u8]
     );
     gen_get_mut_unsized_harness!(
+        harness_get_mut_vec_u64,
         harness_get_mut_vec_u64_unique_some,
         harness_get_mut_vec_u64_shared_none,
         harness_get_mut_vec_u64_weak_present_none,
         [u64]
     );
     gen_get_mut_unsized_harness!(
+        harness_get_mut_vec_u128,
         harness_get_mut_vec_u128_unique_some,
         harness_get_mut_vec_u128_shared_none,
         harness_get_mut_vec_u128_weak_present_none,
         [u128]
-    );
-
-    proof_for_cases!(
-        harness_get_mut_slice_shared_none,
-        0 => harness_get_mut_vec_u8_shared_none,
-        1 => harness_get_mut_vec_u64_shared_none,
-        _ => harness_get_mut_vec_u128_shared_none,
-    );
-
-    proof_for_cases!(
-        harness_get_mut_slice_weak_present_none,
-        0 => harness_get_mut_vec_u8_weak_present_none,
-        1 => harness_get_mut_vec_u64_weak_present_none,
-        _ => harness_get_mut_vec_u128_weak_present_none,
     );
 
     // `Rc::make_mut` has three behavior-defining states:
@@ -5883,8 +5871,7 @@ mod verify {
     // - weak-present: keep one weak reference alive before `make_mut`.
     // Rc::make_mut harnesses.
     macro_rules! gen_make_mut_sized_harness {
-        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
-            #[kani::proof]
+        ($proof:ident, $unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
             pub fn $unique() {
                 let value: $ty = kani::any::<$ty>();
                 let mut rc: Rc<$ty, Global> = Rc::new_in(value, Global);
@@ -5895,7 +5882,6 @@ mod verify {
                 kani::cover(true, "make_mut unique ownership is reachable");
             }
 
-            #[kani::proof]
             pub fn $shared() {
                 let value: $ty = kani::any::<$ty>();
                 let mut rc: Rc<$ty, Global> = Rc::new_in(value, Global);
@@ -5907,7 +5893,6 @@ mod verify {
                 kani::cover(true, "make_mut shared ownership is reachable");
             }
 
-            #[kani::proof]
             pub fn $weak_present() {
                 let value: $ty = kani::any::<$ty>();
                 let mut rc: Rc<$ty, Global> = Rc::new_in(value, Global);
@@ -5918,12 +5903,18 @@ mod verify {
                 assert!(_weak.upgrade().is_none());
                 kani::cover(true, "make_mut disassociates the weak reference");
             }
+
+            proof_for_cases!(
+                $proof,
+                0 => $unique,
+                1 => $shared,
+                _ => $weak_present,
+            );
         };
     }
 
     macro_rules! gen_make_mut_unsized_harness {
-        ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
-            #[kani::proof]
+        ($proof:ident, $unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
             pub fn $unique() {
                 let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
@@ -5936,7 +5927,6 @@ mod verify {
                 kani::cover(true, "make_mut unique slice ownership is reachable");
             }
 
-            #[kani::proof]
             pub fn $shared() {
                 let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
@@ -5950,7 +5940,6 @@ mod verify {
                 kani::cover(true, "make_mut shared slice ownership is reachable");
             }
 
-            #[kani::proof]
             pub fn $weak_present() {
                 let values: [$elem; 16] = kani::any();
                 let slice_len = kani::any_where(|len: &usize| *len <= values.len());
@@ -5963,34 +5952,46 @@ mod verify {
                 assert!(_weak.upgrade().is_none());
                 kani::cover(true, "make_mut disassociates the slice weak reference");
             }
+
+            proof_for_cases!(
+                $proof,
+                0 => $unique,
+                1 => $shared,
+                _ => $weak_present,
+            );
         };
     }
 
     gen_make_mut_sized_harness!(
+        harness_make_mut_u8,
         harness_make_mut_u8_unique,
         harness_make_mut_u8_shared,
         harness_make_mut_u8_weak_present,
         u8
     );
     gen_make_mut_sized_harness!(
+        harness_make_mut_u64,
         harness_make_mut_u64_unique,
         harness_make_mut_u64_shared,
         harness_make_mut_u64_weak_present,
         u64
     );
     gen_make_mut_sized_harness!(
+        harness_make_mut_u128,
         harness_make_mut_u128_unique,
         harness_make_mut_u128_shared,
         harness_make_mut_u128_weak_present,
         u128
     );
     gen_make_mut_sized_harness!(
+        harness_make_mut_unit,
         harness_make_mut_unit_unique,
         harness_make_mut_unit_shared,
         harness_make_mut_unit_weak_present,
         ()
     );
     gen_make_mut_sized_harness!(
+        harness_make_mut_arr4,
         harness_make_mut_arr4_unique,
         harness_make_mut_arr4_shared,
         harness_make_mut_arr4_weak_present,
@@ -5998,18 +5999,21 @@ mod verify {
     );
 
     gen_make_mut_unsized_harness!(
+        harness_make_mut_vec_u8,
         harness_make_mut_vec_u8_unique,
         harness_make_mut_vec_u8_shared,
         harness_make_mut_vec_u8_weak_present,
         u8
     );
     gen_make_mut_unsized_harness!(
+        harness_make_mut_vec_u64,
         harness_make_mut_vec_u64_unique,
         harness_make_mut_vec_u64_shared,
         harness_make_mut_vec_u64_weak_present,
         u64
     );
     gen_make_mut_unsized_harness!(
+        harness_make_mut_vec_u128,
         harness_make_mut_vec_u128_unique,
         harness_make_mut_vec_u128_shared,
         harness_make_mut_vec_u128_weak_present,
@@ -8606,19 +8610,15 @@ mod verify {
     // Rc::try_unwrap harnesses.
     macro_rules! gen_try_unwrap_harness {
         (
-            $unique:ident, $shared:ident, $weak_present:ident, $ty:ty
-            $(, #[$shared_proof:meta])?
+            $proof:ident, $unique:ident, $shared:ident, $weak_present:ident, $ty:ty
         ) => {
             gen_try_unwrap_harness!(
-                $unique, $shared, $weak_present, $ty, kani::any::<$ty>()
-                $(, #[$shared_proof])?
+                $proof, $unique, $shared, $weak_present, $ty, kani::any::<$ty>()
             );
         };
         (
-            $unique:ident, $shared:ident, $weak_present:ident, $ty:ty, $expr:expr
-            $(, #[$shared_proof:meta])?
+            $proof:ident, $unique:ident, $shared:ident, $weak_present:ident, $ty:ty, $expr:expr
         ) => {
-            #[kani::proof]
             pub fn $unique() {
                 let value: $ty = $expr;
                 let expected = value.clone();
@@ -8639,7 +8639,6 @@ mod verify {
                 }
             }
 
-            $(#[$shared_proof])?
             pub fn $shared() {
                 let value: $ty = $expr;
                 let expected = value.clone();
@@ -8667,7 +8666,6 @@ mod verify {
                 }
             }
 
-            #[kani::proof]
             pub fn $weak_present() {
                 let value: $ty = $expr;
                 let expected = value.clone();
@@ -8698,12 +8696,18 @@ mod verify {
                     }
                 }
             }
+
+            proof_for_cases!(
+                $proof,
+                0 => $unique,
+                1 => $shared,
+                _ => $weak_present,
+            );
         };
     }
 
     macro_rules! gen_try_unwrap_vec_harness {
-        ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
-            #[kani::proof]
+        ($proof:ident, $unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
             pub fn $unique() {
                 let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
                 let expected_len = value.len();
@@ -8762,7 +8766,6 @@ mod verify {
                 }
             }
 
-            #[kani::proof]
             pub fn $weak_present() {
                 let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
                 let expected_len = value.len();
@@ -8802,80 +8805,79 @@ mod verify {
                     }
                 }
             }
+
+            proof_for_cases!(
+                $proof,
+                0 => $unique,
+                1 => $shared,
+                _ => $weak_present,
+            );
         };
     }
 
     gen_try_unwrap_harness!(
+        harness_try_unwrap_u8,
         harness_try_unwrap_u8_unique,
         harness_try_unwrap_u8_shared,
         harness_try_unwrap_u8_weak_present,
         u8
     );
     gen_try_unwrap_harness!(
+        harness_try_unwrap_u64,
         harness_try_unwrap_u64_unique,
         harness_try_unwrap_u64_shared,
         harness_try_unwrap_u64_weak_present,
         u64
     );
     gen_try_unwrap_harness!(
+        harness_try_unwrap_u128,
         harness_try_unwrap_u128_unique,
         harness_try_unwrap_u128_shared,
         harness_try_unwrap_u128_weak_present,
         u128
     );
     gen_try_unwrap_harness!(
+        harness_try_unwrap_unit,
         harness_try_unwrap_unit_unique,
         harness_try_unwrap_unit_shared,
         harness_try_unwrap_unit_weak_present,
-        (),
-        #[kani::proof]
+        ()
     );
     gen_try_unwrap_harness!(
+        harness_try_unwrap_array,
         harness_try_unwrap_array_unique,
         harness_try_unwrap_array_shared,
         harness_try_unwrap_array_weak_present,
-        [u8; 4],
-        #[kani::proof]
+        [u8; 4]
     );
     gen_try_unwrap_harness!(
+        harness_try_unwrap_bool,
         harness_try_unwrap_bool_unique,
         harness_try_unwrap_bool_shared,
         harness_try_unwrap_bool_weak_present,
-        bool,
-        #[kani::proof]
-    );
-
-    proof_for_cases!(
-        harness_try_unwrap_sized_shared,
-        0 => harness_try_unwrap_u8_shared,
-        1 => harness_try_unwrap_u64_shared,
-        _ => harness_try_unwrap_u128_shared,
+        bool
     );
 
     gen_try_unwrap_vec_harness!(
+        harness_try_unwrap_vec_u8,
         harness_try_unwrap_vec_u8_unique,
         harness_try_unwrap_vec_u8_shared,
         harness_try_unwrap_vec_u8_weak_present,
         u8
     );
     gen_try_unwrap_vec_harness!(
+        harness_try_unwrap_vec_u64,
         harness_try_unwrap_vec_u64_unique,
         harness_try_unwrap_vec_u64_shared,
         harness_try_unwrap_vec_u64_weak_present,
         u64
     );
     gen_try_unwrap_vec_harness!(
+        harness_try_unwrap_vec_u128,
         harness_try_unwrap_vec_u128_unique,
         harness_try_unwrap_vec_u128_shared,
         harness_try_unwrap_vec_u128_weak_present,
         u128
-    );
-
-    proof_for_cases!(
-        harness_try_unwrap_vec_shared,
-        0 => harness_try_unwrap_vec_u8_shared,
-        1 => harness_try_unwrap_vec_u64_shared,
-        _ => harness_try_unwrap_vec_u128_shared,
     );
 
     // Rc::new_zeroed_slice_in harnesses.
