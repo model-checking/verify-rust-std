@@ -257,6 +257,17 @@ pub fn format_shortest_opt<'a>(
     // render integral parts, while checking for the accuracy at each step.
     let mut ten_kappa = max_ten_kappa; // 10^kappa
     let mut remainder = plus1int; // digits yet to be rendered
+    // TODO: make `plus1rem` a `let` in the loop again once Kani has
+    // https://github.com/model-checking/kani/pull/5071. Until then a variable that an exit path
+    // of the loop reads must be named in `loop_modifies`, so it is declared before the loop; the
+    // assignment under `cfg(kani)` exists only so that the clause may borrow it.
+    let mut plus1rem;
+    #[cfg(kani)]
+    {
+        plus1rem = 0;
+    }
+    #[safety::loop_invariant(i <= buf.len() && flt2dec::ghost::written(buf, i))]
+    #[cfg_attr(kani, kani::loop_modifies(&i, &ten_kappa, &remainder, &plus1rem, &mut buf[..]))]
     loop {
         // we always have at least one digit to render, as `plus1 >= 10^kappa`
         // invariants:
@@ -271,10 +282,12 @@ pub fn format_shortest_opt<'a>(
         buf[i] = MaybeUninit::new(b'0' + q as u8);
         i += 1;
 
-        let plus1rem = ((r as u64) << e) + plus1frac; // == (plus1 % 10^kappa) * 2^e
+        plus1rem = ((r as u64) << e) + plus1frac; // == (plus1 % 10^kappa) * 2^e
         if plus1rem < delta1 {
             // `plus1 % 10^kappa < delta1 = plus1 - minus1`; we've found the correct `kappa`.
             let ten_kappa = (ten_kappa as u64) << e; // scale 10^kappa back to the shared exponent
+            #[cfg(kani)]
+            flt2dec::ghost::assert_written(buf, i);
             return round_and_weed(
                 // SAFETY: we initialized that memory above.
                 unsafe { buf[..i].assume_init_mut() },
@@ -304,6 +317,17 @@ pub fn format_shortest_opt<'a>(
     let mut remainder = plus1frac;
     let mut threshold = delta1frac;
     let mut ulp = 1;
+    // TODO: make `r` a `let` in the loop again once Kani has
+    // https://github.com/model-checking/kani/pull/5071. Until then a variable that an exit path
+    // of the loop reads must be named in `loop_modifies`, so it is declared before the loop; the
+    // assignment under `cfg(kani)` exists only so that the clause may borrow it.
+    let mut r;
+    #[cfg(kani)]
+    {
+        r = 0;
+    }
+    #[safety::loop_invariant(i <= buf.len() && flt2dec::ghost::written(buf, i))]
+    #[cfg_attr(kani, kani::loop_modifies(&i, &remainder, &threshold, &ulp, &r, &mut buf[..]))]
     loop {
         // the next digit should be significant as we've tested that before breaking out
         // invariants, where `m = max_kappa + 1` (# of digits in the integral part):
@@ -317,13 +341,15 @@ pub fn format_shortest_opt<'a>(
         // divide `remainder` by `10^kappa`.
         // both are scaled by `2^e / 10^kappa`, so the latter is implicit here.
         let q = remainder >> e;
-        let r = remainder & ((1 << e) - 1);
+        r = remainder & ((1 << e) - 1);
         debug_assert!(q < 10);
         buf[i] = MaybeUninit::new(b'0' + q as u8);
         i += 1;
 
         if r < threshold {
             let ten_kappa = 1 << e; // implicit divisor
+            #[cfg(kani)]
+            flt2dec::ghost::assert_written(buf, i);
             return round_and_weed(
                 // SAFETY: we initialized that memory above.
                 unsafe { buf[..i].assume_init_mut() },
@@ -419,6 +445,8 @@ pub fn format_shortest_opt<'a>(
             //
             // consequently, we should stop when `TC1 || TC2 || (TC3a && TC3b)`. the following is
             // equal to its inverse, `!TC1 && !TC2 && (!TC3a || !TC3b)`.
+            #[safety::loop_invariant(plus1w >= remainder)]
+            #[cfg_attr(kani, kani::loop_modifies(&plus1w, &raw const *last))]
             while plus1w < plus1v_up
                 && threshold - plus1w >= ten_kappa
                 && (plus1w + ten_kappa < plus1v_up
@@ -554,6 +582,17 @@ pub fn format_exact_opt<'a>(
     let mut kappa = max_kappa as i16;
     let mut ten_kappa = max_ten_kappa; // 10^kappa
     let mut remainder = vint; // digits yet to be rendered
+    // TODO: make `r` a `let` in the loop again once Kani has
+    // https://github.com/model-checking/kani/pull/5071. Until then a variable that an exit path
+    // of the loop reads must be named in `loop_modifies`, so it is declared before the loop; the
+    // assignment under `cfg(kani)` exists only so that the clause may borrow it.
+    let mut r;
+    #[cfg(kani)]
+    {
+        r = 0;
+    }
+    #[safety::loop_invariant(i < len && len <= buf.len() && flt2dec::ghost::written(buf, i))]
+    #[cfg_attr(kani, kani::loop_modifies(&i, &kappa, &ten_kappa, &remainder, &r, &mut buf[..]))]
     loop {
         // we always have at least one digit to render
         // invariants:
@@ -563,7 +602,7 @@ pub fn format_exact_opt<'a>(
 
         // divide `remainder` by `10^kappa`. both are scaled by `2^-e`.
         let q = remainder / ten_kappa;
-        let r = remainder % ten_kappa;
+        r = remainder % ten_kappa;
         debug_assert!(q < 10);
         buf[i] = MaybeUninit::new(b'0' + q as u8);
         i += 1;
@@ -605,6 +644,17 @@ pub fn format_exact_opt<'a>(
     // the first two comparisons from `possibly_round`, for the reference.
     let mut remainder = vfrac;
     let maxerr = 1 << (e - 1);
+    // TODO: make `r` a `let` in the loop again once Kani has
+    // https://github.com/model-checking/kani/pull/5071. Until then a variable that an exit path
+    // of the loop reads must be named in `loop_modifies`, so it is declared before the loop; the
+    // assignment under `cfg(kani)` exists only so that the clause may borrow it.
+    let mut r;
+    #[cfg(kani)]
+    {
+        r = 0;
+    }
+    #[safety::loop_invariant(i < len && len <= buf.len() && flt2dec::ghost::written(buf, i))]
+    #[cfg_attr(kani, kani::loop_modifies(&i, &err, &remainder, &r, &mut buf[..]))]
     while err < maxerr {
         // invariants, where `m = max_kappa + 1` (# of digits in the integral part):
         // - `remainder < 2^e`
@@ -617,7 +667,7 @@ pub fn format_exact_opt<'a>(
         // divide `remainder` by `10^kappa`.
         // both are scaled by `2^e / 10^kappa`, so the latter is implicit here.
         let q = remainder >> e;
-        let r = remainder & ((1 << e) - 1);
+        r = remainder & ((1 << e) - 1);
         debug_assert!(q < 10);
         buf[i] = MaybeUninit::new(b'0' + q as u8);
         i += 1;
@@ -714,6 +764,8 @@ pub fn format_exact_opt<'a>(
         // we've already verified that `ulp < 10^kappa / 2`, so as long as
         // `10^kappa` did not overflow after all, the second check is fine.
         if ten_kappa - remainder > remainder && ten_kappa - 2 * remainder >= 2 * ulp {
+            #[cfg(kani)]
+            flt2dec::ghost::assert_written(buf, len);
             // SAFETY: our caller initialized that memory.
             return Some((unsafe { buf[..len].assume_init_ref() }, exp));
         }
@@ -736,6 +788,8 @@ pub fn format_exact_opt<'a>(
         // as `10^kappa` is never zero). also note that `remainder - ulp <= 10^kappa`,
         // so the second check does not overflow.
         if remainder > ulp && ten_kappa - (remainder - ulp) <= remainder - ulp {
+            #[cfg(kani)]
+            flt2dec::ghost::assert_written(buf, len);
             if let Some(c) =
                 // SAFETY: our caller must have initialized that memory.
                 round_up(unsafe { buf[..len].assume_init_mut() })
@@ -749,6 +803,8 @@ pub fn format_exact_opt<'a>(
                     len += 1;
                 }
             }
+            #[cfg(kani)]
+            flt2dec::ghost::assert_written(buf, len);
             // SAFETY: we and our caller initialized that memory.
             return Some((unsafe { buf[..len].assume_init_ref() }, exp));
         }
@@ -774,5 +830,107 @@ pub fn format_exact<'a>(
     match format_exact_opt(d, unsafe { &mut *(buf as *mut _) }, limit) {
         Some(ret) => ret,
         None => fallback(d, buf, limit),
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use flt2dec::ghost;
+    use flt2dec::strategy::dragon::verify as dragon;
+
+    use super::*;
+    use crate::kani;
+    use crate::num::imp::bignum::Big64x20;
+
+    /// Capacity of the digit buffers of the two wrappers; the length actually passed is symbolic,
+    /// up to this. See `dragon::verify` for what limits it.
+    const BUF_CAP: usize = 32;
+    /// `format_shortest_opt` and `format_exact_opt` get a larger one, beyond the largest buffer
+    /// that the formatting functions ask them to fill (828 bytes, for an `f64` in exact mode):
+    /// all the loops they run are under contract, so the bound costs solver time only. Kissat
+    /// needs far less memory than the default solver for these two.
+    const OPT_BUF_CAP: usize = 1024;
+
+    /// Stands in for `Fp::mul`, which is safe code without side effects: any `Fp` at all. Nothing
+    /// about the products is needed for memory safety, whereas the real 128-bit multiplications
+    /// make the solver prove (or refute) arithmetic facts about them that are irrelevant here.
+    fn any_fp_mul(_: Fp, _: Fp) -> Fp {
+        Fp { f: kani::any(), e: kani::any() }
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(2)]
+    #[kani::solver(kissat)]
+    #[kani::stub(Fp::mul, any_fp_mul)]
+    fn check_format_shortest_opt() {
+        let d = flt2dec::verify::any_decoded();
+        let mut buf = ghost::any_buf::<{ OPT_BUF_CAP }>();
+        let len: usize = kani::any();
+        kani::assume(len <= OPT_BUF_CAP);
+        ghost::pick_witness();
+        let _ = format_shortest_opt(&d, &mut buf[..len]);
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(2)]
+    #[kani::solver(kissat)]
+    #[kani::stub(flt2dec::round_up, flt2dec::verify::any_round_up)]
+    fn check_format_exact_opt() {
+        let d = flt2dec::verify::any_decoded();
+        let mut buf = ghost::any_buf::<{ OPT_BUF_CAP }>();
+        let len: usize = kani::any();
+        kani::assume(len <= OPT_BUF_CAP);
+        ghost::pick_witness();
+        let _ = format_exact_opt(&d, &mut buf[..len], kani::any());
+    }
+
+    // The two wrappers below run the Grisu attempt and then, on the same buffer, the Dragon
+    // fallback. Both run for real here, with the same models of the safe arithmetic helpers as
+    // in their own harnesses.
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(34)]
+    #[kani::stub(Fp::mul, any_fp_mul)]
+    #[kani::stub(Big64x20::mul_small, dragon::any_mul_small)]
+    #[kani::stub(Big64x20::mul_pow2, dragon::any_mul_pow2)]
+    #[kani::stub(Big64x20::mul_digits, dragon::any_mul_digits)]
+    #[kani::stub(Big64x20::add, dragon::any_add)]
+    #[kani::stub(Big64x20::sub, dragon::any_sub)]
+    #[kani::stub(Big64x20::div_rem_small, dragon::any_div_rem_small)]
+    #[kani::stub(<Big64x20 as crate::cmp::Ord>::cmp, dragon::any_cmp)]
+    #[kani::stub(Big64x20::is_zero, dragon::any_is_zero)]
+    #[kani::stub(flt2dec::round_up, flt2dec::verify::any_round_up)]
+    fn check_format_shortest() {
+        let d = flt2dec::verify::any_decoded();
+        let mut buf = ghost::any_buf::<{ BUF_CAP }>();
+        let len: usize = kani::any();
+        kani::assume(len <= BUF_CAP);
+        ghost::pick_witness();
+        let _ = format_shortest(&d, &mut buf[..len]);
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(19)]
+    #[kani::stub(Big64x20::mul_small, dragon::any_mul_small)]
+    #[kani::stub(Big64x20::mul_pow2, dragon::any_mul_pow2)]
+    #[kani::stub(Big64x20::mul_digits, dragon::any_mul_digits)]
+    #[kani::stub(Big64x20::add, dragon::any_add)]
+    #[kani::stub(Big64x20::sub, dragon::any_sub)]
+    #[kani::stub(Big64x20::div_rem_small, dragon::any_div_rem_small)]
+    #[kani::stub(<Big64x20 as crate::cmp::Ord>::cmp, dragon::any_cmp)]
+    #[kani::stub(Big64x20::is_zero, dragon::any_is_zero)]
+    #[kani::stub(flt2dec::round_up, flt2dec::verify::any_round_up)]
+    fn check_format_exact() {
+        let d = flt2dec::verify::any_decoded();
+        let mut buf = ghost::any_buf::<{ dragon::EXACT_BUF_CAP }>();
+        let len: usize = kani::any();
+        kani::assume(len <= dragon::EXACT_BUF_CAP);
+        ghost::pick_witness();
+        let _ = format_exact(&d, &mut buf[..len], kani::any());
     }
 }

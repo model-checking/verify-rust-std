@@ -135,6 +135,82 @@ pub mod strategy {
     pub mod grisu;
 }
 
+/// Ghost state shared by the proof harnesses, loop invariants and safety checks of the
+/// digit-generation strategies.
+///
+/// What those proofs must establish is that `buf[..n]` has been written by the time it is passed to
+/// `assume_init_*`. Neither a loop invariant nor Kani's own initialization checks (which do not
+/// support slices of `MaybeUninit`) can say "this memory is initialized" directly, so the proofs
+/// track a property of the bytes instead: every byte the strategies store is at least `b'0'`,
+/// while a byte that was never stored keeps the value the harness gave it, and the harnesses
+/// start from buffers with arbitrary contents (`any_buf`). The index `w` is picked
+/// nondeterministically by the harness before the call, which keeps the invariants free of
+/// quantifiers. What Kani proves is thus: whatever the buffer contains initially,
+/// `buf[w] >= b'0'` holds for every `w < n` at every `assume_init_*` call on `buf[..n]`.
+///
+/// This implies that a real run, on a buffer that is uninitialized, never reads a byte it has
+/// not written. The strategies read the buffer only through those `assume_init_*` calls, so up
+/// to the first such read the run does not depend on what the buffer contained initially, and
+/// it is also a run of the harness for every choice of initial contents. If that read covered a
+/// byte `w` that was never written, the choice with a zero at `w` would violate the property.
+/// So the read covers only bytes the run has written, the run still does not depend on the
+/// initial contents after it, and the same reasoning applies to the next read.
+///
+/// "A run of the harness" has two qualifications. The harnesses replace some safe arithmetic
+/// helpers by models (see the `verify` modules); these allow everything the helpers can do, so
+/// the real run is still among the runs of the harness. And Kani checks arithmetic overflow and
+/// `debug_assert!`, so the argument does not cover a run that continues past either of them, as
+/// a release build would.
+#[cfg(kani)]
+pub(crate) mod ghost {
+    use crate::mem::MaybeUninit;
+
+    /// The index whose initialization is being tracked. Set once per harness to `kani::any()`.
+    static mut WITNESS: usize = 0;
+
+    /// Starts tracking an arbitrary index.
+    pub(crate) fn pick_witness() {
+        // SAFETY: the harnesses are single-threaded.
+        unsafe { WITNESS = crate::kani::any() };
+    }
+
+    /// The tracked index.
+    pub(crate) fn witness() -> usize {
+        // SAFETY: the harnesses are single-threaded.
+        unsafe { WITNESS }
+    }
+
+    /// A digit buffer for a harness: `N` bytes with arbitrary contents.
+    ///
+    /// The bytes are deliberately not `MaybeUninit::uninit()`: the proofs then hold for every
+    /// initial contents by construction, and do not depend on how Kani models memory that was
+    /// never written.
+    pub(crate) fn any_buf<const N: usize>() -> [MaybeUninit<u8>; N] {
+        let bytes: [u8; N] = crate::kani::any();
+        // SAFETY: `[u8; N]` and `[MaybeUninit<u8>; N]` have the same layout, and every `u8` is a
+        // valid `MaybeUninit<u8>`.
+        unsafe { (&raw const bytes).cast::<[MaybeUninit<u8>; N]>().read() }
+    }
+
+    /// `buf[..n]` has been written, as far as the witness index can tell.
+    pub(crate) fn written(buf: &[MaybeUninit<u8>], n: usize) -> bool {
+        let w = witness();
+        // SAFETY: the harnesses make their buffers with `any_buf`, so every byte holds a value.
+        w >= n || w >= buf.len() || unsafe { buf[w].assume_init() } >= b'0'
+    }
+
+    /// The proof obligation of an `assume_init_*` call on `buf[..n]`.
+    ///
+    /// A violation is reported through `assert_unchecked` rather than `assert!`, so that it is
+    /// undefined behavior and not a panic: the strategy harnesses are `#[kani::should_panic]`,
+    /// which accepts panics but nothing else.
+    pub(crate) fn assert_written(buf: &[MaybeUninit<u8>], n: usize) {
+        // SAFETY: none is claimed. This is the property the harnesses ask Kani to prove, and
+        // Kani reports a violation as a failed check.
+        unsafe { crate::hint::assert_unchecked(written(buf, n)) };
+    }
+}
+
 /// The minimum size of buffer necessary for the shortest mode.
 ///
 /// It is a bit non-trivial to derive, but this is one plus the maximal number of
@@ -682,4 +758,359 @@ where
             }
         }
     }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub(crate) mod verify {
+    use super::*;
+    use crate::kani;
+
+    /// Any `Decoded` at all, including ones that `decode` never produces.
+    pub(crate) fn any_decoded() -> Decoded {
+        Decoded {
+            mant: kani::any(),
+            minus: kani::any(),
+            plus: kani::any(),
+            exp: kani::any(),
+            inclusive: kani::any(),
+        }
+    }
+
+    /// Stands in for `round_up` in the harnesses of the digit generation strategies. `round_up`
+    /// is safe code working on bytes that are already initialized, but the iterator and `fill`
+    /// machinery it pulls into the callers' loops makes instrumenting their loop contracts several
+    /// times as expensive. This model lets every byte keep its value, be incremented (panicking on
+    /// overflow, as the real addition does), or become `b'0'` or `b'1'`, independently of the
+    /// others, and returns `None`, `Some(b'0')` or `Some(b'1')`. `check_round_up_model` proves
+    /// that this covers everything `round_up` does.
+    ///
+    /// The loop has a contract so that its cost does not grow with the length of the buffer. The
+    /// invariant keeps what the proofs need, the possible values of the byte at the witness index
+    /// (see `ghost`); the other bytes become arbitrary, which only adds behaviors.
+    pub(crate) fn any_round_up(d: &mut [u8]) -> Option<u8> {
+        let w = ghost::witness();
+        let old = if w < d.len() { d[w] } else { 0 };
+        let mut i = 0;
+        #[kani::loop_invariant(i <= d.len()
+            && (w >= d.len()
+                || if i <= w {
+                    d[w] == old
+                } else {
+                    d[w] == old
+                        || (old < u8::MAX && d[w] == old + 1)
+                        || d[w] == b'0'
+                        || d[w] == b'1'
+                }))]
+        #[kani::loop_modifies(&i, &mut d[..])]
+        while i < d.len() {
+            match kani::any::<u8>() {
+                0 => {}
+                1 => d[i] += 1,
+                2 => d[i] = b'0',
+                _ => d[i] = b'1',
+            }
+            i += 1;
+        }
+        match kani::any::<u8>() {
+            0 => None,
+            1 => Some(b'0'),
+            _ => Some(b'1'),
+        }
+    }
+
+    /// `any_round_up` over-approximates `round_up`: whatever the digits (or non-digits) are,
+    /// each byte of the buffer ends up with one of the values the model allows for it, and so does
+    /// the returned digit. The byte `w` is arbitrary, so this holds for all of them, and since the
+    /// model chooses independently for each byte, it allows every combination. The real function
+    /// panics when it increments a `0xff` byte, hence `should_panic`; the two properties are
+    /// stated with `assert_unchecked` so that their violation would not count as a panic.
+    ///
+    /// This is checked for slices of up to 32 bytes, which covers the Dragon harnesses.
+    /// `grisu::verify::check_format_exact_opt` passes the model longer slices; checking those
+    /// here is too expensive, and for them the model rests on reading `round_up`: it looks for
+    /// the last byte that is not `b'9'`, increments it and overwrites what follows with `b'0'`,
+    /// or writes `b'1'` and `b'0'`s if there is none, whatever the length.
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(34)]
+    fn check_round_up_model() {
+        const CAP: usize = 32;
+        let mut d: [u8; CAP] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= CAP);
+        let w: usize = kani::any();
+        kani::assume(w < CAP);
+        let old = d[w];
+        let ret = round_up(&mut d[..len]);
+        let new = d[w];
+        // SAFETY: none is claimed. These are the properties this harness asks Kani to prove.
+        unsafe {
+            crate::hint::assert_unchecked(
+                new == old || (old < u8::MAX && new == old + 1) || new == b'0' || new == b'1',
+            );
+            crate::hint::assert_unchecked(matches!(ret, None | Some(b'0') | Some(b'1')));
+        }
+    }
+
+    /// Capacity of the digit buffers used by the harnesses. The lengths actually passed to the
+    /// functions under verification are symbolic, anywhere up to this capacity. It exceeds the
+    /// largest scratch buffer `to_exact_fixed_str` can ask for with an `f64` (828 bytes).
+    const BUF_CAP: usize = 1024;
+    /// Capacity of the `parts` arrays; the functions need at most 6.
+    const PARTS_CAP: usize = 8;
+
+    /// What every element of a `parts` array points to before the call. The functions under
+    /// verification cannot produce a part that points here, so a returned part that does was
+    /// never written.
+    static POISON: [u8; 1] = [0];
+
+    /// A `parts` array for a harness. Its elements hold a value, so that the check in
+    /// `inspect_parts` does not depend on how Kani models memory that was never written.
+    fn poisoned_parts<'a>() -> [MaybeUninit<Part<'a>>; PARTS_CAP] {
+        [MaybeUninit::new(Part::Copy(&POISON)); PARTS_CAP]
+    }
+
+    /// Checks that every returned part has been written (see `POISON`), and reads the two ends of
+    /// the slices they refer to.
+    ///
+    /// The loop runs a fixed number of times instead of `parts.len()` times, so that no unwinding
+    /// assertion depends on the symbolic length.
+    fn inspect_parts(parts: &[Part<'_>]) {
+        assert!(parts.len() <= 6);
+        let mut i = 0;
+        while i < 6 {
+            if i < parts.len() {
+                if let Part::Copy(bytes) = parts[i] {
+                    assert!(!crate::ptr::eq(bytes.as_ptr(), POISON.as_ptr()));
+                    if let (Some(&first), Some(&last)) = (bytes.first(), bytes.last()) {
+                        let _ = (first, last);
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
+
+    /// Any digit string a caller may pass to `digits_to_dec_str` and `digits_to_exp_str` without
+    /// tripping their leading `assert!`s: non-empty, with a non-zero first digit. The remaining
+    /// bytes are unconstrained.
+    fn any_digits(storage: &[u8; BUF_CAP]) -> &[u8] {
+        let len: usize = kani::any();
+        kani::assume(len >= 1 && len <= BUF_CAP);
+        kani::assume(storage[0] > b'0');
+        &storage[..len]
+    }
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_digits_to_dec_str() {
+        let storage: [u8; BUF_CAP] = kani::any();
+        let buf = any_digits(&storage);
+        let mut parts = poisoned_parts();
+        let nparts: usize = kani::any();
+        kani::assume(nparts >= 4 && nparts <= PARTS_CAP);
+
+        let out = digits_to_dec_str(buf, kani::any(), kani::any(), &mut parts[..nparts]);
+        assert!(out.len() >= 2 && out.len() <= 4);
+        inspect_parts(out);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_digits_to_exp_str() {
+        let storage: [u8; BUF_CAP] = kani::any();
+        let buf = any_digits(&storage);
+        let mut parts = poisoned_parts();
+        let nparts: usize = kani::any();
+        kani::assume(nparts >= 6 && nparts <= PARTS_CAP);
+
+        let out =
+            digits_to_exp_str(buf, kani::any(), kani::any(), kani::any(), &mut parts[..nparts]);
+        assert!(out.len() >= 3 && out.len() <= 6);
+        inspect_parts(out);
+    }
+
+    fn any_sign() -> Sign {
+        if kani::any() { Sign::Minus } else { Sign::MinusPlus }
+    }
+
+    /// Models an arbitrary digit-generation callback that honors what the `to_*_str` functions
+    /// document about it: it returns the part of `buf` it initialized, and that part is a digit
+    /// string acceptable to `digits_to_dec_str`/`digits_to_exp_str` (see `any_digits`). How many
+    /// digits are written (anywhere from 1 to `buf.len()`), which bytes they are, and the returned
+    /// exponent are all nondeterministic.
+    fn any_nonempty_digits<'a>(buf: &'a mut [MaybeUninit<u8>]) -> &'a [u8] {
+        let len: usize = kani::any();
+        kani::assume(len >= 1 && len <= buf.len());
+        let digits: [u8; BUF_CAP] = kani::any();
+        kani::assume(digits[0] > b'0');
+        // SAFETY: the buffers of the harnesses hold at most `BUF_CAP` bytes, so `len` bytes can be
+        // read from `digits` and written to `buf`, and the two do not overlap.
+        unsafe {
+            crate::ptr::copy_nonoverlapping(digits.as_ptr(), buf.as_mut_ptr().cast::<u8>(), len)
+        };
+        // SAFETY: `buf[..len]` was initialized just above.
+        unsafe { buf[..len].assume_init_ref() }
+    }
+
+    fn any_shortest<'a>(_: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> (&'a [u8], i16) {
+        (any_nonempty_digits(buf), kani::any())
+    }
+
+    /// Like `any_shortest`, for the exact mode as `to_exact_exp_str` uses it: it asks for digits
+    /// without a limit on the last one (`limit == i16::MIN`), so there are always some.
+    fn any_exact_unlimited<'a>(
+        _: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+        _: i16,
+    ) -> (&'a [u8], i16) {
+        (any_nonempty_digits(buf), kani::any())
+    }
+
+    /// Like `any_shortest`, for the exact mode as `to_exact_fixed_str` uses it: when the
+    /// requested last-digit `limit` cannot be met, the callback reports `exp <= limit` together
+    /// with no digits at all.
+    fn any_exact<'a>(_: &Decoded, buf: &'a mut [MaybeUninit<u8>], limit: i16) -> (&'a [u8], i16) {
+        let exp: i16 = kani::any();
+        if exp <= limit {
+            // SAFETY: an empty prefix has nothing to initialize.
+            (unsafe { buf[..0].assume_init_ref() }, exp)
+        } else {
+            (any_nonempty_digits(buf), exp)
+        }
+    }
+
+    macro_rules! check_to_str {
+        ($float:ty, $shortest:ident, $shortest_exp:ident, $exact_exp:ident, $exact_fixed:ident) => {
+            #[kani::proof]
+            #[kani::unwind(8)]
+            fn $shortest() {
+                let mut buf = [MaybeUninit::<u8>::uninit(); BUF_CAP];
+                let mut parts = poisoned_parts();
+                let (buf_len, nparts): (usize, usize) = kani::any();
+                kani::assume(buf_len >= MAX_SIG_DIGITS && buf_len <= BUF_CAP);
+                kani::assume(nparts >= 4 && nparts <= PARTS_CAP);
+
+                let out = to_shortest_str(
+                    any_shortest,
+                    kani::any::<$float>(),
+                    any_sign(),
+                    kani::any(),
+                    &mut buf[..buf_len],
+                    &mut parts[..nparts],
+                );
+                assert!(out.parts.len() >= 1 && out.parts.len() <= 4);
+                inspect_parts(out.parts);
+            }
+
+            #[kani::proof]
+            #[kani::unwind(8)]
+            fn $shortest_exp() {
+                let mut buf = [MaybeUninit::<u8>::uninit(); BUF_CAP];
+                let mut parts = poisoned_parts();
+                let (buf_len, nparts): (usize, usize) = kani::any();
+                kani::assume(buf_len >= MAX_SIG_DIGITS && buf_len <= BUF_CAP);
+                kani::assume(nparts >= 6 && nparts <= PARTS_CAP);
+                let dec_bounds: (i16, i16) = kani::any();
+                kani::assume(dec_bounds.0 <= dec_bounds.1);
+
+                let out = to_shortest_exp_str(
+                    any_shortest,
+                    kani::any::<$float>(),
+                    any_sign(),
+                    dec_bounds,
+                    kani::any(),
+                    &mut buf[..buf_len],
+                    &mut parts[..nparts],
+                );
+                assert!(out.parts.len() >= 1 && out.parts.len() <= 6);
+                inspect_parts(out.parts);
+            }
+
+            #[kani::proof]
+            #[kani::unwind(8)]
+            fn $exact_exp() {
+                let mut buf = [MaybeUninit::<u8>::uninit(); BUF_CAP];
+                let mut parts = poisoned_parts();
+                let (buf_len, nparts): (usize, usize) = kani::any();
+                kani::assume(buf_len <= BUF_CAP);
+                kani::assume(nparts >= 6 && nparts <= PARTS_CAP);
+                let v: $float = kani::any();
+                let frac_digits: usize = kani::any();
+                // The function asserts that the scratch buffer is large enough for the digits it
+                // is going to request.
+                if let (_, FullDecoded::Finite(decoded)) = decode(v) {
+                    let maxlen = estimate_max_buf_len(decoded.exp);
+                    kani::assume(
+                        buf_len >= if frac_digits < maxlen { frac_digits + 1 } else { maxlen },
+                    );
+                }
+
+                let out = to_exact_exp_str(
+                    any_exact_unlimited,
+                    v,
+                    any_sign(),
+                    frac_digits,
+                    kani::any(),
+                    &mut buf[..buf_len],
+                    &mut parts[..nparts],
+                );
+                assert!(out.parts.len() >= 1 && out.parts.len() <= 6);
+                inspect_parts(out.parts);
+            }
+
+            #[kani::proof]
+            #[kani::unwind(8)]
+            fn $exact_fixed() {
+                let mut buf = [MaybeUninit::<u8>::uninit(); BUF_CAP];
+                let mut parts = poisoned_parts();
+                let (buf_len, nparts): (usize, usize) = kani::any();
+                kani::assume(buf_len <= BUF_CAP);
+                kani::assume(nparts >= 4 && nparts <= PARTS_CAP);
+                let v: $float = kani::any();
+                // The function asserts that the scratch buffer is large enough for the digits it
+                // is going to request.
+                if let (_, FullDecoded::Finite(decoded)) = decode(v) {
+                    kani::assume(buf_len >= estimate_max_buf_len(decoded.exp));
+                }
+
+                let out = to_exact_fixed_str(
+                    any_exact,
+                    v,
+                    any_sign(),
+                    kani::any(),
+                    &mut buf[..buf_len],
+                    &mut parts[..nparts],
+                );
+                assert!(out.parts.len() >= 1 && out.parts.len() <= 4);
+                inspect_parts(out.parts);
+            }
+        };
+    }
+
+    // `f16` only implements `DecodableFloat` on targets with reliable `f16` support, and `f128`
+    // does not implement it at all.
+    #[cfg(target_has_reliable_f16)]
+    check_to_str!(
+        f16,
+        check_to_shortest_str_f16,
+        check_to_shortest_exp_str_f16,
+        check_to_exact_exp_str_f16,
+        check_to_exact_fixed_str_f16
+    );
+    check_to_str!(
+        f32,
+        check_to_shortest_str_f32,
+        check_to_shortest_exp_str_f32,
+        check_to_exact_exp_str_f32,
+        check_to_exact_fixed_str_f32
+    );
+    check_to_str!(
+        f64,
+        check_to_shortest_str_f64,
+        check_to_shortest_exp_str_f64,
+        check_to_exact_exp_str_f64,
+        check_to_exact_fixed_str_f64
+    );
 }
