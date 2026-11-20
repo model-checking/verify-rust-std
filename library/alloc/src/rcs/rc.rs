@@ -5762,23 +5762,26 @@ mod verify {
         ($unique:ident, $shared:ident, $weak_present:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $unique() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let mut rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 assert!(Rc::<[$elem], Global>::get_mut(&mut rc).is_some());
                 kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
             }
 
             pub fn $shared() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let mut rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let _shared: Rc<[$elem], Global> = Rc::clone(&rc);
                 assert!(Rc::<[$elem], Global>::get_mut(&mut rc).is_none());
                 kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
             }
 
             pub fn $weak_present() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let mut rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let _weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
                 assert!(Rc::<[$elem], Global>::get_mut(&mut rc).is_none());
                 kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
@@ -5918,8 +5921,9 @@ mod verify {
         ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
             #[kani::proof]
             pub fn $unique() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let mut rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let len = rc.len();
                 let result = Rc::<[$elem], Global>::make_mut(&mut rc);
                 assert!(result.len() == len);
@@ -5930,8 +5934,9 @@ mod verify {
 
             #[kani::proof]
             pub fn $shared() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let mut rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let _shared: Rc<[$elem], Global> = Rc::clone(&rc);
                 let len = rc.len();
                 let result = Rc::<[$elem], Global>::make_mut(&mut rc);
@@ -5943,8 +5948,9 @@ mod verify {
 
             #[kani::proof]
             pub fn $weak_present() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let mut rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let _weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
                 let len = rc.len();
                 let result = Rc::<[$elem], Global>::make_mut(&mut rc);
@@ -6565,8 +6571,9 @@ mod verify {
             #[kani::proof]
             pub fn $live() {
                 // Path (3): downgrade from a live `Rc<[E]>`.
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let strong: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let upgraded = Weak::<[$elem], Global>::upgrade(&weak);
                 assert!(upgraded.is_some());
@@ -6588,8 +6595,9 @@ mod verify {
 
             pub fn $strong_zero() {
                 // Path (2): weak points to allocation, then strong owner is dropped.
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let strong: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let expected = Rc::<[$elem], Global>::as_ptr(&strong);
                 drop(strong);
@@ -6770,8 +6778,9 @@ mod verify {
             #[kani::proof]
             pub fn $some() {
                 // Branch (2): non-dangling unsized weak from live `Rc<[E]>`.
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let strong: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let inner = Weak::<[$elem], Global>::inner(&weak);
                 assert!(inner.is_some());
@@ -6796,8 +6805,9 @@ mod verify {
             pub fn $expired() {
                 // The allocation remains valid for the weak control block after the last
                 // strong owner is dropped, so this must not be mistaken for the sentinel.
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let strong: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 drop(strong);
                 let ptr = Weak::<[$elem], Global>::as_ptr(&weak);
@@ -6982,8 +6992,9 @@ mod verify {
         ($live:ident, $after_drop:ident, $dangling:ident, [$elem:ty]) => {
             pub fn $live() {
                 // Build live slice allocation and keep strong owner alive.
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let strong: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 // Create an explicit weak while the strong owner remains alive.
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let ptr = Weak::<[$elem], Global>::as_ptr(&weak);
@@ -7010,8 +7021,9 @@ mod verify {
             #[kani::proof]
             pub fn $after_drop() {
                 // Create explicit weak from live strong slice owner.
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let strong: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 // Drop strong owner first.
                 drop(strong);
@@ -9203,8 +9215,9 @@ mod verify {
         ($unique:ident, $shared:ident, $weak_present:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $unique() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 // Only the implicit weak exists while the sole strong slice owner is alive.
                 assert!(rc.inner().strong() == 1 && rc.inner().weak() == 1);
                 kani::cover(
@@ -9217,8 +9230,9 @@ mod verify {
             }
 
             pub fn $shared() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let rc_clone: Rc<[$elem], Global> = Rc::clone(&rc);
                 // Two strong owners make the first drop take the non-final branch.
                 assert!(rc.inner().strong() == 2 && rc.inner().weak() == 1);
@@ -9233,8 +9247,9 @@ mod verify {
 
             #[kani::proof]
             pub fn $weak_present() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
                 // The explicit weak adds to the implicit weak count.
                 assert!(rc.inner().strong() == 1 && rc.inner().weak() == 2);
