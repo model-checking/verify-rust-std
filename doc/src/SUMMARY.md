@@ -8,7 +8,7 @@
 
 - [Verification Tools](./tools.md)
   - [Kani](./tools/kani.md)
-  - [GOTO Transcoder](./tools/goto-transcoder.md)
+  - [ESBMC](./tools/esbmc.md)
   - [VeriFast](./tools/verifast.md)
   - [Flux](./tools/flux.md)
   - [KMIR](./tools/kmir.md)
