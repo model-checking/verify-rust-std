@@ -5706,6 +5706,20 @@ mod verify {
 
     // === SAFE FUNCTIONS (54 — all required) ===
 
+    // Select one existing case before constructing its inputs. Each arm keeps
+    // the original concrete type, setup, and symbolic input range.
+    macro_rules! proof_for_cases {
+        ($name:ident, $($selector:literal => $case:ident,)+ _ => $last:ident $(,)?) => {
+            #[kani::proof]
+            pub fn $name() {
+                match kani::any::<u8>() {
+                    $($selector => $case(),)+
+                    _ => $last(),
+                }
+            }
+        };
+    }
+
     // `Rc::get_mut` returns `Some(&mut T)` only when the allocation is fully unique:
     // `strong_count == 1` and `weak_count == 0` (`Rc::is_unique`).
     // Therefore we need three harness scenarios to cover all behavior-relevant states:
@@ -5715,7 +5729,10 @@ mod verify {
     // The generated harnesses below realize these states explicitly for each tested type.
     // Rc::get_mut harnesses.
     macro_rules! gen_get_mut_sized_harness {
-        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
+        (
+            $unique:ident, $shared:ident, $weak_present:ident, $ty:ty
+            $(, #[$non_unique_proof:meta])?
+        ) => {
             #[kani::proof]
             pub fn $unique() {
                 let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
@@ -5723,7 +5740,7 @@ mod verify {
                 kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
             }
 
-            #[kani::proof]
+            $(#[$non_unique_proof])?
             pub fn $shared() {
                 let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
                 let _shared: Rc<$ty, Global> = Rc::clone(&rc);
@@ -5731,7 +5748,7 @@ mod verify {
                 kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
             }
 
-            #[kani::proof]
+            $(#[$non_unique_proof])?
             pub fn $weak_present() {
                 let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
                 let _weak: Weak<$ty, Global> = Rc::downgrade(&rc);
@@ -5751,7 +5768,6 @@ mod verify {
                 kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
             }
 
-            #[kani::proof]
             pub fn $shared() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let mut rc: Rc<[$elem], Global> = Rc::from(vec);
@@ -5760,7 +5776,6 @@ mod verify {
                 kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
             }
 
-            #[kani::proof]
             pub fn $weak_present() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let mut rc: Rc<[$elem], Global> = Rc::from(vec);
@@ -5793,13 +5808,29 @@ mod verify {
         harness_get_mut_unit_unique_some,
         harness_get_mut_unit_shared_none,
         harness_get_mut_unit_weak_present_none,
-        ()
+        (),
+        #[kani::proof]
     );
     gen_get_mut_sized_harness!(
         harness_get_mut_arr_unique_some,
         harness_get_mut_arr_shared_none,
         harness_get_mut_arr_weak_present_none,
-        [u8; 4]
+        [u8; 4],
+        #[kani::proof]
+    );
+
+    proof_for_cases!(
+        harness_get_mut_sized_shared_none,
+        0 => harness_get_mut_u8_shared_none,
+        1 => harness_get_mut_u64_shared_none,
+        _ => harness_get_mut_u128_shared_none,
+    );
+
+    proof_for_cases!(
+        harness_get_mut_sized_weak_present_none,
+        0 => harness_get_mut_u8_weak_present_none,
+        1 => harness_get_mut_u64_weak_present_none,
+        _ => harness_get_mut_u128_weak_present_none,
     );
     gen_get_mut_unsized_harness!(
         harness_get_mut_vec_u8_unique_some,
@@ -5818,6 +5849,20 @@ mod verify {
         harness_get_mut_vec_u128_shared_none,
         harness_get_mut_vec_u128_weak_present_none,
         [u128]
+    );
+
+    proof_for_cases!(
+        harness_get_mut_slice_shared_none,
+        0 => harness_get_mut_vec_u8_shared_none,
+        1 => harness_get_mut_vec_u64_shared_none,
+        _ => harness_get_mut_vec_u128_shared_none,
+    );
+
+    proof_for_cases!(
+        harness_get_mut_slice_weak_present_none,
+        0 => harness_get_mut_vec_u8_weak_present_none,
+        1 => harness_get_mut_vec_u64_weak_present_none,
+        _ => harness_get_mut_vec_u128_weak_present_none,
     );
 
     // `Rc::make_mut` has three behavior-defining states:
@@ -6096,7 +6141,6 @@ mod verify {
                 kani::cover(true, "Weak::as_ptr returns the allocation payload pointer");
             }
 
-            #[kani::proof]
             pub fn $dangling() {
                 // Dangling path trigger: sentinel weak from `new_in`.
                 // `Weak::new_in(Global)` contains only the sentinel and no backing `RcInner`.
@@ -6128,7 +6172,6 @@ mod verify {
                 kani::cover(true, "Weak::as_ptr returns the slice payload pointer");
             }
 
-            #[kani::proof]
             pub fn $dangling() {
                 // Dangling unsized path: sentinel survives coercion array -> slice.
                 // Start from sentinel `Weak<[E; 1]>::new_in(Global)`.
@@ -6196,6 +6239,16 @@ mod verify {
         bool
     );
 
+    proof_for_cases!(
+        harness_weak_as_ptr_sized_sentinel,
+        0 => harness_weak_as_ptr_u8_dangling,
+        1 => harness_weak_as_ptr_u64_dangling,
+        2 => harness_weak_as_ptr_u128_dangling,
+        3 => harness_weak_as_ptr_unit_dangling,
+        4 => harness_weak_as_ptr_array_dangling,
+        _ => harness_weak_as_ptr_bool_dangling,
+    );
+
     gen_weak_as_ptr_unsized_harness!(
         harness_weak_as_ptr_vec_u8_live,
         harness_weak_as_ptr_vec_u8_dangling,
@@ -6210,6 +6263,13 @@ mod verify {
         harness_weak_as_ptr_vec_u128_live,
         harness_weak_as_ptr_vec_u128_dangling,
         [u128]
+    );
+
+    proof_for_cases!(
+        harness_weak_as_ptr_slice_sentinel,
+        0 => harness_weak_as_ptr_vec_u8_dangling,
+        1 => harness_weak_as_ptr_vec_u64_dangling,
+        _ => harness_weak_as_ptr_vec_u128_dangling,
     );
     gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_u8_expired, u8);
     gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_u64_expired, u64);
@@ -6251,7 +6311,6 @@ mod verify {
                 kani::cover(true, "dropping the recovered weak releases its ownership token");
             }
 
-            #[kani::proof]
             pub fn $dangling() {
                 // Dangling path trigger: sentinel weak from `new_in`.
                 let weak: Weak<$ty, Global> = Weak::new_in(Global);
@@ -6299,7 +6358,6 @@ mod verify {
                 kani::cover(true, "dropping the recovered weak slice releases its ownership token");
             }
 
-            #[kani::proof]
             pub fn $dangling() {
                 // Dangling unsized path: sentinel survives coercion array -> slice.
                 // Start from sentinel `Weak<[E; 1]>::new_in(Global)`.
@@ -6373,6 +6431,15 @@ mod verify {
         [u8; 4]
     );
 
+    proof_for_cases!(
+        harness_weak_into_raw_with_allocator_sized_sentinel,
+        0 => harness_weak_into_raw_with_allocator_u8_dangling,
+        1 => harness_weak_into_raw_with_allocator_u64_dangling,
+        2 => harness_weak_into_raw_with_allocator_u128_dangling,
+        3 => harness_weak_into_raw_with_allocator_unit_dangling,
+        _ => harness_weak_into_raw_with_allocator_arr_dangling,
+    );
+
     gen_weak_into_raw_with_allocator_unsized_harness!(
         harness_weak_into_raw_with_allocator_vec_u8_live,
         harness_weak_into_raw_with_allocator_vec_u8_dangling,
@@ -6387,6 +6454,13 @@ mod verify {
         harness_weak_into_raw_with_allocator_vec_u128_live,
         harness_weak_into_raw_with_allocator_vec_u128_dangling,
         [u128]
+    );
+
+    proof_for_cases!(
+        harness_weak_into_raw_with_allocator_slice_sentinel,
+        0 => harness_weak_into_raw_with_allocator_vec_u8_dangling,
+        1 => harness_weak_into_raw_with_allocator_vec_u64_dangling,
+        _ => harness_weak_into_raw_with_allocator_vec_u128_dangling,
     );
     gen_weak_into_raw_with_allocator_expired_harness!(
         harness_weak_into_raw_with_allocator_u8_expired,
@@ -6424,7 +6498,10 @@ mod verify {
     // - `*_dangling`: construct sentinel weak with `Weak::new_in` -> path (1)
     // Weak::upgrade harnesses.
     macro_rules! gen_weak_upgrade_sized_harness {
-        ($live:ident, $strong_zero:ident, $dangling:ident, $ty:ty) => {
+        (
+            $live:ident, $strong_zero:ident, $dangling:ident, $ty:ty
+            $(, #[$expired_proof:meta])?
+        ) => {
             #[kani::proof]
             pub fn $live() {
                 // Path (3): live strong owner is still in scope.
@@ -6450,7 +6527,7 @@ mod verify {
                 kani::cover(true, "dropping the upgraded Rc restores the strong count");
             }
 
-            #[kani::proof]
+            $(#[$expired_proof])?
             pub fn $strong_zero() {
                 // Path (2): drop all strong owners after creating weak.
                 let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
@@ -6468,7 +6545,6 @@ mod verify {
                 kani::cover(true, "expired weak observes zero strong references");
             }
 
-            #[kani::proof]
             pub fn $dangling() {
                 // Path (1): sentinel weak from `new_in`.
                 let weak: Weak<$ty, Global> = Weak::new_in(Global);
@@ -6510,7 +6586,6 @@ mod verify {
                 kani::cover(true, "dropping the upgraded slice Rc restores the strong count");
             }
 
-            #[kani::proof]
             pub fn $strong_zero() {
                 // Path (2): weak points to allocation, then strong owner is dropped.
                 let vec = verifier_nondet_vec_rc::<$elem>();
@@ -6529,7 +6604,6 @@ mod verify {
                 kani::cover(true, "expired weak slice observes zero strong references");
             }
 
-            #[kani::proof]
             pub fn $dangling() {
                 // Path (1): sentinel weak coerced from `[E; 1]` to `[E]`.
                 let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
@@ -6567,19 +6641,39 @@ mod verify {
         harness_weak_upgrade_unit_live,
         harness_weak_upgrade_unit_strong_zero,
         harness_weak_upgrade_unit_dangling,
-        ()
+        (),
+        #[kani::proof]
     );
     gen_weak_upgrade_sized_harness!(
         harness_weak_upgrade_array_live,
         harness_weak_upgrade_array_strong_zero,
         harness_weak_upgrade_array_dangling,
-        [u8; 4]
+        [u8; 4],
+        #[kani::proof]
     );
     gen_weak_upgrade_sized_harness!(
         harness_weak_upgrade_bool_live,
         harness_weak_upgrade_bool_strong_zero,
         harness_weak_upgrade_bool_dangling,
-        bool
+        bool,
+        #[kani::proof]
+    );
+
+    proof_for_cases!(
+        harness_weak_upgrade_sized_sentinel,
+        0 => harness_weak_upgrade_u8_dangling,
+        1 => harness_weak_upgrade_u64_dangling,
+        2 => harness_weak_upgrade_u128_dangling,
+        3 => harness_weak_upgrade_unit_dangling,
+        4 => harness_weak_upgrade_array_dangling,
+        _ => harness_weak_upgrade_bool_dangling,
+    );
+
+    proof_for_cases!(
+        harness_weak_upgrade_sized_strong_zero,
+        0 => harness_weak_upgrade_u8_strong_zero,
+        1 => harness_weak_upgrade_u64_strong_zero,
+        _ => harness_weak_upgrade_u128_strong_zero,
     );
 
     gen_weak_upgrade_unsized_harness!(
@@ -6599,6 +6693,20 @@ mod verify {
         harness_weak_upgrade_vec_u128_strong_zero,
         harness_weak_upgrade_vec_u128_dangling,
         [u128]
+    );
+
+    proof_for_cases!(
+        harness_weak_upgrade_slice_sentinel,
+        0 => harness_weak_upgrade_vec_u8_dangling,
+        1 => harness_weak_upgrade_vec_u64_dangling,
+        _ => harness_weak_upgrade_vec_u128_dangling,
+    );
+
+    proof_for_cases!(
+        harness_weak_upgrade_slice_strong_zero,
+        0 => harness_weak_upgrade_vec_u8_strong_zero,
+        1 => harness_weak_upgrade_vec_u64_strong_zero,
+        _ => harness_weak_upgrade_vec_u128_strong_zero,
     );
 
     // `Weak::inner` has exactly two branches:
@@ -6626,7 +6734,6 @@ mod verify {
                 kani::cover(true, "Weak::inner exposes live strong and weak counts");
             }
 
-            #[kani::proof]
             pub fn $none() {
                 // Branch (1): sentinel weak created directly.
                 let weak: Weak<$ty, Global> = Weak::new_in(Global);
@@ -6674,7 +6781,6 @@ mod verify {
                 kani::cover(true, "Weak::inner exposes live slice strong and weak counts");
             }
 
-            #[kani::proof]
             pub fn $none() {
                 // Branch (1): sentinel weak remains dangling after array->slice coercion.
                 let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
@@ -6743,6 +6849,16 @@ mod verify {
         harness_weak_inner_bool_expired,
         bool
     );
+
+    proof_for_cases!(
+        harness_weak_inner_sized_sentinel,
+        0 => harness_weak_inner_u8_none,
+        1 => harness_weak_inner_u64_none,
+        2 => harness_weak_inner_u128_none,
+        3 => harness_weak_inner_unit_none,
+        4 => harness_weak_inner_array_none,
+        _ => harness_weak_inner_bool_none,
+    );
     gen_weak_inner_unsized_harness!(
         harness_weak_inner_vec_u8_some,
         harness_weak_inner_vec_u8_none,
@@ -6760,6 +6876,13 @@ mod verify {
         harness_weak_inner_vec_u128_none,
         harness_weak_inner_vec_u128_expired,
         [u128]
+    );
+
+    proof_for_cases!(
+        harness_weak_inner_slice_sentinel,
+        0 => harness_weak_inner_vec_u8_none,
+        1 => harness_weak_inner_vec_u64_none,
+        _ => harness_weak_inner_vec_u128_none,
     );
 
     // `Drop for Weak` executes the following decision chain:
@@ -6781,8 +6904,11 @@ mod verify {
     //   -> `inner()` is `None` -> early return branch.
     // Weak::drop harnesses.
     macro_rules! gen_drop_weak_sized_harness {
-        ($live:ident, $after_drop:ident, $dangling:ident, $ty:ty) => {
-            #[kani::proof]
+        (
+            $live:ident, $after_drop:ident, $dangling:ident, $ty:ty
+            $(, #[$live_proof:meta])?
+        ) => {
+            $(#[$live_proof])?
             pub fn $live() {
                 // Keep one strong owner alive.
                 let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
@@ -6835,7 +6961,6 @@ mod verify {
                 );
             }
 
-            #[kani::proof]
             pub fn $dangling() {
                 // Create sentinel weak with no allocation behind it.
                 let weak: Weak<$ty, Global> = Weak::new_in(Global);
@@ -6855,7 +6980,6 @@ mod verify {
     // - dangling uses sentinel weak coerced to the unsized type.
     macro_rules! gen_drop_weak_unsized_harness {
         ($live:ident, $after_drop:ident, $dangling:ident, [$elem:ty]) => {
-            #[kani::proof]
             pub fn $live() {
                 // Build live slice allocation and keep strong owner alive.
                 let vec = verifier_nondet_vec_rc::<$elem>();
@@ -6904,7 +7028,6 @@ mod verify {
                 kani::cover(true, "Weak::drop deallocates the final slice weak allocation");
             }
 
-            #[kani::proof]
             pub fn $dangling() {
                 // Build sentinel dangling weak in sized form.
                 let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
@@ -6942,19 +7065,39 @@ mod verify {
         harness_drop_weak_unit_live,
         harness_drop_weak_unit_after_strong_drop,
         harness_drop_weak_unit_dangling,
-        ()
+        (),
+        #[kani::proof]
     );
     gen_drop_weak_sized_harness!(
         harness_drop_weak_array_live,
         harness_drop_weak_array_after_strong_drop,
         harness_drop_weak_array_dangling,
-        [u8; 4]
+        [u8; 4],
+        #[kani::proof]
     );
     gen_drop_weak_sized_harness!(
         harness_drop_weak_bool_live,
         harness_drop_weak_bool_after_strong_drop,
         harness_drop_weak_bool_dangling,
-        bool
+        bool,
+        #[kani::proof]
+    );
+
+    proof_for_cases!(
+        harness_drop_weak_sized_sentinel,
+        0 => harness_drop_weak_u8_dangling,
+        1 => harness_drop_weak_u64_dangling,
+        2 => harness_drop_weak_u128_dangling,
+        3 => harness_drop_weak_unit_dangling,
+        4 => harness_drop_weak_array_dangling,
+        _ => harness_drop_weak_bool_dangling,
+    );
+
+    proof_for_cases!(
+        harness_drop_weak_sized_live,
+        0 => harness_drop_weak_u8_live,
+        1 => harness_drop_weak_u64_live,
+        _ => harness_drop_weak_u128_live,
     );
     gen_drop_weak_unsized_harness!(
         harness_drop_weak_vec_u8_live,
@@ -6975,14 +7118,31 @@ mod verify {
         [u128]
     );
 
+    proof_for_cases!(
+        harness_drop_weak_slice_sentinel,
+        0 => harness_drop_weak_vec_u8_dangling,
+        1 => harness_drop_weak_vec_u64_dangling,
+        _ => harness_drop_weak_vec_u128_dangling,
+    );
+
+    proof_for_cases!(
+        harness_drop_weak_slice_live,
+        0 => harness_drop_weak_vec_u8_live,
+        1 => harness_drop_weak_vec_u64_live,
+        _ => harness_drop_weak_vec_u128_live,
+    );
+
     // `inc_strong` has two execution paths:
     // - Non-overflow path: the count is incremented normally.
     // - Overflow path: the count wraps to zero and `abort_immediate()` is reached.
     // Kani models this abort as an assertion failure, checked with `should_panic`.
     // RcInnerPtr::inc_strong harnesses.
     macro_rules! gen_inc_strong_non_overflow_sized_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
+        (
+            $name:ident, $ty:ty
+            $(, #[$non_overflow_proof:meta])?
+        ) => {
+            $(#[$non_overflow_proof])?
             pub fn $name() {
                 // Build a valid live Rc. This guarantees the precondition `strong != 0`.
                 let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
@@ -7001,7 +7161,6 @@ mod verify {
 
     macro_rules! gen_inc_strong_non_overflow_unsized_harness {
         ($name:ident, [$elem:ty]) => {
-            #[kani::proof]
             pub fn $name() {
                 // Build an unsized Rc<[T]> from a nondet vector.
                 let vec = verifier_nondet_vec_rc::<$elem>();
@@ -7038,13 +7197,39 @@ mod verify {
     gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_u8, u8);
     gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_u64, u64);
     gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_u128, u128);
-    gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_unit, ());
-    gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_array, [u8; 4]);
-    gen_inc_strong_non_overflow_sized_harness!(harness_inc_strong_bool, bool);
+    gen_inc_strong_non_overflow_sized_harness!(
+        harness_inc_strong_unit,
+        (),
+        #[kani::proof]
+    );
+    gen_inc_strong_non_overflow_sized_harness!(
+        harness_inc_strong_array,
+        [u8; 4],
+        #[kani::proof]
+    );
+    gen_inc_strong_non_overflow_sized_harness!(
+        harness_inc_strong_bool,
+        bool,
+        #[kani::proof]
+    );
+
+    proof_for_cases!(
+        harness_inc_strong_sized_non_overflow,
+        0 => harness_inc_strong_u8,
+        1 => harness_inc_strong_u64,
+        _ => harness_inc_strong_u128,
+    );
 
     gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_vec_u8, [u8]);
     gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_vec_u64, [u64]);
     gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_vec_u128, [u128]);
+
+    proof_for_cases!(
+        harness_inc_strong_slice_non_overflow,
+        0 => harness_inc_strong_vec_u8,
+        1 => harness_inc_strong_vec_u64,
+        _ => harness_inc_strong_vec_u128,
+    );
 
     // `inc_weak` has two execution paths:
     // - Non-overflow path: the count is incremented normally.
@@ -7052,8 +7237,11 @@ mod verify {
     // Kani models this abort as an assertion failure, checked with `should_panic`.
     // RcInnerPtr::inc_weak harnesses.
     macro_rules! gen_inc_weak_non_overflow_sized_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
+        (
+            $name:ident, $ty:ty
+            $(, #[$non_overflow_proof:meta])?
+        ) => {
+            $(#[$non_overflow_proof])?
             pub fn $name() {
                 // Build a live `Rc<T>` so the precondition `weak != 0` holds.
                 let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
@@ -7072,7 +7260,6 @@ mod verify {
 
     macro_rules! gen_inc_weak_non_overflow_unsized_harness {
         ($name:ident, [$elem:ty]) => {
-            #[kani::proof]
             pub fn $name() {
                 // Build `Rc<[T]>` from nondeterministic vector input.
                 let vec = verifier_nondet_vec_rc::<$elem>();
@@ -7109,13 +7296,39 @@ mod verify {
     gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_u8, u8);
     gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_u64, u64);
     gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_u128, u128);
-    gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_unit, ());
-    gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_array, [u8; 4]);
-    gen_inc_weak_non_overflow_sized_harness!(harness_inc_weak_bool, bool);
+    gen_inc_weak_non_overflow_sized_harness!(
+        harness_inc_weak_unit,
+        (),
+        #[kani::proof]
+    );
+    gen_inc_weak_non_overflow_sized_harness!(
+        harness_inc_weak_array,
+        [u8; 4],
+        #[kani::proof]
+    );
+    gen_inc_weak_non_overflow_sized_harness!(
+        harness_inc_weak_bool,
+        bool,
+        #[kani::proof]
+    );
+
+    proof_for_cases!(
+        harness_inc_weak_sized_non_overflow,
+        0 => harness_inc_weak_u8,
+        1 => harness_inc_weak_u64,
+        _ => harness_inc_weak_u128,
+    );
 
     gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_vec_u8, [u8]);
     gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_vec_u64, [u64]);
     gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_vec_u128, [u128]);
+
+    proof_for_cases!(
+        harness_inc_weak_slice_non_overflow,
+        0 => harness_inc_weak_vec_u8,
+        1 => harness_inc_weak_vec_u64,
+        _ => harness_inc_weak_vec_u128,
+    );
 
     // UniqueRc::into_rc harnesses.
     macro_rules! gen_uniquerc_into_rc_sized_harness {
@@ -8370,10 +8583,19 @@ mod verify {
     // 3) unique strong owner with outstanding weak refs (success-with-weak path).
     // Rc::try_unwrap harnesses.
     macro_rules! gen_try_unwrap_harness {
-        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
-            gen_try_unwrap_harness!($unique, $shared, $weak_present, $ty, kani::any::<$ty>());
+        (
+            $unique:ident, $shared:ident, $weak_present:ident, $ty:ty
+            $(, #[$shared_proof:meta])?
+        ) => {
+            gen_try_unwrap_harness!(
+                $unique, $shared, $weak_present, $ty, kani::any::<$ty>()
+                $(, #[$shared_proof])?
+            );
         };
-        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty, $expr:expr) => {
+        (
+            $unique:ident, $shared:ident, $weak_present:ident, $ty:ty, $expr:expr
+            $(, #[$shared_proof:meta])?
+        ) => {
             #[kani::proof]
             pub fn $unique() {
                 let value: $ty = $expr;
@@ -8395,7 +8617,7 @@ mod verify {
                 }
             }
 
-            #[kani::proof]
+            $(#[$shared_proof])?
             pub fn $shared() {
                 let value: $ty = $expr;
                 let expected = value.clone();
@@ -8485,7 +8707,6 @@ mod verify {
                 }
             }
 
-            #[kani::proof]
             pub fn $shared() {
                 let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
                 let expected_len = value.len();
@@ -8584,19 +8805,29 @@ mod verify {
         harness_try_unwrap_unit_unique,
         harness_try_unwrap_unit_shared,
         harness_try_unwrap_unit_weak_present,
-        ()
+        (),
+        #[kani::proof]
     );
     gen_try_unwrap_harness!(
         harness_try_unwrap_array_unique,
         harness_try_unwrap_array_shared,
         harness_try_unwrap_array_weak_present,
-        [u8; 4]
+        [u8; 4],
+        #[kani::proof]
     );
     gen_try_unwrap_harness!(
         harness_try_unwrap_bool_unique,
         harness_try_unwrap_bool_shared,
         harness_try_unwrap_bool_weak_present,
-        bool
+        bool,
+        #[kani::proof]
+    );
+
+    proof_for_cases!(
+        harness_try_unwrap_sized_shared,
+        0 => harness_try_unwrap_u8_shared,
+        1 => harness_try_unwrap_u64_shared,
+        _ => harness_try_unwrap_u128_shared,
     );
 
     gen_try_unwrap_vec_harness!(
@@ -8616,6 +8847,13 @@ mod verify {
         harness_try_unwrap_vec_u128_shared,
         harness_try_unwrap_vec_u128_weak_present,
         u128
+    );
+
+    proof_for_cases!(
+        harness_try_unwrap_vec_shared,
+        0 => harness_try_unwrap_vec_u8_shared,
+        1 => harness_try_unwrap_vec_u64_shared,
+        _ => harness_try_unwrap_vec_u128_shared,
     );
 
     // Rc::new_zeroed_slice_in harnesses.
@@ -8906,7 +9144,10 @@ mod verify {
     // and the final-strong path with an explicit weak keeping the allocation alive.
     // Rc::drop harnesses.
     macro_rules! gen_drop_rc_sized {
-        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
+        (
+            $unique:ident, $shared:ident, $weak_present:ident, $ty:ty
+            $(, #[$shared_proof:meta])?
+        ) => {
             #[kani::proof]
             pub fn $unique() {
                 let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
@@ -8921,7 +9162,7 @@ mod verify {
                 kani::cover(true, "Rc::drop unique path reaches drop_slow");
             }
 
-            #[kani::proof]
+            $(#[$shared_proof])?
             pub fn $shared() {
                 let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
                 let rc_clone: Rc<$ty, Global> = Rc::clone(&rc);
@@ -8975,7 +9216,6 @@ mod verify {
                 kani::cover(true, "Rc::drop unique slice path reaches drop_slow");
             }
 
-            #[kani::proof]
             pub fn $shared() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let rc: Rc<[$elem], Global> = Rc::from(vec);
@@ -9039,19 +9279,29 @@ mod verify {
         harness_drop_rc_unit_unique,
         harness_drop_rc_unit_shared,
         harness_drop_rc_unit_weak_present,
-        ()
+        (),
+        #[kani::proof]
     );
     gen_drop_rc_sized!(
         harness_drop_rc_array_unique,
         harness_drop_rc_array_shared,
         harness_drop_rc_array_weak_present,
-        [u8; 4]
+        [u8; 4],
+        #[kani::proof]
     );
     gen_drop_rc_sized!(
         harness_drop_rc_bool_unique,
         harness_drop_rc_bool_shared,
         harness_drop_rc_bool_weak_present,
-        bool
+        bool,
+        #[kani::proof]
+    );
+
+    proof_for_cases!(
+        harness_drop_rc_sized_shared,
+        0 => harness_drop_rc_u8_shared,
+        1 => harness_drop_rc_u64_shared,
+        _ => harness_drop_rc_u128_shared,
     );
 
     gen_drop_rc_unsized!(
@@ -9071,6 +9321,13 @@ mod verify {
         harness_drop_rc_vec_u128_shared,
         harness_drop_rc_vec_u128_weak_present,
         [u128]
+    );
+
+    proof_for_cases!(
+        harness_drop_rc_slice_shared,
+        0 => harness_drop_rc_vec_u8_shared,
+        1 => harness_drop_rc_vec_u64_shared,
+        _ => harness_drop_rc_vec_u128_shared,
     );
 
     // Rc::clone harnesses.
