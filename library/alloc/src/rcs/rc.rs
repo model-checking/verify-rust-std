@@ -6100,9 +6100,9 @@ mod verify {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let len = vec.len();
-                let src: Box<[$elem], Global> = Box::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let len = kani::any_where(|len: &usize| *len <= values.len());
+                let src: Box<[$elem], Global> = Box::from(&values[..len]);
                 let rc = Rc::<[$elem], Global>::from_box_in(src);
                 assert!(rc.len() == len);
                 kani::cover(true, "from_box_in preserves the slice length");
@@ -6342,11 +6342,11 @@ mod verify {
             #[kani::proof]
             pub fn $live() {
                 // Live unsized path: weak points into a real slice allocation.
-                // `Rc::from(vec)` creates a real slice allocation.
                 // `downgrade` references that allocation while `strong` is alive.
                 // So this executes the non-dangling branch.
-                let vec = verifier_nondet_vec_rc::<$elem>();
-                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                let values: [$elem; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let strong: Rc<[$elem], Global> = Rc::from(&values[..slice_len]);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let expected = Weak::<[$elem], Global>::as_ptr(&weak);
                 assert!(Rc::strong_count(&strong) == 1 && Rc::weak_count(&strong) == 1);
@@ -8311,9 +8311,10 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$ty>();
-                let rc: Rc<[$ty]> = Rc::from(vec);
-                // N lies within the helper's possible length range,
+                let values: [$ty; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$ty]> = Rc::from(&values[..slice_len]);
+                // N lies within the symbolic length range,
                 // so both Ok (len == N) and Err (len != N) are reachable.
                 const N: usize = 4;
                 let len = rc.len();
@@ -9095,8 +9096,9 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let values = verifier_nondet_vec_rc::<$ty>();
-                let rc: Rc<[$ty]> = Rc::from(values);
+                let values: [$ty; 24] = kani::any();
+                let slice_len = kani::any_where(|len: &usize| *len <= values.len());
+                let rc: Rc<[$ty]> = Rc::from(&values[..slice_len]);
                 let source_len = rc.len();
                 let expected_ptr = Rc::as_ptr(&rc);
                 // `N` is a const generic and cannot be symbolic, so each harness
