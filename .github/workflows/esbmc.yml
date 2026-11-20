@@ -7,6 +7,7 @@ on:
   pull_request:
     branches: [ main ]
   push:
+    branches: [ main ]
     paths:
       - 'library/**'
       - '.github/workflows/esbmc.yml'
