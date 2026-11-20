@@ -283,6 +283,13 @@ main() {
     kani_path=$(get_kani_path "$build_dir")
     echo "Kani executable path: $kani_path"
 
+    # On macOS, compile the library one crate at a time. Kani compiles all the harnesses of a
+    # crate in one compiler process, and the 7 GB macOS runners kill the compiler of `core`
+    # when the compiler of another crate with many harnesses (`alloc`) runs beside it.
+    if [[ "$(uname)" == "Darwin" ]]; then
+        export CARGO_BUILD_JOBS=1
+    fi
+
     echo "Running Kani command..."
     "$kani_path" --version
 
