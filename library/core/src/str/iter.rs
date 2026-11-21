@@ -2094,11 +2094,9 @@ mod verify {
         match_plan: Option<&'a [SearchMatch]>,
     }
 
-    // Issue #753: into_searcher must preserve the passed haystack by pointer AND
-    // length. The model and constructor proof uphold that requirement. Pattern is
-    // still a safe trait in this repository's pinned std, so this is a safe impl;
-    // change it to unsafe impl only when the upstream trait change is imported.
-    impl Pattern for ModelPattern {
+    // SAFETY: `into_searcher` stores the provided `haystack` slice, and
+    // `ModelSearcher::haystack` returns that same slice.
+    unsafe impl Pattern for ModelPattern {
         type Searcher<'a> = ModelSearcher<'a>;
 
         fn into_searcher(self, haystack: &str) -> ModelSearcher<'_> {
