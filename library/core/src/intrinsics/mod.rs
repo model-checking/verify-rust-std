@@ -4046,15 +4046,46 @@ mod verify {
     check_align_of_val_dyn_for!(check_align_of_val_dyn_u32, u32);
     check_align_of_val_dyn_for!(check_align_of_val_dyn_i128, i128);
 
+    /// Index in `buffer` of the element `src` points to, for `copy_preserves_init`. The
+    /// contracts require `src` to be aligned and in bounds, so it points to an element.
+    fn copy_source_index<T, const N: usize>(src: *const T, buffer: &[MaybeUninit<T>; N]) -> usize {
+        (src as usize - buffer.as_ptr() as usize) / core::mem::size_of::<T>()
+    }
+
+    /// After a copy of `count` elements from element `src_index` of a buffer whose initialized
+    /// elements `init` records (before the copy) to `dst`, check that a non-deterministically
+    /// chosen copied element whose source was initialized is initialized at `dst`. The typed read
+    /// is what checks it: with `-Z uninit-checks`, reading an uninitialized byte fails. Elements
+    /// whose source was uninitialized are not read: the copy carries their state over, and any
+    /// later read of them is reported. Without `-Z uninit-checks`, only the read's bounds and
+    /// alignment are checked.
+    fn copy_preserves_init<T, const N: usize>(
+        init: &[bool; N],
+        src_index: usize,
+        dst: *const T,
+        count: usize,
+    ) {
+        if count > 0 {
+            let k: usize = kani::any_where(|k: &usize| *k < count);
+            if init[src_index + k] {
+                // SAFETY: the contract's precondition makes `dst[..count]` writable, hence
+                // readable after the copy; the element was copied from an initialized one.
+                let _ = unsafe { dst.add(k).read() };
+            }
+        }
+    }
+
     // ---- copy_nonoverlapping ----
     // Restores the pre-body-removal contract. `MaybeUninit<T>` because the copy is
-    // untyped; the ensures compares per-byte initialization state, which Kani
-    // checks only with `-Z uninit-checks` (see `check_copy_untyped`).
+    // untyped: the source may hold uninitialized bytes. That initialized bytes are
+    // copied as initialized is checked by the harnesses (see `copy_preserves_init`),
+    // not by an `ensures`: under `-Z uninit-checks`, `can_dereference` asserts that a
+    // byte is initialized rather than returning whether it is, so an `ensures` cannot
+    // compare the initialization of source and destination bytes.
     #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
         && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
         && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count))
         && ub_checks::maybe_is_nonoverlapping(src as *const (), dst as *const (), crate::mem::size_of::<T>(), count))]
-    #[ensures(|_| check_copy_untyped(src, dst, count))]
     #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
     #[allow(dead_code)]
     unsafe fn copy_nonoverlapping_wrapper<T>(src: *const T, dst: *mut T, count: usize) {
@@ -4063,8 +4094,9 @@ mod verify {
     }
 
     // No `ArbitraryPointer`: it initializes memory via the function under
-    // verification. Non-deterministic `src` init gives the untyped-copy ensures
-    // teeth; `dst` may alias `buffer1` so non-overlap is genuinely exercised.
+    // verification. Non-deterministic `src` init, recorded in `init`, gives
+    // `copy_preserves_init` teeth; `dst` may alias `buffer1` so non-overlap is
+    // genuinely exercised.
     macro_rules! check_copy_nonoverlapping_for {
         ($harness:ident, $ty:ty) => {
             #[kani::proof_for_contract(copy_nonoverlapping_wrapper)]
@@ -4077,9 +4109,11 @@ mod verify {
                     })) as *mut $ty
                 };
                 let mut buffer1 = [MaybeUninit::<$ty>::uninit(); N];
+                let mut init = [false; N];
                 for i in 0..N {
                     if kani::any() {
                         buffer1[i] = MaybeUninit::new(kani::any());
+                        init[i] = true;
                     }
                 }
                 let mut buffer2 = [MaybeUninit::<$ty>::uninit(); N];
@@ -4088,7 +4122,9 @@ mod verify {
                     if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
                 let count: usize = kani::any();
                 kani::cover(count > 0, "copy_nonoverlapping copies a non-empty range");
+                let src_index = copy_source_index(src, &buffer1);
                 unsafe { copy_nonoverlapping_wrapper(src, dst, count) };
+                copy_preserves_init(&init, src_index, dst, count);
             }
         };
     }
@@ -4103,7 +4139,6 @@ mod verify {
     #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
         && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
         && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
-    #[ensures(|_| check_copy_untyped(src, dst, count))]
     #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
     #[allow(dead_code)]
     unsafe fn copy_wrapper<T>(src: *const T, dst: *mut T, count: usize) {
@@ -4125,9 +4160,11 @@ mod verify {
                     })) as *mut $ty
                 };
                 let mut buffer1 = [MaybeUninit::<$ty>::uninit(); N];
+                let mut init = [false; N];
                 for i in 0..N {
                     if kani::any() {
                         buffer1[i] = MaybeUninit::new(kani::any());
+                        init[i] = true;
                     }
                 }
                 let mut buffer2 = [MaybeUninit::<$ty>::uninit(); N];
@@ -4137,7 +4174,9 @@ mod verify {
                     if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
                 let count: usize = kani::any();
                 kani::cover(count > 0, "copy copies a non-empty range");
+                let src_index = copy_source_index(src, &buffer1);
                 unsafe { copy_wrapper(src, dst, count) };
+                copy_preserves_init(&init, src_index, dst, count);
             }
         };
     }
@@ -4543,7 +4582,12 @@ mod verify {
     #[kani::proof]
     fn check_transmute_unchecked_ref_address() {
         let mut generator = PointerGenerator::<10000>::new();
-        let arb_ptr: *const bool = generator.any_in_bounds().ptr;
+        let ArbitraryPointer { ptr: arb_ptr, is_initialized, .. } = generator.any_in_bounds();
+        // A reference must point to a valid value, so to initialized memory: under
+        // `-Z uninit-checks`, creating one to an uninitialized pointee is reported. The address
+        // that the transmute must preserve does not depend on the pointee.
+        kani::assume(is_initialized);
+        let arb_ptr: *const bool = arb_ptr;
         let arb_ref: &bool = unsafe { &*(arb_ptr) };
         let arb_ref_2: &u8 = unsafe { transmute_unchecked(arb_ref) };
         assert_eq!(arb_ref as *const bool, arb_ref_2 as *const u8 as *const bool);
@@ -4555,7 +4599,11 @@ mod verify {
     fn check_transmute_unchecked_slice_metadata() {
         const MAX_SIZE: usize = 32;
         let mut generator = PointerGenerator::<10000>::new();
-        let arb_arr_ptr: *const [bool; MAX_SIZE] = generator.any_in_bounds().ptr;
+        let ArbitraryPointer { ptr: arb_arr_ptr, is_initialized, .. } = generator.any_in_bounds();
+        // As for the reference harnesses: the slice metadata the transmute must preserve does
+        // not depend on the pointee, and a reference must point to initialized memory.
+        kani::assume(is_initialized);
+        let arb_arr_ptr: *const [bool; MAX_SIZE] = arb_arr_ptr;
         let arb_slice = kani::slice::any_slice_of_array(unsafe { &*(arb_arr_ptr) });
         //The following prevents taking redundant slices:
         kani::assume(arb_slice.as_ptr() == arb_arr_ptr as *const bool);
@@ -4651,7 +4699,12 @@ mod verify {
     #[kani::proof]
     fn check_transmute_ref_address() {
         let mut generator = PointerGenerator::<10000>::new();
-        let arb_ptr: *const bool = generator.any_in_bounds().ptr;
+        let ArbitraryPointer { ptr: arb_ptr, is_initialized, .. } = generator.any_in_bounds();
+        // A reference must point to a valid value, so to initialized memory: under
+        // `-Z uninit-checks`, creating one to an uninitialized pointee is reported. The address
+        // that the transmute must preserve does not depend on the pointee.
+        kani::assume(is_initialized);
+        let arb_ptr: *const bool = arb_ptr;
         let arb_ref: &bool = unsafe { &*(arb_ptr) };
         let arb_ref_2: &u8 = unsafe { transmute(arb_ref) };
         assert_eq!(arb_ref as *const bool, arb_ref_2 as *const u8 as *const bool);
@@ -4663,7 +4716,11 @@ mod verify {
     fn check_transmute_slice_metadata() {
         const MAX_SIZE: usize = 32;
         let mut generator = PointerGenerator::<10000>::new();
-        let arb_arr_ptr: *const [bool; MAX_SIZE] = generator.any_in_bounds().ptr;
+        let ArbitraryPointer { ptr: arb_arr_ptr, is_initialized, .. } = generator.any_in_bounds();
+        // As for the reference harnesses: the slice metadata the transmute must preserve does
+        // not depend on the pointee, and a reference must point to initialized memory.
+        kani::assume(is_initialized);
+        let arb_arr_ptr: *const [bool; MAX_SIZE] = arb_arr_ptr;
         let arb_slice = kani::slice::any_slice_of_array(unsafe { &*(arb_arr_ptr) });
         //The following prevents taking redundant slices:
         kani::assume(arb_slice.as_ptr() == arb_arr_ptr as *const bool);
@@ -4833,7 +4890,6 @@ mod verify {
         && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
         && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count))
         && ub_checks::maybe_is_nonoverlapping(src as *const (), dst as *const (), crate::mem::size_of::<T>(), count))]
-    #[ensures(|_| check_copy_untyped(src, dst, count))]
     #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
     #[allow(dead_code)]
     unsafe fn volatile_copy_nonoverlapping_memory_model<T>(
@@ -4858,9 +4914,11 @@ mod verify {
                     })) as *mut $ty
                 };
                 let mut buffer1 = [MaybeUninit::<$ty>::uninit(); N];
+                let mut init = [false; N];
                 for i in 0..N {
                     if kani::any() {
                         buffer1[i] = MaybeUninit::new(kani::any());
+                        init[i] = true;
                     }
                 }
                 let mut buffer2 = [MaybeUninit::<$ty>::uninit(); N];
@@ -4873,7 +4931,9 @@ mod verify {
                     count > 0,
                     "volatile_copy_nonoverlapping_memory copies a non-empty range",
                 );
+                let src_index = copy_source_index(src, &buffer1);
                 unsafe { volatile_copy_nonoverlapping_memory_model(dst, src, count) };
+                copy_preserves_init(&init, src_index, dst, count);
             }
         };
     }
@@ -4897,7 +4957,6 @@ mod verify {
     #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
         && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
         && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
-    #[ensures(|_| check_copy_untyped(src, dst, count))]
     #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
     #[allow(dead_code)]
     unsafe fn volatile_copy_memory_model<T>(dst: *mut T, src: *const T, count: usize) {
@@ -4918,9 +4977,11 @@ mod verify {
                     })) as *mut $ty
                 };
                 let mut buffer1 = [MaybeUninit::<$ty>::uninit(); N];
+                let mut init = [false; N];
                 for i in 0..N {
                     if kani::any() {
                         buffer1[i] = MaybeUninit::new(kani::any());
+                        init[i] = true;
                     }
                 }
                 let mut buffer2 = [MaybeUninit::<$ty>::uninit(); N];
@@ -4929,7 +4990,9 @@ mod verify {
                     if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
                 let count: usize = kani::any();
                 kani::cover(count > 0, "volatile_copy_memory copies a non-empty range");
+                let src_index = copy_source_index(src, &buffer1);
                 unsafe { volatile_copy_memory_model(dst, src, count) };
+                copy_preserves_init(&init, src_index, dst, count);
             }
         };
     }
@@ -5388,15 +5451,23 @@ mod verify {
     fn run_with_arbitrary_ptrs<T: Arbitrary>(harness: impl Fn(*mut T, *mut T)) {
         let mut generator1 = PointerGenerator::<100>::new();
         let mut generator2 = PointerGenerator::<100>::new();
-        let ArbitraryPointer { ptr: src, status: src_status, .. } =
+        let ArbitraryPointer { ptr: src, status: src_status, is_initialized: src_init, .. } =
             generator1.any_alloc_status::<T>();
-        let ArbitraryPointer { ptr: dst, status: dst_status, .. } = if kani::any() {
-            generator1.any_alloc_status::<T>()
-        } else {
-            generator2.any_alloc_status::<T>()
-        };
+        let ArbitraryPointer { ptr: dst, status: dst_status, is_initialized: dst_init, .. } =
+            if kani::any() {
+                generator1.any_alloc_status::<T>()
+            } else {
+                generator2.any_alloc_status::<T>()
+            };
         kani::assume(supported_status(src_status));
         kani::assume(supported_status(dst_status));
+        // `typed_swap_nonoverlapping`, the only user, requires `can_dereference` of both pointers:
+        // in bounds, with a valid, hence initialized, pointee. Restrict the inputs to those, as
+        // the precondition does. Under `-Z uninit-checks` this is needed: Kani cannot assume
+        // initialization, so the precondition asserts it, and Kani's model of the intrinsic checks
+        // the pointees at the call, before the precondition applies.
+        kani::assume(src_status == AllocationStatus::InBounds && src_init);
+        kani::assume(dst_status == AllocationStatus::InBounds && dst_init);
         harness(src, dst);
     }
 
