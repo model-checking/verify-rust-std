@@ -1,3 +1,5 @@
+#![cfg(not(skip_unsupported_miri_tests))] // fs API support in Miri is quite spotty
+
 use rand::RngCore;
 
 use super::Dir;
@@ -183,6 +185,7 @@ fn file_test_io_seek_and_write() {
         target_os = "freebsd",
         target_os = "fuchsia",
         target_os = "hurd",
+        target_os = "haiku",
         target_os = "illumos",
         target_os = "linux",
         target_os = "netbsd",
@@ -217,6 +220,7 @@ fn file_lock_multiple_shared() {
         target_os = "freebsd",
         target_os = "fuchsia",
         target_os = "hurd",
+        target_os = "haiku",
         target_os = "illumos",
         target_os = "linux",
         target_os = "netbsd",
@@ -252,6 +256,7 @@ fn file_lock_blocking() {
         target_os = "freebsd",
         target_os = "fuchsia",
         target_os = "hurd",
+        target_os = "haiku",
         target_os = "illumos",
         target_os = "linux",
         target_os = "netbsd",
@@ -284,6 +289,7 @@ fn file_lock_drop() {
         target_os = "freebsd",
         target_os = "fuchsia",
         target_os = "hurd",
+        target_os = "haiku",
         target_os = "illumos",
         target_os = "linux",
         target_os = "netbsd",
@@ -318,6 +324,7 @@ fn file_lock_dup() {
         target_os = "freebsd",
         target_os = "fuchsia",
         target_os = "hurd",
+        target_os = "haiku",
         target_os = "illumos",
         target_os = "linux",
         target_os = "netbsd",
@@ -340,7 +347,7 @@ fn file_lock_double() {
     // The behavior here differs between Windows and Unix: on Windows, f1 holds both locks;
     // on Unix, the lock got downgraded so f1 only holds the shared lock.
     assert_matches!(f2.try_lock(), Err(TryLockError::WouldBlock));
-    if cfg!(windows) {
+    if cfg!(any(windows, target_os = "haiku")) {
         assert_matches!(f2.try_lock_shared(), Err(TryLockError::WouldBlock));
     } else {
         check!(f2.try_lock_shared());
@@ -824,7 +831,8 @@ fn file_test_io_seek_read_exact_write_all() {
 fn file_test_windows_fileext_trait_case_1() {
     use crate::os::windows::fs::FileExt;
 
-    // Test when seek_read_exact(), seek_write_all() are called with empty buffers.
+    // Test when seek_read_exact(), seek_read_buf_exact(), seek_write_all() are called with empty
+    // buffers.
     struct MockFile {}
 
     impl FileExt for MockFile {
@@ -837,112 +845,232 @@ fn file_test_windows_fileext_trait_case_1() {
         }
     }
 
-    let mock_file = MockFile {};
-    check!(mock_file.seek_read_exact(&mut [], 0));
-    check!(mock_file.seek_write_all(&[], 0));
-    check!(mock_file.seek_read_exact(&mut [], 420));
-    check!(mock_file.seek_write_all(&[], 420));
+    for offset in [0, 1, 420] {
+        {
+            let mock_file = MockFile {};
+            check!(mock_file.seek_read_exact(&mut [], offset));
+        }
+        {
+            let mock_file = MockFile {};
+            let mut buf = [MaybeUninit::uninit(); 0];
+            let mut buf = BorrowedBuf::from(buf.as_mut_slice());
+            check!(mock_file.seek_read_buf_exact(buf.unfilled(), offset));
+        }
+        {
+            let mock_file = MockFile {};
+            check!(mock_file.seek_write_all(&[], offset));
+        }
+    }
 }
 
 #[test]
 #[cfg(windows)]
 fn file_test_windows_fileext_trait_case_2() {
+    use crate::cell::RefCell;
     use crate::os::windows::fs::FileExt;
 
     // Test when seek_read(), seek_write() return Ok(0)
     struct MockFile {
         expected_offset: u64,
+        read_calls: RefCell<usize>,
+        write_calls: RefCell<usize>,
+    }
+
+    impl MockFile {
+        fn new(expected_offset: u64) -> Self {
+            Self { expected_offset, read_calls: RefCell::new(0), write_calls: RefCell::new(0) }
+        }
     }
 
     impl FileExt for MockFile {
         fn seek_read(&self, _buf: &mut [u8], offset: u64) -> io::Result<usize> {
+            *self.read_calls.borrow_mut() += 1;
             assert_eq!(offset, self.expected_offset);
             Ok(0)
         }
 
         fn seek_write(&self, _buf: &[u8], offset: u64) -> io::Result<usize> {
+            *self.write_calls.borrow_mut() += 1;
             assert_eq!(offset, self.expected_offset);
             Ok(0)
         }
     }
 
-    {
-        let mock_file = MockFile { expected_offset: 0 };
-        let mut buf = [0; 256];
-        assert_eq!(
-            mock_file.seek_read_exact(&mut buf, 0).unwrap_err().kind(),
-            io::ErrorKind::UnexpectedEof
-        );
-        assert_eq!(mock_file.seek_write_all(&buf, 0).unwrap_err().kind(), io::ErrorKind::WriteZero);
-    }
-
-    {
-        let mock_file = MockFile { expected_offset: 420 };
-        let mut buf = [0; 256];
-        assert_eq!(
-            mock_file.seek_read_exact(&mut buf, 420).unwrap_err().kind(),
-            io::ErrorKind::UnexpectedEof
-        );
-        assert_eq!(
-            mock_file.seek_write_all(&buf, 420).unwrap_err().kind(),
-            io::ErrorKind::WriteZero
-        );
+    for offset in [0, 1, 420] {
+        {
+            let mock_file = MockFile::new(offset);
+            let mut buf = [0; 256];
+            assert_eq!(
+                mock_file.seek_read_exact(&mut buf, offset).unwrap_err().kind(),
+                ErrorKind::UnexpectedEof
+            );
+            assert_eq!(*mock_file.read_calls.borrow(), 1);
+            assert_eq!(*mock_file.write_calls.borrow(), 0);
+        }
+        {
+            let mock_file = MockFile::new(offset);
+            let mut buf = [MaybeUninit::uninit(); 256];
+            let mut buf = BorrowedBuf::from(buf.as_mut_slice());
+            assert_eq!(
+                mock_file.seek_read_buf_exact(buf.unfilled(), offset).unwrap_err().kind(),
+                ErrorKind::UnexpectedEof
+            );
+            assert_eq!(*mock_file.read_calls.borrow(), 1);
+            assert_eq!(*mock_file.write_calls.borrow(), 0);
+        }
+        {
+            let mock_file = MockFile::new(offset);
+            let buf = [42_u8; 69];
+            assert_eq!(
+                mock_file.seek_write_all(&buf, offset).unwrap_err().kind(),
+                ErrorKind::WriteZero
+            );
+            assert_eq!(*mock_file.read_calls.borrow(), 0);
+            assert_eq!(*mock_file.write_calls.borrow(), 1);
+        }
     }
 }
 
 #[test]
 #[cfg(windows)]
 fn file_test_windows_fileext_trait_case_3() {
+    use crate::cell::RefCell;
     use crate::os::windows::fs::FileExt;
 
-    // Test that Err other than io::ErrorKind::Interrupted are propagated up.
+    // Test that Err are propagated up.
     struct MockFile {
         expected_offset: u64,
+        read_calls: RefCell<usize>,
+        write_calls: RefCell<usize>,
+    }
+
+    impl MockFile {
+        fn new(expected_offset: u64) -> Self {
+            Self { expected_offset, read_calls: RefCell::new(0), write_calls: RefCell::new(0) }
+        }
     }
 
     impl FileExt for MockFile {
         fn seek_read(&self, _buf: &mut [u8], offset: u64) -> io::Result<usize> {
+            *self.read_calls.borrow_mut() += 1;
             assert_eq!(offset, self.expected_offset);
-            Err(io::Error::new(io::ErrorKind::PermissionDenied, "seek_read"))
+            Err(io::Error::new(ErrorKind::PermissionDenied, "seek_read"))
         }
 
         fn seek_write(&self, _buf: &[u8], offset: u64) -> io::Result<usize> {
+            *self.write_calls.borrow_mut() += 1;
             assert_eq!(offset, self.expected_offset);
-            Err(io::Error::new(io::ErrorKind::ConnectionRefused, "seek_write"))
+            Err(io::Error::new(ErrorKind::ConnectionRefused, "seek_write"))
         }
     }
 
-    {
-        let mock_file = MockFile { expected_offset: 0 };
-        let mut buf = [0; 256];
-        assert_eq!(
-            mock_file.seek_read_exact(&mut buf, 0).unwrap_err().kind(),
-            io::ErrorKind::PermissionDenied
-        );
-        assert_eq!(
-            mock_file.seek_write_all(&buf, 0).unwrap_err().kind(),
-            io::ErrorKind::ConnectionRefused
-        );
+    for offset in [0, 1, 420] {
+        {
+            let mock_file = MockFile::new(offset);
+            let mut buf = [0; 256];
+            assert_eq!(
+                mock_file.seek_read_exact(&mut buf, offset).unwrap_err().kind(),
+                ErrorKind::PermissionDenied
+            );
+            assert_eq!(*mock_file.read_calls.borrow(), 1);
+            assert_eq!(*mock_file.write_calls.borrow(), 0);
+        }
+        {
+            let mock_file = MockFile::new(offset);
+            let mut buf = [MaybeUninit::uninit(); 256];
+            let mut buf = BorrowedBuf::from(buf.as_mut_slice());
+            assert_eq!(
+                mock_file.seek_read_buf_exact(buf.unfilled(), offset).unwrap_err().kind(),
+                ErrorKind::PermissionDenied
+            );
+            assert_eq!(*mock_file.read_calls.borrow(), 1);
+            assert_eq!(*mock_file.write_calls.borrow(), 0);
+        }
+        {
+            let mock_file = MockFile::new(offset);
+            let buf = [42_u8; 69];
+            assert_eq!(
+                mock_file.seek_write_all(&buf, offset).unwrap_err().kind(),
+                ErrorKind::ConnectionRefused
+            );
+            assert_eq!(*mock_file.read_calls.borrow(), 0);
+            assert_eq!(*mock_file.write_calls.borrow(), 1);
+        }
     }
-
-    {
-        let mock_file = MockFile { expected_offset: 420 };
-        let mut buf = [0; 256];
-        assert_eq!(
-            mock_file.seek_read_exact(&mut buf, 420).unwrap_err().kind(),
-            io::ErrorKind::PermissionDenied
-        );
-        assert_eq!(
-            mock_file.seek_write_all(&buf, 420).unwrap_err().kind(),
-            io::ErrorKind::ConnectionRefused
-        );
-    }
-    // FIXME: Cover io::ErrorKind::Interrupted, but don't infinite loop ;)
 }
 
 #[test]
 #[cfg(windows)]
 fn file_test_windows_fileext_trait_case_4() {
+    use crate::cell::RefCell;
+    use crate::os::windows::fs::FileExt;
+
+    // Test that Err ErrorKind::Interrupted are propagated up (unlike Unix versions)
+    struct MockFile {
+        expected_offset: u64,
+        read_calls: RefCell<usize>,
+        write_calls: RefCell<usize>,
+    }
+
+    impl MockFile {
+        fn new(expected_offset: u64) -> Self {
+            Self { expected_offset, read_calls: RefCell::new(0), write_calls: RefCell::new(0) }
+        }
+    }
+
+    impl FileExt for MockFile {
+        fn seek_read(&self, _buf: &mut [u8], offset: u64) -> io::Result<usize> {
+            *self.read_calls.borrow_mut() += 1;
+            assert_eq!(offset, self.expected_offset);
+            Err(io::Error::new(ErrorKind::Interrupted, "seek_read"))
+        }
+
+        fn seek_write(&self, _buf: &[u8], offset: u64) -> io::Result<usize> {
+            *self.write_calls.borrow_mut() += 1;
+            assert_eq!(offset, self.expected_offset);
+            Err(io::Error::new(ErrorKind::Interrupted, "seek_write"))
+        }
+    }
+
+    for offset in [0, 1, 420] {
+        {
+            let mock_file = MockFile::new(offset);
+            let mut buf = [0; 256];
+            assert_eq!(
+                mock_file.seek_read_exact(&mut buf, offset).unwrap_err().kind(),
+                ErrorKind::Interrupted
+            );
+            assert_eq!(*mock_file.read_calls.borrow(), 1);
+            assert_eq!(*mock_file.write_calls.borrow(), 0);
+        }
+        {
+            let mock_file = MockFile::new(offset);
+            let mut buf = [MaybeUninit::uninit(); 256];
+            let mut buf = BorrowedBuf::from(buf.as_mut_slice());
+            assert_eq!(
+                mock_file.seek_read_buf_exact(buf.unfilled(), offset).unwrap_err().kind(),
+                ErrorKind::Interrupted
+            );
+            assert_eq!(*mock_file.read_calls.borrow(), 1);
+            assert_eq!(*mock_file.write_calls.borrow(), 0);
+        }
+        {
+            let mock_file = MockFile::new(offset);
+            let buf = [42_u8; 69];
+            assert_eq!(
+                mock_file.seek_write_all(&buf, offset).unwrap_err().kind(),
+                ErrorKind::Interrupted
+            );
+            assert_eq!(*mock_file.read_calls.borrow(), 0);
+            assert_eq!(*mock_file.write_calls.borrow(), 1);
+        }
+    }
+}
+
+#[test]
+#[cfg(windows)]
+fn file_test_windows_fileext_trait_case_5() {
+    use crate::cell::RefCell;
     use crate::os::windows::fs::FileExt;
 
     const MSG: &[u8] =
@@ -952,10 +1080,19 @@ fn file_test_windows_fileext_trait_case_4() {
     // seek_write(), respectively.
     struct MockFile {
         expected_offset: u64,
+        read_calls: RefCell<usize>,
+        write_calls: RefCell<usize>,
+    }
+
+    impl MockFile {
+        fn new(expected_offset: u64) -> Self {
+            Self { expected_offset, read_calls: RefCell::new(0), write_calls: RefCell::new(0) }
+        }
     }
 
     impl FileExt for MockFile {
         fn seek_read(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+            *self.read_calls.borrow_mut() += 1;
             assert_eq!(offset, self.expected_offset);
             assert_eq!(buf.len(), MSG.len());
             assert_eq!(buf, &[0; MSG.len()]);
@@ -964,6 +1101,7 @@ fn file_test_windows_fileext_trait_case_4() {
         }
 
         fn seek_write(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
+            *self.write_calls.borrow_mut() += 1;
             assert_eq!(offset, self.expected_offset);
             assert_eq!(buf.len(), MSG.len());
             assert_eq!(buf, MSG);
@@ -971,26 +1109,36 @@ fn file_test_windows_fileext_trait_case_4() {
         }
     }
 
-    {
-        let mock_file = MockFile { expected_offset: 0 };
-        let mut buf = [0; MSG.len()];
-        check!(mock_file.seek_read_exact(&mut buf, 0));
-        assert_eq!(&buf, MSG);
-        check!(mock_file.seek_write_all(&buf, 0));
-    }
-
-    {
-        let mock_file = MockFile { expected_offset: 420 };
-        let mut buf = [0; MSG.len()];
-        check!(mock_file.seek_read_exact(&mut buf, 420));
-        assert_eq!(&buf, MSG);
-        check!(mock_file.seek_write_all(&buf, 420));
+    for offset in [0, 1, 420] {
+        {
+            let mock_file = MockFile::new(offset);
+            let mut buf = [0; MSG.len()];
+            check!(mock_file.seek_read_exact(&mut buf, offset));
+            assert_eq!(&buf, MSG);
+            assert_eq!(*mock_file.read_calls.borrow(), 1);
+            assert_eq!(*mock_file.write_calls.borrow(), 0);
+        }
+        {
+            let mock_file = MockFile::new(offset);
+            let mut buf = [MaybeUninit::uninit(); MSG.len()];
+            let mut buf = BorrowedBuf::from(buf.as_mut_slice());
+            check!(mock_file.seek_read_buf_exact(buf.unfilled(), offset));
+            assert_eq!(*mock_file.read_calls.borrow(), 1);
+            assert_eq!(*mock_file.write_calls.borrow(), 0);
+        }
+        {
+            let mock_file = MockFile::new(offset);
+            check!(mock_file.seek_write_all(MSG, offset));
+            assert_eq!(*mock_file.read_calls.borrow(), 0);
+            assert_eq!(*mock_file.write_calls.borrow(), 1);
+        }
     }
 }
 
 #[test]
 #[cfg(windows)]
-fn file_test_windows_fileext_trait_case_5() {
+fn file_test_windows_fileext_trait_case_6() {
+    use crate::cell::RefCell;
     use crate::os::windows::fs::FileExt;
 
     const MSG: &[u8] =
@@ -999,36 +1147,55 @@ fn file_test_windows_fileext_trait_case_5() {
     // Test pathological case where seek_read(), seek_write() only do 1 byte per call, return Ok(1)
     struct MockFile {
         base_offset: u64,
+        read_calls: RefCell<usize>,
+        write_calls: RefCell<usize>,
+    }
+
+    impl MockFile {
+        fn new(base_offset: u64) -> Self {
+            Self { base_offset, read_calls: RefCell::new(0), write_calls: RefCell::new(0) }
+        }
     }
 
     impl FileExt for MockFile {
         fn seek_read(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+            *self.read_calls.borrow_mut() += 1;
             let offset = (offset - self.base_offset) as usize;
             buf[0..1].copy_from_slice(&MSG[offset..offset + 1]);
             Ok(1)
         }
 
         fn seek_write(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
+            *self.write_calls.borrow_mut() += 1;
             let offset = (offset - self.base_offset) as usize;
             assert_eq!(buf[0..1], MSG[offset..offset + 1]);
             Ok(1)
         }
     }
 
-    {
-        let mock_file = MockFile { base_offset: 0 };
-        let mut buf = [0; MSG.len()];
-        check!(mock_file.seek_read_exact(&mut buf, 0));
-        assert_eq!(&buf, MSG);
-        check!(mock_file.seek_write_all(&buf, 0));
-    }
-
-    {
-        let mock_file = MockFile { base_offset: 420 };
-        let mut buf = [0; MSG.len()];
-        check!(mock_file.seek_read_exact(&mut buf, 420));
-        assert_eq!(&buf, MSG);
-        check!(mock_file.seek_write_all(&buf, 420));
+    for offset in [0, 1, 420] {
+        {
+            let mock_file = MockFile::new(offset);
+            let mut buf = [0; MSG.len()];
+            check!(mock_file.seek_read_exact(&mut buf, offset));
+            assert_eq!(&buf, MSG);
+            assert_eq!(*mock_file.read_calls.borrow(), MSG.len());
+            assert_eq!(*mock_file.write_calls.borrow(), 0);
+        }
+        {
+            let mock_file = MockFile::new(offset);
+            let mut buf = [MaybeUninit::uninit(); MSG.len()];
+            let mut buf = BorrowedBuf::from(buf.as_mut_slice());
+            check!(mock_file.seek_read_buf_exact(buf.unfilled(), offset));
+            assert_eq!(*mock_file.read_calls.borrow(), MSG.len());
+            assert_eq!(*mock_file.write_calls.borrow(), 0);
+        }
+        {
+            let mock_file = MockFile::new(offset);
+            check!(mock_file.seek_write_all(MSG, offset));
+            assert_eq!(*mock_file.read_calls.borrow(), 0);
+            assert_eq!(*mock_file.write_calls.borrow(), MSG.len());
+        }
     }
 }
 
@@ -1315,7 +1482,7 @@ fn recursive_rmdir() {
 }
 
 #[test]
-fn recursive_rmdir_of_symlink() {
+fn recursive_rmdir_of_dir_symlink() {
     // test we do not recursively delete a symlink but only dirs.
     let tmpdir = tmpdir();
     let link = tmpdir.join("d1");
@@ -1342,8 +1509,6 @@ fn recursive_rmdir_of_file_fails() {
 }
 
 #[test]
-// only Windows makes a distinction between file and directory symlinks.
-#[cfg(windows)]
 fn recursive_rmdir_of_file_symlink() {
     let tmpdir = tmpdir();
     if !got_symlink_permission(&tmpdir) {
@@ -1354,9 +1519,12 @@ fn recursive_rmdir_of_file_symlink() {
     let f2 = tmpdir.join("f2");
     check!(check!(File::create(&f1)).write(b"foo"));
     check!(symlink_file(&f1, &f2));
-    match fs::remove_dir_all(&f2) {
-        Ok(..) => panic!("wanted a failure"),
-        Err(..) => {}
+    let res = fs::remove_dir_all(&f2);
+    // Windows and Unix behavior differs here.
+    if cfg!(windows) {
+        let _err = res.unwrap_err();
+    } else {
+        let _ok = res.unwrap();
     }
 }
 
@@ -1730,7 +1898,6 @@ fn fchmod_works() {
     check!(file.set_permissions(p));
 }
 
-#[cfg(not(target_os = "android"))]
 #[test]
 fn fchmodat_works() {
     let tmpdir = tmpdir();
@@ -2402,7 +2569,6 @@ fn test_eq_windows_file_type() {
 /// Regression test for https://github.com/rust-lang/rust/issues/50619.
 #[test]
 #[cfg(target_os = "linux")]
-#[cfg_attr(miri, ignore)] // Cannot spawn processes on Miri
 fn test_read_dir_infinite_loop() {
     use crate::io::ErrorKind;
     use crate::process::Command;
@@ -2588,7 +2754,6 @@ fn test_hidden_file_truncation() {
         .open(&path)
         .unwrap();
     file.write("hidden world!".as_bytes()).unwrap();
-    file.flush().unwrap();
     drop(file);
 
     // Create a new file by truncating the existing one.
@@ -2660,6 +2825,98 @@ fn test_rename_symlink() {
 
     symlink_file(not_exist, &original).unwrap();
     fs::rename(&original, &dest).unwrap();
+    // Make sure that renaming `original` to `dest` preserves the symlink.
+    assert_eq!(fs::read_link(&dest).unwrap().as_path(), not_exist);
+}
+
+#[test]
+fn test_rename_noreplace() {
+    let tmpdir = tmpdir();
+    let source_path = tmpdir.join("source_file.txt");
+    let target_path = tmpdir.join("target_file.txt");
+
+    fs::write(&source_path, b"source hello world").unwrap();
+
+    fs::rename_noreplace(&source_path, &target_path).unwrap();
+    assert!(!source_path.exists());
+    assert_eq!(fs::read(&target_path).unwrap(), b"source hello world");
+}
+
+#[test]
+fn test_rename_noreplace_existing_file() {
+    let tmpdir = tmpdir();
+    let source_path = tmpdir.join("source_file.txt");
+    let target_path = tmpdir.join("target_file.txt");
+
+    fs::write(&source_path, b"source hello world").unwrap();
+    fs::write(&target_path, b"target hello world").unwrap();
+
+    let err = fs::rename_noreplace(&source_path, &target_path).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::AlreadyExists);
+    // Make sure the failed rename left both files untouched.
+    assert_eq!(fs::read(&source_path).unwrap(), b"source hello world");
+    assert_eq!(fs::read(&target_path).unwrap(), b"target hello world");
+}
+
+#[test]
+fn test_rename_noreplace_directory_to_empty_directory() {
+    // Renaming a directory over an existing empty directory should fail;
+    // plain `rename` would succeed here.
+    let tmpdir = tmpdir();
+    let source_path = tmpdir.join("source_directory");
+    let target_path = tmpdir.join("target_directory");
+
+    fs::create_dir(&source_path).unwrap();
+    fs::create_dir(&target_path).unwrap();
+
+    let err = fs::rename_noreplace(&source_path, &target_path).unwrap_err();
+    assert_matches!(
+        err.kind(),
+        // A native no-replace rename returns `AlreadyExists`. The `link`/`unlink`
+        // fallback cannot rename directories and returns `PermissionDenied`.
+        ErrorKind::AlreadyExists | ErrorKind::PermissionDenied,
+        "Expected AlreadyExists or PermissionDenied error, got {err}"
+    );
+}
+
+#[test]
+#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple", windows))]
+fn test_rename_noreplace_directory() {
+    let tmpdir = tmpdir();
+    let source_path = tmpdir.join("source_directory");
+    let target_path = tmpdir.join("target_directory");
+
+    fs::create_dir(&source_path).unwrap();
+    fs::write(source_path.join("file.txt"), b"hello world").unwrap();
+
+    match fs::rename_noreplace(&source_path, &target_path) {
+        Ok(()) => {
+            assert!(!source_path.exists());
+            assert_eq!(fs::read(target_path.join("file.txt")).unwrap(), b"hello world");
+        }
+        // Without a native no-replace rename (Linux before 3.15), Unix
+        // platforms fall back to `link`/`unlink`, and it rejects directories.
+        Err(err) if cfg!(unix) && err.kind() == ErrorKind::PermissionDenied => {
+            assert!(source_path.exists());
+            assert!(!target_path.exists());
+        }
+        Err(err) => panic!("unexpected error: {err:?}"),
+    }
+}
+
+#[test]
+fn test_rename_noreplace_symlink() {
+    let tmpdir = tmpdir();
+    if !got_symlink_permission(&tmpdir) {
+        return;
+    };
+
+    let original = tmpdir.join("original");
+    let dest = tmpdir.join("dest");
+    let not_exist = Path::new("does not exist");
+
+    symlink_file(not_exist, &original).unwrap();
+    fs::rename_noreplace(&original, &dest).unwrap();
     // Make sure that renaming `original` to `dest` preserves the symlink.
     assert_eq!(fs::read_link(&dest).unwrap().as_path(), not_exist);
 }
@@ -3041,7 +3298,6 @@ fn test_dir_write_file() {
     let dir = check!(Dir::open(tmpdir.path()));
     let mut f = check!(dir.open_file_with("foo.txt", &OpenOptions::new().write(true).create(true)));
     check!(f.write(b"bar"));
-    check!(f.flush());
     drop(f);
     let mut f = check!(File::open(tmpdir.join("foo.txt")));
     let mut buf = [0u8; 3];
@@ -3054,9 +3310,16 @@ fn test_dir_remove_file() {
     let tmpdir = tmpdir();
     let mut f = check!(File::create(tmpdir.join("foo.txt")));
     check!(f.write(b"bar"));
-    check!(f.flush());
     drop(f);
     let dir = check!(Dir::open(tmpdir.path()));
+
+    if got_symlink_permission(&tmpdir) {
+        // Removing a symlink should remove the link, not the destination.
+        check!(symlink_file("foo.txt", &tmpdir.join("link")));
+        check!(dir.remove_file("link"));
+        assert!(check!(dir.metadata("foo.txt")).is_file()); // file still exists
+    }
+
     check!(dir.remove_file("foo.txt"));
     assert!(!matches!(exists(tmpdir.join("foo.txt")), Ok(true)));
 }
@@ -3073,17 +3336,36 @@ fn test_dir_rename_file() {
     let mut buf = [0u8; 3];
     check!(f.read_exact(&mut buf));
     assert_eq!(b"bar", &buf);
+
+    // Renaming a symlink should rename the link, not the destination.
+    if got_symlink_permission(&tmpdir) {
+        check!(symlink_file("baz.txt", &tmpdir.join("link")));
+        check!(dir.rename("link", &dir, "link-renamed"));
+        assert!(check!(dir.symlink_metadata("baz.txt")).is_file()); // file still exists
+        assert!(check!(dir.symlink_metadata("link-renamed")).is_symlink()); // symlink has new name
+    }
 }
 
-// FIXME: re-enable once QNX fixes TOCTOU bug for fs::remove_dir
-// Note that it may get fixed in QNX 8 in a future libc release
-// ... https://github.com/rust-lang/rust/issues/153781
-#[cfg_attr(any(target_os = "nto", target_os = "qnx"), ignore)]
 #[test]
 fn test_dir_remove_dir() {
     let tmpdir = tmpdir();
     check!(fs::create_dir(tmpdir.join("foo")));
     let dir = check!(Dir::open(tmpdir.path()));
+
+    if got_symlink_permission(&tmpdir) {
+        // Removing a symlink should remove the link, not the destination.
+        check!(symlink_dir("foo", &tmpdir.join("link")));
+        if cfg!(windows) {
+            // directory symlinks need `remove_dir` on Windows
+            dir.remove_file("link").unwrap_err();
+            check!(dir.remove_dir("link"));
+        } else {
+            dir.remove_dir("link").unwrap_err();
+            check!(dir.remove_file("link"));
+        }
+        assert!(check!(dir.metadata("foo")).is_dir()); // dir still exists
+    }
+
     check!(dir.remove_dir("foo"));
     assert!(!matches!(exists(tmpdir.join("foo")), Ok(true)));
 }
@@ -3096,6 +3378,14 @@ fn test_dir_rename_dir() {
     check!(dir.rename("foo", &dir, "baz"));
     let m = check!(tmpdir.join("baz").metadata());
     assert!(m.is_dir());
+
+    // Renaming a symlink should rename the link, not the destination.
+    if got_symlink_permission(&tmpdir) {
+        check!(symlink_dir("baz", &tmpdir.join("link")));
+        check!(dir.rename("link", &dir, "link-renamed"));
+        assert!(check!(dir.symlink_metadata("baz")).is_dir()); // dir still exists
+        assert!(check!(dir.symlink_metadata("link-renamed")).is_symlink()); // symlink has new name
+    }
 }
 
 #[test]
@@ -3115,7 +3405,6 @@ fn test_dir_open_dir() {
     let mut f =
         check!(dir2.open_file_with("bar.txt", &OpenOptions::new().create(true).write(true)));
     check!(f.write(b"baz"));
-    check!(f.flush());
     drop(f);
     let dir3 = check!(dir1.open_dir("foo"));
     let mut f = check!(dir3.open_file("bar.txt"));
@@ -3146,6 +3435,19 @@ fn test_dir_metadata() {
     let metadata = check!(dir.symlink_metadata("link"));
     assert!(!metadata.is_file());
     assert!(metadata.is_symlink());
+}
+
+#[test]
+fn test_read_dir_dir() {
+    let tmpdir = tmpdir();
+    check!(fs::write(tmpdir.path().join("file.txt"), b"hello"));
+
+    let read_dir = check!(fs::read_dir(tmpdir.path()));
+    let dir = check!(read_dir.dir());
+    let mut f = check!(dir.open_file("file.txt"));
+    let mut data = vec![];
+    check!(f.read_to_end(&mut data));
+    assert_eq!(data, b"hello");
 }
 
 fn root_test_dir(what: &str) -> PathBuf {

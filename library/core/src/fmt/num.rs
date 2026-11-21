@@ -281,7 +281,7 @@ macro_rules! impl_Display {
                 let mut offset;
 
                 #[cfg(not(feature = "optimize_for_size"))]
-                // SAFETY: `buf` will always be big enough to contain all digits.
+                // SAFETY: `buf` is from a `NumBuffer`, so it will always be big enough to contain all digits.
                 unsafe {
                     offset = self.unsigned_abs()._fmt_inner(&mut buf.buf);
                 }
@@ -289,7 +289,8 @@ macro_rules! impl_Display {
                 {
                     // Lossless conversion (with as) is asserted at the top of
                     // this macro.
-                    offset = ${concat($fmt_fn, _in_buf_small)}(self.unsigned_abs() as $T, &mut buf.buf);
+                    // SAFETY: `buf` is from a `NumBuffer`, so it will always be big enough to contain all digits.
+                    offset = unsafe { ${concat($fmt_fn, _in_buf_small)}(self.unsigned_abs() as $T, &mut buf.buf) };
                 }
                 // Only difference between signed and unsigned are these 4 lines.
                 if self < 0 {
@@ -329,7 +330,7 @@ macro_rules! impl_Display {
                 let offset;
 
                 #[cfg(not(feature = "optimize_for_size"))]
-                // SAFETY: `buf` will always be big enough to contain all digits.
+                // SAFETY: `buf` is from a `NumBuffer`, so it will always be big enough to contain all digits.
                 unsafe {
                     offset = self._fmt_inner(&mut buf.buf);
                 }
@@ -337,7 +338,8 @@ macro_rules! impl_Display {
                 {
                     // Lossless conversion (with as) is asserted at the top of
                     // this macro.
-                    offset = ${concat($fmt_fn, _in_buf_small)}(self as $T, &mut buf.buf);
+                    // SAFETY: `buf` is from a `NumBuffer`, so it will always be big enough to contain all digits.
+                    offset = unsafe { ${concat($fmt_fn, _in_buf_small)}(self as $T, &mut buf.buf) };
                 }
                 // SAFETY: Starting from `offset`, all elements of the slice have been set.
                 unsafe { slice_buffer_to_str(&buf.buf, offset) }
@@ -346,22 +348,35 @@ macro_rules! impl_Display {
 
         )*
 
+        /// # Safety
+        /// The number's decimal representation must fit into the buffer.
+        /// i.e. `n == 0 && buf.len() >= 1 || n.ilog10() + 1 <= buf.len()`
+        ///
+        /// Note that this function is shared across sizes. In particular, `u8` and `u16` use the
+        /// `u32` version of this function, so the buffer length is not always the same; this
+        /// prevents the function from being safe, and/or using `NumBuffer`.
         #[cfg(feature = "optimize_for_size")]
-        fn ${concat($fmt_fn, _in_buf_small)}(mut n: $T, buf: &mut [MaybeUninit::<u8>]) -> usize {
+        unsafe fn ${concat($fmt_fn, _in_buf_small)}(mut n: $T, buf: &mut [MaybeUninit::<u8>]) -> usize {
+            debug_assert!(n == 0 && buf.len() >= 1 || buf.len() >= n.ilog10() as usize + 1);
+
             let mut curr = buf.len();
 
-            // SAFETY: To show that it's OK to copy into `buf_ptr`, notice that at the beginning
-            // `curr == buf.len() == 39 > log(n)` since `n < 2^128 < 10^39`, and at
-            // each step this is kept the same as `n` is divided. Since `n` is always
-            // non-negative, this means that `curr > 0` so `buf_ptr[curr..curr + 1]`
-            // is safe to access.
-            loop {
-                curr -= 1;
-                buf[curr].write((n % 10) as u8 + b'0');
-                n /= 10;
+            // SAFETY:
+            // For `n == 0`, we only access index 0, and `buf.len() >= 1`.
+            // Otherwise, it takes `n.ilog10() + 1` divisions by 10 for `n`
+            // to become 0. Hence `curr` is decremented at most that many times.
+            // Then due to `buf.len() >= n.ilog10() + 1`, `curr` can never
+            // wrap, which means it is in-bounds (since it starts in-bounds
+            // and counts down).
+            unsafe {
+                loop {
+                    curr -= 1;
+                    buf.get_unchecked_mut(curr).write((n % 10) as u8 + b'0');
+                    n /= 10;
 
-                if n == 0 {
-                    break;
+                    if n == 0 {
+                        break;
+                    }
                 }
             }
             curr
@@ -372,7 +387,8 @@ macro_rules! impl_Display {
             const MAX_DEC_N: usize = $T::MAX.ilog10() as usize + 1;
             let mut buf = [MaybeUninit::<u8>::uninit(); MAX_DEC_N];
 
-            let offset = ${concat($fmt_fn, _in_buf_small)}(n, &mut buf);
+            // SAFETY: `T::MAX` is the largest possible decimal length, so the buffer is large enough.
+            let offset = unsafe { ${concat($fmt_fn, _in_buf_small)}(n, &mut buf) };
             // SAFETY: Starting from `offset`, all elements of the slice have been set.
             let buf_slice = unsafe { slice_buffer_to_str(&buf, offset) };
             f.pad_integral(is_nonnegative, "", buf_slice)
@@ -925,4 +941,80 @@ fn div_rem_1e16(n: u128) -> (u128, u64) {
     let quot = n.carrying_mul(M_HIGH, 0).1 >> SH_POST;
     let rem = n - quot * D;
     (quot, rem as u64)
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use safety::{ensures, requires};
+
+    use super::*;
+    use crate::kani;
+
+    // ---------------------------------------------------------------------
+    // `fmt::num::parse_u64_into` (the challenge's listed usage site) was
+    // removed when decimal formatting was rewritten; `u64::_fmt` is its
+    // successor and fills the tail of a `MaybeUninit<u8>` buffer with the
+    // ASCII digits of `self` exactly as `parse_u64_into` did. Its documented
+    // safety condition ("`buf` will always be big enough to contain all
+    // digits") is stated as `requires` on this wrapper: `_fmt` is generated
+    // by `impl_Display!` for every integer type, so annotating it directly
+    // would touch the runtime definition of all of them (the approach #643
+    // takes); the wrapper keeps the annotation surface at zero.
+    // ---------------------------------------------------------------------
+
+    /// Digits of `u64::MAX` (= 20); any `u64` fits in this many bytes.
+    const U64_MAX_DEC_N: usize = u64::MAX.ilog10() as usize + 1;
+
+    #[cfg(not(feature = "optimize_for_size"))]
+    #[requires(buf.len() >= U64_MAX_DEC_N)]
+    #[ensures(|result: &&str| !result.is_empty() && result.len() <= U64_MAX_DEC_N)]
+    #[ensures(|result: &&str| result.as_bytes().iter().all(|b| b.is_ascii_digit()))]
+    #[kani::modifies(crate::ptr::slice_from_raw_parts_mut(buf.as_mut_ptr(), buf.len()))]
+    #[allow(dead_code)]
+    fn u64_fmt_wrapper<'a>(n: u64, buf: &'a mut [MaybeUninit<u8>]) -> &'a str {
+        // SAFETY: guaranteed by the precondition (`buf` holds any `u64`'s digits).
+        unsafe { n._fmt(buf) }
+    }
+
+    // Verifies the `ensures` plus the UB checks along `_fmt_inner`'s
+    // buffer-filling walk and the final `slice_buffer_to_str` cast
+    // (`get_unchecked`, `assume_init_ref`, `from_utf8_unchecked`).
+    // Unwind: the digit loop runs at most 5 times (4 digits each), the
+    // byte-level `ensures` scan up to `U64_MAX_DEC_N` times.
+    #[cfg(not(feature = "optimize_for_size"))]
+    #[kani::proof_for_contract(u64_fmt_wrapper)]
+    #[kani::unwind(21)]
+    fn check_u64_fmt() {
+        let n: u64 = kani::any();
+        let mut buf = [MaybeUninit::<u8>::uninit(); U64_MAX_DEC_N];
+        let s = u64_fmt_wrapper(n, &mut buf);
+        kani::cover(s.len() == 1, "single digit");
+        kani::cover(s.len() > 1, "multiple digits");
+    }
+
+    // Value-level fidelity on a bounded window (full 20-digit decimal
+    // equality for arbitrary `u64` does not converge): below 100 the result
+    // is exactly the one- or two-digit decimal of `n`, pinning the lookup
+    // table path against, e.g., a swapped-pair mutant.
+    #[cfg(not(feature = "optimize_for_size"))]
+    #[kani::proof]
+    #[kani::unwind(21)]
+    fn check_u64_fmt_small_values() {
+        let n: u64 = kani::any();
+        kani::assume(n < 100);
+        let mut buf = [MaybeUninit::<u8>::uninit(); U64_MAX_DEC_N];
+        let s = unsafe { n._fmt(&mut buf) };
+        let bytes = s.as_bytes();
+        if n < 10 {
+            assert_eq!(bytes.len(), 1);
+            assert_eq!(bytes[0], b'0' + n as u8);
+        } else {
+            assert_eq!(bytes.len(), 2);
+            assert_eq!(bytes[0], b'0' + (n / 10) as u8);
+            assert_eq!(bytes[1], b'0' + (n % 10) as u8);
+        }
+        kani::cover(n < 10, "one digit");
+        kani::cover(n >= 10, "two digits");
+    }
 }

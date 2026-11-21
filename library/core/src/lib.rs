@@ -86,9 +86,8 @@
 // Library features:
 // tidy-alphabetical-start
 #![feature(asm_experimental_arch)]
-#![feature(bstr_internals)]
+#![feature(byte_str_internals)]
 #![feature(cfg_target_has_reliable_f16_f128)]
-#![feature(const_carrying_mul_add)]
 #![feature(const_cmp)]
 #![feature(const_destruct)]
 #![feature(const_eval_select)]
@@ -129,6 +128,7 @@
 #![feature(f128)]
 #![feature(field_projections)]
 #![feature(final_associated_functions)]
+#![feature(forced_keywords)]
 #![feature(freeze_impls)]
 #![feature(fundamental)]
 #![feature(impl_restriction)]
@@ -141,6 +141,7 @@
 #![feature(macro_metavar_expr_concat)]
 #![feature(marker_trait_attr)]
 #![feature(min_specialization)]
+#![feature(move_trait)]
 #![feature(multiple_supertrait_upcastable)]
 #![feature(must_not_suspend)]
 #![feature(negative_impls)]
@@ -148,6 +149,10 @@
 #![feature(pattern_types)]
 #![feature(pin_macro_internals)]
 #![feature(prelude_import)]
+#![feature(register_tool)]
+// Flux injects `#![feature(register_tool)]` itself, which core now also enables (for
+// `#![register_tool(lint)]`); allow the duplicate under Flux only.
+#![cfg_attr(flux, allow(duplicate_features))]
 #![feature(repr_simd)]
 #![feature(rustc_attrs)]
 #![feature(rustdoc_internals)]
@@ -184,6 +189,10 @@
 #![feature(s390x_target_feature)]
 #![feature(wasm_target_feature)]
 #![feature(x86_amx_intrinsics)]
+// tidy-alphabetical-end
+
+// tidy-alphabetical-start
+#![register_tool(lint)]
 // tidy-alphabetical-end
 
 // tidy-alphabetical-start
@@ -252,6 +261,9 @@ pub use legacy_int_modules::{i8, i16, i32, i64, isize, u8, u16, u32, u64, usize}
 #[allow(deprecated, clippy::legacy_numeric_constants)]
 pub use legacy_int_modules::{i128, u128};
 
+#[macro_use]
+pub mod num;
+
 #[path = "num/f128.rs"]
 pub mod f128;
 #[path = "num/f16.rs"]
@@ -260,9 +272,6 @@ pub mod f16;
 pub mod f32;
 #[path = "num/f64.rs"]
 pub mod f64;
-
-#[macro_use]
-pub mod num;
 
 /* Core modules for ownership management */
 
@@ -297,8 +306,8 @@ pub mod ascii;
 pub mod asserting;
 #[unstable(feature = "async_iterator", issue = "79024")]
 pub mod async_iter;
-#[unstable(feature = "bstr", issue = "134915")]
-pub mod bstr;
+#[unstable(feature = "byte_str", issue = "134915")]
+pub mod byte_str;
 pub mod cell;
 pub mod char;
 pub mod ffi;

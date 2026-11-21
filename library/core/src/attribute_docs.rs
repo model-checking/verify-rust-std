@@ -230,6 +230,70 @@ const _: () = ();
 /// [the `crate_name` attribute]: ../reference/crates-and-source-files.html#the-crate_name-attribute
 const _: () = ();
 
+#[doc(attribute = "crate_type")]
+//
+/// Specifies the type of a crate.
+///
+/// Written as an inner attribute at the top of the crate root, `crate_type` is used
+/// to specify the type of a crate.
+///
+/// ```
+/// #![crate_type = "lib"]
+/// ```
+///
+/// The specified crate type must be a known crate type (for the list of valid crate types, see [Linkage]),
+/// otherwise `rustc` reports an error:
+///
+/// ```text
+/// error: invalid `crate_type` value
+///  --> typo.rs:1:17
+///   |
+/// 1 | #![crate_type = "dyllib"]
+///   |                 ^^^^^^^^ help: did you mean: `"dylib"`
+///   |
+///   = note: `#[deny(unknown_crate_types)]` on by default
+/// ```
+///
+/// In one session of compilation, the compiler can generate multiple artifacts through the use of
+/// either command line flags or the `crate_type` attribute. Note that the output artifacts are stackable in
+/// the sense that if multiple are specified, then the compiler will produce each form of output without
+/// having to recompile.
+///
+/// For example, if a crate has the following `crate_type` attributes:
+///
+/// ```
+/// #![crate_type = "staticlib"]
+/// #![crate_type = "dylib"]
+/// ```
+///
+/// Then the compiler will build both a static library and a dynamic library.
+///
+/// If the flag `--test` is passed, the `crate_type` attributes will be ignored, and the crate will be built
+/// as a test harness.
+///
+/// For `[lib]`/`[[bin]]` targets Cargo passes `--crate-type` derived from the target (`[lib] crate-type`, `[[bin]]`);
+/// test/bench targets are compiled with `--test`. In all these cases the attribute is ignored.
+///
+/// Note that the `bin` type and `proc-macro` type cannot be mixed with any other crate type,
+/// otherwise `rustc` reports an error:
+///
+/// ```text
+/// error: cannot mix `bin` crate type with others
+/// ```
+///
+/// ```text
+/// error: cannot mix `proc-macro` crate type with others
+/// ```
+///
+/// In general, crate type `bin` and crate type `lib` should be sufficient for all compilation needs, and
+/// the other options are just available if more fine-grained control is desired over the output format of
+/// a crate.
+///
+/// For more information, see the Reference on [Linkage].
+///
+/// [Linkage]: ../reference/linkage.html
+const _: () = ();
+
 #[doc(attribute = "deny")]
 //
 /// Emits an error, preventing the compilation from finishing, when a lint check has failed.
@@ -885,4 +949,99 @@ const _: () = ();
 ///
 /// [`cfg`]: ./attribute.cfg.html
 /// [the `cfg_attr` attribute]: ../reference/conditional-compilation.html#the-cfg_attr-attribute
+const _: () = ();
+
+#[doc(attribute = "windows_subsystem")]
+//
+/// The `windows_subsystem` attribute is used to specify the subsystem for a Windows application.
+///
+/// Example:
+///
+/// ```rust
+/// #![windows_subsystem = "windows"]
+///
+/// fn main() {}
+/// ```
+///
+/// Accepted values are "console" (default) and "windows".
+///
+/// The `windows_subsystem` attribute may only be applied to the crate root.
+///
+/// Only the first use of `windows_subsystem` has effect.
+///
+/// The `windows_subsystem` attribute is ignored on non-Windows targets and non-bin crate types.
+/// If a "console" process is run from an existing console then it will be attached to said console;
+/// otherwise a new one will be created.
+/// The "windows" subsystem will run detached from any existing "console".
+///
+/// [Reference](../reference/runtime.html#the-windows_subsystem-attribute)
+const _: () = ();
+
+#[doc(attribute = "recursion_limit")]
+//
+/// Sets the maximum depth for recursive compile-time operations.
+///
+/// The compiler limits how deeply it recurses while performing operations that could
+/// otherwise expand forever, such as macro expansion and auto-dereference. The
+/// `recursion_limit` attribute raises that limit. It applies to the whole crate and is
+/// written at the crate root:
+///
+/// ```
+/// #![recursion_limit = "256"]
+///
+/// // Macros may now expand up to 256 levels deep.
+/// ```
+///
+/// The value is a string containing the new limit. The default is 128.
+///
+/// This limit affects only compile-time recursion. It does not change how deeply
+/// recursive code can run at runtime.
+///
+/// When a compile-time operation recurses deeper than the limit, compilation fails. For
+/// example, this macro expands itself forever, so it always hits the limit:
+///
+/// ```compile_fail
+/// macro_rules! a {
+///     () => { a!(); };
+/// }
+///
+/// a!();
+/// ```
+///
+/// This produces an error whose help message suggests how to raise the limit:
+///
+/// ```text
+/// error: recursion limit reached while expanding `a!`
+///  --> src/main.rs:2:13
+///   |
+/// 2 |     () => { a!(); };
+///   |             ^^^^
+/// ...
+/// 5 | a!();
+///   | ---- in this macro invocation
+///   |
+///   = help: consider increasing the recursion limit by adding a `#![recursion_limit = "256"]`
+///           attribute to your crate
+/// ```
+///
+/// Auto-dereference is limited in the same way:
+///
+/// ```compile_fail
+/// #![recursion_limit = "1"]
+///
+/// // Error: two recursive steps are needed to auto-dereference `&&&1` to `&u8`.
+/// let f = |_: &u8| {};
+/// f(&&&1);
+/// ```
+///
+/// Reaching the limit is most common in code that nests many macros, such as code expanded
+/// by `derive` macros or deeply nested `async` code. Raising the limit is safe, but very
+/// large values can make the compiler use more time and memory, and deeply nested code can
+/// still overflow the compiler's own stack. Increase the limit in measured steps rather
+/// than jumping to a very large number. If the limit is reached without an obvious cause,
+/// the code may be more deeply recursive than intended.
+///
+/// For more information, see the Reference on [the `recursion_limit` attribute].
+///
+/// [the `recursion_limit` attribute]: ../reference/attributes/limits.html#the-recursion_limit-attribute
 const _: () = ();
