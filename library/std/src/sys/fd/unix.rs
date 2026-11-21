@@ -3,19 +3,9 @@
 #[cfg(test)]
 mod tests;
 
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "l4re",
-    target_os = "android",
-    target_os = "hurd",
-)))]
+#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "hurd")))]
 use libc::off_t as off64_t;
-#[cfg(any(
-    target_os = "android",
-    target_os = "linux",
-    target_os = "l4re",
-    target_os = "hurd",
-))]
+#[cfg(any(target_os = "android", target_os = "linux", target_os = "hurd"))]
 use libc::off64_t;
 
 cfg_select! {
@@ -72,12 +62,16 @@ pub struct FileDesc(OwnedFd);
 //
 // On Apple targets however, apparently the 64-bit libc is either buggy or
 // intentionally showing odd behavior by rejecting any read with a size
-// larger than INT_MAX. To handle both of these the read size is capped on
-// both platforms.
-const READ_LIMIT: usize = if cfg!(target_vendor = "apple") {
-    libc::c_int::MAX as usize
-} else {
-    libc::ssize_t::MAX as usize
+// larger than INT_MAX.
+//
+// Meanwhile on QNX, reads/writes/sends larger than INT_MAX return the wrong
+// number of bytes written (eg, writing 2^31 bytes returns (2^64 - 2^31) instead
+// of the correct byte count).
+const READ_LIMIT: usize = cfg_select! {
+    any(target_vendor = "apple", target_os = "nto", target_os = "qnx") => {
+        libc::c_int::MAX as usize
+    }
+    _ => libc::ssize_t::MAX as usize,
 };
 
 #[cfg(any(
@@ -242,6 +236,7 @@ impl FileDesc {
         target_os = "linux",
         target_os = "netbsd",
         target_os = "openbsd", // OpenBSD 2.7
+        target_os = "l4re",
         all(target_os = "macos", target_arch = "aarch64"),
     ))]
     pub fn read_vectored_at(&self, bufs: &mut [IoSliceMut<'_>], offset: u64) -> io::Result<usize> {
@@ -269,6 +264,7 @@ impl FileDesc {
         target_os = "netbsd",
         target_os = "openbsd",
         target_vendor = "apple",
+        target_os = "l4re",
     )))]
     pub fn read_vectored_at(&self, bufs: &mut [IoSliceMut<'_>], offset: u64) -> io::Result<usize> {
         io::default_read_vectored(|b| self.read_at(b, offset), bufs)

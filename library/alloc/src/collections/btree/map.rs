@@ -205,8 +205,14 @@ pub struct BTreeMap<
 #[stable(feature = "btree_drop", since = "1.7.0")]
 unsafe impl<#[may_dangle] K, #[may_dangle] V, A: AllocatorClone> Drop for BTreeMap<K, V, A> {
     fn drop(&mut self) {
-        // ignore-tidy-undocumented-unsafe
-        drop(unsafe { ptr::read(self) }.into_iter())
+        if let Some(root) = self.root.take() {
+            // SAFETY: The tree won't be used after this point.
+            // The allocator has not been moved out and will be moved into `drop_tree`.
+            unsafe { root.into_dying().drop_tree(ManuallyDrop::take(&mut self.alloc)) };
+        } else {
+            // SAFETY: The allocator has not been moved out and won't be used after this point.
+            unsafe { ManuallyDrop::drop(&mut self.alloc) };
+        }
     }
 }
 
@@ -695,6 +701,13 @@ impl<K, V, A: AllocatorClone> BTreeMap<K, V, A> {
     #[must_use]
     pub const fn new_in(alloc: A) -> BTreeMap<K, V, A> {
         BTreeMap { root: None, length: 0, alloc: ManuallyDrop::new(alloc), _marker: PhantomData }
+    }
+
+    /// Returns a reference to the underlying allocator.
+    #[unstable(feature = "btreemap_alloc", issue = "163177")]
+    #[inline]
+    pub fn allocator(&self) -> &A {
+        &self.alloc
     }
 }
 
@@ -2824,11 +2837,7 @@ impl<K, V, A: AllocatorClone> BTreeMap<K, V, A> {
     /// ```
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_unstable(
-        feature = "const_btree_len",
-        issue = "71835",
-        implied_by = "const_btree_new"
-    )]
+    #[rustc_const_stable(feature = "const_btree_len", since = "CURRENT_RUSTC_VERSION")]
     #[rustc_confusables("length", "size")]
     pub const fn len(&self) -> usize {
         self.length
@@ -2848,11 +2857,7 @@ impl<K, V, A: AllocatorClone> BTreeMap<K, V, A> {
     /// ```
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_unstable(
-        feature = "const_btree_len",
-        issue = "71835",
-        implied_by = "const_btree_new"
-    )]
+    #[rustc_const_stable(feature = "const_btree_len", since = "CURRENT_RUSTC_VERSION")]
     pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }

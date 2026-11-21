@@ -1,6 +1,10 @@
+use safety::ensures;
+
 use crate::any::type_name;
 use crate::clone::TrivialClone;
-use crate::marker::Destruct;
+#[cfg(kani)]
+use crate::kani;
+use crate::marker::{Destruct, Freeze};
 use crate::mem::{ManuallyDrop, transmute_neo};
 use crate::{fmt, intrinsics, ptr, slice};
 
@@ -477,6 +481,17 @@ impl<T> MaybeUninit<T> {
     #[rustc_diagnostic_item = "maybe_uninit_zeroed"]
     #[stable(feature = "maybe_uninit", since = "1.36.0")]
     #[rustc_const_stable(feature = "const_maybe_uninit_zeroed", since = "1.75.0")]
+    // No `requires` (challenge 2, part 2): the `intrinsics::write_bytes` conditions
+    // hold structurally for the fresh stack local `u`. Ensures covers bytes only;
+    // whether they form a valid `T` remains the caller's concern.
+    #[ensures(|result: &MaybeUninit<T>| {
+        // SAFETY: `zeroed` just initialized every backing byte; `u8` has no
+        // invalid bit patterns.
+        let bytes = unsafe {
+            slice::from_raw_parts(result.as_ptr() as *const u8, crate::mem::size_of::<T>())
+        };
+        bytes.iter().all(|b| *b == 0)
+    })]
     pub const fn zeroed() -> MaybeUninit<T> {
         let mut u = MaybeUninit::<T>::uninit();
         // SAFETY: `u.as_mut_ptr()` points to allocated memory.
@@ -612,7 +627,7 @@ impl<T> MaybeUninit<T> {
     /// until they are, it is advisable to avoid them.)
     #[stable(feature = "maybe_uninit", since = "1.36.0")]
     #[rustc_const_stable(feature = "const_maybe_uninit_as_ptr", since = "1.59.0")]
-    #[rustc_as_ptr]
+    #[lint::as_ptr]
     #[inline(always)]
     pub const fn as_ptr(&self) -> *const T {
         // `MaybeUninit` and `ManuallyDrop` are both `repr(transparent)` so we can cast the pointer.
@@ -654,7 +669,7 @@ impl<T> MaybeUninit<T> {
     /// until they are, it is advisable to avoid them.)
     #[stable(feature = "maybe_uninit", since = "1.36.0")]
     #[rustc_const_stable(feature = "const_maybe_uninit_as_mut_ptr", since = "1.83.0")]
-    #[rustc_as_ptr]
+    #[lint::as_ptr]
     #[inline(always)]
     pub const fn as_mut_ptr(&mut self) -> *mut T {
         // `MaybeUninit` and `ManuallyDrop` are both `repr(transparent)` so we can cast the pointer.
@@ -1062,6 +1077,9 @@ impl<T> MaybeUninit<T> {
     /// Note that even if the contents of a `MaybeUninit` have been initialized, the value may still
     /// contain padding bytes which are left uninitialized.
     ///
+    /// This method requires `T: Freeze`. It's not available for types with interior mutability,
+    /// such as `Cell<T>`.
+    ///
     /// # Examples
     ///
     /// ```
@@ -1075,7 +1093,10 @@ impl<T> MaybeUninit<T> {
     /// assert_eq!(bytes, val.to_ne_bytes());
     /// ```
     #[unstable(feature = "maybe_uninit_as_bytes", issue = "93092")]
-    pub const fn as_bytes(&self) -> &[MaybeUninit<u8>] {
+    pub const fn as_bytes(&self) -> &[MaybeUninit<u8>]
+    where
+        T: Freeze,
+    {
         // SAFETY: MaybeUninit<u8> is always valid, even for padding bytes
         unsafe {
             slice::from_raw_parts(self.as_ptr().cast::<MaybeUninit<u8>>(), super::size_of::<T>())
@@ -1114,6 +1135,35 @@ impl<T> MaybeUninit<T> {
                 super::size_of::<T>(),
             )
         }
+    }
+
+    /// Converts `&T` to `&MaybeUninit<T>`.
+    ///
+    /// The value stays initialized. This function changes only the type of the reference.
+    ///
+    /// There is no corresponding `from_mut` method, because it could allow writing uninitialized memory
+    /// into the original value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(maybe_uninit_from_ref, maybe_uninit_as_bytes)]
+    /// use std::mem::MaybeUninit;
+    ///
+    /// let val = 0x12345678_u32;
+    /// let uninit = MaybeUninit::from_ref(&val);
+    /// let bytes = uninit.as_bytes();
+    ///
+    /// // All bytes of a u32 are initialized, so assume_init is sound here:
+    /// let byte_val = unsafe { bytes[0].assume_init() };
+    /// assert_eq!(byte_val, val.to_ne_bytes()[0]);
+    /// ```
+    #[unstable(feature = "maybe_uninit_from_ref", issue = "165213")]
+    #[inline]
+    #[must_use]
+    pub const fn from_ref(r: &T) -> &MaybeUninit<T> {
+        // SAFETY: `MaybeUninit<T>` is repr(transparent) and every initialized T is a valid MaybeUninit<T>
+        unsafe { &*ptr::from_ref(r).cast() }
     }
 }
 
@@ -1375,6 +1425,8 @@ impl<T> [MaybeUninit<T>] {
             };
         }
 
+        spec_default_zero!(bool); // The default is `false == 0`.
+        spec_default_zero!(char);
         spec_default_zero!(i8);
         spec_default_zero!(u8);
         spec_default_zero!(i16);
@@ -1387,6 +1439,11 @@ impl<T> [MaybeUninit<T>] {
         spec_default_zero!(u128);
         spec_default_zero!(isize);
         spec_default_zero!(usize);
+        // +0.0 has binary representation of all-zeros:
+        spec_default_zero!(f16);
+        spec_default_zero!(f32);
+        spec_default_zero!(f64);
+        spec_default_zero!(f128);
 
         T::write_default(self)
     }
@@ -1478,6 +1535,9 @@ impl<T> [MaybeUninit<T>] {
     /// Note that even if the contents of a `MaybeUninit` have been initialized, the value may still
     /// contain padding bytes which are left uninitialized.
     ///
+    /// This method requires `T: Freeze`. It's not available for types with interior mutability,
+    /// such as `Cell<T>`.
+    ///
     /// # Examples
     ///
     /// ```
@@ -1492,7 +1552,10 @@ impl<T> [MaybeUninit<T>] {
     /// assert_eq!(&[val1, val2], &[0x1234u16, 0x5678u16]);
     /// ```
     #[unstable(feature = "maybe_uninit_as_bytes", issue = "93092")]
-    pub const fn as_bytes(&self) -> &[MaybeUninit<u8>] {
+    pub const fn as_bytes(&self) -> &[MaybeUninit<u8>]
+    where
+        T: Freeze,
+    {
         // SAFETY: MaybeUninit<u8> is always valid, even for padding bytes
         unsafe {
             slice::from_raw_parts(self.as_ptr().cast::<MaybeUninit<u8>>(), super::size_of_val(self))
@@ -1731,4 +1794,56 @@ impl<T: TrivialClone> SpecFill<T> for [MaybeUninit<T>] {
         // initialization guards and such.
         self.fill_with(|| MaybeUninit::new(unsafe { ptr::read(&value) }));
     }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    // -------------------------------------------------------------------------
+    // zeroed: `write_bytes` is body-less (Kani models it as `memset`), so nothing
+    // to stub (https://github.com/model-checking/kani/issues/3325); intrinsic-side
+    // contract is on `write_bytes_wrapper` in `intrinsics/mod.rs`. The byte-level
+    // `ensures` also pins the model's fidelity. No arguments, so non-vacuous.
+
+    // Safety + byte-fidelity family; `(u8, bool)` covers the documented
+    // padding-free "all fields hold bit-pattern 0" case.
+    macro_rules! check_zeroed_usage_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(MaybeUninit::zeroed)]
+            fn $harness() {
+                let _m = MaybeUninit::<$ty>::zeroed();
+                kani::cover(true, "zeroed usage is reachable");
+            }
+        };
+    }
+
+    check_zeroed_usage_for!(check_zeroed_usage_u8, u8);
+    check_zeroed_usage_for!(check_zeroed_usage_u32, u32);
+    check_zeroed_usage_for!(check_zeroed_usage_u64, u64);
+    check_zeroed_usage_for!(check_zeroed_usage_i128, i128);
+    check_zeroed_usage_for!(check_zeroed_usage_char, char);
+    check_zeroed_usage_for!(check_zeroed_usage_pair, (u8, bool));
+
+    // Value family: connects the byte-level `ensures` to the numeric zero for
+    // types where the all-zero pattern is a valid value.
+    macro_rules! check_zeroed_value_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(MaybeUninit::zeroed)]
+            fn $harness() {
+                let m = MaybeUninit::<$ty>::zeroed();
+                kani::cover(true, "zeroed value usage is reachable");
+                // SAFETY: `0` is a valid bit pattern for `$ty`.
+                let v = unsafe { m.assume_init() };
+                assert!(v == 0 as $ty, "zeroed initializes to the numeric zero");
+            }
+        };
+    }
+
+    check_zeroed_value_for!(check_zeroed_value_u8, u8);
+    check_zeroed_value_for!(check_zeroed_value_u32, u32);
+    check_zeroed_value_for!(check_zeroed_value_u64, u64);
+    check_zeroed_value_for!(check_zeroed_value_i128, i128);
 }

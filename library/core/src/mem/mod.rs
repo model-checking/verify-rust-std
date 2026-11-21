@@ -30,6 +30,8 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
+use safety::{ensures, requires};
+
 use crate::alloc::Layout;
 use crate::clone::TrivialClone;
 use crate::cmp::Ordering;
@@ -38,10 +40,10 @@ use crate::kani;
 use crate::marker::{Destruct, DiscriminantKind};
 use crate::panic::const_assert;
 use crate::ub_checks::assert_unsafe_precondition;
-use crate::{clone, cmp, fmt, hash, intrinsics, ptr};
+use crate::{clone, cmp, fmt, hash, intrinsics, ptr, ub_checks};
 
 mod alignment;
-#[unstable(feature = "ptr_alignment_type", issue = "102070")]
+#[stable(feature = "alignment_type", since = "CURRENT_RUSTC_VERSION")]
 pub use alignment::Alignment;
 
 mod manually_drop;
@@ -61,7 +63,7 @@ mod transmutability;
 pub use transmutability::{Assume, TransmuteFrom};
 
 mod drop_guard;
-#[stable(feature = "drop_guard", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "drop_guard", since = "1.100.0")]
 pub use drop_guard::DropGuard;
 
 // This one has to be a re-export (rather than wrapping the underlying intrinsic) so that we can do
@@ -580,6 +582,10 @@ pub const fn align_of<T>() -> usize {
 #[must_use]
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_const_stable(feature = "const_align_of_val", since = "1.85.0")]
+// No `requires` (challenge 2, part 2): the intrinsic's sole documented condition,
+// `can_dereference`, holds structurally for the live reference `val: &T`.
+// Intrinsic-side contract: `align_of_val_{sized,slice}_wrapper` in `intrinsics/mod.rs`.
+#[ensures(|result: &usize| result.is_power_of_two())]
 pub const fn align_of_val<T: ?Sized>(val: &T) -> usize {
     // SAFETY: val is a reference, so it's a valid raw pointer
     unsafe { intrinsics::align_of_val(val) }
@@ -639,6 +645,10 @@ pub const fn align_of_val<T: ?Sized>(val: &T) -> usize {
 #[must_use]
 #[stable(feature = "layout_for_ptr", since = "1.99.0")]
 #[rustc_const_stable(feature = "layout_for_ptr", since = "1.99.0")]
+// No `requires` (challenge 2, part 3): the documented `# Safety` condition is per-case,
+// and the Kani-modeled intrinsic reads only pointer metadata, never the referent;
+// per-case demos: `align_of_val_{sized,slice}_wrapper` in `intrinsics/mod.rs`.
+#[ensures(|result: &usize| result.is_power_of_two())]
 pub const unsafe fn align_of_val_raw<T: ?Sized>(val: *const T) -> usize {
     // SAFETY: the caller must provide a valid raw pointer
     unsafe { intrinsics::align_of_val(val) }
@@ -841,7 +851,7 @@ pub const fn swap<T>(x: &mut T, y: &mut T) {
 
 /// Replaces `dest` with the default value of `T`, returning the previous `dest` value.
 ///
-/// * If you want to replace the values of two variables, see [`swap`].
+/// * If you want to switch the values of two variables, see [`swap`].
 /// * If you want to replace with a passed value instead of the default value, see [`replace`].
 ///
 /// # Examples
@@ -1289,6 +1299,82 @@ pub const unsafe fn transmute_neo<Src, Dst>(src: Src) -> Dst {
 #[stable(feature = "discriminant_value", since = "1.21.0")]
 pub struct Discriminant<T>(<T as DiscriminantKind>::Discriminant);
 
+/// Implementation detail for [`Discriminant::ord`].
+#[unstable(feature = "discriminant_ord", issue = "165438")]
+pub struct DiscriminantOrd<T>(<T as DiscriminantKind>::Discriminant);
+
+impl<T> Discriminant<T> {
+    /// Returns an ordering key for this [`Discriminant`] that has an unstable
+    /// implementation with regards to *semantic versioning*. This is not the be confused
+    /// with an [*"unstable sort"*].
+    ///
+    /// Because all types have a publicly accessible [`Discriminant`], regardless
+    /// of whether the order of said type is a part of its stability guarantees,
+    /// the exact ordering of the returned [`DiscriminantOrd`] cannot be relied on
+    /// for stability across crates. This is similar to the stability of the size
+    /// of a type as returned by [`size_of`].
+    ///
+    /// Enum values will be ordered based on the source declaration and `repr` values
+    /// of their variants, consistent with derived implementations of [`PartialOrd`]
+    /// and [`Ord`]. Noting that only the discriminant and no field values are considered.
+    /// All other kinds of values have an *unspecified* ordering, but will _typically_
+    /// be trivially ordered as equivalent.
+    ///
+    /// Users of this function should instead rely on the [`Ord`] implementation
+    /// of `T` wherever possible.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(discriminant_ord)]
+    ///
+    /// use std::cmp::Ordering;
+    /// use std::mem::discriminant;
+    /// # use std::assert_matches;
+    ///
+    /// enum Foo { A(i32), B(i32) }
+    ///
+    /// // Equivalent arms will compare equal regardless of contained data
+    /// assert_matches!(
+    ///     discriminant(&Foo::A(1)).ord().cmp(&discriminant(&Foo::A(2)).ord()),
+    ///     Ordering::Equal,
+    /// );
+    ///
+    /// // Inequivalent arms will compare not-equal
+    /// assert_matches!(
+    ///     discriminant(&Foo::A(1)).ord().cmp(&discriminant(&Foo::B(1)).ord()),
+    ///     Ordering::Less | Ordering::Greater,
+    /// );
+    /// ```
+    ///
+    /// Upstream libraries and the compiler are free to change the exact ordering
+    /// of discriminants. The below _may_ break at any time:
+    ///
+    /// ```should_panic
+    /// # #![feature(discriminant_ord)]
+    /// #
+    /// # use std::cmp::Ordering;
+    /// # use std::mem::discriminant;
+    /// # use std::assert_matches;
+    /// #
+    /// # enum Foo { B(i32), A(i32) } // Deliberately swapped so this example panics
+    /// #
+    /// // Foo::A is declared before Foo::B, but that ordering is not stable
+    /// assert_matches!(
+    ///     discriminant(&Foo::A(0)).ord().cmp(&discriminant(&Foo::B(0)).ord()),
+    ///     Ordering::Less,
+    /// );
+    /// ```
+    ///
+    /// ["unstable sort"]: slice::sort_unstable
+    #[unstable(feature = "discriminant_ord", issue = "165438")]
+    #[must_use]
+    #[inline]
+    pub const fn ord(&self) -> DiscriminantOrd<T> {
+        DiscriminantOrd::<T>(self.0)
+    }
+}
+
 // N.B. These trait implementations cannot be derived because we don't want any bounds on T.
 
 #[stable(feature = "discriminant_value", since = "1.21.0")]
@@ -1326,6 +1412,58 @@ impl<T> hash::Hash for Discriminant<T> {
 impl<T> fmt::Debug for Discriminant<T> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_tuple("Discriminant").field(&self.0).finish()
+    }
+}
+
+#[unstable(feature = "discriminant_ord", issue = "165438")]
+impl<T> Copy for DiscriminantOrd<T> {}
+
+#[unstable(feature = "discriminant_ord", issue = "165438")]
+impl<T> clone::Clone for DiscriminantOrd<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+#[doc(hidden)]
+#[unstable(feature = "trivial_clone", issue = "none")]
+unsafe impl<T> TrivialClone for DiscriminantOrd<T> {}
+
+#[unstable(feature = "discriminant_ord", issue = "165438")]
+impl<T> cmp::PartialEq for DiscriminantOrd<T> {
+    fn eq(&self, rhs: &Self) -> bool {
+        self.0 == rhs.0
+    }
+}
+
+#[unstable(feature = "discriminant_ord", issue = "165438")]
+impl<T> cmp::Eq for DiscriminantOrd<T> {}
+
+#[unstable(feature = "discriminant_ord", issue = "165438")]
+impl<T> hash::Hash for DiscriminantOrd<T> {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+#[unstable(feature = "discriminant_ord", issue = "165438")]
+impl<T> fmt::Debug for DiscriminantOrd<T> {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt.debug_tuple("DiscriminantOrd").field(&self.0).finish()
+    }
+}
+
+#[unstable(feature = "discriminant_ord", issue = "165438")]
+impl<T> cmp::PartialOrd for DiscriminantOrd<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        self.0.partial_cmp(&other.0)
+    }
+}
+
+#[unstable(feature = "discriminant_ord", issue = "165438")]
+impl<T> cmp::Ord for DiscriminantOrd<T> {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        self.0.cmp(&other.0)
     }
 }
 
@@ -1481,7 +1619,7 @@ pub trait SizedTypeProperties: Sized {
     const ALIGN: usize = intrinsics::align_of::<Self>();
 
     #[doc(hidden)]
-    #[unstable(feature = "ptr_alignment_type", issue = "102070")]
+    #[unstable(feature = "sized_type_properties", issue = "none")]
     const ALIGNMENT: Alignment = {
         // This can't panic since type alignment is always a power of two.
         Alignment::new(Self::ALIGN).unwrap()
@@ -1668,10 +1806,10 @@ impl<T> SizedTypeProperties for T {}
     note = "this macro expects a container type and a (nested) field path, like `offset_of!(Type, field)`"
 )]
 #[doc(alias = "memoffset")]
-#[allow_internal_unstable(builtin_syntax, core_intrinsics)]
+#[allow_internal_unstable(core_intrinsics, internal_syntax)]
 #[diagnostic::opaque]
 pub macro offset_of($Container:ty, $($fields:expr)+ $(,)?) {
-    const { builtin # offset_of($Container, $($fields)+) }
+    const { k#offset_of($Container, $($fields)+) }
 }
 
 /// Create a fresh instance of the inhabited ZST type `T`.
@@ -1705,7 +1843,6 @@ pub macro offset_of($Container:ty, $($fields:expr)+ $(,)?) {
 /// # Examples
 ///
 /// ```
-/// #![feature(mem_conjure_zst)]
 /// use std::mem::conjure_zst;
 ///
 /// assert_eq!(unsafe { conjure_zst::<()>() }, ());
@@ -1713,8 +1850,9 @@ pub macro offset_of($Container:ty, $($fields:expr)+ $(,)?) {
 /// ```
 ///
 /// [inhabited]: https://doc.rust-lang.org/reference/glossary.html#inhabited
-#[unstable(feature = "mem_conjure_zst", issue = "95383")]
-#[rustc_const_unstable(feature = "mem_conjure_zst", issue = "95383")]
+#[stable(feature = "mem_conjure_zst", since = "1.100.0")]
+#[rustc_const_stable(feature = "mem_conjure_zst", since = "1.100.0")]
+#[rustc_allow_const_fn_unstable(const_type_name)] // type_name() called only at run time
 pub const unsafe fn conjure_zst<T>() -> T {
     const_assert!(
         T::IS_ZST,
@@ -1765,4 +1903,148 @@ mod verify {
         forget(x);
         forget(y);
     }
+
+    // -------------------------------------------------------------------------
+    // swap: two live `&mut T` structurally satisfy the `typed_swap_nonoverlapping`
+    // contract (`intrinsics/mod.rs`). `stub_verified` turns each intrinsic
+    // `requires` into a call-site obligation; without the stub they are absent.
+    // Value equality is per concrete type: bound is only `T`, no `PartialEq`.
+    macro_rules! check_swap_usage_for {
+        ($safety:ident, $value:ident, $ty:ty) => {
+            #[kani::proof_for_contract(swap)]
+            #[kani::stub_verified(intrinsics::typed_swap_nonoverlapping)]
+            fn $safety() {
+                let mut x: $ty = kani::any();
+                let mut y: $ty = kani::any();
+                // Non-vacuity witness: no assume narrows the inputs.
+                kani::cover(true, "swap usage: the &mut argument space is non-empty");
+                swap(&mut x, &mut y);
+            }
+
+            #[kani::proof_for_contract(swap)]
+            fn $value() {
+                let mut x: $ty = kani::any();
+                let mut y: $ty = kani::any();
+                let old_x = x;
+                let old_y = y;
+                kani::cover(old_x != old_y, "swap exchanges two distinct values");
+                swap(&mut x, &mut y);
+                assert!(x == old_y && y == old_x, "swap exchanges the two values");
+            }
+        };
+    }
+
+    check_swap_usage_for!(check_swap_usage_u8, check_swap_value_u8, u8);
+    check_swap_usage_for!(check_swap_usage_u16, check_swap_value_u16, u16);
+    check_swap_usage_for!(check_swap_usage_u32, check_swap_value_u32, u32);
+    check_swap_usage_for!(check_swap_usage_u64, check_swap_value_u64, u64);
+    check_swap_usage_for!(check_swap_usage_char, check_swap_value_char, char);
+
+    // -------------------------------------------------------------------------
+    // align_of_val: body-less intrinsic, so no contract to stub
+    // (https://github.com/model-checking/kani/issues/3325); intrinsic-side contract
+    // is on `align_of_val_{sized,slice}_wrapper` in `intrinsics/mod.rs`. Harnesses
+    // pin Kani's model per type (generic `ensures` impossible for `T: ?Sized`).
+
+    // Sized case: model must return `align_of::<T>()`, pointer-independent.
+    macro_rules! check_align_of_val_usage_sized_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val)]
+            fn $harness() {
+                let val: $ty = kani::any();
+                let r = align_of_val(&val);
+                kani::cover(true, "align_of_val usage (sized) is reachable");
+                assert_eq!(r, align_of::<$ty>());
+            }
+        };
+    }
+
+    check_align_of_val_usage_sized_for!(check_align_of_val_usage_u8, u8);
+    check_align_of_val_usage_sized_for!(check_align_of_val_usage_u32, u32);
+    check_align_of_val_usage_sized_for!(check_align_of_val_usage_u64, u64);
+    check_align_of_val_usage_sized_for!(check_align_of_val_usage_i128, i128);
+    check_align_of_val_usage_sized_for!(check_align_of_val_usage_char, char);
+
+    // Slice case: a slice's alignment is its element's, independent of `len`.
+    macro_rules! check_align_of_val_usage_slice_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val)]
+            fn $harness() {
+                const N: usize = 4;
+                let arr: [$ty; N] = kani::any();
+                let len: usize = kani::any_where(|l: &usize| *l <= N);
+                let s: &[$ty] = &arr[..len];
+                kani::cover(len > 0, "align_of_val usage measures a non-empty slice");
+                let r = align_of_val(s);
+                assert_eq!(r, align_of::<$ty>());
+            }
+        };
+    }
+
+    check_align_of_val_usage_slice_for!(check_align_of_val_usage_slice_u8, u8);
+    check_align_of_val_usage_slice_for!(check_align_of_val_usage_slice_u32, u32);
+    check_align_of_val_usage_slice_for!(check_align_of_val_usage_slice_i64, i64);
+
+    // -------------------------------------------------------------------------
+    // align_of_val_raw (challenge 2, part 3): raw-pointer sibling; same body-less
+    // modeling as above, pinned per type. Each harness builds `val` from a live
+    // allocation, so the input space is non-empty.
+
+    // Sized case: model must return `align_of::<T>()`, pointer-independent.
+    macro_rules! check_align_of_val_raw_sized_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_raw)]
+            fn $harness() {
+                let val: $ty = kani::any();
+                let ptr: *const $ty = &val;
+                let align = unsafe { align_of_val_raw(ptr) };
+                kani::cover(true, "align_of_val_raw (sized) call is reachable");
+                assert_eq!(align, align_of::<$ty>());
+            }
+        };
+    }
+
+    check_align_of_val_raw_sized_for!(check_align_of_val_raw_u8, u8);
+    check_align_of_val_raw_sized_for!(check_align_of_val_raw_u32, u32);
+    check_align_of_val_raw_sized_for!(check_align_of_val_raw_u64, u64);
+    check_align_of_val_raw_sized_for!(check_align_of_val_raw_i128, i128);
+    check_align_of_val_raw_sized_for!(check_align_of_val_raw_char, char);
+
+    // Sized + dangling: demonstrates the documented "always safe if `T: Sized`",
+    // even non-dereferenceable (the modeled intrinsic reads no memory).
+    macro_rules! check_align_of_val_raw_dangling_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_raw)]
+            fn $harness() {
+                let ptr: *const $ty = crate::ptr::dangling();
+                let align = unsafe { align_of_val_raw(ptr) };
+                kani::cover(true, "align_of_val_raw accepts a dangling sized pointer");
+                assert_eq!(align, align_of::<$ty>());
+            }
+        };
+    }
+
+    check_align_of_val_raw_dangling_for!(check_align_of_val_raw_dangling_u8, u8);
+    check_align_of_val_raw_dangling_for!(check_align_of_val_raw_dangling_u64, u64);
+
+    // Slice case: initialized backing array, as `can_dereference` requires under
+    // `-Z uninit-checks`; alignment is independent of `len`.
+    macro_rules! check_align_of_val_raw_slice_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_raw)]
+            fn $harness() {
+                const N: usize = 4;
+                let arr: [$ty; N] = kani::any();
+                let len: usize = kani::any_where(|l: &usize| *l <= N);
+                let ptr: *const [$ty] = core::ptr::slice_from_raw_parts(arr.as_ptr(), len);
+                let align = unsafe { align_of_val_raw(ptr) };
+                kani::cover(len > 0, "align_of_val_raw measures a non-empty slice");
+                assert_eq!(align, align_of::<$ty>());
+            }
+        };
+    }
+
+    check_align_of_val_raw_slice_for!(check_align_of_val_raw_slice_u8, u8);
+    check_align_of_val_raw_slice_for!(check_align_of_val_raw_slice_u32, u32);
+    check_align_of_val_raw_slice_for!(check_align_of_val_raw_slice_i64, i64);
 }

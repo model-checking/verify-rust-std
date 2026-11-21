@@ -151,8 +151,8 @@ fn gen_spec(in_file: String, ext_name: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn gen_bind(in_file: &str, ext_name: &str, out_path: &Path) -> io::Result<()> {
-    let f = File::open(in_file).unwrap_or_else(|_| panic!("Failed to open {in_file}"));
+fn gen_bind(path: &Path, filename: &str, ext_name: &str, out_path: &Path) -> io::Result<()> {
+    let f = File::open(path).unwrap_or_else(|_| panic!("Failed to open {path:?}"));
     let f = BufReader::new(f);
 
     let target: TargetFeature = TargetFeature::new(ext_name);
@@ -167,15 +167,15 @@ fn gen_bind(in_file: &str, ext_name: &str, out_path: &Path) -> io::Result<()> {
     out.push_str(&format!(
         r#"// This code is automatically generated. DO NOT MODIFY.
 //
-// Instead, modify `{in_file}` and run the following command to re-generate this file:
+// Instead, modify `crates/stdarch-gen-loongarch/{filename}` and run the following command to re-generate this file:
 //
 // ```
-// OUT_DIR=`pwd`/crates/core_arch cargo run -p stdarch-gen-loongarch -- {in_file}
+// OUT_DIR=`pwd`/crates/core_arch cargo run -p stdarch-gen-loongarch -- crates/stdarch-gen-loongarch/{filename}
 // ```
 
 use crate::mem::transmute;
 use super::super::*;
-"#
+"#,
     ));
 
     out.push_str(
@@ -369,7 +369,6 @@ fn gen_bind_body(
             _ => panic!("unsupported type"),
         }
     };
-    let mut rustc_legacy_const_generics = "";
     let fn_decl = {
         let fn_output = if out_t.to_lowercase() == "void" {
             String::new()
@@ -410,7 +409,6 @@ fn gen_bind_body(
                 ),
                 _ => panic!("unsupported assembly format: {}", asm_fmts[1]),
             };
-            rustc_legacy_const_generics = "rustc_legacy_const_generics(0)";
         } else if para_num == 2 && (in_t[1] == "UQI" || in_t[1] == "USI") {
             fn_inputs = if asm_fmts[2].starts_with("ui") {
                 format!(
@@ -422,7 +420,6 @@ fn gen_bind_body(
             } else {
                 panic!("unsupported assembly format: {}", asm_fmts[2]);
             };
-            rustc_legacy_const_generics = "rustc_legacy_const_generics(1)";
         } else if para_num == 2 && in_t[1] == "QI" {
             fn_inputs = if asm_fmts[2].starts_with("si") {
                 format!(
@@ -434,7 +431,6 @@ fn gen_bind_body(
             } else {
                 panic!("unsupported assembly format: {}", asm_fmts[2]);
             };
-            rustc_legacy_const_generics = "rustc_legacy_const_generics(1)";
         } else if para_num == 2 && in_t[0] == "CVPOINTER" && in_t[1] == "SI" {
             fn_inputs = if asm_fmts[2].starts_with("si") {
                 format!(
@@ -446,7 +442,6 @@ fn gen_bind_body(
             } else {
                 panic!("unsupported assembly format: {}", asm_fmts[2]);
             };
-            rustc_legacy_const_generics = "rustc_legacy_const_generics(1)";
         } else if para_num == 2 && in_t[0] == "CVPOINTER" && in_t[1] == "DI" {
             fn_inputs = match asm_fmts[2].as_str() {
                 "rk" => format!(
@@ -468,7 +463,6 @@ fn gen_bind_body(
             } else {
                 panic!("unsupported assembly format: {}", asm_fmts[2])
             };
-            rustc_legacy_const_generics = "rustc_legacy_const_generics(2)";
         } else if para_num == 3 && in_t[1] == "CVPOINTER" && in_t[2] == "SI" {
             fn_inputs = match asm_fmts[2].as_str() {
                 "si12" => format!(
@@ -479,7 +473,6 @@ fn gen_bind_body(
                 ),
                 _ => panic!("unsupported assembly format: {}", asm_fmts[2]),
             };
-            rustc_legacy_const_generics = "rustc_legacy_const_generics(2)";
         } else if para_num == 3 && in_t[1] == "CVPOINTER" && in_t[2] == "DI" {
             fn_inputs = match asm_fmts[2].as_str() {
                 "rk" => format!(
@@ -505,7 +498,6 @@ fn gen_bind_body(
                     asm_fmts[2], current_name
                 ),
             };
-            rustc_legacy_const_generics = "rustc_legacy_const_generics(2, 3)";
         }
         format!(
             "pub {}fn {current_name}{fn_inputs} {fn_output}",
@@ -612,30 +604,16 @@ fn gen_bind_body(
             ),
         }
     }
-    let function = if !rustc_legacy_const_generics.is_empty() {
-        format!(
-            r#"
+    let function = format!(
+        r#"
 #[inline]{target_feature}
-#[{rustc_legacy_const_generics}]
-#[unstable(feature = "stdarch_loongarch", issue = "117427")]
+#[stable(feature = "stdarch_loongarch_simd", since = "CURRENT_RUSTC_VERSION")]
 {fn_decl}{{
     {call_params}
 }}
 "#,
-            target_feature = target.to_target_feature_attr(current_name)
-        )
-    } else {
-        format!(
-            r#"
-#[inline]{target_feature}
-#[unstable(feature = "stdarch_loongarch", issue = "117427")]
-{fn_decl}{{
-    {call_params}
-}}
-"#,
-            target_feature = target.to_target_feature_attr(current_name)
-        )
-    };
+        target_feature = target.to_target_feature_attr(current_name)
+    );
     (link_function, function)
 }
 
@@ -1631,10 +1609,11 @@ pub fn main() -> Result<(), String> {
     let arguments = &args.arguments;
     if arguments.len() == 1 && (arguments[0] == "lsx" || arguments[0] == "lasx") {
         let extension = arguments[0].as_str();
-        let spec_rel = format!("crates/stdarch-gen-loongarch/{extension}.spec");
+        let filename = format!("{extension}.spec");
+        let path = crate_dir.join(&filename);
         let committed = core_arch_src.join("loongarch64").join(extension);
         run_generator(&ctx, &committed, mode, |out_dir| {
-            gen_bind(&spec_rel, extension, out_dir)
+            gen_bind(&path, &filename, extension, out_dir)
         })
         .map_err(|e| e.to_string())?;
     } else {
@@ -1660,7 +1639,8 @@ pub fn main() -> Result<(), String> {
             .join("src")
             .join("loongarch64")
             .join(ext_name);
-        gen_bind(&in_file, ext_name, &out_path).map_err(|e| e.to_string())?;
+        gen_bind(Path::new(&in_file), &in_file_name, ext_name, &out_path)
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }

@@ -86,13 +86,14 @@ impl Thread {
                     // >= PTHREAD_STACK_MIN, it must be an alignment issue.
                     // Round up to the nearest page and try again.
                     let page_size = sys::pal::conf::page_size();
-                    let stack_size =
-                        (stack_size + page_size - 1) & (-(page_size as isize - 1) as usize - 1);
+                    let stack_size = stack_size.checked_next_multiple_of(page_size);
 
                     // Some libc implementations, e.g. musl, place an upper bound
                     // on the stack size, in which case we can only gracefully return
                     // an error here.
-                    if libc::pthread_attr_setstacksize(attr.get(), stack_size) != 0 {
+                    if stack_size.is_none_or(|stack_size| {
+                        libc::pthread_attr_setstacksize(attr.get(), stack_size) != 0
+                    }) {
                         return Err(io::const_error!(
                             io::ErrorKind::InvalidInput,
                             "invalid stack size"
@@ -162,7 +163,6 @@ pub fn available_parallelism() -> io::Result<NonZero<usize>> {
             target_os = "hurd",
             target_os = "linux",
             target_os = "aix",
-            target_os = "freebsd",
             target_vendor = "apple",
             target_os = "cygwin",
             target_os = "redox",
@@ -175,17 +175,9 @@ pub fn available_parallelism() -> io::Result<NonZero<usize>> {
             #[cfg(any(target_os = "android", target_os = "linux"))]
             {
                 quota = cgroups::quota().max(1);
-            }
-
-            #[cfg(any(target_os = "android", target_os = "linux", target_os = "freebsd"))]
-            {
-                #[cfg(not(target_os = "freebsd"))]
-                type Cpuset = libc::cpu_set_t;
-                #[cfg(target_os = "freebsd")]
-                type Cpuset = libc::cpuset_t;
-                let mut set: Cpuset = unsafe { mem::zeroed() };
+                let mut set: libc::cpu_set_t = unsafe { mem::zeroed() };
                 unsafe {
-                    if libc::sched_getaffinity(0, size_of::<Cpuset>(), &mut set) == 0 {
+                    if libc::sched_getaffinity(0, size_of::<libc::cpu_set_t>(), &mut set) == 0 {
                         let count = libc::CPU_COUNT(&set) as usize;
                         let count = count.min(quota);
 
@@ -210,8 +202,33 @@ pub fn available_parallelism() -> io::Result<NonZero<usize>> {
                 }
             }
         }
-        any(target_os = "dragonfly", target_os = "openbsd", target_os = "netbsd") => {
+        any(
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd",
+        ) => {
             use crate::ptr;
+
+            #[cfg(target_os = "freebsd")]
+            {
+                let mut set: libc::cpuset_t = unsafe { mem::zeroed() };
+                unsafe {
+                    if libc::cpuset_getaffinity(
+                        libc::CPU_LEVEL_WHICH,
+                        libc::CPU_WHICH_PID,
+                        -1,
+                        size_of::<libc::cpuset_t>(),
+                        &mut set,
+                    ) == 0
+                    {
+                        let count = libc::CPU_COUNT(&set) as usize;
+                        if count > 0 {
+                            return Ok(NonZero::new_unchecked(count));
+                        }
+                    }
+                }
+            }
 
             #[cfg(target_os = "netbsd")]
             {

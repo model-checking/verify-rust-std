@@ -94,6 +94,7 @@ pub mod fallback;
 pub mod gpu;
 mod macros;
 pub mod mir;
+pub mod reflection;
 pub mod simd;
 
 use macros::intrinsic_dispatch_on_type;
@@ -101,7 +102,9 @@ use macros::intrinsic_dispatch_on_type;
 // These imports are used for simplifying intra-doc links
 #[allow(unused_imports)]
 #[cfg(all(target_has_atomic = "8", target_has_atomic = "32", target_has_atomic = "ptr"))]
-use crate::sync::atomic::{self, AtomicBool, AtomicI32, AtomicIsize, AtomicU32, Ordering};
+use crate::sync::atomic::{
+    self, AtomicBool, AtomicI32, AtomicIsize, AtomicPtr, AtomicU32, Ordering,
+};
 
 /// A type for atomic ordering parameters for intrinsics. This is a separate type from
 /// `atomic::Ordering` so that we can make it `ConstParamTy` and fix the values used here without a
@@ -121,12 +124,28 @@ pub enum AtomicOrdering {
 // N.B., these intrinsics take raw pointers because they mutate aliased
 // memory, which is not valid for either `&` or `&mut`.
 
-/// Stores a value if the current value is the same as the `old` value.
+/// Stores a value if the current value is the same as the `old` value,
+/// with the returned `T` being the previous value and the returned `bool` being
+/// whether the exchange was successful.
 /// `T` must be an integer or pointer type.
+///
+/// # Safety
+///
+/// * If `T` is an integer type, this is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::compare_exchange`].
+///   Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
+/// * If `T` is a pointer type, this is equivalent to [`AtomicPtr<P>::from_ptr`] followed by [`AtomicPtr<P>::compare_exchange`],
+///   where `P` is the pointee type of the pointer.
+///   Refer to the documentation of [`AtomicPtr<P>::from_ptr`] for safety requirements.
 ///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `compare_exchange` method.
 /// For example, [`AtomicBool::compare_exchange`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::compare_exchange`]: AtomicI32::compare_exchange
+/// [`AtomicPtr<P>::from_ptr`]: AtomicPtr::from_ptr
+/// [`AtomicPtr<P>::compare_exchange`]: AtomicPtr::compare_exchange
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn atomic_cxchg<
@@ -139,12 +158,28 @@ pub const unsafe fn atomic_cxchg<
     src: T,
 ) -> (T, bool);
 
-/// Stores a value if the current value is the same as the `old` value.
+/// Stores a value if the current value is the same as the `old` value,
+/// with the returned `T` being the previous value and the returned `bool` being
+/// whether the exchange was successful.
 /// `T` must be an integer or pointer type. The comparison may spuriously fail.
+///
+/// # Safety
+///
+/// * If `T` is an integer type, this is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::compare_exchange_weak`].
+///   Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
+/// * If `T` is a pointer type, this is equivalent to [`AtomicPtr<P>::from_ptr`] followed by [`AtomicPtr<P>::compare_exchange_weak`],
+///   where `P` is the pointee type of the pointer.
+///   Refer to the documentation of [`AtomicPtr<P>::from_ptr`] for safety requirements.
 ///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `compare_exchange_weak` method.
 /// For example, [`AtomicBool::compare_exchange_weak`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::compare_exchange_weak`]: AtomicI32::compare_exchange_weak
+/// [`AtomicPtr<P>::from_ptr`]: AtomicPtr::from_ptr
+/// [`AtomicPtr<P>::compare_exchange_weak`]: AtomicPtr::compare_exchange_weak
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn atomic_cxchgweak<
@@ -162,18 +197,18 @@ pub const unsafe fn atomic_cxchgweak<
 ///
 /// # Safety
 ///
-/// * If `VOLATILE` is `true`, this is equivalent to [Atomic::load_volatile].
+/// * If `VOLATILE` is `true`, this is equivalent to [`Atomic<T>::load_volatile`].
 ///   Refer to the documentation of that method for safety requirements.
 ///
-/// * If `VOLATILE` is `false`, this is equivalent to [Atomic::from_ptr] followed
-///   by [Atomic::load]. Refer to the documentation of [Atomic::from_ptr] for safety requirements.
+/// * If `VOLATILE` is `false`, this is equivalent to [`Atomic<T>::from_ptr`] followed
+///   by [`Atomic<T>::load`]. Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
 ///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `load` method. For example, [`AtomicBool::load`].
 ///
-/// [Atomic::load_volatile]: AtomicI32::load_volatile
-/// [Atomic::from_ptr]: AtomicI32::from_ptr
-/// [Atomic::load]: AtomicI32::load
+/// [`Atomic<T>::load_volatile`]: AtomicI32::load_volatile
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::load`]: AtomicI32::load
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn atomic_load<T: Copy, const ORD: AtomicOrdering, const VOLATILE: bool>(
@@ -185,18 +220,18 @@ pub const unsafe fn atomic_load<T: Copy, const ORD: AtomicOrdering, const VOLATI
 ///
 /// # Safety
 ///
-/// * If `VOLATILE` is `true`, this is equivalent to [Atomic::store_volatile].
+/// * If `VOLATILE` is `true`, this is equivalent to [`Atomic<T>::store_volatile`].
 ///   Refer to the documentation of that method for safety requirements.
 ///
-/// * If `VOLATILE` is `false`, this is equivalent to [Atomic::from_ptr] followed
-///   by [Atomic::store]. Refer to the documentation of [Atomic::from_ptr] for safety requirements.
+/// * If `VOLATILE` is `false`, this is equivalent to [`Atomic<T>::from_ptr`] followed
+///   by [`Atomic<T>::store`]. Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
 ///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `store` method. For example, [`AtomicBool::store`].
 ///
-/// [Atomic::store_volatile]: AtomicI32::store_volatile
-/// [Atomic::from_ptr]: AtomicI32::from_ptr
-/// [Atomic::store]: AtomicI32::store
+/// [`Atomic<T>::store_volatile`]: AtomicI32::store_volatile
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::store`]: AtomicI32::store
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn atomic_store<T: Copy, const ORD: AtomicOrdering, const VOLATILE: bool>(
@@ -207,8 +242,22 @@ pub const unsafe fn atomic_store<T: Copy, const ORD: AtomicOrdering, const VOLAT
 /// Stores the value at the specified memory location, returning the old value.
 /// `T` must be an integer or pointer type.
 ///
+/// # Safety
+///
+/// * If `T` is an integer type, this is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::swap`].
+///   Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
+/// * If `T` is a pointer type, this is equivalent to [`AtomicPtr<P>::from_ptr`] followed by [`AtomicPtr<P>::swap`],
+///   where `P` is the pointee type of the pointer.
+///   Refer to the documentation of [`AtomicPtr<P>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `swap` method. For example, [`AtomicBool::swap`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::swap`]: AtomicI32::swap
+/// [`AtomicPtr<P>::from_ptr`]: AtomicPtr::from_ptr
+/// [`AtomicPtr<P>::swap`]: AtomicPtr::swap
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn atomic_xchg<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T;
@@ -217,8 +266,22 @@ pub const unsafe fn atomic_xchg<T: Copy, const ORD: AtomicOrdering>(dst: *mut T,
 /// `T` must be an integer or pointer type.
 /// `U` must be the same as `T` if that is an integer type, or `usize` if `T` is a pointer type.
 ///
+/// # Safety
+///
+/// * If `T` is an integer type, this is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_add`].
+///   Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
+/// * If `T` is a pointer type, this is equivalent to [`AtomicPtr<P>::from_ptr`] followed by [`AtomicPtr<P>::fetch_byte_add`],
+///   where `P` is the pointee type of the pointer.
+///   Refer to the documentation of [`AtomicPtr<P>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `fetch_add` method. For example, [`AtomicIsize::fetch_add`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::fetch_add`]: AtomicI32::fetch_add
+/// [`AtomicPtr<P>::from_ptr`]: AtomicPtr::from_ptr
+/// [`AtomicPtr<P>::fetch_byte_add`]: AtomicPtr::fetch_byte_add
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn atomic_xadd<T: Copy, U: Copy, const ORD: AtomicOrdering>(
@@ -230,8 +293,22 @@ pub const unsafe fn atomic_xadd<T: Copy, U: Copy, const ORD: AtomicOrdering>(
 /// `T` must be an integer or pointer type.
 /// `U` must be the same as `T` if that is an integer type, or `usize` if `T` is a pointer type.
 ///
+/// # Safety
+///
+/// * If `T` is an integer type, this is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_sub`].
+///   Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
+/// * If `T` is a pointer type, this is equivalent to [`AtomicPtr<P>::from_ptr`] followed by [`AtomicPtr<P>::fetch_byte_sub`],
+///   where `P` is the pointee type of the pointer.
+///   Refer to the documentation of [`AtomicPtr<P>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `fetch_sub` method. For example, [`AtomicIsize::fetch_sub`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::fetch_sub`]: AtomicI32::fetch_sub
+/// [`AtomicPtr<P>::from_ptr`]: AtomicPtr::from_ptr
+/// [`AtomicPtr<P>::fetch_byte_sub`]: AtomicPtr::fetch_byte_sub
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn atomic_xsub<T: Copy, U: Copy, const ORD: AtomicOrdering>(
@@ -243,8 +320,22 @@ pub const unsafe fn atomic_xsub<T: Copy, U: Copy, const ORD: AtomicOrdering>(
 /// `T` must be an integer or pointer type.
 /// `U` must be the same as `T` if that is an integer type, or `usize` if `T` is a pointer type.
 ///
+/// # Safety
+///
+/// * If `T` is an integer type, this is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_and`].
+///   Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
+/// * If `T` is a pointer type, this is equivalent to [`AtomicPtr<P>::from_ptr`] followed by [`AtomicPtr<P>::fetch_and`],
+///   where `P` is the pointee type of the pointer.
+///   Refer to the documentation of [`AtomicPtr<P>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `fetch_and` method. For example, [`AtomicBool::fetch_and`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::fetch_and`]: AtomicI32::fetch_and
+/// [`AtomicPtr<P>::from_ptr`]: AtomicPtr::from_ptr
+/// [`AtomicPtr<P>::fetch_and`]: AtomicPtr::fetch_and
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn atomic_and<T: Copy, U: Copy, const ORD: AtomicOrdering>(
@@ -256,8 +347,16 @@ pub const unsafe fn atomic_and<T: Copy, U: Copy, const ORD: AtomicOrdering>(
 /// `T` must be an integer or pointer type.
 /// `U` must be the same as `T` if that is an integer type, or `usize` if `T` is a pointer type.
 ///
+/// # Safety
+///
+/// This is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_nand`].
+/// Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
-/// [`AtomicBool`] type via the `fetch_nand` method. For example, [`AtomicBool::fetch_nand`].
+/// [`atomic`] types via the `fetch_nand` method. For example, [`AtomicBool::fetch_nand`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::fetch_nand`]: AtomicI32::fetch_nand
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn atomic_nand<T: Copy, U: Copy, const ORD: AtomicOrdering>(
@@ -269,8 +368,22 @@ pub const unsafe fn atomic_nand<T: Copy, U: Copy, const ORD: AtomicOrdering>(
 /// `T` must be an integer or pointer type.
 /// `U` must be the same as `T` if that is an integer type, or `usize` if `T` is a pointer type.
 ///
+/// # Safety
+///
+/// * If `T` is an integer type, this is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_or`].
+///   Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
+/// * If `T` is a pointer type, this is equivalent to [`AtomicPtr<P>::from_ptr`] followed by [`AtomicPtr<P>::fetch_or`],
+///   where `P` is the pointee type of the pointer.
+///   Refer to the documentation of [`AtomicPtr<P>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `fetch_or` method. For example, [`AtomicBool::fetch_or`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::fetch_or`]: AtomicI32::fetch_or
+/// [`AtomicPtr<P>::from_ptr`]: AtomicPtr::from_ptr
+/// [`AtomicPtr<P>::fetch_or`]: AtomicPtr::fetch_or
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn atomic_or<T: Copy, U: Copy, const ORD: AtomicOrdering>(
@@ -282,8 +395,22 @@ pub const unsafe fn atomic_or<T: Copy, U: Copy, const ORD: AtomicOrdering>(
 /// `T` must be an integer or pointer type.
 /// `U` must be the same as `T` if that is an integer type, or `usize` if `T` is a pointer type.
 ///
+/// # Safety
+///
+/// * If `T` is an integer type, this is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_xor`].
+///   Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
+/// * If `T` is a pointer type, this is equivalent to [`AtomicPtr<P>::from_ptr`] followed by [`AtomicPtr<P>::fetch_xor`],
+///   where `P` is the pointee type of the pointer.
+///   Refer to the documentation of [`AtomicPtr<P>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] types via the `fetch_xor` method. For example, [`AtomicBool::fetch_xor`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::fetch_xor`]: AtomicI32::fetch_xor
+/// [`AtomicPtr<P>::from_ptr`]: AtomicPtr::from_ptr
+/// [`AtomicPtr<P>::fetch_xor`]: AtomicPtr::fetch_xor
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn atomic_xor<T: Copy, U: Copy, const ORD: AtomicOrdering>(
@@ -294,8 +421,16 @@ pub const unsafe fn atomic_xor<T: Copy, U: Copy, const ORD: AtomicOrdering>(
 /// Maximum with the current value using a signed comparison.
 /// `T` must be a signed integer type.
 ///
+/// # Safety
+///
+/// This is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_max`].
+/// Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] signed integer types via the `fetch_max` method. For example, [`AtomicI32::fetch_max`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::fetch_max`]: AtomicI32::fetch_max
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn atomic_max<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T;
@@ -303,8 +438,16 @@ pub const unsafe fn atomic_max<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, 
 /// Minimum with the current value using a signed comparison.
 /// `T` must be a signed integer type.
 ///
+/// # Safety
+///
+/// This is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_min`].
+/// Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] signed integer types via the `fetch_min` method. For example, [`AtomicI32::fetch_min`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicI32::from_ptr
+/// [`Atomic<T>::fetch_min`]: AtomicI32::fetch_min
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn atomic_min<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T;
@@ -312,8 +455,16 @@ pub const unsafe fn atomic_min<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, 
 /// Minimum with the current value using an unsigned comparison.
 /// `T` must be an unsigned integer type.
 ///
+/// # Safety
+///
+/// This is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_min`].
+/// Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] unsigned integer types via the `fetch_min` method. For example, [`AtomicU32::fetch_min`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicU32::from_ptr
+/// [`Atomic<T>::fetch_min`]: AtomicU32::fetch_min
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn atomic_umin<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T;
@@ -321,8 +472,16 @@ pub const unsafe fn atomic_umin<T: Copy, const ORD: AtomicOrdering>(dst: *mut T,
 /// Maximum with the current value using an unsigned comparison.
 /// `T` must be an unsigned integer type.
 ///
+/// # Safety
+///
+/// This is equivalent to [`Atomic<T>::from_ptr`] followed by [`Atomic<T>::fetch_max`].
+/// Refer to the documentation of [`Atomic<T>::from_ptr`] for safety requirements.
+///
 /// The stabilized version of this intrinsic is available on the
 /// [`atomic`] unsigned integer types via the `fetch_max` method. For example, [`AtomicU32::fetch_max`].
+///
+/// [`Atomic<T>::from_ptr`]: AtomicU32::from_ptr
+/// [`Atomic<T>::fetch_max`]: AtomicU32::fetch_max
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn atomic_umax<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T;
@@ -413,10 +572,41 @@ pub const fn prefetch_write_instruction<T, const LOCALITY: i32>(data: *const T) 
 
 /// Executes a breakpoint trap, for inspection by a debugger.
 ///
-/// This intrinsic does not have a stable counterpart.
+/// The public version of this intrinsic is [`core::arch::breakpoint`].
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub fn breakpoint();
+
+/// Executes a breakpoint trap, for inspection by a debugger. This is allowed to resume.
+///
+/// The public version of this intrinsic is [`core::process::resumable_breakpoint`].
+#[rustc_intrinsic]
+#[rustc_nounwind]
+#[miri::intrinsic_fallback_is_spec]
+pub const fn resumable_breakpoint() {}
+
+/// A container for the string arguments passed to [`codeview_annotation`].
+#[unstable(feature = "codeview_annotation", issue = "163964")]
+pub trait CodeViewAnnotationArgs {
+    /// The string arguments to `codeview_annotation`.
+    const ARGS: &[&str];
+}
+
+/// Emits a call to [`llvm.codeview.annotation`](https://llvm.org/docs/LangRef.html#llvm-codeview-annotation-intrinsic)
+/// which results in [`CodeViewAnnotationArgs::ARGS`] being written to the
+/// PDB as an `S_ANNOTATION` record.
+///
+/// Works only with targets that use PDB debuginfo and with the LLVM backend.
+/// Is a no-op on other targets and backends.
+#[rustc_intrinsic]
+#[rustc_nounwind]
+#[miri::intrinsic_fallback_is_spec]
+pub fn codeview_annotation<T: CodeViewAnnotationArgs>() {
+    // const block to catch any errors in `T::ARGS`
+    const {
+        let _ignore = T::ARGS;
+    }
+}
 
 /// Magic intrinsic that derives its meaning from attributes
 /// attached to the function.
@@ -431,26 +621,23 @@ pub fn breakpoint();
 #[rustc_intrinsic]
 pub fn rustc_peek<T>(_: T) -> T;
 
-/// Aborts the execution of the process.
+/// Ungracefully aborts the execution of the process.
 ///
-/// Note that, unlike most intrinsics, this is safe to call;
-/// it does not require an `unsafe` block.
-/// Therefore, implementations must not require the user to uphold
-/// any safety invariants.
+/// This is the intrinsic for directly implementing [`core::process::crash`] which, on most
+/// platforms, will invoke an invalid instruction. On Unix, the process will probably terminate with
+/// a signal like `SIGABRT`, `SIGILL`, `SIGTRAP`, `SIGSEGV` or `SIGBUS`. The precise behavior is not
+/// guaranteed and not stable.
 ///
 /// [`std::process::abort`](../../std/process/fn.abort.html) is to be preferred if possible,
 /// as its behavior is more user-friendly and more stable.
 ///
-/// The current implementation of `intrinsics::abort` is to invoke an invalid instruction,
-/// on most platforms.
-/// On Unix, the
-/// process will probably terminate with a signal like `SIGABRT`, `SIGILL`, `SIGTRAP`, `SIGSEGV` or
-/// `SIGBUS`.  The precise behavior is not guaranteed and not stable.
+/// Note that, unlike most intrinsics, this is safe to call; it does not require an `unsafe` block.
+/// Therefore, implementations must not require the user to uphold any safety invariants.
 ///
-/// The stabilization-track version of this intrinsic is [`core::process::abort_immediate`].
+/// The stabilized version of this intrinsic is [`core::process::crash`].
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub fn abort() -> !;
+pub const fn abort_immediate() -> !;
 
 /// Informs the optimizer that this point in the code is not reachable,
 /// enabling further optimizations.
@@ -475,9 +662,7 @@ pub const unsafe fn unreachable() -> !;
 /// own, or if it does not enable any significant optimizations.
 ///
 /// The stabilized version of this intrinsic is [`core::hint::assert_unchecked`].
-#[rustc_intrinsic_const_stable_indirect]
 #[rustc_nounwind]
-#[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
 pub const unsafe fn assume(b: bool) {
     if !b {
@@ -511,7 +696,6 @@ pub const fn cold_path() {}
 /// any safety invariants.
 ///
 /// This intrinsic does not have a stable counterpart.
-#[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_nounwind]
 #[inline(always)]
 pub const fn likely(b: bool) -> bool {
@@ -534,7 +718,6 @@ pub const fn likely(b: bool) -> bool {
 /// any safety invariants.
 ///
 /// This intrinsic does not have a stable counterpart.
-#[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_nounwind]
 #[inline(always)]
 pub const fn unlikely(b: bool) -> bool {
@@ -560,8 +743,7 @@ pub const fn unlikely(b: bool) -> bool {
 /// The public form of this intrinsic is [`core::hint::select_unpredictable`].
 /// However unlike the public form, the intrinsic will not drop the value that
 /// is not selected.
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_const_unstable(feature = "const_select_unpredictable", issue = "145938")]
+#[rustc_const_unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
 #[rustc_nounwind]
 #[miri::intrinsic_fallback_is_spec]
@@ -1107,69 +1289,36 @@ pub unsafe fn unaligned_volatile_load<T>(src: *const T) -> T;
 #[rustc_diagnostic_item = "intrinsics_unaligned_volatile_store"]
 pub unsafe fn unaligned_volatile_store<T>(dst: *mut T, val: T);
 
-/// Returns the square root of an `f16`
-///
-/// The stabilized version of this intrinsic is
-/// [`f16::sqrt`](../../std/primitive.f16.html#method.sqrt)
-#[inline]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn sqrtf16(x: f16) -> f16 {
-    sqrtf32(x as f32) as f16
-}
-/// Returns the square root of an `f32`
-///
-/// The stabilized version of this intrinsic is
-/// [`f32::sqrt`](../../std/primitive.f32.html#method.sqrt)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn sqrtf32(x: f32) -> f32;
-/// Returns the square root of an `f64`
-///
-/// The stabilized version of this intrinsic is
-/// [`f64::sqrt`](../../std/primitive.f64.html#method.sqrt)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn sqrtf64(x: f64) -> f64;
-/// Returns the square root of an `f128`
-///
-/// The stabilized version of this intrinsic is
-/// [`f128::sqrt`](../../std/primitive.f128.html#method.sqrt)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn sqrtf128(x: f128) -> f128;
+intrinsic_dispatch_on_type! {
+    /// Returns the square root of a floating-point value.
+    ///
+    /// The stabilized versions of this intrinsic are available on the float primitives via the
+    /// `sqrt` method. For example, [`f32::sqrt`](../../std/primitive.f32.html#method.sqrt).
+    #[rustc_nounwind]
+    #[rustc_intrinsic]
+    pub fn sqrt<T: bounds::FloatPrimitive>(x: T) -> T;
 
-/// Raises an `f16` to an integer power.
-///
-/// The stabilized version of this intrinsic is
-/// [`f16::powi`](../../std/primitive.f16.html#method.powi)
-#[inline]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn powif16(a: f16, x: i32) -> f16 {
-    powif32(a as f32, x) as f16
+    f16 => { libm::sqrtf16(x) }
+    f32 => { libm::sqrtf(x) }
+    f64 => { libm::sqrt(x) }
+    f128 => { libm::sqrtf128(x) }
 }
-/// Raises an `f32` to an integer power.
-///
-/// The stabilized version of this intrinsic is
-/// [`f32::powi`](../../std/primitive.f32.html#method.powi)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn powif32(a: f32, x: i32) -> f32;
-/// Raises an `f64` to an integer power.
-///
-/// The stabilized version of this intrinsic is
-/// [`f64::powi`](../../std/primitive.f64.html#method.powi)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn powif64(a: f64, x: i32) -> f64;
-/// Raises an `f128` to an integer power.
-///
-/// The stabilized version of this intrinsic is
-/// [`f128::powi`](../../std/primitive.f128.html#method.powi)
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn powif128(a: f128, x: i32) -> f128;
+
+intrinsic_dispatch_on_type! {
+    /// Raises a floating-point value to an integer power.
+    ///
+    /// The stabilized versions of this intrinsic are available on the float primitives via the
+    /// `powi` method. For example, [`f32::powi`](../../std/primitive.f32.html#method.powi).
+    #[rustc_nounwind]
+    #[inline]
+    #[rustc_intrinsic]
+    pub fn powi<T: bounds::FloatPrimitive>(a: T, x: i32) -> T;
+
+    f16 => { powi(a as f32, x) as f16 }
+    f32 => { libm::__powisf2(a, x) }
+    f64 => { libm::__powidf2(a, x) }
+    f128 => { libm::__powitf2(a, x) }
+}
 
 intrinsic_dispatch_on_type! {
     /// Returns the sine of a floating-point value.
@@ -1213,48 +1362,25 @@ intrinsic_dispatch_on_type! {
     f128 => { libm::maybe_available::cosf128(x) }
 }
 
-/// Raises an `f16` to an `f16` power.
-///
-/// The stabilized version of this intrinsic is
-/// [`f16::powf`](../../std/primitive.f16.html#method.powf)
-#[inline]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn powf16(a: f16, x: f16) -> f16 {
-    powf32(a as f32, x as f32) as f16
-}
-/// Raises an `f32` to an `f32` power.
-///
-/// The stabilized version of this intrinsic is
-/// [`f32::powf`](../../std/primitive.f32.html#method.powf)
-#[inline]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn powf32(a: f32, x: f32) -> f32 {
-    cfg_select! {
-        all(target_env = "msvc", target_arch = "x86") => powf64(a as f64, x as f64) as f32,
-        _ => libm::likely_available::powf(a, x),
+intrinsic_dispatch_on_type! {
+    /// Raises a floating-point value to a power of the same type.
+    ///
+    /// The stabilized versions of this intrinsic are available on the float primitives via the
+    /// `powf` method. For example, [`f32::powf`](../../std/primitive.f32.html#method.powf).
+    #[rustc_nounwind]
+    #[inline]
+    #[rustc_intrinsic]
+    pub fn powf<T: bounds::FloatPrimitive>(a: T, x: T) -> T;
+
+    f16 => { powf(a as f32, x as f32) as f16 }
+    f32 => {
+        cfg_select! {
+            all(target_env = "msvc", target_arch = "x86") => powf(a as f64, x as f64) as f32,
+            _ => libm::likely_available::powf(a, x),
+        }
     }
-}
-/// Raises an `f64` to an `f64` power.
-///
-/// The stabilized version of this intrinsic is
-/// [`f64::powf`](../../std/primitive.f64.html#method.powf)
-#[inline]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn powf64(a: f64, x: f64) -> f64 {
-    libm::likely_available::pow(a, x)
-}
-/// Raises an `f128` to an `f128` power.
-///
-/// The stabilized version of this intrinsic is
-/// [`f128::powf`](../../std/primitive.f128.html#method.powf)
-#[inline]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub fn powf128(a: f128, x: f128) -> f128 {
-    libm::maybe_available::powf128(a, x)
+    f64 => { libm::likely_available::pow(a, x) }
+    f128 => { libm::maybe_available::powf128(a, x) }
 }
 
 intrinsic_dispatch_on_type! {
@@ -1362,47 +1488,29 @@ intrinsic_dispatch_on_type! {
     f128 => { libm::maybe_available::log2f128(x) }
 }
 
-/// Returns `a * b + c` without rounding the intermediate result for `f16` values.
-///
-/// The stabilized version of this intrinsic is
-/// [`f16::mul_add`](../../std/primitive.f16.html#method.mul_add)
-#[rustc_intrinsic_const_stable_indirect]
-#[inline]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn fmaf16(a: f16, b: f16, c: f16) -> f16 {
-    // NOTE: f32 does not have sufficient precision, so use f64 instead.
-    // see also https://github.com/llvm/llvm-project/issues/128450#issuecomment-2727540179.
-    fmaf64(a as f64, b as f64, c as f64) as f16
-}
-/// Returns `a * b + c` without rounding the intermediate result for `f32` values.
-///
-/// The stabilized version of this intrinsic is
-/// [`f32::mul_add`](../../std/primitive.f32.html#method.mul_add)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn fmaf32(a: f32, b: f32, c: f32) -> f32;
-/// Returns `a * b + c` without rounding the intermediate result for `f64` values.
-///
-/// The stabilized version of this intrinsic is
-/// [`f64::mul_add`](../../std/primitive.f64.html#method.mul_add)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn fmaf64(a: f64, b: f64, c: f64) -> f64;
-/// Returns `a * b + c` without rounding the intermediate result for `f128` values.
-///
-/// The stabilized version of this intrinsic is
-/// [`f128::mul_add`](../../std/primitive.f128.html#method.mul_add)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn fmaf128(a: f128, b: f128, c: f128) -> f128;
+intrinsic_dispatch_on_type! {
+    /// Returns `a * b + c` without rounding the intermediate result.
+    ///
+    /// The stabilized versions of this intrinsic are available on the float primitives via the
+    /// `mul_add` method. For example,
+    /// [`f32::mul_add`](../../std/primitive.f32.html#method.mul_add).
+    #[rustc_nounwind]
+    #[inline]
+    #[rustc_intrinsic_const_stable_indirect]
+    #[rustc_intrinsic]
+    // The fallback bodies call into `libm`, which is not available at compile time. This is fine
+    // because const-eval implements this intrinsic itself and never runs the fallback body.
+    #[rustc_do_not_const_check]
+    pub const fn fma<T: bounds::FloatPrimitive>(a: T, b: T, c: T) -> T;
 
-/// Returns `a * b + c` for `f16` values, non-deterministically executing
-/// either a fused multiply-add or two operations with rounding of the
-/// intermediate result.
+    f16 => { libm::fmaf16(a, b, c) }
+    f32 => { libm::fmaf(a, b, c) }
+    f64 => { libm::fma(a, b, c) }
+    f128 => { libm::fmaf128(a, b, c) }
+}
+
+/// Returns `a * b + c`, non-deterministically executing either a fused multiply-add or two
+/// operations with rounding of the intermediate result.
 ///
 /// The operation is fused if the code generator determines that target
 /// instruction set has support for a fused operation, and that the fused
@@ -1410,247 +1518,121 @@ pub const fn fmaf128(a: f128, b: f128, c: f128) -> f128;
 /// and add instructions. It is unspecified whether or not a fused operation
 /// is selected, and that may depend on optimization level and context, for
 /// example.
-#[inline]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn fmuladdf16(a: f16, b: f16, c: f16) -> f16 {
-    a * b + c
-}
-/// Returns `a * b + c` for `f32` values, non-deterministically executing
-/// either a fused multiply-add or two operations with rounding of the
-/// intermediate result.
 ///
-/// The operation is fused if the code generator determines that target
-/// instruction set has support for a fused operation, and that the fused
-/// operation is more efficient than the equivalent, separate pair of mul
-/// and add instructions. It is unspecified whether or not a fused operation
-/// is selected, and that may depend on optimization level and context, for
-/// example.
+/// The stabilized versions of this intrinsic are available on the float primitives via the
+/// `mul_add_relaxed` method. For example,
+/// [`f32::mul_add_relaxed`](../../std/primitive.f32.html#method.mul_add_relaxed).
 #[inline]
+#[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub const fn fmuladdf32(a: f32, b: f32, c: f32) -> f32 {
-    a * b + c
-}
-/// Returns `a * b + c` for `f64` values, non-deterministically executing
-/// either a fused multiply-add or two operations with rounding of the
-/// intermediate result.
-///
-/// The operation is fused if the code generator determines that target
-/// instruction set has support for a fused operation, and that the fused
-/// operation is more efficient than the equivalent, separate pair of mul
-/// and add instructions. It is unspecified whether or not a fused operation
-/// is selected, and that may depend on optimization level and context, for
-/// example.
-#[inline]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn fmuladdf64(a: f64, b: f64, c: f64) -> f64 {
-    a * b + c
-}
-/// Returns `a * b + c` for `f128` values, non-deterministically executing
-/// either a fused multiply-add or two operations with rounding of the
-/// intermediate result.
-///
-/// The operation is fused if the code generator determines that target
-/// instruction set has support for a fused operation, and that the fused
-/// operation is more efficient than the equivalent, separate pair of mul
-/// and add instructions. It is unspecified whether or not a fused operation
-/// is selected, and that may depend on optimization level and context, for
-/// example.
-#[inline]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn fmuladdf128(a: f128, b: f128, c: f128) -> f128 {
+#[rustc_do_not_const_check]
+pub const fn fmuladd<T: bounds::FloatPrimitive>(a: T, b: T, c: T) -> T {
     a * b + c
 }
 
-/// Returns the largest integer less than or equal to an `f16`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f16::floor`](../../std/primitive.f16.html#method.floor)
-#[rustc_intrinsic_const_stable_indirect]
-#[inline]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn floorf16(x: f16) -> f16 {
-    floorf32(x as f32) as f16
-}
-/// Returns the largest integer less than or equal to an `f32`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f32::floor`](../../std/primitive.f32.html#method.floor)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn floorf32(x: f32) -> f32;
-/// Returns the largest integer less than or equal to an `f64`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f64::floor`](../../std/primitive.f64.html#method.floor)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn floorf64(x: f64) -> f64;
-/// Returns the largest integer less than or equal to an `f128`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f128::floor`](../../std/primitive.f128.html#method.floor)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn floorf128(x: f128) -> f128;
+intrinsic_dispatch_on_type! {
+    /// Returns the largest integer less than or equal to a floating-point value.
+    ///
+    /// The stabilized versions of this intrinsic are available on the float primitives via the
+    /// `floor` method. For example, [`f32::floor`](../../std/primitive.f32.html#method.floor).
+    #[rustc_nounwind]
+    #[inline]
+    #[rustc_intrinsic_const_stable_indirect]
+    #[rustc_intrinsic]
+    // The fallback bodies call into `libm`, which is not available at compile time. This is fine
+    // because const-eval implements this intrinsic itself and never runs the fallback body.
+    #[rustc_do_not_const_check]
+    pub const fn floor<T: bounds::FloatPrimitive>(x: T) -> T;
 
-/// Returns the smallest integer greater than or equal to an `f16`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f16::ceil`](../../std/primitive.f16.html#method.ceil)
-#[rustc_intrinsic_const_stable_indirect]
-#[inline]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn ceilf16(x: f16) -> f16 {
-    ceilf32(x as f32) as f16
-}
-/// Returns the smallest integer greater than or equal to an `f32`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f32::ceil`](../../std/primitive.f32.html#method.ceil)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn ceilf32(x: f32) -> f32;
-/// Returns the smallest integer greater than or equal to an `f64`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f64::ceil`](../../std/primitive.f64.html#method.ceil)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn ceilf64(x: f64) -> f64;
-/// Returns the smallest integer greater than or equal to an `f128`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f128::ceil`](../../std/primitive.f128.html#method.ceil)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn ceilf128(x: f128) -> f128;
-
-/// Returns the integer part of an `f16`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f16::trunc`](../../std/primitive.f16.html#method.trunc)
-#[rustc_intrinsic_const_stable_indirect]
-#[inline]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn truncf16(x: f16) -> f16 {
-    truncf32(x as f32) as f16
-}
-/// Returns the integer part of an `f32`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f32::trunc`](../../std/primitive.f32.html#method.trunc)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn truncf32(x: f32) -> f32;
-/// Returns the integer part of an `f64`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f64::trunc`](../../std/primitive.f64.html#method.trunc)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn truncf64(x: f64) -> f64;
-/// Returns the integer part of an `f128`.
-///
-/// The stabilized version of this intrinsic is
-/// [`f128::trunc`](../../std/primitive.f128.html#method.trunc)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn truncf128(x: f128) -> f128;
-
-/// Returns the nearest integer to an `f16`. Rounds half-way cases to the number with an even
-/// least significant digit.
-///
-/// The stabilized version of this intrinsic is
-/// [`f16::round_ties_even`](../../std/primitive.f16.html#method.round_ties_even)
-#[rustc_intrinsic_const_stable_indirect]
-#[inline]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn round_ties_even_f16(x: f16) -> f16 {
-    round_ties_even_f32(x as f32) as f16
+    f16 => { libm::floorf16(x) }
+    f32 => { libm::floorf(x) }
+    f64 => { libm::floor(x) }
+    f128 => { libm::floorf128(x) }
 }
 
-/// Returns the nearest integer to an `f32`. Rounds half-way cases to the number with an even
-/// least significant digit.
-///
-/// The stabilized version of this intrinsic is
-/// [`f32::round_ties_even`](../../std/primitive.f32.html#method.round_ties_even)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn round_ties_even_f32(x: f32) -> f32;
+intrinsic_dispatch_on_type! {
+    /// Returns the smallest integer greater than or equal to a floating-point value.
+    ///
+    /// The stabilized versions of this intrinsic are available on the float primitives via the
+    /// `ceil` method. For example, [`f32::ceil`](../../std/primitive.f32.html#method.ceil).
+    #[rustc_nounwind]
+    #[inline]
+    #[rustc_intrinsic_const_stable_indirect]
+    #[rustc_intrinsic]
+    // The fallback bodies call into `libm`, which is not available at compile time. This is fine
+    // because const-eval implements this intrinsic itself and never runs the fallback body.
+    #[rustc_do_not_const_check]
+    pub const fn ceil<T: bounds::FloatPrimitive>(x: T) -> T;
 
-/// Returns the nearest integer to an `f64`. Rounds half-way cases to the number with an even
-/// least significant digit.
-///
-/// The stabilized version of this intrinsic is
-/// [`f64::round_ties_even`](../../std/primitive.f64.html#method.round_ties_even)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn round_ties_even_f64(x: f64) -> f64;
-
-/// Returns the nearest integer to an `f128`. Rounds half-way cases to the number with an even
-/// least significant digit.
-///
-/// The stabilized version of this intrinsic is
-/// [`f128::round_ties_even`](../../std/primitive.f128.html#method.round_ties_even)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn round_ties_even_f128(x: f128) -> f128;
-
-/// Returns the nearest integer to an `f16`. Rounds half-way cases away from zero.
-///
-/// The stabilized version of this intrinsic is
-/// [`f16::round`](../../std/primitive.f16.html#method.round)
-#[rustc_intrinsic_const_stable_indirect]
-#[inline]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn roundf16(x: f16) -> f16 {
-    roundf32(x as f32) as f16
+    f16 => { libm::ceilf16(x) }
+    f32 => { libm::ceilf(x) }
+    f64 => { libm::ceil(x) }
+    f128 => { libm::ceilf128(x) }
 }
-/// Returns the nearest integer to an `f32`. Rounds half-way cases away from zero.
-///
-/// The stabilized version of this intrinsic is
-/// [`f32::round`](../../std/primitive.f32.html#method.round)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn roundf32(x: f32) -> f32;
-/// Returns the nearest integer to an `f64`. Rounds half-way cases away from zero.
-///
-/// The stabilized version of this intrinsic is
-/// [`f64::round`](../../std/primitive.f64.html#method.round)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn roundf64(x: f64) -> f64;
-/// Returns the nearest integer to an `f128`. Rounds half-way cases away from zero.
-///
-/// The stabilized version of this intrinsic is
-/// [`f128::round`](../../std/primitive.f128.html#method.round)
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const fn roundf128(x: f128) -> f128;
+
+intrinsic_dispatch_on_type! {
+    /// Returns the integer part of a floating-point value.
+    ///
+    /// The stabilized versions of this intrinsic are available on the float primitives via the
+    /// `trunc` method. For example, [`f32::trunc`](../../std/primitive.f32.html#method.trunc).
+    #[rustc_nounwind]
+    #[inline]
+    #[rustc_intrinsic_const_stable_indirect]
+    #[rustc_intrinsic]
+    // The fallback bodies call into `libm`, which is not available at compile time. This is fine
+    // because const-eval implements this intrinsic itself and never runs the fallback body.
+    #[rustc_do_not_const_check]
+    pub const fn trunc<T: bounds::FloatPrimitive>(x: T) -> T;
+
+    f16 => { libm::truncf16(x) }
+    f32 => { libm::truncf(x) }
+    f64 => { libm::trunc(x) }
+    f128 => { libm::truncf128(x) }
+}
+
+intrinsic_dispatch_on_type! {
+    /// Returns the nearest integer to a floating-point value. Rounds half-way cases to the number
+    /// with an even least significant digit.
+    ///
+    /// The stabilized versions of this intrinsic are available on the float primitives via the
+    /// `round_ties_even` method. For example,
+    /// [`f32::round_ties_even`](../../std/primitive.f32.html#method.round_ties_even).
+    #[rustc_nounwind]
+    #[inline]
+    #[rustc_intrinsic_const_stable_indirect]
+    #[rustc_intrinsic]
+    // The fallback bodies call into `libm`, which is not available at compile time. This is fine
+    // because const-eval implements this intrinsic itself and never runs the fallback body.
+    #[rustc_do_not_const_check]
+    pub const fn round_ties_even<T: bounds::FloatPrimitive>(x: T) -> T;
+
+    f16 => { libm::roundevenf16(x) }
+    f32 => { libm::roundevenf(x) }
+    f64 => { libm::roundeven(x) }
+    f128 => { libm::roundevenf128(x) }
+}
+
+intrinsic_dispatch_on_type! {
+    /// Returns the nearest integer to a floating-point value. Rounds half-way cases away from
+    /// zero.
+    ///
+    /// The stabilized versions of this intrinsic are available on the float primitives via the
+    /// `round` method. For example, [`f32::round`](../../std/primitive.f32.html#method.round).
+    #[rustc_nounwind]
+    #[inline]
+    #[rustc_intrinsic_const_stable_indirect]
+    #[rustc_intrinsic]
+    // The fallback bodies call into `libm`, which is not available at compile time. This is fine
+    // because const-eval implements this intrinsic itself and never runs the fallback body.
+    #[rustc_do_not_const_check]
+    pub const fn round<T: bounds::FloatPrimitive>(x: T) -> T;
+
+    f16 => { libm::roundf16(x) }
+    f32 => { libm::roundf(x) }
+    f64 => { libm::round(x) }
+    f128 => { libm::roundf128(x) }
+}
 
 /// Float addition that allows optimizations based on algebraic rules.
 /// Requires that inputs and output of the operation are finite, causing UB otherwise.
@@ -2031,8 +2013,7 @@ pub const fn mul_with_overflow<T: Copy>(x: T, y: T) -> (T, bool);
 ///
 /// This currently supports unsigned integers *only*, no signed ones.
 /// The stabilized versions of this intrinsic are available on integers.
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_const_unstable(feature = "const_carrying_mul_add", issue = "85532")]
+#[rustc_const_unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_nounwind]
 #[rustc_intrinsic]
 #[miri::intrinsic_fallback_is_spec]
@@ -2136,12 +2117,12 @@ pub const unsafe fn unchecked_mul<T: Copy>(x: T, y: T) -> T;
 /// The stabilized versions of this intrinsic are available on the integer
 /// primitives via the `rotate_left` method. For example,
 /// [`u32::rotate_left`]
-#[rustc_intrinsic_const_stable_indirect]
 #[rustc_nounwind]
 #[rustc_intrinsic]
-#[rustc_allow_const_fn_unstable(const_trait_impl, funnel_shifts)]
+#[rustc_allow_const_fn_unstable(const_trait_impl)]
+#[cfg_attr(miri, track_caller)]
 #[miri::intrinsic_fallback_is_spec]
-pub const fn rotate_left<T: [const] fallback::FunnelShift>(x: T, shift: u32) -> T {
+pub const fn rotate_left<T: fallback::FunnelShift>(x: T, shift: u32) -> T {
     // Make sure to call the intrinsic for `funnel_shl`, not the fallback impl.
     // SAFETY: we modulo `shift` so that the result is definitely less than the size of
     // `T` in bits.
@@ -2158,12 +2139,12 @@ pub const fn rotate_left<T: [const] fallback::FunnelShift>(x: T, shift: u32) -> 
 /// The stabilized versions of this intrinsic are available on the integer
 /// primitives via the `rotate_right` method. For example,
 /// [`u32::rotate_right`]
-#[rustc_intrinsic_const_stable_indirect]
 #[rustc_nounwind]
 #[rustc_intrinsic]
-#[rustc_allow_const_fn_unstable(const_trait_impl, funnel_shifts)]
+#[rustc_allow_const_fn_unstable(const_trait_impl)]
+#[cfg_attr(miri, track_caller)]
 #[miri::intrinsic_fallback_is_spec]
-pub const fn rotate_right<T: [const] fallback::FunnelShift>(x: T, shift: u32) -> T {
+pub const fn rotate_right<T: fallback::FunnelShift>(x: T, shift: u32) -> T {
     // Make sure to call the intrinsic for `funnel_shr`, not the fallback impl.
     // SAFETY: we modulo `shift` so that the result is definitely less than the size of
     // `T` in bits.
@@ -2259,15 +2240,9 @@ pub const fn saturating_sub<T: Copy>(a: T, b: T) -> T;
 /// via the `funnel_shl` method. For example, [`u32::funnel_shl`].
 #[rustc_intrinsic]
 #[rustc_nounwind]
-#[rustc_const_unstable(feature = "funnel_shifts", issue = "145686")]
-#[unstable(feature = "funnel_shifts", issue = "145686")]
-#[track_caller]
-#[miri::intrinsic_fallback_is_spec]
-pub const unsafe fn unchecked_funnel_shl<T: [const] fallback::FunnelShift>(
-    a: T,
-    b: T,
-    shift: u32,
-) -> T {
+#[rustc_intrinsic_const_stable_indirect]
+#[rustc_do_not_const_check] // Use built-in impl to avoid const-checks in the fallback body.
+pub const unsafe fn unchecked_funnel_shl<T: fallback::FunnelShift>(a: T, b: T, shift: u32) -> T {
     // SAFETY: caller ensures that `shift` is in-range
     unsafe { a.unchecked_funnel_shl(b, shift) }
 }
@@ -2287,15 +2262,9 @@ pub const unsafe fn unchecked_funnel_shl<T: [const] fallback::FunnelShift>(
 /// via the `funnel_shr` method. For example, [`u32::funnel_shr`]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-#[rustc_const_unstable(feature = "funnel_shifts", issue = "145686")]
-#[unstable(feature = "funnel_shifts", issue = "145686")]
-#[track_caller]
-#[miri::intrinsic_fallback_is_spec]
-pub const unsafe fn unchecked_funnel_shr<T: [const] fallback::FunnelShift>(
-    a: T,
-    b: T,
-    shift: u32,
-) -> T {
+#[rustc_intrinsic_const_stable_indirect]
+#[rustc_do_not_const_check] // Ise built-in impl to avoid const-checks in the fallback body.
+pub const unsafe fn unchecked_funnel_shr<T: fallback::FunnelShift>(a: T, b: T, shift: u32) -> T {
     // SAFETY: caller ensures that `shift` is in-range
     unsafe { a.unchecked_funnel_shr(b, shift) }
 }
@@ -2306,8 +2275,7 @@ pub const unsafe fn unchecked_funnel_shr<T: [const] fallback::FunnelShift>(
 /// via the `carryless_mul` method. For example, [`u32::carryless_mul`].
 #[rustc_intrinsic]
 #[rustc_nounwind]
-#[rustc_const_unstable(feature = "uint_carryless_mul", issue = "152080")]
-#[unstable(feature = "uint_carryless_mul", issue = "152080")]
+#[rustc_const_unstable(feature = "core_intrinsics", issue = "none")]
 #[miri::intrinsic_fallback_is_spec]
 pub const fn carryless_mul<T: [const] fallback::CarrylessMul>(a: T, b: T) -> T {
     a.carryless_mul(b)
@@ -2655,7 +2623,6 @@ pub(crate) macro const_eval_select {
 /// ```
 #[rustc_const_stable_indirect]
 #[rustc_nounwind]
-#[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
 pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
     false
@@ -2684,7 +2651,6 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
 #[rustc_nounwind]
 #[inline]
 #[rustc_intrinsic]
-#[rustc_intrinsic_const_stable_indirect]
 #[cfg_attr(kani, kani::modifies(x))]
 #[cfg_attr(kani, kani::modifies(y))]
 #[requires(ub_checks::can_dereference(x) && ub_checks::can_write(x))]
@@ -2717,7 +2683,6 @@ pub const unsafe fn typed_swap_nonoverlapping<T>(x: *mut T, y: *mut T) {
 /// In consteval, this function currently returns `true`. This is because the value of the `ub_checks`
 /// configuration can differ across crates, but we need this function to always return the same
 /// value in consteval in order to avoid unsoundness.
-#[rustc_intrinsic_const_stable_indirect] // just for UB checks
 #[inline(always)]
 #[rustc_intrinsic]
 pub const fn ub_checks() -> bool {
@@ -2776,8 +2741,7 @@ pub const unsafe fn const_allocate(_size: usize, _align: usize) -> *mut u8 {
 ///    - At runtime, it is not checked.
 /// - If the `ptr` is created in an another const, this intrinsic doesn't deallocate it.
 /// - If the `ptr` is pointing to a local variable, this intrinsic doesn't deallocate it.
-#[rustc_const_unstable(feature = "const_heap", issue = "79597")]
-#[unstable(feature = "core_intrinsics", issue = "none")]
+#[rustc_const_unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_nounwind]
 #[rustc_intrinsic]
 #[miri::intrinsic_fallback_is_spec]
@@ -2865,7 +2829,6 @@ pub const fn contract_check_ensures<C: Fn(&Ret) -> bool + Copy, Ret>(
 ///
 /// `ptr` must point to a vtable.
 #[rustc_nounwind]
-#[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
 // VTable pointers must be valid for dereferencing at least 3 `usize` (size, alignment and drop):
 // <https://github.com/rust-lang/unsafe-code-guidelines/issues/166>
@@ -2881,7 +2844,6 @@ pub unsafe fn vtable_size(_ptr: *const ()) -> usize;
 ///
 /// `ptr` must point to a vtable.
 #[rustc_nounwind]
-#[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
 // VTable pointers must be valid for dereferencing at least 3 `usize` (size, alignment and drop):
 // <https://github.com/rust-lang/unsafe-code-guidelines/issues/166>
@@ -2908,7 +2870,6 @@ pub unsafe fn vtable_align(_ptr: *const ()) -> usize;
 ///
 /// The stabilized version of this intrinsic is [`core::mem::size_of`].
 #[rustc_nounwind]
-#[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 #[rustc_comptime]
@@ -2928,7 +2889,6 @@ pub fn size_of<T>() -> usize;
 ///
 /// The stabilized version of this intrinsic is [`core::mem::align_of`].
 #[rustc_nounwind]
-#[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 #[rustc_comptime]
@@ -2947,8 +2907,6 @@ pub fn align_of<T>() -> usize;
 /// The stabilized version of this intrinsic is [`core::mem::offset_of`].
 /// This intrinsic is also a lang item so `offset_of!` can desugar to calls to it.
 #[rustc_nounwind]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_const_unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 #[lang = "offset_of"]
@@ -2965,8 +2923,6 @@ pub fn offset_of<T: PointeeSized>(variant: u32, field: u32) -> usize;
 /// There should be no need to call this intrinsic manually, as its value is used to define
 /// [`Field::OFFSET`](crate::field::Field::OFFSET), which is publicly accessible.
 #[rustc_intrinsic]
-#[unstable(feature = "field_projections", issue = "145383")]
-#[rustc_const_unstable(feature = "field_projections", issue = "145383")]
 #[rustc_comptime]
 pub fn field_offset<F: crate::field::Field>() -> usize;
 
@@ -2980,7 +2936,6 @@ pub fn field_offset<F: crate::field::Field>() -> usize;
 ///
 /// The to-be-stabilized version of this intrinsic is [`crate::mem::variant_count`].
 #[rustc_nounwind]
-#[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
 #[rustc_comptime]
 pub fn variant_count<T>() -> usize;
@@ -2993,7 +2948,6 @@ pub fn variant_count<T>() -> usize;
 ///
 /// See [`crate::mem::size_of_val_raw`] for safety conditions.
 #[rustc_nounwind]
-#[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
 #[rustc_intrinsic_const_stable_indirect]
 pub const unsafe fn size_of_val<T: ?Sized>(ptr: *const T) -> usize;
@@ -3006,29 +2960,9 @@ pub const unsafe fn size_of_val<T: ?Sized>(ptr: *const T) -> usize;
 ///
 /// See [`crate::mem::align_of_val_raw`] for safety conditions.
 #[rustc_nounwind]
-#[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
 #[rustc_intrinsic_const_stable_indirect]
 pub const unsafe fn align_of_val<T: ?Sized>(ptr: *const T) -> usize;
-
-#[rustc_intrinsic]
-#[rustc_comptime]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-/// Check if a type represented by a `TypeId` implements a trait represented by a `TypeId`.
-/// It can only be called at compile time, the backends do
-/// not implement it. If it implements the trait the dyn metadata gets returned for vtable access.
-pub fn type_id_vtable(
-    _id: crate::any::TypeId,
-    _trait: crate::any::TypeId,
-) -> Option<ptr::DynMetadata<*const ()>>;
-
-/// Compute the type information of a concrete type.
-/// It can only be called at compile time, the backends do
-/// not implement it.
-#[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_comptime]
-pub fn type_of(_id: crate::any::TypeId) -> crate::mem::type_info::Type;
 
 /// Gets a static string slice containing the name of a type.
 ///
@@ -3039,125 +2973,9 @@ pub fn type_of(_id: crate::any::TypeId) -> crate::mem::type_info::Type;
 ///
 /// The stabilized version of this intrinsic is [`core::any::type_name`].
 #[rustc_nounwind]
-#[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
 #[rustc_comptime]
 pub fn type_name<T: ?Sized>() -> &'static str;
-
-/// Gets an identifier which is globally unique to the specified type. This
-/// function will return the same value for a type regardless of whichever
-/// crate it is invoked in.
-///
-/// Note that, unlike most intrinsics, this can only be called at compile-time
-/// as backends do not have an implementation for it. The only caller (its
-/// stable counterpart) wraps this intrinsic call in a `const` block so that
-/// backends only see an evaluated constant.
-///
-/// The stabilized version of this intrinsic is [`core::any::TypeId::of`].
-#[rustc_nounwind]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_intrinsic]
-#[rustc_comptime]
-pub fn type_id<T: ?Sized>() -> crate::any::TypeId;
-
-/// Tests (at compile-time) if two [`crate::any::TypeId`] instances identify the
-/// same type. This is necessary because at const-eval time the actual discriminating
-/// data is opaque and cannot be inspected directly.
-///
-/// The stabilized version of this intrinsic is the [PartialEq] impl for [`core::any::TypeId`].
-#[rustc_nounwind]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_intrinsic]
-#[rustc_do_not_const_check]
-pub const fn type_id_eq(a: crate::any::TypeId, b: crate::any::TypeId) -> bool {
-    // SAFETY: we know `TypeId` is 16 bytes of initialized data.
-    // This is runtime-only code so we do not have to worry about provenance.
-    unsafe { crate::mem::transmute::<_, u128>(a) == crate::mem::transmute::<_, u128>(b) }
-}
-
-/// Returns whether the type represented by this `TypeId` is a signed integer.
-///
-/// The more user-friendly version of this intrinsic is [`core::any::TypeId::is_signed`].
-#[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_comptime]
-pub fn type_id_is_signed(_id: crate::any::TypeId) -> bool;
-
-/// Gets the length of the array represented by this `TypeId`.
-///
-/// The more user-friendly version of this intrinsic is [`core::any::TypeId::array_len`].
-#[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_comptime]
-pub fn type_id_array_len(_id: crate::any::TypeId) -> usize;
-
-/// Gets the type of each element of the array or slice represented by this `TypeId`.
-///
-/// The more user-friendly version of this intrinsic is [`core::any::TypeId::element_ty`].
-#[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_comptime]
-pub fn type_id_element_ty(_id: crate::any::TypeId) -> Option<crate::any::TypeId>;
-
-/// Gets the size of the type represented by this `TypeId`.
-///
-/// The more user-friendly version of this intrinsic is [`core::any::TypeId::size`].
-#[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_comptime]
-pub fn size_of_type_id(_id: crate::any::TypeId) -> Option<usize>;
-
-/// Gets the number of variants of the type represented by this `TypeId`.
-///
-/// The more user-friendly version of this intrinsic is [`core::any::TypeId::variants`].
-#[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_comptime]
-pub fn type_id_variants(_id: crate::any::TypeId) -> usize;
-
-/// Gets the name of the variant represented by the base `TypeId` and variant_idx.
-///
-/// The more user-friendly version of this intrinsic is [`core::mem::type_info::VariantId::name`].
-///
-/// [`TypeId`]: crate::any::TypeId
-#[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_comptime]
-pub fn variant_name(_base: crate::any::TypeId, _variant_index: usize) -> &'static str;
-
-/// Returns true when the variant represented by the base `TypeId` and variant_idx is non
-/// exhaustive.
-///
-/// The more user-friendly version of this intrinsic is
-/// [`core::mem::type_info::VariantId::non_exhaustive`].
-///
-/// [`TypeId`]: crate::any::TypeId
-#[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_comptime]
-pub fn variant_non_exhaustive(base: crate::any::TypeId, variant: usize) -> bool;
-
-/// Gets the number of fields at the given `variant_index` represented by this `TypeId`.
-///
-/// The more user-friendly version of this intrinsic is [`core::any::TypeId::fields`].
-#[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_comptime]
-pub fn type_id_fields(_id: crate::any::TypeId, _variant_index: usize) -> usize;
-
-/// Gets the [`FieldRepresentingType`]'s `TypeId` at the given index of the type represented by this `TypeId`.
-///
-/// The more user-friendly version of this intrinsic is [`core::any::TypeId::field`].
-///
-/// [`FieldRepresentingType`]: crate::field::FieldRepresentingType
-#[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_comptime]
-pub fn type_id_field_representing_type(
-    _id: crate::any::TypeId,
-    _variant_index: usize,
-    _field_index: usize,
-) -> crate::any::TypeId;
 
 /// Gets the actual field `TypeId` of the [`FieldRepresentingType`]'s `TypeId`.
 ///
@@ -3165,7 +2983,6 @@ pub fn type_id_field_representing_type(
 ///
 /// [`FieldRepresentingType`]: crate::field::FieldRepresentingType
 #[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_comptime]
 pub fn field_representing_type_actual_type_id(
     _frt_type_id: crate::any::TypeId,
@@ -3177,7 +2994,6 @@ pub fn field_representing_type_actual_type_id(
 ///
 /// [`FieldRepresentingType`]: crate::field::FieldRepresentingType
 #[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_comptime]
 pub fn field_representing_type_name(_frt_type_id: crate::any::TypeId) -> &'static str;
 
@@ -3187,51 +3003,8 @@ pub fn field_representing_type_name(_frt_type_id: crate::any::TypeId) -> &'stati
 ///
 /// [`FieldRepresentingType`]: crate::field::FieldRepresentingType
 #[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_comptime]
 pub fn field_representing_type_offset(_frt_type_id: crate::any::TypeId) -> usize;
-
-/// Given a `TypeId` that represents a function pointer returns an [`core::mem::type_info::FnPtr`].
-/// When called on something else this returns `None`.
-///
-/// The more user-friendly version of this intrinsic is [`core::any::TypeId::function_ptr`].
-#[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_comptime]
-pub fn type_id_function_ptr(_type_id: crate::any::TypeId) -> Option<crate::mem::type_info::FnPtr>;
-
-/// Checks whether this type is non-exhaustive.
-#[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_comptime]
-pub fn non_exhaustive(_id: crate::any::TypeId) -> bool;
-
-/// Returns the list of generic args on this type.
-/// Only meaningful for Adts, closures, ... Everything else returns an empty slice.
-#[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_comptime]
-pub fn type_id_generics(_id: crate::any::TypeId) -> &'static [crate::mem::type_info::Generic];
-
-// FIXME(reflection): Pick a consistent naming scheme for the intrinsics. Right now we got
-// type_id_<something>, <something>_type_id and intrinsics not mentioning type_id at all.
-/// Given a `TypeId` that represents a pointer this returns the `TypeId` which that pointer
-/// points to. When called on anything else this returns None.
-///
-/// The more user-friendly version of this intrinsic is [`core::any::TypeId::points_to`].
-#[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_comptime]
-pub fn type_id_points_to(_id: crate::any::TypeId) -> Option<crate::any::TypeId>;
-
-/// Given a `TypeId` that represents a pointer returns whether that pointer is mutable.
-/// When called on anything else this returns `false`.
-///
-/// The more user-friendly version of this intrinsic is [`core::any::TypeId::points_mutably`].
-#[rustc_intrinsic]
-#[unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_comptime]
-pub fn type_id_points_mutably(_id: crate::any::TypeId) -> bool;
 
 /// Lowers in MIR to `Rvalue::Aggregate` with `AggregateKind::RawPtr`.
 ///
@@ -3239,7 +3012,6 @@ pub fn type_id_points_mutably(_id: crate::any::TypeId) -> bool;
 /// `ptr::from_raw_parts` in a way compatible with the compiler being able to
 /// change the possible layouts of pointers.
 #[rustc_nounwind]
-#[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 pub const fn aggregate_raw_ptr<P: bounds::BuiltinDeref, D, M>(data: D, meta: M) -> P
@@ -3250,7 +3022,6 @@ where
 ///
 /// This is used to implement functions like `ptr::metadata`.
 #[rustc_nounwind]
-#[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + PointeeSized, M>(ptr: *const P) -> M;
@@ -3264,6 +3035,10 @@ pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + PointeeSized, M>(ptr: 
 /// It is UB to read the uninitialized bytes, so we cannot compare their values only their
 /// initialization state.
 ///
+/// The comparison goes through `ub_checks::can_dereference`, which checks initialization only
+/// when Kani runs with `-Z uninit-checks`. Without that flag, as in CI, `can_dereference` treats
+/// every byte as initialized, so this function does not check initialization.
+///
 /// This is used for contracts only.
 #[allow(dead_code)]
 #[allow(unused_variables)]
@@ -3276,7 +3051,10 @@ fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
         // them and check it. Using quantifiers would not add value as we can rely on the solver to
         // pick an uninitialized element if such an element exists.
         let elem = kani::any_where(|val: &usize| *val < count);
-        let src_data = src as *const u8;
+        // Offset *both* sides by `elem`: comparing `dst[elem]` against `src[0]`
+        // would be wrong whenever initialization differs across elements.
+        // (Oracle fix independently found by #643.)
+        let src_data = unsafe { src.add(elem) } as *const u8;
         let dst_data = unsafe { dst.add(elem) } as *const u8;
         ub_checks::can_dereference(unsafe { src_data.add(byte) })
             == ub_checks::can_dereference(unsafe { dst_data.add(byte) })
@@ -3393,7 +3171,6 @@ pub const fn minimum_number_nsz_f16(x: f16, y: f16) -> f16 {
 ///
 /// The stabilized version of this intrinsic is [`f32::min`].
 #[rustc_nounwind]
-#[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 pub const fn minimum_number_nsz_f32(x: f32, y: f32) -> f32 {
     if x.is_nan() || y <= x {
@@ -3419,7 +3196,6 @@ pub const fn minimum_number_nsz_f32(x: f32, y: f32) -> f32 {
 ///
 /// The stabilized version of this intrinsic is [`f64::min`].
 #[rustc_nounwind]
-#[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 pub const fn minimum_number_nsz_f64(x: f64, y: f64) -> f64 {
     if x.is_nan() || y <= x {
@@ -3595,7 +3371,6 @@ pub const fn maximum_number_nsz_f16(x: f16, y: f16) -> f16 {
 ///
 /// The stabilized version of this intrinsic is [`f32::max`].
 #[rustc_nounwind]
-#[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 pub const fn maximum_number_nsz_f32(x: f32, y: f32) -> f32 {
     if x.is_nan() || y >= x {
@@ -3621,7 +3396,6 @@ pub const fn maximum_number_nsz_f32(x: f32, y: f32) -> f32 {
 ///
 /// The stabilized version of this intrinsic is [`f64::max`].
 #[rustc_nounwind]
-#[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 pub const fn maximum_number_nsz_f64(x: f64, y: f64) -> f64 {
     if x.is_nan() || y >= x {
@@ -3758,11 +3532,10 @@ pub const fn maximumf128(x: f128, y: f128) -> f128 {
 /// The stabilized versions of this intrinsic are available on the float
 /// primitives via the `abs` method. For example, [`f32::abs`].
 #[rustc_nounwind]
-#[rustc_const_unstable(feature = "core_intrinsics", issue = "none")]
-#[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
+#[rustc_intrinsic_const_stable_indirect]
+#[rustc_do_not_const_check] // Use built-in impl to avoid const-checks in the fallback body.
 #[miri::intrinsic_fallback_is_spec]
-#[rustc_do_not_const_check] // use built-in impl to avoid const-checks in the fallback body.
 pub const fn fabs<T: bounds::FloatPrimitive>(x: T) -> T {
     T::from_bits(x.to_bits() & !T::SIGN_MASK)
 }
@@ -3784,7 +3557,6 @@ pub const fn copysignf16(x: f16, y: f16) -> f16 {
 /// [`f32::copysign`](../../std/primitive.f32.html#method.copysign)
 #[inline]
 #[rustc_nounwind]
-#[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 pub const fn copysignf32(x: f32, y: f32) -> f32 {
     f32::from_bits((x.to_bits() & !f32::SIGN_MASK) | (y.to_bits() & f32::SIGN_MASK))
@@ -3795,7 +3567,6 @@ pub const fn copysignf32(x: f32, y: f32) -> f32 {
 /// [`f64::copysign`](../../std/primitive.f64.html#method.copysign)
 #[inline]
 #[rustc_nounwind]
-#[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
 pub const fn copysignf64(x: f64, y: f64) -> f64 {
     f64::from_bits((x.to_bits() & !f64::SIGN_MASK) | (y.to_bits() & f64::SIGN_MASK))
@@ -4013,33 +3784,411 @@ mod verify {
         });
     }
 
-    // #[kani::proof_for_contract(copy)]
-    // fn check_copy() {
-    //     run_with_arbitrary_ptrs::<char>(|src, dst| unsafe { copy(src, dst, kani::any()) });
-    // }
+    // ---- vtable_size ----
+    // Wrapper pattern, used throughout: Kani cannot attach contracts to body-less
+    // `#[rustc_intrinsic]`s (rust-lang/rust#137489, model-checking/kani#3325), so
+    // each contract lives on a thin wrapper (or `*_model`) fn; harnesses verify that.
+    // `[usize; 3]`: vtable = (size, align, drop-in-place), per rust-lang/unsafe-code-guidelines#166.
+    #[requires(ub_checks::can_dereference(ptr as *const [usize; 3]))]
+    #[ensures(|result: &usize| *result <= isize::MAX as usize)]
+    #[allow(dead_code)]
+    unsafe fn vtable_size_wrapper(ptr: *const ()) -> usize {
+        // SAFETY: guaranteed by the precondition (`ptr` points to a vtable).
+        unsafe { vtable_size(ptr) }
+    }
 
-    // #[kani::proof_for_contract(copy_nonoverlapping)]
-    // fn check_copy_nonoverlapping() {
-    //     // Note: cannot use `ArbitraryPointer` here.
-    //     // The `ArbitraryPtr` will arbitrarily initialize memory by indirectly invoking
-    //     // `copy_nonoverlapping`.
-    //     // Kani contract checking would fail due to existing restriction on calls to
-    //     // the function under verification.
-    //     let gen_any_ptr = |buf: &mut [MaybeUninit<char>; 100]| -> *mut char {
-    //         let base = buf.as_mut_ptr() as *mut u8;
-    //         base.wrapping_add(kani::any_where(|offset: &usize| *offset < 400)) as *mut char
-    //     };
-    //     let mut buffer1 = [MaybeUninit::<char>::uninit(); 100];
-    //     for i in 0..100 {
-    //         if kani::any() {
-    //             buffer1[i] = MaybeUninit::new(kani::any());
-    //         }
-    //     }
-    //     let mut buffer2 = [MaybeUninit::<char>::uninit(); 100];
-    //     let src = gen_any_ptr(&mut buffer1);
-    //     let dst = if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
-    //     unsafe { copy_nonoverlapping(src, dst, kani::any()) }
-    // }
+    // Real vtable pointer via `dyn Debug`; the `assert_eq!` pins Kani's model
+    // and witnesses non-vacuity.
+    macro_rules! check_vtable_size_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(vtable_size_wrapper)]
+            fn $harness() {
+                let val: $ty = kani::any();
+                let obj: &dyn core::fmt::Debug = &val;
+                let fat: *const dyn core::fmt::Debug = obj;
+                let meta = core::ptr::metadata(fat);
+                // Same transmute `DynMetadata::vtable_ptr` performs (layout-compatible).
+                let vptr = unsafe {
+                    core::mem::transmute::<core::ptr::DynMetadata<dyn core::fmt::Debug>, *const ()>(
+                        meta,
+                    )
+                };
+                let size = unsafe { vtable_size_wrapper(vptr) };
+                kani::cover(true, "vtable_size call is reachable");
+                assert_eq!(size, core::mem::size_of::<$ty>());
+            }
+        };
+    }
+
+    check_vtable_size_for!(check_vtable_size_u8, u8);
+    check_vtable_size_for!(check_vtable_size_u32, u32);
+    check_vtable_size_for!(check_vtable_size_u64, u64);
+    check_vtable_size_for!(check_vtable_size_i128, i128);
+
+    // ---- vtable_align ----
+    // As `vtable_size`; the ensures encodes non-zero power of two.
+    #[requires(ub_checks::can_dereference(ptr as *const [usize; 3]))]
+    #[ensures(|result: &usize| result.is_power_of_two())]
+    #[allow(dead_code)]
+    unsafe fn vtable_align_wrapper(ptr: *const ()) -> usize {
+        // SAFETY: guaranteed by the precondition (`ptr` points to a vtable).
+        unsafe { vtable_align(ptr) }
+    }
+
+    macro_rules! check_vtable_align_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(vtable_align_wrapper)]
+            fn $harness() {
+                let val: $ty = kani::any();
+                let obj: &dyn core::fmt::Debug = &val;
+                let fat: *const dyn core::fmt::Debug = obj;
+                let meta = core::ptr::metadata(fat);
+                // Same transmute `DynMetadata::vtable_ptr` performs.
+                let vptr = unsafe {
+                    core::mem::transmute::<core::ptr::DynMetadata<dyn core::fmt::Debug>, *const ()>(
+                        meta,
+                    )
+                };
+                let align = unsafe { vtable_align_wrapper(vptr) };
+                kani::cover(true, "vtable_align call is reachable");
+                assert_eq!(align, core::mem::align_of::<$ty>());
+            }
+        };
+    }
+
+    check_vtable_align_for!(check_vtable_align_u8, u8);
+    check_vtable_align_for!(check_vtable_align_u32, u32);
+    check_vtable_align_for!(check_vtable_align_u64, u64);
+    check_vtable_align_for!(check_vtable_align_i128, i128);
+
+    // ---- size_of_val ----
+    // Kani models this intrinsic (no fallback body); harness asserts pin it.
+    // `size_of_val_raw` documents per-case safety, so each case gets its own
+    // wrapper: `Sized` is always safe; a slice needs total size <= `isize::MAX`.
+    #[ensures(|result: &usize| *result <= isize::MAX as usize)]
+    #[allow(dead_code)]
+    unsafe fn size_of_val_sized_wrapper<T>(ptr: *const T) -> usize {
+        // SAFETY: `Sized` case never reads `*ptr`; safe for any pointer.
+        unsafe { size_of_val(ptr) }
+    }
+
+    // Division-first so the check never overflows; a ZST element makes it 0.
+    #[requires(crate::mem::size_of::<E>() == 0 || ptr.len() <= (isize::MAX as usize) / crate::mem::size_of::<E>())]
+    #[ensures(|result: &usize| *result <= isize::MAX as usize)]
+    #[allow(dead_code)]
+    unsafe fn size_of_val_slice_wrapper<E>(ptr: *const [E]) -> usize {
+        // SAFETY: only the length metadata is read; precondition bounds the size.
+        unsafe { size_of_val(ptr) }
+    }
+
+    // Model must return `size_of::<T>()`, pointer-independent.
+    macro_rules! check_size_of_val_sized_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(size_of_val_sized_wrapper)]
+            fn $harness() {
+                let val: $ty = kani::any();
+                let ptr: *const $ty = &val;
+                let size = unsafe { size_of_val_sized_wrapper(ptr) };
+                kani::cover(true, "size_of_val (sized) call is reachable");
+                assert_eq!(size, core::mem::size_of::<$ty>());
+            }
+        };
+    }
+
+    check_size_of_val_sized_for!(check_size_of_val_u8, u8);
+    check_size_of_val_sized_for!(check_size_of_val_u32, u32);
+    check_size_of_val_sized_for!(check_size_of_val_u64, u64);
+    check_size_of_val_sized_for!(check_size_of_val_i128, i128);
+    check_size_of_val_sized_for!(check_size_of_val_char, char);
+
+    // In-bounds `len` over a real array; model must return `len * size_of::<E>()`.
+    macro_rules! check_size_of_val_slice_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(size_of_val_slice_wrapper)]
+            fn $harness() {
+                const N: usize = 4;
+                let arr: [$ty; N] = kani::any();
+                let len: usize = kani::any_where(|l: &usize| *l <= N);
+                let ptr: *const [$ty] = core::ptr::slice_from_raw_parts(arr.as_ptr(), len);
+                let size = unsafe { size_of_val_slice_wrapper(ptr) };
+                kani::cover(len > 0, "size_of_val measures a non-empty slice");
+                assert_eq!(size, len * core::mem::size_of::<$ty>());
+            }
+        };
+    }
+
+    check_size_of_val_slice_for!(check_size_of_val_slice_u8, u8);
+    check_size_of_val_slice_for!(check_size_of_val_slice_u32, u32);
+    check_size_of_val_slice_for!(check_size_of_val_slice_i64, i64);
+
+    // ---- align_of_val (historically `min_align_of_val`) ----
+    // Same modeling and per-case wrapper split as `size_of_val`; the slice
+    // contract keeps the documented size-fits-`isize` condition.
+    #[ensures(|result: &usize| result.is_power_of_two())]
+    #[allow(dead_code)]
+    unsafe fn align_of_val_sized_wrapper<T>(ptr: *const T) -> usize {
+        // SAFETY: `Sized` case never reads `*ptr`; safe for any pointer.
+        unsafe { align_of_val(ptr) }
+    }
+
+    #[requires(crate::mem::size_of::<E>() == 0 || ptr.len() <= (isize::MAX as usize) / crate::mem::size_of::<E>())]
+    #[ensures(|result: &usize| result.is_power_of_two())]
+    #[allow(dead_code)]
+    unsafe fn align_of_val_slice_wrapper<E>(ptr: *const [E]) -> usize {
+        // SAFETY: only the length metadata is read; precondition bounds the size.
+        unsafe { align_of_val(ptr) }
+    }
+
+    // Model must return `align_of::<T>()`, pointer-independent.
+    macro_rules! check_align_of_val_sized_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_sized_wrapper)]
+            fn $harness() {
+                let val: $ty = kani::any();
+                let ptr: *const $ty = &val;
+                let align = unsafe { align_of_val_sized_wrapper(ptr) };
+                kani::cover(true, "align_of_val (sized) call is reachable");
+                assert_eq!(align, core::mem::align_of::<$ty>());
+            }
+        };
+    }
+
+    check_align_of_val_sized_for!(check_align_of_val_u8, u8);
+    check_align_of_val_sized_for!(check_align_of_val_u32, u32);
+    check_align_of_val_sized_for!(check_align_of_val_u64, u64);
+    check_align_of_val_sized_for!(check_align_of_val_i128, i128);
+    check_align_of_val_sized_for!(check_align_of_val_char, char);
+
+    // In-bounds `len`; model must return `align_of::<E>()` regardless of `len`.
+    macro_rules! check_align_of_val_slice_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_slice_wrapper)]
+            fn $harness() {
+                const N: usize = 4;
+                let arr: [$ty; N] = kani::any();
+                let len: usize = kani::any_where(|l: &usize| *l <= N);
+                let ptr: *const [$ty] = core::ptr::slice_from_raw_parts(arr.as_ptr(), len);
+                let align = unsafe { align_of_val_slice_wrapper(ptr) };
+                kani::cover(len > 0, "align_of_val measures a non-empty slice");
+                assert_eq!(align, core::mem::align_of::<$ty>());
+            }
+        };
+    }
+
+    check_align_of_val_slice_for!(check_align_of_val_slice_u8, u8);
+    check_align_of_val_slice_for!(check_align_of_val_slice_u32, u32);
+    check_align_of_val_slice_for!(check_align_of_val_slice_i64, i64);
+
+    // ---- size_of_val / align_of_val: trait-object (`dyn`) tails ----
+    // Third documented case of `size_of_val_raw` / `align_of_val_raw`: the
+    // vtable must be valid. Kani has no vtable predicate, so (exactly as for
+    // `vtable_size_wrapper`) dereferenceability of the three metadata words is
+    // the necessary approximation; harnesses supply real compiler-produced
+    // vtables, so the precondition is satisfied non-vacuously.
+    #[allow(dead_code)]
+    fn dyn_vtable_ptr(ptr: *const dyn core::fmt::Debug) -> *const () {
+        let meta = core::ptr::metadata(ptr);
+        // Same transmute `DynMetadata::vtable_ptr` performs (layout-compatible).
+        unsafe {
+            core::mem::transmute::<core::ptr::DynMetadata<dyn core::fmt::Debug>, *const ()>(meta)
+        }
+    }
+
+    #[requires(ub_checks::can_dereference(dyn_vtable_ptr(ptr) as *const [usize; 3]))]
+    #[ensures(|result: &usize| *result <= isize::MAX as usize)]
+    #[allow(dead_code)]
+    unsafe fn size_of_val_dyn_wrapper(ptr: *const dyn core::fmt::Debug) -> usize {
+        // SAFETY: only the vtable is read; readable by the precondition.
+        unsafe { size_of_val(ptr) }
+    }
+
+    #[requires(ub_checks::can_dereference(dyn_vtable_ptr(ptr) as *const [usize; 3]))]
+    #[ensures(|result: &usize| result.is_power_of_two())]
+    #[allow(dead_code)]
+    unsafe fn align_of_val_dyn_wrapper(ptr: *const dyn core::fmt::Debug) -> usize {
+        // SAFETY: only the vtable is read; readable by the precondition.
+        unsafe { align_of_val(ptr) }
+    }
+
+    // Erased-type fidelity: the model must return the *underlying* type's
+    // size/align through the vtable, not a fixture value.
+    macro_rules! check_size_of_val_dyn_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(size_of_val_dyn_wrapper)]
+            fn $harness() {
+                let val: $ty = kani::any();
+                let obj: &dyn core::fmt::Debug = &val;
+                let size = unsafe { size_of_val_dyn_wrapper(obj) };
+                kani::cover(true, "size_of_val (dyn) call is reachable");
+                assert_eq!(size, core::mem::size_of::<$ty>());
+            }
+        };
+    }
+
+    check_size_of_val_dyn_for!(check_size_of_val_dyn_u8, u8);
+    check_size_of_val_dyn_for!(check_size_of_val_dyn_u32, u32);
+    check_size_of_val_dyn_for!(check_size_of_val_dyn_i128, i128);
+
+    macro_rules! check_align_of_val_dyn_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_dyn_wrapper)]
+            fn $harness() {
+                let val: $ty = kani::any();
+                let obj: &dyn core::fmt::Debug = &val;
+                let align = unsafe { align_of_val_dyn_wrapper(obj) };
+                kani::cover(true, "align_of_val (dyn) call is reachable");
+                assert_eq!(align, core::mem::align_of::<$ty>());
+            }
+        };
+    }
+
+    check_align_of_val_dyn_for!(check_align_of_val_dyn_u8, u8);
+    check_align_of_val_dyn_for!(check_align_of_val_dyn_u32, u32);
+    check_align_of_val_dyn_for!(check_align_of_val_dyn_i128, i128);
+
+    // ---- copy_nonoverlapping ----
+    // Restores the pre-body-removal contract. `MaybeUninit<T>` because the copy is
+    // untyped; the ensures compares per-byte initialization state, which Kani
+    // checks only with `-Z uninit-checks` (see `check_copy_untyped`).
+    #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
+        && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
+        && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count))
+        && ub_checks::maybe_is_nonoverlapping(src as *const (), dst as *const (), crate::mem::size_of::<T>(), count))]
+    #[ensures(|_| check_copy_untyped(src, dst, count))]
+    #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+    #[allow(dead_code)]
+    unsafe fn copy_nonoverlapping_wrapper<T>(src: *const T, dst: *mut T, count: usize) {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { copy_nonoverlapping(src, dst, count) }
+    }
+
+    // No `ArbitraryPointer`: it initializes memory via the function under
+    // verification. Non-deterministic `src` init gives the untyped-copy ensures
+    // teeth; `dst` may alias `buffer1` so non-overlap is genuinely exercised.
+    macro_rules! check_copy_nonoverlapping_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(copy_nonoverlapping_wrapper)]
+            fn $harness() {
+                const N: usize = 100;
+                let gen_any_ptr = |buf: &mut [MaybeUninit<$ty>; N]| -> *mut $ty {
+                    let base = buf.as_mut_ptr() as *mut u8;
+                    base.wrapping_add(kani::any_where(|o: &usize| {
+                        *o < N * core::mem::size_of::<$ty>()
+                    })) as *mut $ty
+                };
+                let mut buffer1 = [MaybeUninit::<$ty>::uninit(); N];
+                for i in 0..N {
+                    if kani::any() {
+                        buffer1[i] = MaybeUninit::new(kani::any());
+                    }
+                }
+                let mut buffer2 = [MaybeUninit::<$ty>::uninit(); N];
+                let src = gen_any_ptr(&mut buffer1) as *const $ty;
+                let dst =
+                    if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
+                let count: usize = kani::any();
+                kani::cover(count > 0, "copy_nonoverlapping copies a non-empty range");
+                unsafe { copy_nonoverlapping_wrapper(src, dst, count) };
+            }
+        };
+    }
+
+    check_copy_nonoverlapping_for!(check_copy_nonoverlapping_u8, u8);
+    check_copy_nonoverlapping_for!(check_copy_nonoverlapping_char, char);
+    check_copy_nonoverlapping_for!(check_copy_nonoverlapping_u32, u32);
+
+    // ---- copy ----
+    // Memmove: overlap permitted, so `copy_nonoverlapping`'s contract minus the
+    // non-overlap clause.
+    #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
+        && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
+        && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+    #[ensures(|_| check_copy_untyped(src, dst, count))]
+    #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+    #[allow(dead_code)]
+    unsafe fn copy_wrapper<T>(src: *const T, dst: *mut T, count: usize) {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { copy(src, dst, count) }
+    }
+
+    // Same setup as `copy_nonoverlapping`, but the aliasing `dst` now exercises
+    // the overlapping case `copy` permits.
+    macro_rules! check_copy_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(copy_wrapper)]
+            fn $harness() {
+                const N: usize = 100;
+                let gen_any_ptr = |buf: &mut [MaybeUninit<$ty>; N]| -> *mut $ty {
+                    let base = buf.as_mut_ptr() as *mut u8;
+                    base.wrapping_add(kani::any_where(|o: &usize| {
+                        *o < N * core::mem::size_of::<$ty>()
+                    })) as *mut $ty
+                };
+                let mut buffer1 = [MaybeUninit::<$ty>::uninit(); N];
+                for i in 0..N {
+                    if kani::any() {
+                        buffer1[i] = MaybeUninit::new(kani::any());
+                    }
+                }
+                let mut buffer2 = [MaybeUninit::<$ty>::uninit(); N];
+                let src = gen_any_ptr(&mut buffer1) as *const $ty;
+                // `dst` may alias `buffer1` (overlap is permitted by `copy`).
+                let dst =
+                    if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
+                let count: usize = kani::any();
+                kani::cover(count > 0, "copy copies a non-empty range");
+                unsafe { copy_wrapper(src, dst, count) };
+            }
+        };
+    }
+
+    check_copy_for!(check_copy_u8, u8);
+    check_copy_for!(check_copy_char, char);
+    check_copy_for!(check_copy_u32, u32);
+
+    // ---- write_bytes ----
+    // C `memset`; contract is the pre-body-removal one. Supersedes the old
+    // harness parked on <https://github.com/model-checking/kani/issues/90>.
+    // Ensures is over `*const u8`: arbitrary `val` bytes need not form a valid `T`.
+    #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
+        && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+    #[requires(ub_checks::maybe_is_aligned_and_not_null(
+        dst as *const (),
+        crate::mem::align_of::<T>(),
+        crate::mem::size_of::<T>() == 0 || count == 0,
+    ))]
+    #[ensures(|_| ub_checks::can_dereference(
+        core::ptr::slice_from_raw_parts(dst as *const u8, count * crate::mem::size_of::<T>())))]
+    #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+    #[allow(dead_code)]
+    unsafe fn write_bytes_wrapper<T>(dst: *mut T, val: u8, count: usize) {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { write_bytes(dst, val, count) }
+    }
+
+    // `dst` stays inside a real stack allocation; the byte-granular offset
+    // generates misaligned pointers the alignment clause must prune.
+    macro_rules! check_write_bytes_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(write_bytes_wrapper)]
+            fn $harness() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                let base = buffer.as_mut_ptr() as *mut u8;
+                let dst = base
+                    .wrapping_add(kani::any_where(|o: &usize| *o < N * core::mem::size_of::<$ty>()))
+                    as *mut $ty;
+                let val: u8 = kani::any();
+                let count: usize = kani::any();
+                kani::cover(count > 0, "write_bytes writes a non-empty range");
+                unsafe { write_bytes_wrapper(dst, val, count) };
+            }
+        };
+    }
+
+    check_write_bytes_for!(check_write_bytes_u8, u8);
+    check_write_bytes_for!(check_write_bytes_char, char);
+    check_write_bytes_for!(check_write_bytes_u32, u32);
 
     //We need this wrapper because transmute_unchecked is an intrinsic, for which Kani does
     //not currently support contracts (https://github.com/model-checking/kani/issues/3345)
@@ -4632,17 +4781,609 @@ mod verify {
     gen_compound_harnesses!(arr_mod, [u8; 2]);
     gen_compound_harnesses!(struct_mod, u8_struct);
 
+    // ---- arith_offset ----
+    // Kani models this as wrapping pointer arithmetic; no safety precondition,
+    // hence no `requires`. Ensures: address displaced by `offset` elements,
+    // wrapping over the pointer width (unlike the bounds-restricted `offset`).
+    #[ensures(|result: &*const T|
+        (*result).addr()
+            == dst.addr().wrapping_add((offset as usize).wrapping_mul(crate::mem::size_of::<T>())))]
+    #[allow(dead_code)]
+    unsafe fn arith_offset_wrapper<T>(dst: *const T, offset: isize) -> *const T {
+        // SAFETY: no preconditions; pure wrapping arithmetic, no memory access.
+        unsafe { arith_offset(dst, offset) }
+    }
+
+    // Nothing is dereferenced, so a provenance-free integer address is the most
+    // general base. CBMC encodes a pointer's address in the bits left over after
+    // the object ID; CI runs with `--object-bits 12`, leaving 52 bits. The
+    // harness therefore keeps the base and the result below 2^52; results that
+    // wrap around past `usize::MAX` are out of reach with 12 object bits.
+    macro_rules! check_arith_offset_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(arith_offset_wrapper)]
+            fn $harness() {
+                // Every base below 2^52, and every offset whose result lands there.
+                let base_addr: usize = kani::any();
+                kani::assume(base_addr >= 1 && base_addr < (1usize << 52));
+                let offset: isize = kani::any();
+                let r =
+                    base_addr as i128 + (offset as i128) * (crate::mem::size_of::<$ty>() as i128);
+                kani::assume(r >= 0 && r < (1i128 << 52));
+
+                let dst: *const $ty = crate::ptr::without_provenance(base_addr);
+                kani::cover(offset > 0, "arith_offset applies a forward displacement");
+                kani::cover(offset < 0, "arith_offset applies a backward displacement");
+                let _ = unsafe { arith_offset_wrapper::<$ty>(dst, offset) };
+            }
+        };
+    }
+
+    check_arith_offset_for!(check_arith_offset_u8, u8);
+    check_arith_offset_for!(check_arith_offset_u32, u32);
+    check_arith_offset_for!(check_arith_offset_u64, u64);
+    check_arith_offset_for!(check_arith_offset_i128, i128);
+
+    // ---- volatile_copy_nonoverlapping_memory ----
+    // As for `volatile_load`/`volatile_store`, the contract lives on a thin
+    // `*_model` wrapper that calls the real intrinsic (Kani supports all five
+    // volatile/unaligned-volatile intrinsics since model-checking/kani#4672 and
+    // #4673). Contract as for `copy_nonoverlapping`, whose safety it shares.
+    #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
+        && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
+        && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count))
+        && ub_checks::maybe_is_nonoverlapping(src as *const (), dst as *const (), crate::mem::size_of::<T>(), count))]
+    #[ensures(|_| check_copy_untyped(src, dst, count))]
+    #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+    #[allow(dead_code)]
+    unsafe fn volatile_copy_nonoverlapping_memory_model<T>(
+        dst: *mut T,
+        src: *const T,
+        count: usize,
+    ) {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { volatile_copy_nonoverlapping_memory(dst, src, count) }
+    }
+
+    // Same setup rationale as `check_copy_nonoverlapping_for`.
+    macro_rules! check_volatile_copy_nonoverlapping_memory_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(volatile_copy_nonoverlapping_memory_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let gen_any_ptr = |buf: &mut [MaybeUninit<$ty>; N]| -> *mut $ty {
+                    let base = buf.as_mut_ptr() as *mut u8;
+                    base.wrapping_add(kani::any_where(|o: &usize| {
+                        *o < N * core::mem::size_of::<$ty>()
+                    })) as *mut $ty
+                };
+                let mut buffer1 = [MaybeUninit::<$ty>::uninit(); N];
+                for i in 0..N {
+                    if kani::any() {
+                        buffer1[i] = MaybeUninit::new(kani::any());
+                    }
+                }
+                let mut buffer2 = [MaybeUninit::<$ty>::uninit(); N];
+                let src = gen_any_ptr(&mut buffer1) as *const $ty;
+                // `dst` may point into a separate buffer or alias `buffer1`.
+                let dst =
+                    if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
+                let count: usize = kani::any();
+                kani::cover(
+                    count > 0,
+                    "volatile_copy_nonoverlapping_memory copies a non-empty range",
+                );
+                unsafe { volatile_copy_nonoverlapping_memory_model(dst, src, count) };
+            }
+        };
+    }
+
+    check_volatile_copy_nonoverlapping_memory_for!(
+        check_volatile_copy_nonoverlapping_memory_u8,
+        u8
+    );
+    check_volatile_copy_nonoverlapping_memory_for!(
+        check_volatile_copy_nonoverlapping_memory_char,
+        char
+    );
+    check_volatile_copy_nonoverlapping_memory_for!(
+        check_volatile_copy_nonoverlapping_memory_u32,
+        u32
+    );
+
+    // ---- volatile_copy_memory ----
+    // Calls the real intrinsic (memmove): the contract is
+    // `volatile_copy_nonoverlapping_memory`'s minus the non-overlap clause.
+    #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
+        && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
+        && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+    #[ensures(|_| check_copy_untyped(src, dst, count))]
+    #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+    #[allow(dead_code)]
+    unsafe fn volatile_copy_memory_model<T>(dst: *mut T, src: *const T, count: usize) {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { volatile_copy_memory(dst, src, count) }
+    }
+
+    // Same setup as `check_copy_for`, including the aliasing `dst`.
+    macro_rules! check_volatile_copy_memory_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(volatile_copy_memory_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let gen_any_ptr = |buf: &mut [MaybeUninit<$ty>; N]| -> *mut $ty {
+                    let base = buf.as_mut_ptr() as *mut u8;
+                    base.wrapping_add(kani::any_where(|o: &usize| {
+                        *o < N * core::mem::size_of::<$ty>()
+                    })) as *mut $ty
+                };
+                let mut buffer1 = [MaybeUninit::<$ty>::uninit(); N];
+                for i in 0..N {
+                    if kani::any() {
+                        buffer1[i] = MaybeUninit::new(kani::any());
+                    }
+                }
+                let mut buffer2 = [MaybeUninit::<$ty>::uninit(); N];
+                let src = gen_any_ptr(&mut buffer1) as *const $ty;
+                let dst =
+                    if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
+                let count: usize = kani::any();
+                kani::cover(count > 0, "volatile_copy_memory copies a non-empty range");
+                unsafe { volatile_copy_memory_model(dst, src, count) };
+            }
+        };
+    }
+
+    check_volatile_copy_memory_for!(check_volatile_copy_memory_u8, u8);
+    check_volatile_copy_memory_for!(check_volatile_copy_memory_char, char);
+    check_volatile_copy_memory_for!(check_volatile_copy_memory_u32, u32);
+
+    // ---- volatile_set_memory ----
+    // Calls the real intrinsic (memset); contract is `write_bytes`'s verbatim,
+    // including the bytes-only ensures.
+    #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
+        && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+    #[requires(ub_checks::maybe_is_aligned_and_not_null(
+        dst as *const (),
+        crate::mem::align_of::<T>(),
+        crate::mem::size_of::<T>() == 0 || count == 0,
+    ))]
+    #[ensures(|_| ub_checks::can_dereference(
+        core::ptr::slice_from_raw_parts(dst as *const u8, count * crate::mem::size_of::<T>())))]
+    #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+    #[allow(dead_code)]
+    unsafe fn volatile_set_memory_model<T>(dst: *mut T, val: u8, count: usize) {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { volatile_set_memory(dst, val, count) }
+    }
+
+    // Same setup rationale as `check_write_bytes_for`.
+    macro_rules! check_volatile_set_memory_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(volatile_set_memory_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                let base = buffer.as_mut_ptr() as *mut u8;
+                let dst = base
+                    .wrapping_add(kani::any_where(|o: &usize| *o < N * core::mem::size_of::<$ty>()))
+                    as *mut $ty;
+                let val: u8 = kani::any();
+                let count: usize = kani::any();
+                kani::cover(count > 0, "volatile_set_memory sets a non-empty range");
+                unsafe { volatile_set_memory_model(dst, val, count) };
+            }
+        };
+    }
+
+    check_volatile_set_memory_for!(check_volatile_set_memory_u8, u8);
+    check_volatile_set_memory_for!(check_volatile_set_memory_char, char);
+    check_volatile_set_memory_for!(check_volatile_set_memory_u32, u32);
+
+    // ---- volatile_load ----
+    // Backs `ptr::read_volatile`; Kani models it as the same read. Requires is
+    // verbatim from `read_volatile`; a read has no `modifies` and no ensures.
+    #[requires(ub_checks::can_dereference(src))]
+    #[allow(dead_code)]
+    unsafe fn volatile_load_model<T>(src: *const T) -> T {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { volatile_load(src) }
+    }
+
+    // `src` stays inside a fully initialized stack allocation. `can_dereference`
+    // checks initialization only with `-Z uninit-checks`, which CI does not pass.
+    // The byte-granular offset generates misaligned pointers the alignment clause
+    // must prune.
+    macro_rules! check_volatile_load_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(volatile_load_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                for i in 0..N {
+                    buffer[i] = MaybeUninit::new(kani::any());
+                }
+                let base = buffer.as_ptr() as *const u8;
+                let src = base
+                    .wrapping_add(kani::any_where(|o: &usize| *o < N * core::mem::size_of::<$ty>()))
+                    as *const $ty;
+                kani::cover(true, "volatile_load reaches a dereferenceable src");
+                let _val = unsafe { volatile_load_model(src) };
+            }
+        };
+    }
+
+    check_volatile_load_for!(check_volatile_load_u8, u8);
+    check_volatile_load_for!(check_volatile_load_char, char);
+    check_volatile_load_for!(check_volatile_load_u32, u32);
+
+    // ---- volatile_store ----
+    // Backs `ptr::write_volatile`; Kani models it as the same write. Requires is
+    // verbatim from `write_volatile`; `modifies(dst)` scopes the write. No
+    // ensures: `dst` may be write-only I/O memory, so asserting post-state
+    // readability would over-claim; fidelity is pinned by the harness read-back.
+    #[requires(ub_checks::can_write(dst))]
+    #[cfg_attr(kani, kani::modifies(dst))]
+    #[allow(dead_code)]
+    unsafe fn volatile_store_model<T>(dst: *mut T, val: T) {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { volatile_store(dst, val) }
+    }
+
+    // `dst` need not be initialized (the store only writes); misaligned pointers
+    // from the byte-granular offset must be pruned by the alignment clause.
+    macro_rules! check_volatile_store_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(volatile_store_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                let base = buffer.as_mut_ptr() as *mut u8;
+                let dst = base
+                    .wrapping_add(kani::any_where(|o: &usize| *o < N * core::mem::size_of::<$ty>()))
+                    as *mut $ty;
+                let val: $ty = kani::any();
+                kani::cover(true, "volatile_store reaches a writeable dst");
+                unsafe { volatile_store_model(dst, val) };
+                // Fidelity: the model actually stored `val` at `dst`.
+                let read_back = unsafe { volatile_load(dst) };
+                assert!(read_back == val);
+            }
+        };
+    }
+
+    check_volatile_store_for!(check_volatile_store_u8, u8);
+    check_volatile_store_for!(check_volatile_store_char, char);
+    check_volatile_store_for!(check_volatile_store_u32, u32);
+
+    // ---- unaligned_volatile_load ----
+    // Volatile analogue of `ptr::read_unaligned`; calls the real intrinsic.
+    // Requires `can_read_unaligned(src)`: dropping the alignment obligation is
+    // the whole difference from `volatile_load`.
+    #[requires(ub_checks::can_read_unaligned(src))]
+    #[allow(dead_code)]
+    unsafe fn unaligned_volatile_load_model<T>(src: *const T) -> T {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { unaligned_volatile_load(src) }
+    }
+
+    // As `check_volatile_load_for`, but misaligned pointers are NOT pruned; the
+    // cover witnesses that a misaligned read is actually reachable.
+    macro_rules! check_unaligned_volatile_load_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(unaligned_volatile_load_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                for i in 0..N {
+                    buffer[i] = MaybeUninit::new(kani::any());
+                }
+                let base = buffer.as_ptr() as *const u8;
+                let src = base
+                    .wrapping_add(kani::any_where(|o: &usize| *o < N * core::mem::size_of::<$ty>()))
+                    as *const $ty;
+                kani::cover(
+                    src.addr() % core::mem::align_of::<$ty>() != 0,
+                    "unaligned_volatile_load reaches a misaligned src",
+                );
+                let _val = unsafe { unaligned_volatile_load_model(src) };
+            }
+        };
+    }
+
+    // `char`/`u32` (alignment > 1) make the misaligned cover satisfiable; `u8`
+    // is handled separately since every address is 1-aligned.
+    check_unaligned_volatile_load_for!(check_unaligned_volatile_load_char, char);
+    check_unaligned_volatile_load_for!(check_unaligned_volatile_load_u32, u32);
+
+    #[kani::proof_for_contract(unaligned_volatile_load_model)]
+    fn check_unaligned_volatile_load_u8() {
+        const N: usize = 100;
+        let mut buffer = [MaybeUninit::<u8>::uninit(); N];
+        for i in 0..N {
+            buffer[i] = MaybeUninit::new(kani::any());
+        }
+        let base = buffer.as_ptr();
+        let src = base.wrapping_add(kani::any_where(|o: &usize| *o < N)) as *const u8;
+        // `u8` is always aligned; just witness a dereferenceable read (non-vacuity).
+        kani::cover(true, "unaligned_volatile_load reaches a dereferenceable src");
+        let _val = unsafe { unaligned_volatile_load_model(src) };
+    }
+
+    // ---- unaligned_volatile_store ----
+    // Volatile analogue of `ptr::write_unaligned`; calls the real intrinsic.
+    // Requires `can_write_unaligned(dst)`: dropping alignment is the whole
+    // difference from `volatile_store`. No ensures (write-only I/O memory);
+    // fidelity is pinned by the harness read-back.
+    #[requires(ub_checks::can_write_unaligned(dst))]
+    #[cfg_attr(kani, kani::modifies(dst))]
+    #[allow(dead_code)]
+    unsafe fn unaligned_volatile_store_model<T>(dst: *mut T, val: T) {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { unaligned_volatile_store(dst, val) }
+    }
+
+    // As `check_volatile_store_for`, but misaligned pointers are NOT pruned; the
+    // cover witnesses a misaligned write, and the read-back assert pins fidelity.
+    macro_rules! check_unaligned_volatile_store_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(unaligned_volatile_store_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                let base = buffer.as_mut_ptr() as *mut u8;
+                let dst = base
+                    .wrapping_add(kani::any_where(|o: &usize| *o < N * core::mem::size_of::<$ty>()))
+                    as *mut $ty;
+                let val: $ty = kani::any();
+                kani::cover(
+                    dst.addr() % core::mem::align_of::<$ty>() != 0,
+                    "unaligned_volatile_store reaches a misaligned dst",
+                );
+                unsafe { unaligned_volatile_store_model(dst, val) };
+                // Fidelity: the model actually stored `val` at `dst`.
+                let read_back = unsafe { crate::ptr::read_unaligned(dst) };
+                assert!(read_back == val);
+            }
+        };
+    }
+
+    // `char`/`u32` have alignment > 1, so the misaligned cover is satisfiable;
+    // `u8` is handled separately as for the load case.
+    check_unaligned_volatile_store_for!(check_unaligned_volatile_store_char, char);
+    check_unaligned_volatile_store_for!(check_unaligned_volatile_store_u32, u32);
+
+    #[kani::proof_for_contract(unaligned_volatile_store_model)]
+    fn check_unaligned_volatile_store_u8() {
+        const N: usize = 100;
+        let mut buffer = [MaybeUninit::<u8>::uninit(); N];
+        let base = buffer.as_mut_ptr();
+        let dst = base.wrapping_add(kani::any_where(|o: &usize| *o < N)) as *mut u8;
+        let val: u8 = kani::any();
+        // `u8` is always aligned; just witness a writeable dst (non-vacuity).
+        kani::cover(true, "unaligned_volatile_store reaches a writeable dst");
+        unsafe { unaligned_volatile_store_model(dst, val) };
+        let read_back = unsafe { crate::ptr::read_unaligned(dst) };
+        assert!(read_back == val);
+    }
+
+    // ---- ptr_offset_from ----
+    // Kani models this as the CBMC pointer difference scaled to units of `T`
+    // (primitive behind `<*const T>::offset_from`). The four `requires` encode
+    // the `# Safety` of `offset_from`, matching the already-verified contract in
+    // `ptr/const_ptr.rs`. Ensures: the exact signed element distance.
+    #[requires(crate::mem::size_of::<T>() != 0)]
+    // Subtracting `base` from `ptr` (as addresses) does not overflow `isize`.
+    #[requires((ptr as isize).checked_sub(base as isize).is_some())]
+    // The byte distance is an exact multiple of the pointee size.
+    #[requires((ptr as isize - base as isize) % (crate::mem::size_of::<T>() as isize) == 0)]
+    // The pointers share an allocation (or are literally the same address).
+    #[requires(ptr as isize == base as isize || ub_checks::same_allocation(ptr, base))]
+    #[ensures(|result: &isize|
+        *result == (ptr as isize - base as isize) / (crate::mem::size_of::<T>() as isize))]
+    #[allow(dead_code)]
+    unsafe fn ptr_offset_from_wrapper<T>(ptr: *const T, base: *const T) -> isize {
+        // SAFETY: guaranteed by the preconditions.
+        unsafe { ptr_offset_from(ptr, base) }
+    }
+
+    // Same-generator pairs satisfy `same_allocation`; cross-generator pairs are
+    // pruned. For these primitive `T`, size == align, so in-bounds pairs satisfy
+    // the exact-multiple clause; covers witness zero/forward/backward distances.
+    macro_rules! check_ptr_offset_from_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(ptr_offset_from_wrapper)]
+            fn $harness() {
+                const GEN_SIZE: usize = mem::size_of::<$ty>();
+                let mut generator1 = PointerGenerator::<{ GEN_SIZE * 4 }>::new();
+                let mut generator2 = PointerGenerator::<{ GEN_SIZE * 4 }>::new();
+                let ptr: *const $ty = generator1.any_in_bounds().ptr;
+                let base: *const $ty = if kani::any() {
+                    generator1.any_in_bounds().ptr
+                } else {
+                    generator2.any_in_bounds().ptr
+                };
+                kani::cover(ptr.addr() == base.addr(), "offset_from: zero distance");
+                kani::cover(ptr.addr() > base.addr(), "offset_from: forward distance");
+                kani::cover(ptr.addr() < base.addr(), "offset_from: backward distance");
+                let _ = unsafe { ptr_offset_from_wrapper::<$ty>(ptr, base) };
+            }
+        };
+    }
+
+    check_ptr_offset_from_for!(check_ptr_offset_from_u8, u8);
+    check_ptr_offset_from_for!(check_ptr_offset_from_u32, u32);
+    check_ptr_offset_from_for!(check_ptr_offset_from_u64, u64);
+    check_ptr_offset_from_for!(check_ptr_offset_from_i32, i32);
+    check_ptr_offset_from_for!(check_ptr_offset_from_i128, i128);
+
+    // ---- ptr_offset_from_unsigned ----
+    // Unsigned variant of `ptr_offset_from`, same model. The first four
+    // `requires` are shared verbatim with `ptr_offset_from_wrapper`; the fifth
+    // adds the variant-specific `ptr >= base`. Ensures: the exact unsigned
+    // element distance (loss-free cast, since the distance is non-negative).
+    #[requires(crate::mem::size_of::<T>() != 0)]
+    #[requires((ptr as isize).checked_sub(base as isize).is_some())]
+    #[requires((ptr as isize - base as isize) % (crate::mem::size_of::<T>() as isize) == 0)]
+    #[requires(ptr as isize == base as isize || ub_checks::same_allocation(ptr, base))]
+    #[requires(ptr as isize >= base as isize)]
+    #[ensures(|result: &usize|
+        *result == ((ptr as isize - base as isize) / (crate::mem::size_of::<T>() as isize)) as usize)]
+    #[allow(dead_code)]
+    unsafe fn ptr_offset_from_unsigned_wrapper<T>(ptr: *const T, base: *const T) -> usize {
+        // SAFETY: guaranteed by the preconditions.
+        unsafe { ptr_offset_from_unsigned(ptr, base) }
+    }
+
+    // As `check_ptr_offset_from_for`; `ptr >= base` prunes backward distances,
+    // so only the zero and forward covers remain.
+    macro_rules! check_ptr_offset_from_unsigned_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(ptr_offset_from_unsigned_wrapper)]
+            fn $harness() {
+                const GEN_SIZE: usize = mem::size_of::<$ty>();
+                let mut generator1 = PointerGenerator::<{ GEN_SIZE * 4 }>::new();
+                let mut generator2 = PointerGenerator::<{ GEN_SIZE * 4 }>::new();
+                let ptr: *const $ty = generator1.any_in_bounds().ptr;
+                let base: *const $ty = if kani::any() {
+                    generator1.any_in_bounds().ptr
+                } else {
+                    generator2.any_in_bounds().ptr
+                };
+                kani::cover(ptr.addr() == base.addr(), "offset_from_unsigned: zero distance");
+                kani::cover(ptr.addr() > base.addr(), "offset_from_unsigned: forward distance");
+                let _ = unsafe { ptr_offset_from_unsigned_wrapper::<$ty>(ptr, base) };
+            }
+        };
+    }
+
+    check_ptr_offset_from_unsigned_for!(check_ptr_offset_from_unsigned_u8, u8);
+    check_ptr_offset_from_unsigned_for!(check_ptr_offset_from_unsigned_u32, u32);
+    check_ptr_offset_from_unsigned_for!(check_ptr_offset_from_unsigned_u64, u64);
+    check_ptr_offset_from_unsigned_for!(check_ptr_offset_from_unsigned_i32, i32);
+    check_ptr_offset_from_unsigned_for!(check_ptr_offset_from_unsigned_i128, i128);
+
+    // ---- read_via_copy ----
+    // Backs `ptr::read`; Kani models it as the plain typed load. Requires
+    // `can_dereference(ptr)`, the `# Safety` of `ptr::read`; a read has no
+    // `modifies` and no ensures.
+    #[requires(ub_checks::can_dereference(ptr))]
+    #[allow(dead_code)]
+    unsafe fn read_via_copy_model<T>(ptr: *const T) -> T {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { read_via_copy(ptr) }
+    }
+
+    // Same setup rationale as `check_volatile_load_for`.
+    macro_rules! check_read_via_copy_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(read_via_copy_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                for i in 0..N {
+                    buffer[i] = MaybeUninit::new(kani::any());
+                }
+                let base = buffer.as_ptr() as *const u8;
+                let ptr = base
+                    .wrapping_add(kani::any_where(|o: &usize| *o < N * core::mem::size_of::<$ty>()))
+                    as *const $ty;
+                kani::cover(true, "read_via_copy reaches a dereferenceable ptr");
+                let _val = unsafe { read_via_copy_model(ptr) };
+            }
+        };
+    }
+
+    check_read_via_copy_for!(check_read_via_copy_u8, u8);
+    check_read_via_copy_for!(check_read_via_copy_char, char);
+    check_read_via_copy_for!(check_read_via_copy_u32, u32);
+
+    // ---- write_via_move ----
+    // Backs `ptr::write`; Kani models it as the plain typed store. Requires only
+    // `can_write(ptr)`: the write overwrites without reading. Ensures the
+    // destination holds a fully-formed `T`; `*ptr == value` is not expressible
+    // because `value` is moved and generic `T: !Copy` cannot be re-read.
+    #[requires(ub_checks::can_write(ptr))]
+    #[ensures(|_| ub_checks::can_dereference(ptr as *const T))]
+    #[cfg_attr(kani, kani::modifies(ptr))]
+    #[allow(dead_code)]
+    unsafe fn write_via_move_model<T>(ptr: *mut T, value: T) {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { write_via_move(ptr, value) }
+    }
+
+    // Destination deliberately left `MaybeUninit`: overwriting uninit memory is
+    // legal and exercised here; misaligned pointers from the byte-granular
+    // offset must be pruned by the alignment clause.
+    macro_rules! check_write_via_move_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(write_via_move_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                let base = buffer.as_mut_ptr() as *mut u8;
+                let ptr = base
+                    .wrapping_add(kani::any_where(|o: &usize| *o < N * core::mem::size_of::<$ty>()))
+                    as *mut $ty;
+                let value: $ty = kani::any();
+                kani::cover(true, "write_via_move reaches a writeable ptr");
+                unsafe { write_via_move_model(ptr, value) };
+            }
+        };
+    }
+
+    check_write_via_move_for!(check_write_via_move_u8, u8);
+    check_write_via_move_for!(check_write_via_move_char, char);
+    check_write_via_move_for!(check_write_via_move_u32, u32);
+
+    // ---- compare_bytes ----
+    // Backs slice comparison; Kani models it as a memcmp. Requires each pointer
+    // readable and initialized for the WHOLE `bytes` range, not merely up to the
+    // first differing byte (the docs stress chunked reads); Kani checks the
+    // initialization part only with `-Z uninit-checks`. No ensures: relating
+    // the returned sign to the first differing byte is functional, not safety.
+    #[requires(ub_checks::can_dereference(core::ptr::slice_from_raw_parts(left, bytes))
+        && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(right, bytes)))]
+    #[allow(dead_code)]
+    unsafe fn compare_bytes_model(left: *const u8, right: *const u8, bytes: usize) -> i32 {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { compare_bytes(left, right, bytes) }
+    }
+
+    // Both buffers fully initialized; `right` may alias `buffer1`. BOUNDED DOMAIN: Kani lowers
+    // the intrinsic to CBMC's built-in `memcmp` loop, which cannot take a loop
+    // invariant, so the range is capped at `MAX_BYTES = 64` with matching
+    // `kani::unwind`; the bound limits the checked instances, not the contract.
+    const MAX_BYTES: usize = 64;
+
+    #[kani::proof_for_contract(compare_bytes_model)]
+    #[kani::unwind(65)] // MAX_BYTES + 1
+    fn check_compare_bytes() {
+        const N: usize = MAX_BYTES;
+        let mut buffer1 = [MaybeUninit::<u8>::uninit(); N];
+        let mut buffer2 = [MaybeUninit::<u8>::uninit(); N];
+        for i in 0..N {
+            buffer1[i] = MaybeUninit::new(kani::any());
+            buffer2[i] = MaybeUninit::new(kani::any());
+        }
+        let gen_any_ptr = |buf: &[MaybeUninit<u8>; N]| -> *const u8 {
+            (buf.as_ptr() as *const u8).wrapping_add(kani::any_where(|o: &usize| *o < N))
+        };
+        let left = gen_any_ptr(&buffer1);
+        // `right` may alias `buffer1` or point into a separate allocation.
+        let right = if kani::any() { gen_any_ptr(&buffer2) } else { gen_any_ptr(&buffer1) };
+        // Unconstrained `bytes` is pruned to `<= MAX_BYTES` by `can_dereference`.
+        let bytes: usize = kani::any();
+        kani::cover(bytes > 0, "compare_bytes compares a non-empty range");
+        let _ = unsafe { compare_bytes_model(left, right, bytes) };
+    }
+
     // FIXME: Enable this harness once <https://github.com/model-checking/kani/issues/90> is fixed.
     // Harness triggers a spurious failure when writing 0 bytes to an invalid memory location,
     // which is a safe operation.
-    #[cfg(not(kani))]
-    #[kani::proof_for_contract(write_bytes)]
-    fn check_write_bytes() {
-        let mut generator = PointerGenerator::<100>::new();
-        let ArbitraryPointer { ptr, status, .. } = generator.any_alloc_status::<char>();
-        kani::assume(supported_status(status));
-        unsafe { write_bytes(ptr, kani::any(), kani::any()) };
-    }
+    //
+    // Superseded by `write_bytes_wrapper` + `check_write_bytes_*` above, which
+    // carry a contract and keep `dst` in a live allocation (sidestepping #90).
 
     fn run_with_arbitrary_ptrs<T: Arbitrary>(harness: impl Fn(*mut T, *mut T)) {
         let mut generator1 = PointerGenerator::<100>::new();
