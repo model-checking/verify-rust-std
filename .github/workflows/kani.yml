@@ -74,6 +74,45 @@ jobs:
       - name: Run Kani Verification
         run: head/scripts/run-kani.sh --path ${{github.workspace}}/head
    
+  # Challenge 2 claims the absence of "Producing an invalid value", which Kani only checks under
+  # -Z valid-value-checks. Run the challenge's harnesses with it: every `intrinsics::verify`
+  # harness, and the ones for copy_from_slice, parse_u64_into, swap, align_of_val and zeroed.
+  check-valid-values-challenge-2:
+    name: Verify Challenge 2 harnesses with -Z valid-value-checks
+    if: ${{ !inputs.autoharness }}
+    runs-on: ubuntu-24.04
+    env:
+      KANI_JOBS: 2
+    steps:
+      - name: Remove unnecessary software to free up disk space
+        run: |
+          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /usr/local/.ghcup
+          df -h
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          path: head
+          submodules: true
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Run Kani Verification
+        run: |
+          head/scripts/run-kani.sh --path ${{github.workspace}}/head --kani-args \
+            -Z valid-value-checks \
+            --harness intrinsics::verify \
+            --harness mem::verify \
+            --harness mem::maybe_uninit::verify::check_zeroed \
+            --harness fmt::num::verify::check_u64_fmt \
+            --harness ptr::verify::check_ptr_write_bytes \
+            --harness ptr::verify::check_swap \
+            --harness ptr::non_null::verify::non_null_check_write_bytes \
+            --harness slice::verify::check_copy_from_slice \
+            --jobs=2 --output-format=terse
+
   kani_autoharness:
     name: Verify std library using autoharness
     # Autoharness, Metrics, List, Analyzer and Build JSON run only in the merge queue, on
