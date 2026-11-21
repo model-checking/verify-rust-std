@@ -84,7 +84,7 @@ use crate::{fmt, hash, intrinsics, mem, ptr};
 // Flux cannot lower the pattern-type field; treat the struct as opaque.
 #[cfg_attr(flux, flux::opaque)]
 pub struct NonNull<#[rustc_assert_variance(covariant)] T: PointeeSized> {
-    pointer: crate::pattern_type!(*const T is !null),
+    pointer: crate::pat::pattern_type!(*const T is !null),
 }
 
 /// `NonNull` pointers are not `Send` because the data they reference may be aliased.
@@ -578,7 +578,7 @@ impl<T: PointeeSized> NonNull<T> {
     /// assert!(aligned.try_cast_aligned::<u32>().is_some());
     /// assert!(unaligned.try_cast_aligned::<u32>().is_none());
     /// ```
-    #[stable(feature = "pointer_try_cast_aligned", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "pointer_try_cast_aligned", since = "1.101.0")]
     #[must_use = "this returns the result of the operation, \
                   without modifying the original"]
     #[inline]
@@ -1601,8 +1601,8 @@ impl<T> NonNull<T> {
     /// but `let slice = NonNull::from(&x[..]);` would be a better way to write code like this.)
     #[inline]
     #[must_use]
-    #[stable(feature = "ptr_cast_slice", since = "CURRENT_RUSTC_VERSION")]
-    #[rustc_const_stable(feature = "ptr_cast_slice", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "ptr_cast_slice", since = "1.101.0")]
+    #[rustc_const_stable(feature = "ptr_cast_slice", since = "1.101.0")]
     pub const fn cast_slice(self, len: usize) -> NonNull<[T]> {
         NonNull::slice_from_raw_parts(self, len)
     }
