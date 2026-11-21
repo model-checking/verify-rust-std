@@ -39,15 +39,6 @@ cfg_select! {
 
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 use libc::c_char;
-#[cfg(any(
-    all(target_os = "linux", not(target_env = "musl")),
-    target_os = "android",
-    target_os = "fuchsia",
-    target_os = "hurd",
-    target_os = "illumos",
-    target_vendor = "apple",
-))]
-use libc::dirfd;
 use libc::{c_int, mode_t};
 
 use crate::ffi::{CStr, OsStr, OsString};
@@ -599,7 +590,6 @@ impl FileAttr {
         all(target_os = "vxworks", vxworks_lt_25_09),
         target_os = "espidf",
         target_os = "vita",
-        target_os = "rtems",
     ))]
     pub fn modified(&self) -> io::Result<SystemTime> {
         SystemTime::new(self.stat.st_mtime as i64, 0)
@@ -609,6 +599,7 @@ impl FileAttr {
         target_os = "horizon",
         target_os = "hurd",
         target_os = "nuttx",
+        target_os = "rtems",
         all(target_os = "vxworks", not(vxworks_lt_25_09))
     ))]
     pub fn modified(&self) -> io::Result<SystemTime> {
@@ -639,7 +630,6 @@ impl FileAttr {
         all(target_os = "vxworks", vxworks_lt_25_09),
         target_os = "espidf",
         target_os = "vita",
-        target_os = "rtems"
     ))]
     pub fn accessed(&self) -> io::Result<SystemTime> {
         SystemTime::new(self.stat.st_atime as i64, 0)
@@ -649,6 +639,7 @@ impl FileAttr {
         target_os = "horizon",
         target_os = "hurd",
         target_os = "nuttx",
+        target_os = "rtems",
         all(target_os = "vxworks", not(vxworks_lt_25_09))
     ))]
     pub fn accessed(&self) -> io::Result<SystemTime> {
@@ -811,6 +802,7 @@ impl ReadDir {
                 target_os = "nto",
                 target_os = "qnx",
                 target_os = "vxworks",
+                target_os = "rtems",
                 target_os = "l4re",
             ) => Dir::open(&self.inner.root, &options),
             // Use `dirfd` where possible.
@@ -1023,12 +1015,10 @@ impl Drop for DirStream {
             target_os = "nto",
             target_os = "qnx",
             target_os = "vita",
-            target_os = "hurd",
             target_os = "espidf",
             target_os = "horizon",
             target_os = "vxworks",
             target_os = "rtems",
-            target_os = "nuttx",
         )))]
         {
             let fd = unsafe { libc::dirfd(self.0) };
@@ -1060,15 +1050,18 @@ impl DirEntry {
     pub fn metadata(&self) -> io::Result<FileAttr> {
         cfg_select! {
             // Use directory handle where possible
-            any(
-                all(target_os = "linux", not(target_env = "musl")),
-                target_os = "android",
-                target_os = "fuchsia",
-                target_os = "hurd",
-                target_os = "illumos",
-                target_vendor = "apple",
-            ) => {
-                let fd = cvt(unsafe { dirfd(self.dir.dirp.0) })?;
+            not(any(
+                target_os = "redox",
+                target_os = "nto",
+                target_os = "qnx",
+                target_os = "vita",
+                target_os = "espidf",
+                target_os = "horizon",
+                target_os = "vxworks",
+                target_os = "rtems",
+                target_os = "l4re",
+            )) => {
+                let fd = cvt(unsafe { libc::dirfd(self.dir.dirp.0) })?;
 
                 // Make this FD into a directory handle. We don't actually drop it,
                 // so having an `OwnedFd` is fine.
@@ -1094,7 +1087,6 @@ impl DirEntry {
             target_os = "nto",
             target_os = "qnx",
             target_os = "vita",
-            target_os = "l4re",
         )))]
         match self.entry.d_type {
             libc::DT_CHR => return Ok(FileType { mode: libc::S_IFCHR }),

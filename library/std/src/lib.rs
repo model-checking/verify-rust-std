@@ -288,7 +288,6 @@
 #![feature(doc_masked)]
 #![feature(doc_notable_trait)]
 #![feature(dropck_eyepatch)]
-#![feature(exact_div)]
 #![feature(f16)]
 #![feature(f128)]
 #![feature(ffi_const)]
@@ -372,10 +371,10 @@
 #![feature(pointer_is_aligned_to)]
 #![feature(portable_simd)]
 #![feature(ptr_as_uninit)]
-#![feature(ptr_cast_slice)]
 #![feature(ptr_mask)]
 #![feature(random)]
 #![feature(raw_os_error_ty)]
+#![feature(register_tool)]
 #![feature(seek_io_take_position)]
 #![feature(seek_stream_len)]
 #![feature(share_trait)]
@@ -450,6 +449,10 @@
     link = "https://github.com/rust-lang/rust/issues/29599#issuecomment-2986866250",
     since = "1.90.0"
 )]
+// tidy-alphabetical-start
+#![register_tool(lint)]
+// tidy-alphabetical-end
+//
 
 // The Rust prelude
 // The compiler expects the prelude definition to be defined before its use statement.
