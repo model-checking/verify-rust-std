@@ -164,13 +164,13 @@ for full license details.
 
 ## Comparison to Other Approved Tools
 The other tools approved at the time of writing are Kani, Verifast, and
-Goto-transcoder (ESBMC).
+ESBMC.
 
 - **Verification Backend:** KMIR primarily differs from all of these tools by
   utilizing a unique verification backend through the K framework and
   reachability logic (as explained in the description above). KMIR has little
   dependence on an SAT solver or SMT solver. Kani's CBMC backend and
-  Goto-transcoder (ESBMC) encode the verification problem into an SAT / SMT
+  ESBMC encode the verification problem into an SAT / SMT
   verification condition to be discharged by the appropriate solver. Kani
   recently added a Lean backend through Aeneas, however Lean does not support
   matching or reachability logic currently. Verifast performs symbolic
