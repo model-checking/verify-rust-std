@@ -56,7 +56,7 @@ impl<'a, T> IterMut<'a, T> {
     /// slices.1[0] = 24;
     /// assert_eq!(deque.as_slices(), (&[8, 42, 10][..], &[24, 1, 2][..]));
     /// ```
-    #[unstable(feature = "vec_deque_iter_as_slices", issue = "123947")]
+    #[unstable(feature = "vec_deque_iter_as_slices", issue = "133253")]
     pub fn into_slices(self) -> (&'a mut [T], &'a mut [T]) {
         (self.i1.into_slice(), self.i2.into_slice())
     }
@@ -90,7 +90,7 @@ impl<'a, T> IterMut<'a, T> {
     ///
     /// assert_eq!(iter.as_slices(), (&[9, 10][..], &[0, 1][..]));
     /// ```
-    #[unstable(feature = "vec_deque_iter_as_slices", issue = "123947")]
+    #[unstable(feature = "vec_deque_iter_as_slices", issue = "133253")]
     pub fn as_slices(&self) -> (&[T], &[T]) {
         (self.i1.as_slice(), self.i2.as_slice())
     }
@@ -126,7 +126,7 @@ impl<'a, T> IterMut<'a, T> {
     /// iter.as_mut_slices().1[0] = 24;
     /// assert_eq!(deque.as_slices(), (&[8, 42, 10][..], &[24, 1, 2][..]));
     /// ```
-    #[unstable(feature = "vec_deque_iter_as_slices", issue = "123947")]
+    #[unstable(feature = "vec_deque_iter_as_slices", issue = "133253")]
     pub fn as_mut_slices(&mut self) -> (&mut [T], &mut [T]) {
         (self.i1.as_mut_slice(), self.i2.as_mut_slice())
     }
