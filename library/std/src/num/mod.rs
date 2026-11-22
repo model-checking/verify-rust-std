@@ -8,6 +8,8 @@
 
 #[unstable(feature = "complex_numbers", issue = "154023")]
 pub use core::num::Complex;
+#[unstable(feature = "extended_float_error_kind", issue = "164793")]
+pub use core::num::FloatErrorKind;
 #[stable(feature = "int_error_matching", since = "1.55.0")]
 pub use core::num::IntErrorKind;
 #[stable(feature = "generic_nonzero", since = "1.79.0")]
@@ -22,6 +24,8 @@ pub use core::num::Wrapping;
     issue = "none"
 )]
 pub use core::num::ZeroablePrimitive;
+#[unstable(feature = "f16b", issue = "160630")]
+pub use core::num::f16b;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::num::{FpCategory, ParseFloatError, ParseIntError, TryFromIntError};
 #[stable(feature = "signed_nonzero", since = "1.34.0")]

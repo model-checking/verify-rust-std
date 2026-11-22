@@ -55,7 +55,7 @@ check-cfg = [
 
 [package.metadata.flux]
 enabled = true
-check_overflow = "lazy"
+check-overflow = "lazy"
 include = [ "src/flux_info.rs",
             "src/ascii*.rs",
             "src/num/mod.rs",

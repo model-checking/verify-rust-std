@@ -1,6 +1,6 @@
-# This workflow executes the supported contracts in goto-transcoder
+# This workflow checks the supported contracts with ESBMC
 
-name: Run GOTO Transcoder (ESBMC)
+name: Run ESBMC
 on:
   workflow_dispatch:
   merge_group:
@@ -9,9 +9,9 @@ on:
   push:
     paths:
       - 'library/**'
-      - '.github/workflows/goto-transcoder.yml'
+      - '.github/workflows/esbmc.yml'
       - 'scripts/run-kani.sh'
-      - 'scripts/run-goto-transcoder.sh'
+      - 'scripts/run-esbmc.sh'
 
 defaults:
   run:
@@ -19,8 +19,8 @@ defaults:
 
 jobs:
   verify-rust-std:
-    name: Verify contracts with goto-transcoder
-    runs-on: ubuntu-latest
+    name: Verify contracts with ESBMC
+    runs-on: ubuntu-24.04
     steps:
       # Step 1: Check out the repository
       - name: Checkout Repository
@@ -32,6 +32,6 @@ jobs:
       - name: Generate contracts
         run: ./scripts/run-kani.sh --kani-args --keep-temps --only-codegen --target-dir kani/contracts
 
-      # Step 3: Run goto-transcoder
-      - name: Run goto-transcoder
-        run: ./scripts/run-goto-transcoder.sh kani/contracts checked_unchecked.*.out
+      # Step 3: Run ESBMC on the GOTO binaries Kani generated
+      - name: Run ESBMC
+        run: ./scripts/run-esbmc.sh kani/contracts checked_unchecked.*.out
