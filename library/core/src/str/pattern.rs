@@ -1739,7 +1739,7 @@ impl TwoWaySearcher {
         #[cfg(kani)]
         let mut scan = verify::TwoWayScan::new();
         #[cfg_attr(kani, kani::loop_invariant(
-            verify::raw_loop_state(self, haystack, needle, long_period)
+            verify::raw_forward_loop_state(self, haystack, needle, long_period)
                 && old_pos <= self.position
                 && (self.position != old_pos || self.memory == on_entry(self.memory))))]
         #[cfg_attr(kani, kani::loop_modifies(&self.position, &self.memory, &scan))]
@@ -6970,16 +6970,21 @@ pub mod verify {
     fn read_range_agreement(arr: &[u8], begin: usize, end: usize, delta: usize, index: usize) {}
 
     #[kani::proof_for_contract(read_range_agreement)]
-    #[kani::solver(z3)]
+    #[kani::stub(range_agreement, word_range_equal_at_observer)]
+    #[kani::stub(range_agreement_for_loop, word_range_equal_at_observer)]
     pub fn harness_read_range_agreement() {
         let arr = any_nonempty_bytes();
         let begin = kani::any();
         let end = kani::any();
         let delta = kani::any();
         let index = kani::any();
+        // Full range agreement implies agreement at this arbitrary read index.
+        unsafe {
+            WORD_EQUALITY_OBSERVATION = index;
+        }
         read_range_agreement(arr, begin, end, delta, index);
         apply_read_range_contract(arr, begin, end, delta, index);
-        kani::cover(index > 4096, "instantiate agreement at an unbounded offset");
+        kani::cover(index > 4096 && delta > 0, "read agreeing bytes at a symbolic offset");
         kani::cover(true, "contract proof returns: harness_read_range_agreement");
     }
 
@@ -7090,6 +7095,24 @@ pub mod verify {
 
     // Numeric safety of the real Two-Way scan is checked separately from the
     // stronger byte equalities required for UTF-8 result boundaries.
+    // The forward loop's write set protects the reverse cursor and cache.
+    pub(super) fn raw_forward_loop_state(
+        s: &TwoWaySearcher,
+        h: &[u8],
+        n: &[u8],
+        long: bool,
+    ) -> bool {
+        let len = crate::intrinsics::ptr_metadata(h as *const [u8]);
+        let ptr = h as *const [u8] as *const u8;
+        numeric_raw_loop_state(s, h, n, long)
+            && (long
+                || s.memory == 0
+                || s.position == 0
+                || s.position == len
+                || unsafe { *crate::intrinsics::arith_offset(ptr, s.position as isize) } as i8
+                    >= -0x40)
+    }
+
     pub(super) fn raw_loop_state(s: &TwoWaySearcher, h: &[u8], n: &[u8], long: bool) -> bool {
         let hn = crate::intrinsics::ptr_metadata(h as *const [u8]);
         let nn = crate::intrinsics::ptr_metadata(n as *const [u8]);
@@ -7359,6 +7382,15 @@ pub mod verify {
         n: &[u8],
         long: bool,
     ) -> S::Output {
+        if !long {
+            let needle = unsafe { crate::str::from_utf8_unchecked(n) };
+            let period = searcher.period;
+            // The Short precondition makes both period offsets boundaries.
+            establish_last_scalar_bound(needle, n.len() - period);
+            if period < n.len() {
+                establish_last_scalar_bound(needle, period);
+            }
+        }
         searcher.next::<S>(h, n, long)
     }
 
@@ -7372,119 +7404,151 @@ pub mod verify {
         verified_raw_forward::<S>(searcher, h, n, long)
     }
 
-    fn check_short_forward_contract(cached: bool) {
-        let h = any_str().as_bytes();
-        let n = any_str().as_bytes();
-        let mut s = any_short_searcher(h, n);
-        kani::assume((s.memory != 0) == cached);
-        kani::cover(true, "assume #84");
-        let _ = verified_raw_forward::<RejectAndMatch>(&mut s, h, n, false);
+    fn any_forward_index() -> usize {
+        // Masking generates every value allowed by the allocation model.
+        kani::any::<usize>() & MAX_ALLOCATION_BYTES
     }
 
-    // Zero and nonzero cache values exhaust the entire candidate state.
-    fn any_uncached_short_searcher(h: &[u8], n: &[u8], has_left_part: bool) -> TwoWaySearcher {
-        assume_needle_edges(n);
-        let critical = if has_left_part {
-            let c: usize = kani::any();
-            kani::assume(c != 0);
-            kani::cover(true, "assume #85");
-            c
+    fn any_nonempty_forward_bytes() -> &'static [u8] {
+        let len = any_forward_index();
+        kani::assume(len > 0);
+        kani::cover(true, "a nonempty forward search allocation");
+        let ptr = initialized_symbolic_allocation(len);
+        // SAFETY: the initialized allocation lives for the proof.
+        unsafe { crate::slice::from_raw_parts(ptr, len) }
+    }
+
+    // The checked contract supplies the complete Short input invariant.
+    fn any_short_forward_searcher(
+        n: &[u8],
+        crit_pos: usize,
+        memory: impl FnOnce(usize) -> usize,
+    ) -> TwoWaySearcher {
+        // For a Short state the overlap is at least the critical position.
+        // Every valid period can be recovered from its overlap and this gap.
+        let prefix = crit_pos + any_forward_index();
+        let period = n.len().saturating_sub(prefix);
+        TwoWaySearcher {
+            crit_pos,
+            crit_pos_back: any_forward_index(),
+            period,
+            byteset: kani::any(),
+            position: any_forward_index(),
+            end: any_forward_index(),
+            memory: memory(prefix),
+            memory_back: if kani::any() { n.len() } else { period },
+        }
+    }
+
+    fn any_short_critical_point(has_left_part: bool) -> usize {
+        if has_left_part {
+            let point = any_forward_index();
+            kani::assume(point > 0);
+            kani::cover(true, "the left part is nonempty");
+            point
         } else {
             0
-        };
-        let s = TwoWaySearcher {
-            crit_pos: critical,
-            crit_pos_back: kani::any(),
-            period: kani::any(),
-            byteset: kani::any(),
-            position: kani::any(),
-            end: kani::any(),
-            memory: 0,
-            memory_back: kani::any(),
-        };
-        kani::assume(short_state(&s, h, n));
-        kani::cover(true, "assume #86");
-        let text = unsafe { crate::str::from_utf8_unchecked(h) };
-        kani::assume(text.is_char_boundary(s.position) && text.is_char_boundary(s.end));
-        kani::cover(true, "assume #87");
-        if has_left_part {
-            let needle = unsafe { crate::str::from_utf8_unchecked(n) };
-            establish_last_scalar_bound(needle, n.len() - s.period);
-            if s.period < n.len() {
-                establish_last_scalar_bound(needle, s.period);
-            }
-            let last = last_scalar_start(n);
-            assert!(s.crit_pos <= last);
-            kani::cover(true, "assert #99");
-            assert!(s.period == n.len() || s.period <= last);
-            kani::cover(true, "assert #100");
         }
-        s
     }
 
     fn check_uncached_forward_contract(has_left_part: bool) {
-        let h = any_str().as_bytes();
-        let n = any_str().as_bytes();
-        let mut s = any_uncached_short_searcher(h, n, has_left_part);
+        let h = any_nonempty_forward_bytes();
+        let n = any_nonempty_forward_bytes();
+        let mut s = any_short_forward_searcher(n, any_short_critical_point(has_left_part), |_| 0);
         let _ = verified_raw_forward::<RejectAndMatch>(&mut s, h, n, false);
+        kani::cover(h.len() > 4096 && n.len() > 4096, "uncached step at symbolic lengths");
     }
 
     #[kani::proof_for_contract(verified_raw_forward)]
     #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
     #[kani::stub_verified(establish_last_scalar_bound)]
-    #[kani::stub_verified(establish_long_match_boundaries)]
+    #[kani::stub_verified(scan_range_step)]
     pub fn harness_two_way_short_next_contract_uncached_no_left() {
         check_uncached_forward_contract(false);
-        kani::cover(
-            true,
-            "contract proof returns: harness_two_way_short_next_contract_uncached_no_left",
-        );
     }
 
     #[kani::proof_for_contract(verified_raw_forward)]
     #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
     #[kani::stub_verified(establish_last_scalar_bound)]
-    #[kani::stub_verified(establish_long_match_boundaries)]
+    #[kani::stub_verified(scan_range_step)]
     pub fn harness_two_way_short_next_contract_uncached_left() {
         check_uncached_forward_contract(true);
-        kani::cover(
-            true,
-            "contract proof returns: harness_two_way_short_next_contract_uncached_left",
-        );
-    }
-
-    #[kani::proof_for_contract(verified_raw_forward)]
-    #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
-    #[kani::stub_verified(establish_long_match_boundaries)]
-    pub fn harness_two_way_short_next_contract_cached() {
-        check_short_forward_contract(true);
-        kani::cover(true, "contract proof returns: harness_two_way_short_next_contract_cached");
-    }
-
-    // Check the exact strategy instantiated by the public MatchOnly adapter.
-    // This is independent of the RejectAndMatch contract partitions above.
-    // Split zero-length haystacks before allocation so the real scan proof
-    // carries one symbolic byte object through every candidate.
-    fn check_short_forward_match_contract(h: &[u8]) {
-        let n = any_nonempty_str().as_bytes();
-        let mut s = any_short_searcher(h, n);
-        let _ = verified_raw_forward::<MatchOnly>(&mut s, h, n, false);
-        kani::cover(n.len() > 4096, "forward MatchOnly contract at arbitrary needle length");
-        kani::cover(true, "the forward MatchOnly contract returns");
     }
 
     #[kani::proof_for_contract(verified_raw_forward)]
     #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
     #[kani::stub_verified(establish_last_scalar_bound)]
+    #[kani::stub_verified(scan_range_step)]
+    pub fn harness_two_way_short_next_contract_cached() {
+        let h = any_nonempty_forward_bytes();
+        let n = any_nonempty_forward_bytes();
+        let mut s = any_short_forward_searcher(n, any_forward_index(), |prefix| {
+            kani::assume(prefix > 0);
+            kani::cover(true, "the cached prefix is nonempty");
+            prefix
+        });
+        let _ = verified_raw_forward::<RejectAndMatch>(&mut s, h, n, false);
+        kani::cover(h.len() > 4096 && n.len() > 4096, "cached step at symbolic lengths");
+    }
+
+    // This case covers every Short cache and critical point at length zero.
+    #[kani::proof_for_contract(verified_raw_forward)]
+    #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
+    #[kani::stub_verified(establish_last_scalar_bound)]
+    pub fn harness_two_way_short_next_contract_empty_haystack() {
+        let n = any_nonempty_forward_bytes();
+        let mut s = any_short_forward_searcher(n, any_forward_index(), |prefix| {
+            if kani::any() { prefix } else { 0 }
+        });
+        let _ = verified_raw_forward::<RejectAndMatch>(&mut s, &[], n, false);
+        kani::cover(n.len() > 4096, "empty haystack with a symbolic needle length");
+    }
+
+    // The critical point is fixed throughout the search. A zero critical point
+    // leaves the left scan empty even after the forward cache changes.
+    fn check_short_forward_match_contract(has_left_part: bool) {
+        let h = any_nonempty_forward_bytes();
+        let n = any_nonempty_forward_bytes();
+        let mut s =
+            any_short_forward_searcher(n, any_short_critical_point(has_left_part), |prefix| {
+                if kani::any() { prefix } else { 0 }
+            });
+        let _ = verified_raw_forward::<MatchOnly>(&mut s, h, n, false);
+        kani::cover(
+            h.len() > 4096 && n.len() > 4096,
+            "forward MatchOnly contract at symbolic lengths",
+        );
+    }
+
+    #[kani::proof_for_contract(verified_raw_forward)]
+    #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
+    #[kani::stub_verified(establish_last_scalar_bound)]
+    #[kani::stub_verified(scan_range_step)]
     pub fn harness_two_way_short_forward_match_contract() {
-        check_short_forward_match_contract(any_nonempty_str().as_bytes());
+        check_short_forward_match_contract(true);
+    }
+
+    #[kani::proof_for_contract(verified_raw_forward)]
+    #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
+    #[kani::stub_verified(establish_last_scalar_bound)]
+    #[kani::stub_verified(scan_range_step)]
+    pub fn harness_two_way_short_forward_match_contract_no_left() {
+        check_short_forward_match_contract(false);
     }
 
     #[kani::proof_for_contract(verified_raw_forward)]
     #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
     #[kani::stub_verified(establish_last_scalar_bound)]
     pub fn harness_two_way_short_forward_match_contract_empty_haystack() {
-        check_short_forward_match_contract(&[]);
+        let n = any_nonempty_forward_bytes();
+        let mut s = any_short_forward_searcher(n, any_forward_index(), |prefix| {
+            if kani::any() { prefix } else { 0 }
+        });
+        let _ = verified_raw_forward::<MatchOnly>(&mut s, &[], n, false);
+        kani::cover(
+            n.len() > 4096,
+            "forward MatchOnly with an empty haystack and a symbolic needle length",
+        );
     }
 
     #[kani::proof_for_contract(verified_raw_reverse)]
@@ -7611,12 +7675,39 @@ pub mod verify {
 
         pub(super) fn advance(&mut self, reverse: bool) {
             let cursor = &mut self.cursor;
-            let item = if reverse { cursor.remaining.next_back() } else { cursor.remaining.next() };
+            let (start, end, item) =
+                scan_range_step(cursor.remaining.start, cursor.remaining.end, reverse);
+            cursor.remaining = start..end;
             cursor.active = item.is_some();
             if let Some(index) = item {
                 cursor.index = index;
             }
         }
+    }
+
+    #[kani::ensures(|result| {
+        if start >= end {
+            *result == (start, end, None)
+        } else if reverse {
+            *result == (start, end - 1, Some(end - 1))
+        } else {
+            *result == (start + 1, end, Some(start))
+        }
+    })]
+    #[kani::modifies()]
+    fn scan_range_step(start: usize, end: usize, reverse: bool) -> (usize, usize, Option<usize>) {
+        let mut range = start..end;
+        let item = if reverse { range.next_back() } else { range.next() };
+        (range.start, range.end, item)
+    }
+
+    #[kani::proof_for_contract(scan_range_step)]
+    pub fn harness_two_way_scan_range_step_contract() {
+        let reverse = kani::any();
+        let (_, _, item) = scan_range_step(kani::any(), kani::any(), reverse);
+        kani::cover(item.is_some() && !reverse, "advance a forward range");
+        kani::cover(item.is_some() && reverse, "advance a reverse range");
+        kani::cover(item.is_none(), "exhaust a range");
     }
 
     pub(super) fn raw_scan_state(
@@ -7873,7 +7964,10 @@ pub mod verify {
                 if progress > count {
                     return false;
                 }
-                (s.crit_pos - progress, s.crit_pos, right_start, len)
+                // Positive progress implies right_start == crit_pos, so
+                // the visited left indices adjoin the completed right scan.
+                let start = if progress == 0 { right_start } else { s.crit_pos - progress };
+                (start, len, 0, 0)
             }
             2 => {
                 if progress > left_end {
@@ -8036,9 +8130,10 @@ pub mod verify {
     }
 
     #[kani::proof]
-    #[kani::stub(raw_loop_state, numeric_raw_loop_state)]
+    #[kani::stub(raw_forward_loop_state, numeric_raw_loop_state)]
     #[kani::stub(long_scan_probes, ub_scan_probes)]
     #[kani::stub(last_scalar_start, unused_last_probe)]
+    #[kani::solver(minisat)]
     pub fn harness_raw_next_step_extra_ub() {
         let h = any_raw_ub_haystack();
         let n = any_nonempty_bytes();
@@ -8064,9 +8159,10 @@ pub mod verify {
     }
 
     #[kani::proof]
-    #[kani::stub(raw_loop_state, numeric_raw_loop_state)]
+    #[kani::stub(raw_forward_loop_state, numeric_raw_loop_state)]
     #[kani::stub(long_scan_probes, ub_scan_probes)]
     #[kani::stub(last_scalar_start, unused_last_probe)]
+    #[kani::solver(minisat)]
     pub fn harness_raw_next_match_extra_ub() {
         let h = any_raw_ub_haystack();
         let n = any_nonempty_bytes();
