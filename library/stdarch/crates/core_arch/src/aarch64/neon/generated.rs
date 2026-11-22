@@ -4604,6 +4604,36 @@ pub fn vcombine_f64(a: float64x1_t, b: float64x1_t) -> float64x2_t {
     }
 }
 #[doc = "Insert vector element from another vector element"]
+#[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vcopy_lane_bf16)"]
+#[inline]
+#[target_feature(enable = "neon")]
+#[cfg_attr(test, assert_instr(nop, LANE1 = 3, LANE2 = 3))]
+#[rustc_legacy_const_generics(1, 3)]
+#[cfg(any(target_has_reliable_f16b, doc))]
+#[doc(cfg(target_has_reliable_f16b))]
+#[unstable(feature = "stdarch_neon_bf16", issue = "164986")]
+pub fn vcopy_lane_bf16<const LANE1: i32, const LANE2: i32>(
+    a: bfloat16x4_t,
+    b: bfloat16x4_t,
+) -> bfloat16x4_t {
+    unsafe { transmute(vcopy_lane_u16::<LANE1, LANE2>(transmute(a), transmute(b))) }
+}
+#[doc = "Insert vector element from another vector element"]
+#[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vcopyq_lane_bf16)"]
+#[inline]
+#[target_feature(enable = "neon")]
+#[cfg_attr(test, assert_instr(nop, LANE1 = 7, LANE2 = 3))]
+#[rustc_legacy_const_generics(1, 3)]
+#[cfg(any(target_has_reliable_f16b, doc))]
+#[doc(cfg(target_has_reliable_f16b))]
+#[unstable(feature = "stdarch_neon_bf16", issue = "164986")]
+pub fn vcopyq_lane_bf16<const LANE1: i32, const LANE2: i32>(
+    a: bfloat16x8_t,
+    b: bfloat16x4_t,
+) -> bfloat16x8_t {
+    unsafe { transmute(vcopyq_lane_u16::<LANE1, LANE2>(transmute(a), transmute(b))) }
+}
+#[doc = "Insert vector element from another vector element"]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vcopy_lane_f32)"]
 #[inline]
 #[target_feature(enable = "neon")]
@@ -4809,6 +4839,36 @@ pub fn vcopy_lane_p64<const LANE1: i32, const LANE2: i32>(
     static_assert!(LANE1 == 0);
     static_assert!(LANE2 == 0);
     b
+}
+#[doc = "Insert vector element from another vector element"]
+#[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vcopy_laneq_bf16)"]
+#[inline]
+#[target_feature(enable = "neon")]
+#[cfg_attr(test, assert_instr(nop, LANE1 = 3, LANE2 = 7))]
+#[rustc_legacy_const_generics(1, 3)]
+#[cfg(any(target_has_reliable_f16b, doc))]
+#[doc(cfg(target_has_reliable_f16b))]
+#[unstable(feature = "stdarch_neon_bf16", issue = "164986")]
+pub fn vcopy_laneq_bf16<const LANE1: i32, const LANE2: i32>(
+    a: bfloat16x4_t,
+    b: bfloat16x8_t,
+) -> bfloat16x4_t {
+    unsafe { transmute(vcopy_laneq_u16::<LANE1, LANE2>(transmute(a), transmute(b))) }
+}
+#[doc = "Insert vector element from another vector element"]
+#[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vcopyq_laneq_bf16)"]
+#[inline]
+#[target_feature(enable = "neon")]
+#[cfg_attr(test, assert_instr(nop, LANE1 = 7, LANE2 = 7))]
+#[rustc_legacy_const_generics(1, 3)]
+#[cfg(any(target_has_reliable_f16b, doc))]
+#[doc(cfg(target_has_reliable_f16b))]
+#[unstable(feature = "stdarch_neon_bf16", issue = "164986")]
+pub fn vcopyq_laneq_bf16<const LANE1: i32, const LANE2: i32>(
+    a: bfloat16x8_t,
+    b: bfloat16x8_t,
+) -> bfloat16x8_t {
+    unsafe { transmute(vcopyq_laneq_u16::<LANE1, LANE2>(transmute(a), transmute(b))) }
 }
 #[doc = "Insert vector element from another vector element"]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vcopy_laneq_f32)"]
@@ -8793,7 +8853,7 @@ pub fn vfma_n_f64(a: float64x1_t, b: float64x1_t, c: f64) -> float64x1_t {
 pub fn vfmad_lane_f64<const LANE: i32>(a: f64, b: f64, c: float64x1_t) -> f64 {
     static_assert!(LANE == 0);
     let c: f64 = vget_lane_f64::<LANE>(c);
-    fmaf64(b, c, a)
+    fma(b, c, a)
 }
 #[doc = "Floating-point fused multiply-add to accumulator"]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vfmah_f16)"]
@@ -8803,7 +8863,7 @@ pub fn vfmad_lane_f64<const LANE: i32>(a: f64, b: f64, c: float64x1_t) -> f64 {
 #[unstable(feature = "stdarch_neon_f16", issue = "136306")]
 #[cfg(not(target_arch = "arm64ec"))]
 pub fn vfmah_f16(a: f16, b: f16, c: f16) -> f16 {
-    fmaf16(b, c, a)
+    fma(b, c, a)
 }
 #[doc = "Floating-point fused multiply-add to accumulator"]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vfmah_lane_f16)"]
@@ -8874,7 +8934,7 @@ pub fn vfmaq_n_f64(a: float64x2_t, b: float64x2_t, c: f64) -> float64x2_t {
 pub fn vfmas_lane_f32<const LANE: i32>(a: f32, b: f32, c: float32x2_t) -> f32 {
     static_assert_uimm_bits!(LANE, 1);
     let c: f32 = vget_lane_f32::<LANE>(c);
-    fmaf32(b, c, a)
+    fma(b, c, a)
 }
 #[doc = "Floating-point fused multiply-add to accumulator"]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vfmas_laneq_f32)"]
@@ -8886,7 +8946,7 @@ pub fn vfmas_lane_f32<const LANE: i32>(a: f32, b: f32, c: float32x2_t) -> f32 {
 pub fn vfmas_laneq_f32<const LANE: i32>(a: f32, b: f32, c: float32x4_t) -> f32 {
     static_assert_uimm_bits!(LANE, 2);
     let c: f32 = vgetq_lane_f32::<LANE>(c);
-    fmaf32(b, c, a)
+    fma(b, c, a)
 }
 #[doc = "Floating-point fused multiply-add to accumulator"]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vfmad_laneq_f64)"]
@@ -8898,7 +8958,7 @@ pub fn vfmas_laneq_f32<const LANE: i32>(a: f32, b: f32, c: float32x4_t) -> f32 {
 pub fn vfmad_laneq_f64<const LANE: i32>(a: f64, b: f64, c: float64x2_t) -> f64 {
     static_assert_uimm_bits!(LANE, 1);
     let c: f64 = vgetq_lane_f64::<LANE>(c);
-    fmaf64(b, c, a)
+    fma(b, c, a)
 }
 #[doc = "Floating-point fused Multiply-Add Long to accumulator (vector)."]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vfmlal_high_f16)"]
@@ -11411,6 +11471,50 @@ pub unsafe fn vldap1q_lane_p64<const LANE: i32>(ptr: *const p64, src: poly64x2_t
     transmute(vldap1q_lane_s64::<LANE>(ptr as *mut i64, transmute(src)))
 }
 #[doc = "Lookup table read with 2-bit indices"]
+#[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vluti2_lane_bf16)"]
+#[doc = "## Safety"]
+#[doc = "  * Neon intrinsic unsafe"]
+#[inline]
+#[target_feature(enable = "neon,lut,bf16")]
+#[cfg_attr(all(test, not(target_env = "msvc")), assert_instr(luti2, LANE = 1))]
+#[rustc_legacy_const_generics(2)]
+#[cfg(any(target_has_reliable_f16b, doc))]
+#[doc(cfg(target_has_reliable_f16b))]
+#[unstable(feature = "stdarch_neon_bf16", issue = "164986")]
+pub unsafe fn vluti2_lane_bf16<const LANE: i32>(a: bfloat16x4_t, b: uint8x8_t) -> bfloat16x8_t {
+    static_assert!(LANE >= 0 && LANE <= 3);
+    unsafe extern "llvm-intrinsic" {
+        #[cfg_attr(
+            any(target_arch = "aarch64", target_arch = "arm64ec"),
+            link_name = "llvm.aarch64.neon.vluti2.lane.v8bf16.v4bf16"
+        )]
+        fn _vluti2_lane_bf16(a: bfloat16x4_t, b: uint8x8_t, n: i32) -> bfloat16x8_t;
+    }
+    _vluti2_lane_bf16(a, b, LANE)
+}
+#[doc = "Lookup table read with 2-bit indices"]
+#[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vluti2q_lane_bf16)"]
+#[doc = "## Safety"]
+#[doc = "  * Neon intrinsic unsafe"]
+#[inline]
+#[target_feature(enable = "neon,lut,bf16")]
+#[cfg_attr(all(test, not(target_env = "msvc")), assert_instr(luti2, LANE = 1))]
+#[rustc_legacy_const_generics(2)]
+#[cfg(any(target_has_reliable_f16b, doc))]
+#[doc(cfg(target_has_reliable_f16b))]
+#[unstable(feature = "stdarch_neon_bf16", issue = "164986")]
+pub unsafe fn vluti2q_lane_bf16<const LANE: i32>(a: bfloat16x8_t, b: uint8x8_t) -> bfloat16x8_t {
+    static_assert!(LANE >= 0 && LANE <= 3);
+    unsafe extern "llvm-intrinsic" {
+        #[cfg_attr(
+            any(target_arch = "aarch64", target_arch = "arm64ec"),
+            link_name = "llvm.aarch64.neon.vluti2.lane.v8bf16.v8bf16"
+        )]
+        fn _vluti2q_lane_bf16(a: bfloat16x8_t, b: uint8x8_t, n: i32) -> bfloat16x8_t;
+    }
+    _vluti2q_lane_bf16(a, b, LANE)
+}
+#[doc = "Lookup table read with 2-bit indices"]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vluti2_lane_f16)"]
 #[doc = "## Safety"]
 #[doc = "  * Neon intrinsic unsafe"]
@@ -11619,6 +11723,50 @@ pub unsafe fn vluti2q_lane_s16<const LANE: i32>(a: int16x8_t, b: uint8x8_t) -> i
         fn _vluti2q_lane_s16(a: int16x8_t, b: uint8x8_t, n: i32) -> int16x8_t;
     }
     _vluti2q_lane_s16(a, b, LANE)
+}
+#[doc = "Lookup table read with 2-bit indices"]
+#[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vluti2_laneq_bf16)"]
+#[doc = "## Safety"]
+#[doc = "  * Neon intrinsic unsafe"]
+#[inline]
+#[target_feature(enable = "neon,lut,bf16")]
+#[cfg_attr(all(test, not(target_env = "msvc")), assert_instr(luti2, LANE = 1))]
+#[rustc_legacy_const_generics(2)]
+#[cfg(any(target_has_reliable_f16b, doc))]
+#[doc(cfg(target_has_reliable_f16b))]
+#[unstable(feature = "stdarch_neon_bf16", issue = "164986")]
+pub unsafe fn vluti2_laneq_bf16<const LANE: i32>(a: bfloat16x4_t, b: uint8x16_t) -> bfloat16x8_t {
+    static_assert!(LANE >= 0 && LANE <= 7);
+    unsafe extern "llvm-intrinsic" {
+        #[cfg_attr(
+            any(target_arch = "aarch64", target_arch = "arm64ec"),
+            link_name = "llvm.aarch64.neon.vluti2.laneq.v8bf16.v4bf16"
+        )]
+        fn _vluti2_laneq_bf16(a: bfloat16x4_t, b: uint8x16_t, n: i32) -> bfloat16x8_t;
+    }
+    _vluti2_laneq_bf16(a, b, LANE)
+}
+#[doc = "Lookup table read with 2-bit indices"]
+#[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vluti2q_laneq_bf16)"]
+#[doc = "## Safety"]
+#[doc = "  * Neon intrinsic unsafe"]
+#[inline]
+#[target_feature(enable = "neon,lut,bf16")]
+#[cfg_attr(all(test, not(target_env = "msvc")), assert_instr(luti2, LANE = 1))]
+#[rustc_legacy_const_generics(2)]
+#[cfg(any(target_has_reliable_f16b, doc))]
+#[doc(cfg(target_has_reliable_f16b))]
+#[unstable(feature = "stdarch_neon_bf16", issue = "164986")]
+pub unsafe fn vluti2q_laneq_bf16<const LANE: i32>(a: bfloat16x8_t, b: uint8x16_t) -> bfloat16x8_t {
+    static_assert!(LANE >= 0 && LANE <= 7);
+    unsafe extern "llvm-intrinsic" {
+        #[cfg_attr(
+            any(target_arch = "aarch64", target_arch = "arm64ec"),
+            link_name = "llvm.aarch64.neon.vluti2.laneq.v8bf16.v8bf16"
+        )]
+        fn _vluti2q_laneq_bf16(a: bfloat16x8_t, b: uint8x16_t, n: i32) -> bfloat16x8_t;
+    }
+    _vluti2q_laneq_bf16(a, b, LANE)
 }
 #[doc = "Lookup table read with 2-bit indices"]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vluti2_laneq_f16)"]
@@ -11831,6 +11979,36 @@ pub unsafe fn vluti2q_laneq_s16<const INDEX: i32>(a: int16x8_t, b: uint8x16_t) -
     _vluti2q_laneq_s16(a, b, INDEX)
 }
 #[doc = "Lookup table read with 4-bit indices"]
+#[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vluti4q_lane_bf16_x2)"]
+#[doc = "## Safety"]
+#[doc = "  * Neon intrinsic unsafe"]
+#[inline]
+#[target_feature(enable = "neon,lut,bf16")]
+#[cfg_attr(all(test, not(target_env = "msvc")), assert_instr(luti4, LANE = 0))]
+#[rustc_legacy_const_generics(2)]
+#[cfg(any(target_has_reliable_f16b, doc))]
+#[doc(cfg(target_has_reliable_f16b))]
+#[unstable(feature = "stdarch_neon_bf16", issue = "164986")]
+pub unsafe fn vluti4q_lane_bf16_x2<const LANE: i32>(
+    a: bfloat16x8x2_t,
+    b: uint8x8_t,
+) -> bfloat16x8_t {
+    static_assert!(LANE >= 0 && LANE <= 1);
+    unsafe extern "llvm-intrinsic" {
+        #[cfg_attr(
+            any(target_arch = "aarch64", target_arch = "arm64ec"),
+            link_name = "llvm.aarch64.neon.vluti4q.lane.x2.v8bf16"
+        )]
+        fn _vluti4q_lane_bf16_x2(
+            a0: bfloat16x8_t,
+            a1: bfloat16x8_t,
+            b: uint8x8_t,
+            n: i32,
+        ) -> bfloat16x8_t;
+    }
+    _vluti4q_lane_bf16_x2(a.0, a.1, b, LANE)
+}
+#[doc = "Lookup table read with 4-bit indices"]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vluti4q_lane_f16_x2)"]
 #[doc = "## Safety"]
 #[doc = "  * Neon intrinsic unsafe"]
@@ -11934,6 +12112,36 @@ pub unsafe fn vluti4q_lane_u8<const LANE: i32>(a: uint8x16_t, b: uint8x8_t) -> u
 pub unsafe fn vluti4q_lane_p8<const LANE: i32>(a: poly8x16_t, b: uint8x8_t) -> poly8x16_t {
     static_assert!(LANE == 0);
     transmute(vluti4q_lane_s8::<LANE>(transmute(a), b))
+}
+#[doc = "Lookup table read with 4-bit indices"]
+#[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vluti4q_laneq_bf16_x2)"]
+#[doc = "## Safety"]
+#[doc = "  * Neon intrinsic unsafe"]
+#[inline]
+#[target_feature(enable = "neon,lut,bf16")]
+#[cfg_attr(all(test, not(target_env = "msvc")), assert_instr(luti4, LANE = 0))]
+#[rustc_legacy_const_generics(2)]
+#[cfg(any(target_has_reliable_f16b, doc))]
+#[doc(cfg(target_has_reliable_f16b))]
+#[unstable(feature = "stdarch_neon_bf16", issue = "164986")]
+pub unsafe fn vluti4q_laneq_bf16_x2<const LANE: i32>(
+    a: bfloat16x8x2_t,
+    b: uint8x16_t,
+) -> bfloat16x8_t {
+    static_assert!(LANE >= 0 && LANE <= 3);
+    unsafe extern "llvm-intrinsic" {
+        #[cfg_attr(
+            any(target_arch = "aarch64", target_arch = "arm64ec"),
+            link_name = "llvm.aarch64.neon.vluti4q.laneq.x2.v8bf16"
+        )]
+        fn _vluti4q_laneq_bf16_x2(
+            a0: bfloat16x8_t,
+            a1: bfloat16x8_t,
+            b: uint8x16_t,
+            n: i32,
+        ) -> bfloat16x8_t;
+    }
+    _vluti4q_laneq_bf16_x2(a.0, a.1, b, LANE)
 }
 #[doc = "Lookup table read with 4-bit indices"]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vluti4q_laneq_f16_x2)"]
@@ -21187,6 +21395,54 @@ pub fn vrecpxh_f16(a: f16) -> f16 {
     unsafe { _vrecpxh_f16(a) }
 }
 #[doc = "Vector reinterpret cast operation"]
+#[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vreinterpret_bf16_f64)"]
+#[inline]
+#[target_feature(enable = "neon")]
+#[cfg(any(target_has_reliable_f16b, doc))]
+#[doc(cfg(target_has_reliable_f16b))]
+#[unstable(feature = "stdarch_neon_bf16", issue = "164986")]
+#[cfg(not(target_arch = "arm64ec"))]
+#[cfg_attr(test, assert_instr(nop))]
+pub fn vreinterpret_bf16_f64(a: float64x1_t) -> bfloat16x4_t {
+    unsafe { transmute(a) }
+}
+#[doc = "Vector reinterpret cast operation"]
+#[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vreinterpretq_bf16_f64)"]
+#[inline]
+#[target_feature(enable = "neon")]
+#[cfg(any(target_has_reliable_f16b, doc))]
+#[doc(cfg(target_has_reliable_f16b))]
+#[unstable(feature = "stdarch_neon_bf16", issue = "164986")]
+#[cfg(not(target_arch = "arm64ec"))]
+#[cfg_attr(test, assert_instr(nop))]
+pub fn vreinterpretq_bf16_f64(a: float64x2_t) -> bfloat16x8_t {
+    unsafe { transmute(a) }
+}
+#[doc = "Vector reinterpret cast operation"]
+#[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vreinterpret_f64_bf16)"]
+#[inline]
+#[target_feature(enable = "neon")]
+#[cfg(any(target_has_reliable_f16b, doc))]
+#[doc(cfg(target_has_reliable_f16b))]
+#[unstable(feature = "stdarch_neon_bf16", issue = "164986")]
+#[cfg(not(target_arch = "arm64ec"))]
+#[cfg_attr(test, assert_instr(nop))]
+pub fn vreinterpret_f64_bf16(a: bfloat16x4_t) -> float64x1_t {
+    unsafe { transmute(a) }
+}
+#[doc = "Vector reinterpret cast operation"]
+#[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vreinterpretq_f64_bf16)"]
+#[inline]
+#[target_feature(enable = "neon")]
+#[cfg(any(target_has_reliable_f16b, doc))]
+#[doc(cfg(target_has_reliable_f16b))]
+#[unstable(feature = "stdarch_neon_bf16", issue = "164986")]
+#[cfg(not(target_arch = "arm64ec"))]
+#[cfg_attr(test, assert_instr(nop))]
+pub fn vreinterpretq_f64_bf16(a: bfloat16x8_t) -> float64x2_t {
+    unsafe { transmute(a) }
+}
+#[doc = "Vector reinterpret cast operation"]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vreinterpret_f64_f16)"]
 #[inline]
 #[target_feature(enable = "neon")]
@@ -22160,7 +22416,7 @@ pub fn vrndaq_f64(a: float64x2_t) -> float64x2_t {
 #[cfg(not(target_arch = "arm64ec"))]
 #[cfg_attr(test, assert_instr(frinta))]
 pub fn vrndah_f16(a: f16) -> f16 {
-    roundf16(a)
+    round(a)
 }
 #[doc = "Floating-point round to integral, to nearest with ties to away"]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vrndh_f16)"]
@@ -22170,7 +22426,7 @@ pub fn vrndah_f16(a: f16) -> f16 {
 #[cfg(not(target_arch = "arm64ec"))]
 #[cfg_attr(test, assert_instr(frintz))]
 pub fn vrndh_f16(a: f16) -> f16 {
-    truncf16(a)
+    trunc(a)
 }
 #[doc = "Floating-point round to integral, using current rounding mode"]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vrndi_f16)"]
@@ -22351,7 +22607,7 @@ pub fn vrndmq_f64(a: float64x2_t) -> float64x2_t {
 #[cfg(not(target_arch = "arm64ec"))]
 #[cfg_attr(test, assert_instr(frintm))]
 pub fn vrndmh_f16(a: f16) -> f16 {
-    floorf16(a)
+    floor(a)
 }
 #[doc = "Floating-point round to integral, to nearest with ties to even"]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vrndn_f64)"]
@@ -22482,7 +22738,7 @@ pub fn vrndpq_f64(a: float64x2_t) -> float64x2_t {
 #[cfg(not(target_arch = "arm64ec"))]
 #[cfg_attr(test, assert_instr(frintp))]
 pub fn vrndph_f16(a: f16) -> f16 {
-    ceilf16(a)
+    ceil(a)
 }
 #[doc = "Floating-point round to integral exact, using current rounding mode"]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vrndx_f16)"]
@@ -22548,7 +22804,7 @@ pub fn vrndxq_f64(a: float64x2_t) -> float64x2_t {
 #[cfg(not(target_arch = "arm64ec"))]
 #[cfg_attr(test, assert_instr(frintx))]
 pub fn vrndxh_f16(a: f16) -> f16 {
-    round_ties_even_f16(a)
+    round_ties_even(a)
 }
 #[doc = "Signed rounding shift left"]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vrshld_s64)"]
@@ -24346,7 +24602,7 @@ pub fn vsqrtq_f64(a: float64x2_t) -> float64x2_t {
 #[cfg(not(target_arch = "arm64ec"))]
 #[cfg_attr(test, assert_instr(fsqrt))]
 pub fn vsqrth_f16(a: f16) -> f16 {
-    sqrtf16(a)
+    sqrt(a)
 }
 #[doc = "Shift Right and Insert (immediate)"]
 #[doc = "[Arm's documentation](https://developer.arm.com/architectures/instruction-sets/intrinsics/vsri_n_s8)"]
