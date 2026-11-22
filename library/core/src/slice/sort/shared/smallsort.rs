@@ -36,6 +36,15 @@ impl<T> StableSmallSortTypeImpl for T {
         SMALL_SORT_FALLBACK_THRESHOLD
     }
 
+    #[cfg_attr(kani, crate::kani::modifies(v))]
+    #[cfg_attr(kani, crate::kani::ensures(|_|
+        !old(<() as verify::trait_model::SortModel<T, F>>::enabled(
+            verify::trait_model::SortEntry::Stable, is_less, v.len(),
+        )) || <() as verify::trait_model::SortModel<T, F>>::sort_postcondition(
+            old(<() as verify::trait_model::SortModel<T, F>>::snapshot(v.as_ptr(), v.len())),
+            v.as_ptr(), v.len(),
+        )
+    ))]
     #[inline(always)]
     default fn small_sort<F: FnMut(&T, &T) -> bool>(
         v: &mut [T],
@@ -54,6 +63,15 @@ impl<T: FreezeMarker> StableSmallSortTypeImpl for T {
         SMALL_SORT_GENERAL_THRESHOLD
     }
 
+    #[cfg_attr(kani, crate::kani::modifies(v, scratch))]
+    #[cfg_attr(kani, crate::kani::ensures(|_|
+        !old(<() as verify::trait_model::SortModel<T, F>>::enabled(
+            verify::trait_model::SortEntry::Stable, is_less, v.len(),
+        )) || <() as verify::trait_model::SortModel<T, F>>::sort_postcondition(
+            old(<() as verify::trait_model::SortModel<T, F>>::snapshot(v.as_ptr(), v.len())),
+            v.as_ptr(), v.len(),
+        )
+    ))]
     #[inline(always)]
     fn small_sort<F: FnMut(&T, &T) -> bool>(
         v: &mut [T],
@@ -80,6 +98,15 @@ impl<T> UnstableSmallSortTypeImpl for T {
         SMALL_SORT_FALLBACK_THRESHOLD
     }
 
+    #[cfg_attr(kani, crate::kani::modifies(v))]
+    #[cfg_attr(kani, crate::kani::ensures(|_|
+        !old(<() as verify::trait_model::SortModel<T, F>>::enabled(
+            verify::trait_model::SortEntry::Unstable, is_less, v.len(),
+        )) || <() as verify::trait_model::SortModel<T, F>>::sort_postcondition(
+            old(<() as verify::trait_model::SortModel<T, F>>::snapshot(v.as_ptr(), v.len())),
+            v.as_ptr(), v.len(),
+        )
+    ))]
     #[inline(always)]
     default fn small_sort<F>(v: &mut [T], is_less: &mut F)
     where
@@ -95,6 +122,15 @@ impl<T: FreezeMarker> UnstableSmallSortTypeImpl for T {
         <T as UnstableSmallSortFreezeTypeImpl>::small_sort_threshold()
     }
 
+    #[cfg_attr(kani, crate::kani::modifies(v))]
+    #[cfg_attr(kani, crate::kani::ensures(|_|
+        !old(<() as verify::trait_model::SortModel<T, F>>::enabled(
+            verify::trait_model::SortEntry::Unstable, is_less, v.len(),
+        )) || <() as verify::trait_model::SortModel<T, F>>::sort_postcondition(
+            old(<() as verify::trait_model::SortModel<T, F>>::snapshot(v.as_ptr(), v.len())),
+            v.as_ptr(), v.len(),
+        )
+    ))]
     #[inline(always)]
     fn small_sort<F>(v: &mut [T], is_less: &mut F)
     where
@@ -122,6 +158,15 @@ impl<T: FreezeMarker> UnstableSmallSortFreezeTypeImpl for T {
         }
     }
 
+    #[cfg_attr(kani, crate::kani::modifies(v))]
+    #[cfg_attr(kani, crate::kani::ensures(|_|
+        !old(<() as verify::trait_model::SortModel<T, F>>::enabled(
+            verify::trait_model::SortEntry::Freeze, is_less, v.len(),
+        )) || <() as verify::trait_model::SortModel<T, F>>::sort_postcondition(
+            old(<() as verify::trait_model::SortModel<T, F>>::snapshot(v.as_ptr(), v.len())),
+            v.as_ptr(), v.len(),
+        )
+    ))]
     #[inline(always)]
     default fn small_sort<F>(v: &mut [T], is_less: &mut F)
     where
@@ -155,6 +200,15 @@ impl<T: FreezeMarker + CopyMarker> UnstableSmallSortFreezeTypeImpl for T {
         }
     }
 
+    #[cfg_attr(kani, crate::kani::modifies(v))]
+    #[cfg_attr(kani, crate::kani::ensures(|_|
+        !old(<() as verify::trait_model::SortModel<T, F>>::enabled(
+            verify::trait_model::SortEntry::Freeze, is_less, v.len(),
+        )) || <() as verify::trait_model::SortModel<T, F>>::sort_postcondition(
+            old(<() as verify::trait_model::SortModel<T, F>>::snapshot(v.as_ptr(), v.len())),
+            v.as_ptr(), v.len(),
+        )
+    ))]
     #[inline(always)]
     fn small_sort<F>(v: &mut [T], is_less: &mut F)
     where
