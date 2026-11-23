@@ -8067,6 +8067,16 @@ pub mod verify {
             }
     }
 
+    // Match the strategy parameter of raw_forward_loop_state for stubbing.
+    fn numeric_raw_forward_loop_state<S: ProbeMode>(
+        s: &TwoWaySearcher,
+        h: &[u8],
+        n: &[u8],
+        long: bool,
+    ) -> bool {
+        numeric_raw_loop_state(s, h, n, long)
+    }
+
     // Numeric-only scan facts for the additional UB audit. These constrain
     // the real for-loop index and search window, without assuming any matched
     // bytes or UTF-8 property. Full endpoint proofs keep their stronger probes.
@@ -8147,7 +8157,7 @@ pub mod verify {
     }
 
     #[kani::proof]
-    #[kani::stub(raw_forward_loop_state, numeric_raw_loop_state)]
+    #[kani::stub(raw_forward_loop_state, numeric_raw_forward_loop_state)]
     #[kani::stub(long_scan_probes, ub_scan_probes)]
     #[kani::stub(last_scalar_start, unused_last_probe)]
     #[kani::solver(minisat)]
@@ -8176,7 +8186,7 @@ pub mod verify {
     }
 
     #[kani::proof]
-    #[kani::stub(raw_forward_loop_state, numeric_raw_loop_state)]
+    #[kani::stub(raw_forward_loop_state, numeric_raw_forward_loop_state)]
     #[kani::stub(long_scan_probes, ub_scan_probes)]
     #[kani::stub(last_scalar_start, unused_last_probe)]
     #[kani::solver(minisat)]
