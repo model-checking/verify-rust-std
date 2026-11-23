@@ -16,21 +16,14 @@
 //!   arbitrary payloads assumes the same route moves whole elements and branches only on
 //!   answers, positions, lengths, and type properties. This source-level assumption is not a
 //!   generic refinement theorem; it excludes payload mutation, sortedness, and stability.
-//! - `trait_model` and `trait_contracts`: conditional contracts on all six `small_sort`
-//!   implementations. The bounded checks target numeric order and full logical-value
-//!   multiplicities on normal return with these exact read-only function pointers:
-//!   - `fn(&u64, &u64) -> bool` pointing to `canonical_less_u64`, at lengths 2 and 3.
-//!     Stable specialized uses an array of length N and separate N+16 scratch. Unstable
-//!     Freeze-specialized and Freeze Copy-specialized use backing N+2 and active `1..N+1`
-//!     with both exterior canaries. The Unstable checks and the N3 forwarding consumer
-//!     replace only the Freeze leaf with the matching type, comparator, length, and geometry.
-//!   - `fn(&Cell<u8>, &Cell<u8>) -> bool` pointing to `canonical_less_cell`, at length 2.
-//!     Stable default insertion and Unstable default fallback both use `backing[1..3]` with
-//!     two exterior canaries. Stable also checks an initialized sentinel in separate two-slot
-//!     caller scratch whose second slot is uninitialized.
-//!   - `fn(&NonCopyKey, &NonCopyKey) -> bool` pointing to `canonical_less_noncopy`, at length 2.
-//!     Freeze default general uses `backing[1..3]` with two exterior canaries and private
-//!     stack scratch.
+//! - `trait_model` and `trait_contracts`: conditional `ensures` on all six `small_sort`
+//!   implementations, checked for nondecreasing order and preservation of every input value and
+//!   its count on normal return with fixed read-only function-pointer comparators:
+//!   `canonical_less_u64` on u64 at lengths 2 and 3 (stable, unstable and Freeze
+//!   specializations), `canonical_less_cell` on `Cell<u8>` at length 2 (stable and unstable
+//!   defaults), and `canonical_less_noncopy` on a non-Copy Freeze key at length 2 (Freeze
+//!   default). The specialized unstable checks and one forwarding harness use `stub_verified`
+//!   for the call to the Freeze method.
 //! - `scratch_geometry`: real stable u64 sorting with separate minimal scratch and
 //!   full-value counts.
 //!
@@ -54,12 +47,13 @@
 //! contract proof does not justify a new consumer. The opt-in control
 //! `helper_contracts::rejects_swap_comparator_writing_outside_frame_u8` checks this restriction.
 //!
-//! The trait write sets cover the active slice and, for Stable specialized, its caller scratch.
-//! The trait frame claims rely on the read-only callbacks and the fixtures listed above.
+//! The trait contracts allow writes to the active slice and, in the `FreezeMarker`
+//! specialization of `StableSmallSortTypeImpl`, to the caller scratch. The checked comparators
+//! are read-only.
 //!
-//! `cfg(kani_smallsort_controls)` enables negative controls and a frame-only function-item
-//! witness. Ordinary CI leaves it unset. Run each control individually with its named
-//! expectation.
+//! `cfg(kani_smallsort_controls)` exposes negative controls and one passing write-set check with
+//! a function-item comparator. Ordinary CI leaves it unset. Run each harness individually;
+//! each control must fail its named check.
 //!
 //! Conventions:
 //! - Ordinary covers must be reachable; `run-kani.sh` does not enforce this itself.

@@ -1,6 +1,5 @@
-//! Bounded trait sort contracts for canonical ordering and full-value multiplicities.
-//! Ordinary roots cover specialized u64 at lengths two and three and default byte routes
-//! at length two. Controls are opt-in.
+//! Checks the `small_sort` postconditions for `u64` at lengths 2 and 3, `Cell<u8>` at length 2,
+//! and `NonCopyKey` at length 2. Negative controls are opt-in.
 
 use super::super::{
     StableSmallSortTypeImpl, UnstableSmallSortFreezeTypeImpl, UnstableSmallSortTypeImpl,
@@ -210,7 +209,8 @@ fn freeze_default_sorts_permutation_noncopy_u8_backing4() {
         <() as SortModel<NonCopyKey, NonCopyCmp>>::enabled(SortEntry::Freeze, &cmp, v.len());
     kani::assert(enabled, "sort model enabled before call");
     kani::cover(enabled, "sort model enabled before call");
-    // Freeze and !Copy select the default. Its 48-byte scratch fits in the stack budget.
+    // `NonCopyKey` is `Freeze` but not `Copy`, so this checks the default general sort with its
+    // private 48-element scratch array.
     <NonCopyKey as UnstableSmallSortFreezeTypeImpl>::small_sort(v, &mut cmp);
     kani::assert(backing[0].0 == left && backing[3].0 == right, "outside slice unchanged");
     sort_input_covers(a < b, b < a, a == b);

@@ -1,5 +1,6 @@
-//! Verification-only sort model, specialized by element and comparator type.
-//! Snapshot callers supply an initialized readable slice region, never scratch storage.
+//! Verification-only sort model. The sorting postcondition applies only to the listed element
+//! types, entry kinds, lengths and comparator function pointers. Snapshots read the initialized
+//! active slice, never scratch storage.
 
 use crate::cell::Cell;
 
@@ -99,13 +100,9 @@ fn sorted_permutation(pre: SortSnapshot, post: SortSnapshot) -> bool {
 }
 
 impl SortModel<u64, U64Cmp> for () {
-    fn enabled(entry: SortEntry, cmp: &U64Cmp, len: usize) -> bool {
-        let supported = match entry {
-            SortEntry::Stable => len == 2 || len == 3,
-            SortEntry::Unstable => len == 2 || len == 3,
-            SortEntry::Freeze => len == 2 || len == 3,
-        };
-        supported && *cmp as *const () == canonical_less_u64 as *const ()
+    // The three u64 entries share this guard.
+    fn enabled(_entry: SortEntry, cmp: &U64Cmp, len: usize) -> bool {
+        (len == 2 || len == 3) && *cmp as *const () == canonical_less_u64 as *const ()
     }
 
     fn snapshot(base: *const u64, len: usize) -> SortSnapshot {
@@ -116,7 +113,7 @@ impl SortModel<u64, U64Cmp> for () {
         result.valid = true;
         let mut i = 0;
         while i < len {
-            // SAFETY: callers provide len initialized readable u64s in the active slice.
+            // SAFETY: `base` points to `len` initialized elements of the active slice.
             result.vals[i] = unsafe { *base.add(i) };
             i += 1;
         }
@@ -139,7 +136,7 @@ impl SortModel<Cell<u8>, CellCmp> for () {
         if len != 2 {
             return SortSnapshot::invalid(len);
         }
-        // SAFETY: the active slice contains two initialized cells. get reads their values.
+        // SAFETY: `base` points to two initialized elements of the active slice.
         let (a, b) = unsafe { ((*base).get(), (*base.add(1)).get()) };
         SortSnapshot::byte_pair(a, b)
     }
@@ -160,7 +157,8 @@ impl SortModel<NonCopyKey, NonCopyCmp> for () {
         if len != 2 {
             return SortSnapshot::invalid(len);
         }
-        // SAFETY: the active slice contains two initialized keys. Read only the byte fields.
+        // SAFETY: `base` points to two initialized elements of the active slice. Read only their
+        // byte fields.
         let (a, b) = unsafe { ((*base).0, (*base.add(1)).0) };
         SortSnapshot::byte_pair(a, b)
     }
