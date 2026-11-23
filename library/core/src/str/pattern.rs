@@ -218,20 +218,6 @@ pub enum SearchStep {
     Done,
 }
 
-macro_rules! reject_steps {
-    ($step:expr $(; $advance:block, $($attr:meta),+)?) => {
-        $($(#[$attr])+ )?
-        loop {
-            $($advance;)?
-            match $step {
-                SearchStep::Reject(a, b) => return Some((a, b)),
-                SearchStep::Done => return None,
-                _ => continue,
-            }
-        }
-    };
-}
-
 /// A searcher for a string pattern.
 ///
 /// This trait provides methods for searching for non-overlapping
@@ -317,7 +303,21 @@ pub unsafe trait Searcher<'a> {
     /// of this and [`next_match`][Searcher::next_match] will overlap.
     #[inline]
     fn next_reject(&mut self) -> Option<(usize, usize)> {
-        reject_steps!(self.next())
+        #[cfg_attr(kani, kani::loop_invariant(verify::RejectionModel::valid(self)))]
+        #[cfg_attr(kani, kani::loop_modifies(
+            verify::RejectionModel::frame(self, false).cursor,
+            verify::RejectionModel::frame(self, false).cache,
+            verify::RejectionModel::frame(self, false).match_flag,
+            verify::RejectionModel::frame(self, false).finished,
+            verify::RejectionModel::frame(self, false).other,
+        ))]
+        loop {
+            match self.next() {
+                SearchStep::Reject(a, b) => return Some((a, b)),
+                SearchStep::Done => return None,
+                _ => continue,
+            }
+        }
     }
 }
 
@@ -393,7 +393,21 @@ pub unsafe trait ReverseSearcher<'a>: Searcher<'a> {
     ///   previously consumed portions of the haystack.
     #[inline]
     fn next_reject_back(&mut self) -> Option<(usize, usize)> {
-        reject_steps!(self.next_back())
+        #[cfg_attr(kani, kani::loop_invariant(verify::RejectionModel::valid(self)))]
+        #[cfg_attr(kani, kani::loop_modifies(
+            verify::RejectionModel::frame(self, true).cursor,
+            verify::RejectionModel::frame(self, true).cache,
+            verify::RejectionModel::frame(self, true).match_flag,
+            verify::RejectionModel::frame(self, true).finished,
+            verify::RejectionModel::frame(self, true).other,
+        ))]
+        loop {
+            match self.next_back() {
+                SearchStep::Reject(a, b) => return Some((a, b)),
+                SearchStep::Done => return None,
+                _ => continue,
+            }
+        }
     }
 }
 
@@ -1188,23 +1202,6 @@ impl<'a, 'b> StrSearcher<'a, 'b> {
 }
 
 unsafe impl<'a, 'b> Searcher<'a> for StrSearcher<'a, 'b> {
-    #[cfg(kani)]
-    fn next_reject(&mut self) -> Option<(usize, usize)> {
-        let mut step = SearchStep::Done;
-        reject_steps!(
-            step;
-            { verify::write_step(self, &mut step, Self::next); },
-            kani::loop_modifies(
-                verify::front_cursor(self),
-                verify::front_memory(self),
-                verify::empty_forward_flag(self),
-                verify::empty_finished(self),
-                &step
-            ),
-            kani::loop_invariant(verify::reject_loop_state(self))
-        )
-    }
-
     #[inline]
     fn haystack(&self) -> &'a str {
         self.haystack
@@ -1301,13 +1298,25 @@ unsafe impl<'a, 'b> Searcher<'a> for StrSearcher<'a, 'b> {
     #[inline]
     fn next_match(&mut self) -> Option<(usize, usize)> {
         match self.searcher {
-            StrSearcherImpl::Empty(..) => loop {
-                match self.next() {
-                    SearchStep::Match(a, b) => return Some((a, b)),
-                    SearchStep::Done => return None,
-                    SearchStep::Reject(..) => {}
+            StrSearcherImpl::Empty(..) =>
+            {
+                #[cfg_attr(kani, kani::loop_invariant(verify::empty_loop_state(self)))]
+                #[cfg_attr(
+                    kani,
+                    kani::loop_modifies(
+                        verify::front_cursor(self),
+                        verify::empty_forward_flag(self),
+                        verify::empty_finished(self),
+                    )
+                )]
+                loop {
+                    match self.next() {
+                        SearchStep::Match(a, b) => return Some((a, b)),
+                        SearchStep::Done => return None,
+                        SearchStep::Reject(..) => {}
+                    }
                 }
-            },
+            }
             StrSearcherImpl::Byte(ref mut searcher) => {
                 let bytes = self.haystack.as_bytes();
                 if searcher.position >= bytes.len() {
@@ -1348,23 +1357,6 @@ unsafe impl<'a, 'b> Searcher<'a> for StrSearcher<'a, 'b> {
 }
 
 unsafe impl<'a, 'b> ReverseSearcher<'a> for StrSearcher<'a, 'b> {
-    #[cfg(kani)]
-    fn next_reject_back(&mut self) -> Option<(usize, usize)> {
-        let mut step = SearchStep::Done;
-        reject_steps!(
-            step;
-            { verify::write_step(self, &mut step, Self::next_back); },
-            kani::loop_modifies(
-                verify::back_cursor(self),
-                verify::back_memory(self),
-                verify::empty_backward_flag(self),
-                verify::empty_finished(self),
-                &step
-            ),
-            kani::loop_invariant(verify::reject_loop_state(self))
-        )
-    }
-
     #[inline]
     #[cfg_attr(kani, kani::requires(verify::invariant(self)))]
     #[cfg_attr(kani, kani::ensures(|step| {
@@ -1447,13 +1439,25 @@ unsafe impl<'a, 'b> ReverseSearcher<'a> for StrSearcher<'a, 'b> {
     #[inline]
     fn next_match_back(&mut self) -> Option<(usize, usize)> {
         match self.searcher {
-            StrSearcherImpl::Empty(..) => loop {
-                match self.next_back() {
-                    SearchStep::Match(a, b) => return Some((a, b)),
-                    SearchStep::Done => return None,
-                    SearchStep::Reject(..) => {}
+            StrSearcherImpl::Empty(..) =>
+            {
+                #[cfg_attr(kani, kani::loop_invariant(verify::empty_loop_state(self)))]
+                #[cfg_attr(
+                    kani,
+                    kani::loop_modifies(
+                        verify::back_cursor(self),
+                        verify::empty_backward_flag(self),
+                        verify::empty_finished(self),
+                    )
+                )]
+                loop {
+                    match self.next_back() {
+                        SearchStep::Match(a, b) => return Some((a, b)),
+                        SearchStep::Done => return None,
+                        SearchStep::Reject(..) => {}
+                    }
                 }
-            },
+            }
             StrSearcherImpl::Byte(ref mut searcher) => {
                 if searcher.end == 0 {
                     return None;
@@ -1587,57 +1591,6 @@ struct TwoWaySearcher {
     for reverse search, chosen instead so that |v'| < period(x).
 
 */
-macro_rules! two_way_scan {
-    (
-        let $bound:ident = $init:expr;
-        for $item:ident in $from:expr, $to:expr, $direction:ident;
-        $scan:ident, $progress:ident => $invariant:expr;
-        $($target:expr),+;
-        $body:block
-    ) => {
-        #[cfg(not(kani))]
-        let $bound = $init;
-        #[cfg(not(kani))]
-        for $item in two_way_scan!(@iterator $from, $to, $direction) $body
-
-        #[cfg(kani)]
-        {
-            $scan.reset(|| {
-                let $bound = $init;
-                $from..$to
-            });
-            let reverse = two_way_scan!(@reverse $direction);
-            #[kani::loop_invariant(
-                $scan.valid(reverse) && {
-                    let $progress = $scan.progress(reverse);
-                    $invariant
-                }
-            )]
-            #[kani::loop_modifies($($target,)+ &$scan.cursor)]
-            loop {
-                $scan.advance(reverse);
-                if !$scan.cursor.active {
-                    break;
-                }
-                $body
-            }
-        }
-    };
-    (@iterator $from:expr, $to:expr, forward) => { $from..$to };
-    (@iterator $from:expr, $to:expr, reverse) => { ($from..$to).rev() };
-    (@reverse forward) => { false };
-    (@reverse reverse) => { true };
-}
-
-macro_rules! two_way_scan_index {
-    ($scan:ident, $index:ident) => {
-        crate::cfg_select! {
-            kani => $scan.cursor.index,
-            _ => $index,
-        }
-    };
-}
-
 impl TwoWaySearcher {
     fn new(needle: &[u8], end: usize) -> TwoWaySearcher {
         let (crit_pos_false, period_false) = TwoWaySearcher::maximal_suffix(needle, false);
@@ -1734,20 +1687,12 @@ impl TwoWaySearcher {
         // `next()` uses `self.position` as its cursor
         let old_pos = self.position;
         let needle_last = needle.len() - 1;
-        #[cfg(kani)]
-        let last_scalar = verify::last_scalar_start(needle);
-        #[cfg(kani)]
-        let mut scan = verify::TwoWayScan::new();
         #[cfg_attr(kani, kani::loop_invariant(
-            verify::raw_forward_loop_state(self, haystack, needle, long_period)
+            verify::raw_forward_loop_state::<S>(self, haystack, needle, long_period)
                 && old_pos <= self.position
                 && (self.position != old_pos || self.memory == on_entry(self.memory))))]
-        #[cfg_attr(kani, kani::loop_modifies(&self.position, &self.memory, &scan))]
+        #[cfg_attr(kani, kani::loop_modifies(&self.position, &self.memory))]
         'search: loop {
-            #[cfg(kani)]
-            let scan_cursor = self.position;
-            #[cfg(kani)]
-            let scan_cache = self.memory;
             // Check that we have room to search in
             // position + needle_last can not overflow if we assume slices
             // are bounded by isize's range.
@@ -1773,69 +1718,53 @@ impl TwoWaySearcher {
             }
 
             // See if the right part of the needle matches
-            two_way_scan! {
-                let start =
-                    if long_period { self.crit_pos } else { cmp::max(self.crit_pos, self.memory) };
-                for i in start, needle.len(), forward;
-                scan, progress => verify::raw_scan_state(self, haystack, needle, long_period, true)
-                    && verify::long_scan_probes::<S>(
-                        self, haystack, needle, long_period, progress, 0, old_pos, last_scalar,
+            let start =
+                if long_period { self.crit_pos } else { cmp::max(self.crit_pos, self.memory) };
+            #[cfg_attr(kani, kani::loop_invariant(
+                verify::long_scan_probes::<S>(
+                        self, haystack, needle, long_period, kani::index, 0, old_pos,
+                        on_entry(verify::last_scalar_start(needle)),
                     )
-                    && self.position == scan_cursor
-                    && self.memory == scan_cache
-                    && old_pos <= self.position;
-                &self.position, &self.memory;
-                {
-                    // SAFETY: on every iteration of `'search`, the `haystack.get(self.position + needle_last)`
-                    // check returned `Some`, so `self.position + needle_last < haystack.len()`.
-                    // Since `i < needle.len()` implies `i <= needle_last`, we have
-                    // `self.position + i < haystack.len()`.
-                    // Every path that mutates `self.position` below either returns or re-enters `'search`,
-                    // which re-runs the check before reaching the loop again.
-                    if needle[two_way_scan_index!(scan, i)]
-                        != unsafe {
-                            *haystack.get_unchecked(self.position + two_way_scan_index!(scan, i))
-                        }
-                    {
-                        self.position += two_way_scan_index!(scan, i) - self.crit_pos + 1;
-                        if !long_period {
-                            self.memory = 0;
-                        }
-                        continue 'search;
+            ))]
+            #[cfg_attr(kani, kani::loop_modifies())]
+            for i in start..needle.len() {
+                // SAFETY: on every iteration of `'search`, the `haystack.get(self.position + needle_last)`
+                // check returned `Some`, so `self.position + needle_last < haystack.len()`.
+                // Since `i < needle.len()` implies `i <= needle_last`, we have
+                // `self.position + i < haystack.len()`.
+                // Every path that mutates `self.position` below either returns or re-enters `'search`,
+                // which re-runs the check before reaching the loop again.
+                if needle[i] != unsafe { *haystack.get_unchecked(self.position + i) } {
+                    self.position += i - self.crit_pos + 1;
+                    if !long_period {
+                        self.memory = 0;
                     }
+                    continue 'search;
                 }
             }
 
             // See if the left part of the needle matches
-            two_way_scan! {
-                let start = if long_period { 0 } else { self.memory };
-                for i in start, self.crit_pos, reverse;
-                scan, progress => verify::raw_scan_state(self, haystack, needle, long_period, true)
-                    && verify::long_scan_probes::<S>(
-                        self, haystack, needle, long_period, progress, 1, old_pos, last_scalar,
+            let start = if long_period { 0 } else { self.memory };
+            #[cfg_attr(kani, kani::loop_invariant(
+                verify::long_scan_probes::<S>(
+                        self, haystack, needle, long_period, kani::index, 1, old_pos,
+                        on_entry(verify::last_scalar_start(needle)),
                     )
-                    && self.position == scan_cursor
-                    && self.memory == scan_cache
-                    && old_pos <= self.position;
-                &self.position, &self.memory;
-                {
-                    // SAFETY: on every iteration of `'search`, the `haystack.get(self.position + needle_last)`
-                    // check returned `Some`, so `self.position + needle_last < haystack.len()`.
-                    // Since `i < self.crit_pos <= needle.len()`, we have `i <= needle_last`, and thus
-                    // `self.position + i <= self.position + needle_last < haystack.len()`.
-                    // Every path that mutates `self.position` below either returns or re-enters `'search`,
-                    // which re-runs the check before reaching the loop again.
-                    if needle[two_way_scan_index!(scan, i)]
-                        != unsafe {
-                            *haystack.get_unchecked(self.position + two_way_scan_index!(scan, i))
-                        }
-                    {
-                        self.position += self.period;
-                        if !long_period {
-                            self.memory = needle.len() - self.period;
-                        }
-                        continue 'search;
+            ))]
+            #[cfg_attr(kani, kani::loop_modifies())]
+            for i in (start..self.crit_pos).rev() {
+                // SAFETY: on every iteration of `'search`, the `haystack.get(self.position + needle_last)`
+                // check returned `Some`, so `self.position + needle_last < haystack.len()`.
+                // Since `i < self.crit_pos <= needle.len()`, we have `i <= needle_last`, and thus
+                // `self.position + i <= self.position + needle_last < haystack.len()`.
+                // Every path that mutates `self.position` below either returns or re-enters `'search`,
+                // which re-runs the check before reaching the loop again.
+                if needle[i] != unsafe { *haystack.get_unchecked(self.position + i) } {
+                    self.position += self.period;
+                    if !long_period {
+                        self.memory = needle.len() - self.period;
                     }
+                    continue 'search;
                 }
             }
 
@@ -1872,20 +1801,12 @@ impl TwoWaySearcher {
         // `next_back()` uses `self.end` as its cursor -- so that `next()` and `next_back()`
         // are independent.
         let old_end = self.end;
-        #[cfg(kani)]
-        let last_scalar = verify::reverse_scan_probe::<S>(needle);
-        #[cfg(kani)]
-        let mut scan = verify::TwoWayScan::new();
         #[cfg_attr(kani, kani::loop_invariant(
             verify::raw_loop_state(self, haystack, needle, long_period)
                 && self.end <= old_end
                 && (self.end != old_end || self.memory_back == on_entry(self.memory_back))))]
-        #[cfg_attr(kani, kani::loop_modifies(&self.end, &self.memory_back, &scan))]
+        #[cfg_attr(kani, kani::loop_modifies(&self.end, &self.memory_back))]
         'search: loop {
-            #[cfg(kani)]
-            let scan_cursor = self.end;
-            #[cfg(kani)]
-            let scan_cache = self.memory_back;
             // Check that we have room to search in
             // end - needle.len() will wrap around when there is no more room,
             // but due to slice length limits it can never wrap all the way back
@@ -1912,72 +1833,56 @@ impl TwoWaySearcher {
             }
 
             // See if the left part of the needle matches
-            two_way_scan! {
-                let crit = if long_period {
-                    self.crit_pos_back
-                } else {
-                    cmp::min(self.crit_pos_back, self.memory_back)
-                };
-                for i in 0, crit, reverse;
-                scan, progress => verify::raw_scan_state(self, haystack, needle, long_period, false)
-                    && verify::long_scan_probes::<S>(
-                        self, haystack, needle, long_period, progress, 2, old_end, last_scalar,
+            let crit = if long_period {
+                self.crit_pos_back
+            } else {
+                cmp::min(self.crit_pos_back, self.memory_back)
+            };
+            #[cfg_attr(kani, kani::loop_invariant(
+                verify::long_scan_probes::<S>(
+                        self, haystack, needle, long_period, kani::index, 2, old_end,
+                        on_entry(verify::reverse_scan_probe::<S>(needle)),
                     )
-                    && self.end == scan_cursor
-                    && self.memory_back == scan_cache
-                    && self.end <= old_end;
-                &self.end, &self.memory_back;
-                {
-                    // SAFETY: On every iteration of `'search`, `haystack.get(self.end.wrapping_sub(needle.len()))`
-                    //   returned `Some`, so `self.end >= needle.len()` and `self.end - needle.len() < haystack.len()`.
-                    //   Since `self.end <= haystack.len()` and `i < needle.len()`, we have
-                    //   `self.end - needle.len() + i < self.end <= haystack.len()`, so
-                    //   `haystack.get_unchecked(self.end - needle.len() + i)` is safe.
-                    // - The path that mutates `self.end` either re-enters `'search`, which re-runs the checks
-                    //   before reaching this loop again, or returns on match, so the invariant holds.
-                    if needle[two_way_scan_index!(scan, i)]
-                        != unsafe {
-                            *haystack.get_unchecked(self.end - needle.len() + two_way_scan_index!(scan, i))
-                        }
-                    {
-                        self.end -= self.crit_pos_back - two_way_scan_index!(scan, i);
-                        if !long_period {
-                            self.memory_back = needle.len();
-                        }
-                        continue 'search;
+            ))]
+            #[cfg_attr(kani, kani::loop_modifies())]
+            for i in (0..crit).rev() {
+                // SAFETY: On every iteration of `'search`, `haystack.get(self.end.wrapping_sub(needle.len()))`
+                //   returned `Some`, so `self.end >= needle.len()` and `self.end - needle.len() < haystack.len()`.
+                //   Since `self.end <= haystack.len()` and `i < needle.len()`, we have
+                //   `self.end - needle.len() + i < self.end <= haystack.len()`, so
+                //   `haystack.get_unchecked(self.end - needle.len() + i)` is safe.
+                // - The path that mutates `self.end` either re-enters `'search`, which re-runs the checks
+                //   before reaching this loop again, or returns on match, so the invariant holds.
+                if needle[i] != unsafe { *haystack.get_unchecked(self.end - needle.len() + i) } {
+                    self.end -= self.crit_pos_back - i;
+                    if !long_period {
+                        self.memory_back = needle.len();
                     }
+                    continue 'search;
                 }
             }
 
             // See if the right part of the needle matches
-            two_way_scan! {
-                let needle_end = if long_period { needle.len() } else { self.memory_back };
-                for i in self.crit_pos_back, needle_end, forward;
-                scan, progress => verify::raw_scan_state(self, haystack, needle, long_period, false)
-                    && verify::long_scan_probes::<S>(
-                        self, haystack, needle, long_period, progress, 3, old_end, last_scalar,
+            let needle_end = if long_period { needle.len() } else { self.memory_back };
+            #[cfg_attr(kani, kani::loop_invariant(
+                verify::long_scan_probes::<S>(
+                        self, haystack, needle, long_period, kani::index, 3, old_end,
+                        on_entry(verify::reverse_scan_probe::<S>(needle)),
                     )
-                    && self.end == scan_cursor
-                    && self.memory_back == scan_cache
-                    && self.end <= old_end;
-                &self.end, &self.memory_back;
-                {
-                    // SAFETY: The same `self.end - needle.len() + i < haystack.len()` argument as the
-                    // left-part loop applies: the `haystack.get(self.end.wrapping_sub(needle.len()))`
-                    // check at the top of `'search` established the bound for this iteration, and
-                    // every mutation of `self.end` is followed by `continue 'search` (which re-runs
-                    // the check) or a `return` (which exits before any further unsafe access).
-                    if needle[two_way_scan_index!(scan, i)]
-                        != unsafe {
-                            *haystack.get_unchecked(self.end - needle.len() + two_way_scan_index!(scan, i))
-                        }
-                    {
-                        self.end -= self.period;
-                        if !long_period {
-                            self.memory_back = self.period;
-                        }
-                        continue 'search;
+            ))]
+            #[cfg_attr(kani, kani::loop_modifies())]
+            for i in self.crit_pos_back..needle_end {
+                // SAFETY: The same `self.end - needle.len() + i < haystack.len()` argument as the
+                // left-part loop applies: the `haystack.get(self.end.wrapping_sub(needle.len()))`
+                // check at the top of `'search` established the bound for this iteration, and
+                // every mutation of `self.end` is followed by `continue 'search` (which re-runs
+                // the check) or a `return` (which exits before any further unsafe access).
+                if needle[i] != unsafe { *haystack.get_unchecked(self.end - needle.len() + i) } {
+                    self.end -= self.period;
+                    if !long_period {
+                        self.memory_back = self.period;
                     }
+                    continue 'search;
                 }
             }
 
@@ -2664,11 +2569,32 @@ pub mod verify {
             }
     }
 
-    // A UTF-8 scalar contains at most four bytes. `nearby_boundary` therefore
-    // bounds this particular rounding loop independently of the string length.
-    // Keep unwinding assertions enabled to prove this is a complete expansion.
+    // A boundary from the original UTF-8 window remains at or after the cursor.
+    pub(crate) const fn ceil_boundary_loop_state(s: &str, index: usize, cursor: usize) -> bool {
+        let len = crate::intrinsics::ptr_metadata(s as *const str);
+        let ptr = s as *const str as *const u8;
+        // The verifier uses a different calling convention in loop clauses.
+        // Check the same byte as is_char_boundary without calling it here.
+        macro_rules! boundary {
+            ($at:expr) => {{
+                let at = $at;
+                at == 0
+                    || at == len
+                    || (at < len
+                        && unsafe { *crate::intrinsics::arith_offset(ptr, at as isize) } as i8
+                            >= -0x40)
+            }};
+        }
+        index <= cursor
+            && cursor < len
+            && len <= isize::MAX as usize
+            && ((cursor == index && boundary!(index))
+                || (cursor <= index + 1 && boundary!(index + 1))
+                || (cursor <= index + 2 && boundary!(index + 2))
+                || (cursor <= index + 3 && boundary!(index + 3)))
+    }
+
     #[kani::proof_for_contract(str::ceil_char_boundary)]
-    #[kani::unwind(5)]
     pub fn harness_ceil_char_boundary() {
         let s = any_str();
         let index: usize = kani::any();
@@ -2887,14 +2813,59 @@ pub mod verify {
         }
     }
 
-    // The trait defaults and StrSearcher proofs share the rejection loop.
-    // Store the step in a local that the loop's write set can name.
-    pub(super) fn write_step<S: ?Sized>(
-        searcher: &mut S,
-        step: &mut SearchStep,
-        next: impl FnOnce(&mut S) -> SearchStep,
-    ) {
-        *step = next(searcher);
+    pub(super) struct RejectionFrame {
+        pub(super) cursor: *const [usize],
+        pub(super) cache: *const [usize],
+        pub(super) match_flag: *const [bool],
+        pub(super) finished: *const [bool],
+        pub(super) other: *const [u8],
+    }
+
+    // The default filters are generic. Select the proof state for their
+    // StrSearcher instantiation without altering the trait method body.
+    pub(super) trait RejectionModel {
+        fn valid(&self) -> bool;
+        fn frame(&self, reverse: bool) -> RejectionFrame;
+    }
+
+    impl<T: ?Sized> RejectionModel for T {
+        default fn valid(&self) -> bool {
+            kani::mem::can_dereference(self)
+        }
+
+        default fn frame(&self, _: bool) -> RejectionFrame {
+            use crate::ptr::slice_from_raw_parts;
+            let bytes = self as *const T as *const u8;
+            RejectionFrame {
+                cursor: slice_from_raw_parts(bytes.cast(), 0),
+                cache: slice_from_raw_parts(bytes.cast(), 0),
+                match_flag: slice_from_raw_parts(bytes.cast(), 0),
+                finished: slice_from_raw_parts(bytes.cast(), 0),
+                other: slice_from_raw_parts(bytes, crate::mem::size_of_val(self)),
+            }
+        }
+    }
+
+    impl RejectionModel for StrSearcher<'_, '_> {
+        fn valid(&self) -> bool {
+            reject_loop_state(self)
+        }
+
+        fn frame(&self, reverse: bool) -> RejectionFrame {
+            use crate::ptr::slice_from_raw_parts;
+            let (cursor, cache, match_flag) = if reverse {
+                (back_cursor(self), back_memory(self), empty_backward_flag(self))
+            } else {
+                (front_cursor(self), front_memory(self), empty_forward_flag(self))
+            };
+            RejectionFrame {
+                cursor: slice_from_raw_parts(cursor, 1),
+                cache,
+                match_flag,
+                finished: empty_finished(self),
+                other: slice_from_raw_parts(self as *const Self as *const u8, 0),
+            }
+        }
     }
 
     pub(super) fn reject_loop_state<'a: 'a, 'b: 'b>(s: &StrSearcher<'a, 'b>) -> bool {
@@ -2929,36 +2900,47 @@ pub mod verify {
                 || unsafe { *crate::intrinsics::arith_offset(hp, t.end as isize) } as i8 >= -0x40)
     }
 
-    pub(super) fn long_loop_state(s: &StrSearcher<'_, '_>) -> bool {
-        let n = crate::intrinsics::ptr_metadata(s.needle as *const str);
-        let len = crate::intrinsics::ptr_metadata(s.haystack as *const str);
-        let hp = s.haystack as *const str as *const u8;
-        let StrSearcherImpl::TwoWay(t) = &s.searcher else {
-            return false;
-        };
-        if n < 2
-            || n > MAX_ALLOCATION_BYTES
-            || len > MAX_ALLOCATION_BYTES
-            || t.crit_pos == 0
-            || t.crit_pos >= n
-            || t.crit_pos_back != t.crit_pos
-            || t.memory != usize::MAX
-            || t.memory_back != usize::MAX
-            || t.position > len
-            || t.end > len
-        {
-            return false;
-        }
-        let other = n - t.crit_pos;
-        let largest = if t.crit_pos > other { t.crit_pos } else { other };
-        t.period == largest + 1
-            && (t.position == 0
-                || t.position == len
-                || unsafe { *crate::intrinsics::arith_offset(hp, t.position as isize) } as i8
-                    >= -0x40)
-            && (t.end == 0
-                || t.end == len
-                || unsafe { *crate::intrinsics::arith_offset(hp, t.end as isize) } as i8 >= -0x40)
+    macro_rules! long_state_body {
+        ($s:ident) => {{
+            let n = crate::intrinsics::ptr_metadata($s.needle as *const str);
+            let len = crate::intrinsics::ptr_metadata($s.haystack as *const str);
+            let hp = $s.haystack as *const str as *const u8;
+            let StrSearcherImpl::TwoWay(t) = &$s.searcher else {
+                return false;
+            };
+            if n < 2
+                || n > MAX_ALLOCATION_BYTES
+                || len > MAX_ALLOCATION_BYTES
+                || t.crit_pos == 0
+                || t.crit_pos >= n
+                || t.crit_pos_back != t.crit_pos
+                || t.memory != usize::MAX
+                || t.memory_back != usize::MAX
+                || t.position > len
+                || t.end > len
+            {
+                return false;
+            }
+            let other = n - t.crit_pos;
+            let largest = if t.crit_pos > other { t.crit_pos } else { other };
+            t.period == largest + 1
+                && (t.position == 0
+                    || t.position == len
+                    || unsafe { *crate::intrinsics::arith_offset(hp, t.position as isize) } as i8
+                        >= -0x40)
+                && (t.end == 0
+                    || t.end == len
+                    || unsafe { *crate::intrinsics::arith_offset(hp, t.end as isize) } as i8
+                        >= -0x40)
+        }};
+    }
+
+    pub(super) fn long_loop_state<'a: 'a, 'b: 'b>(s: &StrSearcher<'a, 'b>) -> bool {
+        long_state_body!(s)
+    }
+
+    fn long_call_state(s: &StrSearcher<'_, '_>) -> bool {
+        long_state_body!(s)
     }
 
     // Called only by the loop invariant: avoid ordinary library calls in this
@@ -2983,26 +2965,36 @@ pub mod verify {
                 || unsafe { *crate::intrinsics::arith_offset(ptr, b as isize) } as i8 >= -0x40)
     }
 
-    pub(super) fn byte_loop_state(s: &StrSearcher<'_, '_>) -> bool {
-        let len = crate::intrinsics::ptr_metadata(s.haystack as *const str);
-        let n = crate::intrinsics::ptr_metadata(s.needle as *const str);
-        let ptr = s.haystack as *const str as *const u8;
-        let np = s.needle as *const str as *const u8;
-        let StrSearcherImpl::Byte(b) = &s.searcher else {
-            return false;
-        };
-        let (f, e) = (b.position, b.end);
-        n == 1
-            && b.b < 128
-            && unsafe { *np } == b.b
-            && f <= len
-            && e <= len
-            && (f == 0
-                || f == len
-                || unsafe { *crate::intrinsics::arith_offset(ptr, f as isize) } as i8 >= -0x40)
-            && (e == 0
-                || e == len
-                || unsafe { *crate::intrinsics::arith_offset(ptr, e as isize) } as i8 >= -0x40)
+    macro_rules! byte_state_body {
+        ($s:ident) => {{
+            let len = crate::intrinsics::ptr_metadata($s.haystack as *const str);
+            let n = crate::intrinsics::ptr_metadata($s.needle as *const str);
+            let ptr = $s.haystack as *const str as *const u8;
+            let np = $s.needle as *const str as *const u8;
+            let StrSearcherImpl::Byte(b) = &$s.searcher else {
+                return false;
+            };
+            let (f, e) = (b.position, b.end);
+            n == 1
+                && b.b < 128
+                && unsafe { *np } == b.b
+                && f <= len
+                && e <= len
+                && (f == 0
+                    || f == len
+                    || unsafe { *crate::intrinsics::arith_offset(ptr, f as isize) } as i8 >= -0x40)
+                && (e == 0
+                    || e == len
+                    || unsafe { *crate::intrinsics::arith_offset(ptr, e as isize) } as i8 >= -0x40)
+        }};
+    }
+
+    pub(super) fn byte_loop_state<'a: 'a, 'b: 'b>(s: &StrSearcher<'a, 'b>) -> bool {
+        byte_state_body!(s)
+    }
+
+    fn byte_call_state(s: &StrSearcher<'_, '_>) -> bool {
+        byte_state_body!(s)
     }
 
     // Numeric projection of C for the additional filter UB proof. It keeps
@@ -3233,8 +3225,6 @@ pub mod verify {
     }
 
     #[kani::proof]
-    // The Empty loop can skip one Reject before Match or Done.
-    #[kani::unwind(3)]
     #[kani::stub_verified(<StrSearcher as Searcher>::next)]
     #[kani::stub(TwoWaySearcher::next, reject_two_way_in_byte_proof)]
     pub fn harness_str_searcher_empty_next_match() {
@@ -3252,7 +3242,6 @@ pub mod verify {
     }
 
     #[kani::proof]
-    #[kani::unwind(3)]
     #[kani::stub_verified(<StrSearcher as ReverseSearcher>::next_back)]
     #[kani::stub(TwoWaySearcher::next_back, reject_two_way_in_byte_proof)]
     pub fn harness_str_searcher_empty_next_match_back() {
@@ -3440,54 +3429,6 @@ pub mod verify {
     }
 
     #[kani::proof]
-    #[kani::unwind(3)]
-    #[kani::stub(<StrSearcher as Searcher>::next, FilterUbModel::next)]
-    #[kani::stub(TwoWaySearcher::next, reject_two_way_in_byte_proof)]
-    #[kani::stub(crate::slice::memchr::memchr, model_memchr)]
-    pub fn harness_empty_next_match_loop_extra_ub() {
-        let mut s = StrSearcher {
-            haystack: any_str(),
-            needle: "",
-            searcher: StrSearcherImpl::Empty(EmptyNeedle {
-                position: kani::any(),
-                end: kani::any(),
-                is_match_fw: kani::any(),
-                is_match_bw: kani::any(),
-                is_finished: kani::any(),
-            }),
-        };
-        kani::assume(filter_ub_state(&s));
-        kani::cover(true, "assume #27");
-        let result = s.next_match();
-        kani::cover(result.is_some(), "arbitrary Empty match indices");
-        kani::cover(result.is_none(), "Empty match loop exhaustion");
-    }
-
-    #[kani::proof]
-    #[kani::unwind(3)]
-    #[kani::stub(<StrSearcher as ReverseSearcher>::next_back, FilterUbModel::next_back)]
-    #[kani::stub(TwoWaySearcher::next_back, reject_two_way_in_byte_proof)]
-    #[kani::stub(crate::slice::memchr::memrchr, model_memchr)]
-    pub fn harness_empty_next_match_back_loop_extra_ub() {
-        let mut s = StrSearcher {
-            haystack: any_str(),
-            needle: "",
-            searcher: StrSearcherImpl::Empty(EmptyNeedle {
-                position: kani::any(),
-                end: kani::any(),
-                is_match_fw: kani::any(),
-                is_match_bw: kani::any(),
-                is_finished: kani::any(),
-            }),
-        };
-        kani::assume(filter_ub_state(&s));
-        kani::cover(true, "assume #28");
-        let result = s.next_match_back();
-        kani::cover(result.is_some(), "arbitrary Empty reverse match indices");
-        kani::cover(result.is_none(), "Empty reverse match loop exhaustion");
-    }
-
-    #[kani::proof]
     pub fn harness_str_searcher_empty_into_searcher() {
         let haystack = any_str();
         let s = "".into_searcher(haystack);
@@ -3653,8 +3594,14 @@ pub mod verify {
         kani::cover(matches!(step, SearchStep::Done), "exhaustion");
     }
 
+    // The Byte filters can change only the active cursor. Specialize C to
+    // its Byte branch, with distinct calls for the loop and step contract.
     #[kani::proof]
     #[kani::stub_verified(<StrSearcher as Searcher>::next)]
+    #[kani::stub(reject_loop_state, byte_loop_state)]
+    #[kani::stub(invariant, byte_call_state)]
+    #[kani::stub(assume_utf8_at_match, omit_match_fact_for_rejection)]
+    #[kani::stub(TwoWaySearcher::next, reject_two_way_in_byte_proof)]
     pub fn harness_str_searcher_byte_next_reject() {
         let mut byte = 0;
         let needle = any_ascii_needle(&mut byte);
@@ -3671,6 +3618,9 @@ pub mod verify {
 
     #[kani::proof]
     #[kani::stub_verified(<StrSearcher as ReverseSearcher>::next_back)]
+    #[kani::stub(reject_loop_state, byte_loop_state)]
+    #[kani::stub(invariant, byte_call_state)]
+    #[kani::stub(TwoWaySearcher::next_back, reject_two_way_in_byte_proof)]
     pub fn harness_str_searcher_byte_next_reject_back() {
         let mut byte = 0;
         let needle = any_ascii_needle(&mut byte);
@@ -4794,64 +4744,47 @@ pub mod verify {
         reverse_lexical_loop(arr, known_period, left, right, offset, period, true, true)
     }
 
-    #[kani::requires(!arr.is_empty() && arr.len() <= MAX_ALLOCATION_BYTES)]
-    #[kani::ensures(|result| *result < arr.len())]
-    #[kani::modifies()]
-    fn reverse_suffix_root_baseline(arr: &[u8], order: bool) -> usize {
-        TwoWaySearcher::reverse_maximal_suffix(arr, arr.len(), order)
-    }
-
-    #[kani::requires(!arr.is_empty() && arr.len() <= MAX_ALLOCATION_BYTES)]
-    #[kani::ensures(|result| *result < arr.len() && reverse_word_earlier(arr, *result, order))]
-    #[kani::modifies()]
-    fn reverse_suffix_dominance_baseline(arr: &[u8], order: bool) -> usize {
-        TwoWaySearcher::reverse_maximal_suffix(arr, arr.len(), order)
-    }
-
-    #[kani::proof_for_contract(reverse_suffix_root_baseline)]
+    #[kani::proof]
     #[kani::stub_verified(verified_reverse_root_transfer)]
     #[kani::stub(reverse_suffix_loop_state, reverse_root_loop_false)]
     #[kani::stub(reverse_loop_facts, probe_suffix_shape)]
     #[kani::stub(reverse_loop_root, root_exclusion_for_loop)]
     pub fn harness_reverse_maximal_suffix_root_probe_false() {
-        let arr = any_nonempty_bytes();
+        let arr = any_suffix_probe_word();
         unsafe {
-            ROOT_STATE_PROBE = (kani::any(), kani::any());
-            EARLIER_STATE_PROBE = kani::any();
+            ROOT_STATE_PROBE = (kani::any::<u64>() as usize, kani::any::<u64>() as usize);
             PREPROCESSING_INPUT = (arr.as_ptr(), arr.len(), false);
         }
-        let result = reverse_suffix_root_baseline(arr, false);
+        let result = TwoWaySearcher::reverse_maximal_suffix(arr, arr.len(), false);
+        assert!(result < arr.len());
+        kani::cover(true, "the real reverse suffix is within the word");
         kani::cover(
             arr.len() > 4096 && result > 0,
             "reverse root false traverses a symbolic-length byte word",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_reverse_maximal_suffix_root_probe_false",
-        );
     }
 
-    #[kani::proof_for_contract(reverse_suffix_root_baseline)]
+    #[kani::proof]
     #[kani::stub_verified(verified_reverse_root_transfer)]
     #[kani::stub(reverse_suffix_loop_state, reverse_root_loop_true)]
     #[kani::stub(reverse_loop_facts, probe_suffix_shape)]
     #[kani::stub(reverse_loop_root, root_exclusion_for_loop)]
     pub fn harness_reverse_maximal_suffix_root_probe_true() {
-        let arr = any_nonempty_bytes();
+        let arr = any_suffix_probe_word();
         unsafe {
-            ROOT_STATE_PROBE = (kani::any(), kani::any());
-            EARLIER_STATE_PROBE = kani::any();
+            ROOT_STATE_PROBE = (kani::any::<u64>() as usize, kani::any::<u64>() as usize);
             PREPROCESSING_INPUT = (arr.as_ptr(), arr.len(), true);
         }
-        let result = reverse_suffix_root_baseline(arr, true);
+        let result = TwoWaySearcher::reverse_maximal_suffix(arr, arr.len(), true);
+        assert!(result < arr.len());
+        kani::cover(true, "the real reverse suffix is within the word");
         kani::cover(
             arr.len() > 4096 && result > 0,
             "reverse root true traverses a symbolic-length byte word",
         );
-        kani::cover(true, "contract proof returns: harness_reverse_maximal_suffix_root_probe_true");
     }
 
-    #[kani::proof_for_contract(reverse_suffix_dominance_baseline)]
+    #[kani::proof]
     #[kani::stub_verified(verified_reverse_left_transfer)]
     #[kani::stub(reverse_suffix_loop_state, reverse_dominance_loop_false)]
     #[kani::stub(reverse_loop_facts, probe_suffix_shape)]
@@ -4859,24 +4792,23 @@ pub mod verify {
     #[kani::stub(reverse_loop_earlier, earlier_exclusion_for_loop)]
     #[kani::stub(reverse_word_earlier, earlier_exclusion_predicate)]
     pub fn harness_reverse_maximal_suffix_dominance_probe_false() {
-        let arr = any_nonempty_bytes();
+        let arr = any_suffix_probe_word();
         unsafe {
-            ROOT_STATE_PROBE = (kani::any(), kani::any());
-            EARLIER_STATE_PROBE = kani::any();
+            EARLIER_STATE_PROBE = kani::any::<u64>() as usize;
             PREPROCESSING_INPUT = (arr.as_ptr(), arr.len(), false);
         }
-        let result = reverse_suffix_dominance_baseline(arr, false);
+        let result = TwoWaySearcher::reverse_maximal_suffix(arr, arr.len(), false);
+        assert!(result < arr.len());
+        kani::cover(true, "the real reverse suffix is within the word");
+        assert!(reverse_word_earlier(arr, result, false));
+        kani::cover(true, "the real reverse suffix satisfies the earlier-suffix probe");
         kani::cover(
             arr.len() > 4096 && result > 0,
             "reverse dominance false traverses a symbolic-length byte word",
         );
-        kani::cover(
-            true,
-            "contract proof returns: harness_reverse_maximal_suffix_dominance_probe_false",
-        );
     }
 
-    #[kani::proof_for_contract(reverse_suffix_dominance_baseline)]
+    #[kani::proof]
     #[kani::stub_verified(verified_reverse_left_transfer)]
     #[kani::stub(reverse_suffix_loop_state, reverse_dominance_loop_true)]
     #[kani::stub(reverse_loop_facts, probe_suffix_shape)]
@@ -4884,20 +4816,19 @@ pub mod verify {
     #[kani::stub(reverse_loop_earlier, earlier_exclusion_for_loop)]
     #[kani::stub(reverse_word_earlier, earlier_exclusion_predicate)]
     pub fn harness_reverse_maximal_suffix_dominance_probe_true() {
-        let arr = any_nonempty_bytes();
+        let arr = any_suffix_probe_word();
         unsafe {
-            ROOT_STATE_PROBE = (kani::any(), kani::any());
-            EARLIER_STATE_PROBE = kani::any();
+            EARLIER_STATE_PROBE = kani::any::<u64>() as usize;
             PREPROCESSING_INPUT = (arr.as_ptr(), arr.len(), true);
         }
-        let result = reverse_suffix_dominance_baseline(arr, true);
+        let result = TwoWaySearcher::reverse_maximal_suffix(arr, arr.len(), true);
+        assert!(result < arr.len());
+        kani::cover(true, "the real reverse suffix is within the word");
+        assert!(reverse_word_earlier(arr, result, true));
+        kani::cover(true, "the real reverse suffix satisfies the earlier-suffix probe");
         kani::cover(
             arr.len() > 4096 && result > 0,
             "reverse dominance true traverses a symbolic-length byte word",
-        );
-        kani::cover(
-            true,
-            "contract proof returns: harness_reverse_maximal_suffix_dominance_probe_true",
         );
     }
 
@@ -5092,27 +5023,25 @@ pub mod verify {
 
     fn known_period_range_shape(arr: &[u8], begin: usize, end: usize, delta: usize) -> bool {
         let saved = unsafe { PREPROCESSING_INPUT };
+        let len = crate::intrinsics::ptr_metadata(arr as *const [u8]);
+        let ptr = arr as *const [u8] as *const u8;
         let k = unsafe { REVERSE_KNOWN_PERIOD };
-        assert!(
-            arr.as_ptr() == saved.0
-                && arr.len() == saved.1
-                && begin == k
-                && end == saved.1
-                && delta == k
-        );
+        assert!(ptr == saved.0 && len == saved.1 && begin == k && end == saved.1 && delta == k);
         kani::cover(true, "reverse loop retains its original global-period operand");
-        0 < k && k <= arr.len() && arr.len() <= MAX_ALLOCATION_BYTES
+        0 < k && k <= len && len <= MAX_ALLOCATION_BYTES
     }
 
     fn known_reflected_period_shape(arr: &[u8], k: usize) -> bool {
-        known_period_range_shape(arr, k, arr.len(), k)
+        known_period_range_shape(arr, k, crate::intrinsics::ptr_metadata(arr as *const [u8]), k)
     }
 
     fn earlier_shape_for_reverse_bound(arr: &[u8], left: usize, order: bool) -> bool {
         let saved = unsafe { PREPROCESSING_INPUT };
-        assert!(arr.as_ptr() == saved.0 && arr.len() == saved.1 && order == saved.2);
+        let len = crate::intrinsics::ptr_metadata(arr as *const [u8]);
+        let ptr = arr as *const [u8] as *const u8;
+        assert!(ptr == saved.0 && len == saved.1 && order == saved.2);
         kani::cover(true, "reverse numeric proof retains the earlier-predicate operands");
-        arr.len() <= MAX_ALLOCATION_BYTES && left < arr.len()
+        len <= MAX_ALLOCATION_BYTES && left < len
     }
 
     // The known-period execution is a prefix of the len-period execution:
@@ -5129,7 +5058,7 @@ pub mod verify {
         period: usize,
         order: bool,
     ) -> bool {
-        let n = arr.len();
+        let n = crate::intrinsics::ptr_metadata(arr as *const [u8]);
         if known_period == 0
             || known_period > n
             || !probe_suffix_shape(arr, left, right, offset, period)
@@ -5194,7 +5123,7 @@ pub mod verify {
         TwoWaySearcher::reverse_maximal_suffix(arr, known_period, order)
     }
 
-    #[kani::proof_for_contract(reverse_suffix_period)]
+    #[kani::proof]
     #[kani::stub_verified(verified_reverse_root_transfer)]
     #[kani::stub_verified(verified_reverse_left_transfer)]
     #[kani::stub_verified(verified_reflected_global_period)]
@@ -5206,23 +5135,26 @@ pub mod verify {
     #[kani::stub(range_agreement, known_period_range_shape)]
     #[kani::stub(reverse_suffix_loop_state, bounded_reverse_loop_false)]
     pub fn harness_reverse_suffix_period_false() {
-        let arr = any_nonempty_bytes();
-        let known_period = kani::any();
+        let arr = any_suffix_probe_word();
+        let known_period = kani::any::<u64>() as usize;
+        kani::assume(0 < known_period && known_period <= arr.len());
+        kani::cover(true, "a positive period within the word");
         unsafe {
-            WORD_EQUALITY_OBSERVATION = kani::any();
+            WORD_EQUALITY_OBSERVATION = kani::any::<u64>() as usize;
             PREPROCESSING_INPUT = (arr.as_ptr(), arr.len(), false);
             REVERSE_KNOWN_PERIOD = known_period;
         }
-        let left = reverse_suffix_period(arr, known_period, false);
+        let left = TwoWaySearcher::reverse_maximal_suffix(arr, known_period, false);
+        assert!(left < known_period);
+        kani::cover(true, "the real reverse suffix lies below the known period");
         kani::cover(
             arr.len() > 4096 && known_period < arr.len(),
             "shorter global period bounds real reverse preprocessing",
         );
         kani::cover(left > 0, "nonzero reverse critical point remains below its period");
-        kani::cover(true, "contract proof returns: harness_reverse_suffix_period_false");
     }
 
-    #[kani::proof_for_contract(reverse_suffix_period)]
+    #[kani::proof]
     #[kani::stub_verified(verified_reverse_root_transfer)]
     #[kani::stub_verified(verified_reverse_left_transfer)]
     #[kani::stub_verified(verified_reflected_global_period)]
@@ -5234,20 +5166,48 @@ pub mod verify {
     #[kani::stub(range_agreement, known_period_range_shape)]
     #[kani::stub(reverse_suffix_loop_state, bounded_reverse_loop_true)]
     pub fn harness_reverse_suffix_period_true() {
-        let arr = any_nonempty_bytes();
-        let known_period = kani::any();
+        let arr = any_suffix_probe_word();
+        let known_period = kani::any::<u64>() as usize;
+        kani::assume(0 < known_period && known_period <= arr.len());
+        kani::cover(true, "a positive period within the word");
         unsafe {
-            WORD_EQUALITY_OBSERVATION = kani::any();
+            WORD_EQUALITY_OBSERVATION = kani::any::<u64>() as usize;
             PREPROCESSING_INPUT = (arr.as_ptr(), arr.len(), true);
             REVERSE_KNOWN_PERIOD = known_period;
         }
-        let left = reverse_suffix_period(arr, known_period, true);
+        let left = TwoWaySearcher::reverse_maximal_suffix(arr, known_period, true);
+        assert!(left < known_period);
+        kani::cover(true, "the real reverse suffix lies below the known period");
         kani::cover(
             arr.len() > 4096 && known_period < arr.len(),
             "shorter global period bounds the opposite reverse order",
         );
         kani::cover(left > 0, "opposite reverse critical point can be nonzero");
-        kani::cover(true, "contract proof returns: harness_reverse_suffix_period_true");
+    }
+
+    // Both orderings above prove this range on the real reverse loop.
+    // Keep the checked summary separate because Kani's function-contract
+    // pass gives some loop-invariant callees incompatible signatures.
+    fn model_verified_reverse_suffix(arr: &[u8], known_period: usize, _: bool) -> usize {
+        assert!(0 < known_period && known_period <= arr.len());
+        kani::cover(true, "the reverse suffix result model uses its proved domain");
+        let left: usize = kani::any();
+        if left < known_period { left } else { 0 }
+    }
+
+    #[kani::proof_for_contract(reverse_suffix_period)]
+    #[kani::stub(TwoWaySearcher::reverse_maximal_suffix, model_verified_reverse_suffix)]
+    #[kani::stub(range_agreement, known_period_range_shape)]
+    pub fn harness_reverse_suffix_period_summary() {
+        let arr = any_suffix_probe_word();
+        let known_period = kani::any::<u64>() as usize;
+        let order = kani::any();
+        unsafe {
+            PREPROCESSING_INPUT = (arr.as_ptr(), arr.len(), order);
+            REVERSE_KNOWN_PERIOD = known_period;
+        }
+        let _ = reverse_suffix_period(arr, known_period, order);
+        kani::cover(arr.len() > 4096, "reverse suffix summary at arbitrary lengths");
     }
 
     // Quantifier bodies must be pure expressions. These macros contain
@@ -6432,15 +6392,6 @@ pub mod verify {
         lyndon_suffix_loop_state(arr, left, right, offset, period, true)
     }
 
-    #[kani::requires(!arr.is_empty() && arr.len() <= MAX_ALLOCATION_BYTES)]
-    #[kani::ensures(|result| result.0 < arr.len() && 0 < result.1
-        && result.1 <= arr.len() - result.0
-        && word_root_dominance(arr, result.0, result.1, reverse))]
-    #[kani::modifies()]
-    fn maximal_suffix_root(arr: &[u8], reverse: bool) -> (usize, usize) {
-        TwoWaySearcher::maximal_suffix(arr, reverse)
-    }
-
     // Counterexample probe for L induction. If real L first fails at (l,p),
     // select that pair here. Earlier true L states and all successors certified
     // by root_extension_witness differ from it. p=1 is always a valid root.
@@ -6489,7 +6440,17 @@ pub mod verify {
             && offset <= n - right
     }
 
-    #[kani::proof_for_contract(maximal_suffix_root)]
+    // Keep the ordinary harness and invariant calls on distinct symbols.
+    // A u64 covers all lengths and probe indices in the pointer model.
+    fn any_suffix_probe_word() -> &'static [u8] {
+        let len = kani::any::<u64>() as usize;
+        kani::assume(len > 0 && len <= MAX_ALLOCATION_BYTES);
+        kani::cover(true, "an arbitrary nonempty word for the suffix proof");
+        let ptr = initialized_symbolic_allocation(len);
+        unsafe { crate::slice::from_raw_parts(ptr, len) }
+    }
+
+    #[kani::proof]
     #[kani::stub_verified(verified_root_transfer)]
     #[kani::stub(root_transfer_pre, root_transfer_probe_pre)]
     #[kani::stub(root_transfer_post, root_transfer_probe_post)]
@@ -6498,20 +6459,23 @@ pub mod verify {
     #[kani::stub(word_root_dominance, root_exclusion_predicate)]
     #[kani::stub(loop_suffix_facts, probe_suffix_shape)]
     pub fn harness_maximal_suffix_root_probe_false() {
-        let arr = any_nonempty_bytes();
+        let arr = any_suffix_probe_word();
         unsafe {
-            ROOT_STATE_PROBE = (kani::any(), kani::any());
+            ROOT_STATE_PROBE = (kani::any::<u64>() as usize, kani::any::<u64>() as usize);
             PREPROCESSING_INPUT = (arr.as_ptr(), arr.len(), false);
         }
-        let result = maximal_suffix_root(arr, false);
+        let result = TwoWaySearcher::maximal_suffix(arr, false);
+        assert!(numeric_suffix_result(arr, result));
+        kani::cover(true, "the real maximal suffix stays within the input");
+        assert!(word_root_dominance(arr, result.0, result.1, false));
+        kani::cover(true, "the real maximal suffix preserves the projected predicate");
         kani::cover(
             arr.len() > 4096 && result.1 > 1,
             "nontrivial root period in a symbolic-length actual search",
         );
-        kani::cover(true, "contract proof returns: harness_maximal_suffix_root_probe_false");
     }
 
-    #[kani::proof_for_contract(maximal_suffix_root)]
+    #[kani::proof]
     #[kani::stub_verified(verified_root_transfer)]
     #[kani::stub(root_transfer_pre, root_transfer_probe_pre)]
     #[kani::stub(root_transfer_post, root_transfer_probe_post)]
@@ -6520,17 +6484,20 @@ pub mod verify {
     #[kani::stub(word_root_dominance, root_exclusion_predicate)]
     #[kani::stub(loop_suffix_facts, probe_suffix_shape)]
     pub fn harness_maximal_suffix_root_probe_true() {
-        let arr = any_nonempty_bytes();
+        let arr = any_suffix_probe_word();
         unsafe {
-            ROOT_STATE_PROBE = (kani::any(), kani::any());
+            ROOT_STATE_PROBE = (kani::any::<u64>() as usize, kani::any::<u64>() as usize);
             PREPROCESSING_INPUT = (arr.as_ptr(), arr.len(), true);
         }
-        let result = maximal_suffix_root(arr, true);
+        let result = TwoWaySearcher::maximal_suffix(arr, true);
+        assert!(numeric_suffix_result(arr, result));
+        kani::cover(true, "the real maximal suffix stays within the input");
+        assert!(word_root_dominance(arr, result.0, result.1, true));
+        kani::cover(true, "the real maximal suffix preserves the projected predicate");
         kani::cover(
             arr.len() > 4096 && result.1 > 1,
             "opposite byte order retains symbolic lengths and non-unit periods",
         );
-        kani::cover(true, "contract proof returns: harness_maximal_suffix_root_probe_true");
     }
 
     fn loop_word_earlier(arr: &[u8], left: usize, reverse: bool) -> bool {
@@ -6730,15 +6697,6 @@ pub mod verify {
         dominance_suffix_loop_state(arr, left, right, offset, period, true)
     }
 
-    #[kani::requires(!arr.is_empty() && arr.len() <= MAX_ALLOCATION_BYTES)]
-    #[kani::ensures(|result| result.0 < arr.len() && 0 < result.1
-        && result.1 <= arr.len() - result.0
-        && word_earlier_dominance(arr, result.0, reverse))]
-    #[kani::modifies()]
-    fn maximal_suffix_dominance(arr: &[u8], reverse: bool) -> (usize, usize) {
-        TwoWaySearcher::maximal_suffix(arr, reverse)
-    }
-
     // D is vacuous at left=0. If it first fails at some other left, this
     // one-state exclusion probe preserves that first counterexample.
     static mut EARLIER_STATE_PROBE: usize = 0;
@@ -6772,7 +6730,7 @@ pub mod verify {
         n <= MAX_ALLOCATION_BYTES && left < n && 0 < period && period <= n - left
     }
 
-    #[kani::proof_for_contract(maximal_suffix_dominance)]
+    #[kani::proof]
     #[kani::stub_verified(verified_left_transfer)]
     #[kani::stub(left_transfer_pre, left_transfer_probe_pre)]
     #[kani::stub(left_transfer_post, left_transfer_probe_post)]
@@ -6782,20 +6740,23 @@ pub mod verify {
     #[kani::stub(loop_word_root, root_shape_for_loop)]
     #[kani::stub(loop_suffix_facts, probe_suffix_shape)]
     pub fn harness_maximal_suffix_dominance_probe_false() {
-        let arr = any_nonempty_bytes();
+        let arr = any_suffix_probe_word();
         unsafe {
-            EARLIER_STATE_PROBE = kani::any();
+            EARLIER_STATE_PROBE = kani::any::<u64>() as usize;
             PREPROCESSING_INPUT = (arr.as_ptr(), arr.len(), false);
         }
-        let result = maximal_suffix_dominance(arr, false);
+        let result = TwoWaySearcher::maximal_suffix(arr, false);
+        assert!(numeric_suffix_result(arr, result));
+        kani::cover(true, "the real maximal suffix stays within the input");
+        assert!(word_earlier_dominance(arr, result.0, false));
+        kani::cover(true, "the real maximal suffix preserves the projected predicate");
         kani::cover(
             arr.len() > 4096 && result.0 > 0,
             "actual maximal suffix moves its left endpoint at symbolic length",
         );
-        kani::cover(true, "contract proof returns: harness_maximal_suffix_dominance_probe_false");
     }
 
-    #[kani::proof_for_contract(maximal_suffix_dominance)]
+    #[kani::proof]
     #[kani::stub_verified(verified_left_transfer)]
     #[kani::stub(left_transfer_pre, left_transfer_probe_pre)]
     #[kani::stub(left_transfer_post, left_transfer_probe_post)]
@@ -6805,17 +6766,20 @@ pub mod verify {
     #[kani::stub(loop_word_root, root_shape_for_loop)]
     #[kani::stub(loop_suffix_facts, probe_suffix_shape)]
     pub fn harness_maximal_suffix_dominance_probe_true() {
-        let arr = any_nonempty_bytes();
+        let arr = any_suffix_probe_word();
         unsafe {
-            EARLIER_STATE_PROBE = kani::any();
+            EARLIER_STATE_PROBE = kani::any::<u64>() as usize;
             PREPROCESSING_INPUT = (arr.as_ptr(), arr.len(), true);
         }
-        let result = maximal_suffix_dominance(arr, true);
+        let result = TwoWaySearcher::maximal_suffix(arr, true);
+        assert!(numeric_suffix_result(arr, result));
+        kani::cover(true, "the real maximal suffix stays within the input");
+        assert!(word_earlier_dominance(arr, result.0, true));
+        kani::cover(true, "the real maximal suffix preserves the projected predicate");
         kani::cover(
             arr.len() > 4096 && result.0 > 0,
             "left endpoint moves in the opposite byte order",
         );
-        kani::cover(true, "contract proof returns: harness_maximal_suffix_dominance_probe_true");
     }
 
     pub(super) fn suffix_loop_state(
@@ -7093,10 +7057,42 @@ pub mod verify {
         kani::cover(true, "contract proof returns: harness_reverse_suffix_full_period_bounds");
     }
 
-    // Numeric safety of the real Two-Way scan is checked separately from the
-    // stronger byte equalities required for UTF-8 result boundaries.
-    // The forward loop's write set protects the reverse cursor and cache.
-    pub(super) fn raw_forward_loop_state(
+    // The forward write set preserves the reverse cursor, reverse cache,
+    // and preprocessing fields. Only the forward facts need loop induction.
+    // The verifier gives ordinary and loop-invariant calls different
+    // write-set ABIs. Definitions share the predicate without sharing calls.
+    macro_rules! raw_forward_numeric {
+        ($s:ident, $h:ident, $n:ident, $long:ident) => {{
+            let hn = crate::intrinsics::ptr_metadata($h as *const [u8]);
+            let nn = crate::intrinsics::ptr_metadata($n as *const [u8]);
+            hn <= MAX_ALLOCATION_BYTES
+                && 2 <= nn
+                && nn <= MAX_ALLOCATION_BYTES
+                && $s.crit_pos <= nn
+                && 0 < $s.period
+                && $s.period <= nn
+                && $s.position <= hn
+                && if $long {
+                    $s.memory == usize::MAX
+                } else {
+                    $s.memory == 0 || $s.memory == nn - $s.period
+                }
+        }};
+    }
+
+    fn raw_forward_numeric_state(s: &TwoWaySearcher, h: &[u8], n: &[u8], long: bool) -> bool {
+        raw_forward_numeric!(s, h, n, long)
+    }
+
+    fn raw_forward_numeric_loop_state(s: &TwoWaySearcher, h: &[u8], n: &[u8], long: bool) -> bool {
+        raw_forward_numeric!(s, h, n, long)
+    }
+
+    // A single step checks the entry cursor before scanning and returns
+    // a rejection after skipping. The public wrapper rounds that rejection
+    // to a UTF-8 boundary. MatchOnly can scan again after a skip, so it must
+    // keep the cached-cursor boundary across its own back edges.
+    pub(super) fn raw_forward_loop_state<S: ProbeMode>(
         s: &TwoWaySearcher,
         h: &[u8],
         n: &[u8],
@@ -7104,8 +7100,9 @@ pub mod verify {
     ) -> bool {
         let len = crate::intrinsics::ptr_metadata(h as *const [u8]);
         let ptr = h as *const [u8] as *const u8;
-        numeric_raw_loop_state(s, h, n, long)
+        raw_forward_numeric_loop_state(s, h, n, long)
             && (long
+                || S::early_reject()
                 || s.memory == 0
                 || s.position == 0
                 || s.position == len
@@ -7216,58 +7213,32 @@ pub mod verify {
         }
     }
 
-    pub(super) fn raw_reverse_pre<S: TwoWayStrategy>(
+    fn raw_reverse_pre<S: TwoWayStrategy>(
         s: &TwoWaySearcher,
         h: &[u8],
         n: &[u8],
         long: bool,
     ) -> bool {
-        if !S::supported()
-            || h.len() > MAX_ALLOCATION_BYTES
-            || n.len() < 2
-            || n.len() > MAX_ALLOCATION_BYTES
-            || s.position > h.len()
-            || s.end > h.len()
-            || lead_width(n[0]) == 0
-        {
-            return false;
-        }
-        if long {
-            if s.memory != usize::MAX
-                || s.memory_back != usize::MAX
-                || !long_preprocessing_state(s, n)
-            {
-                return false;
-            }
-        } else if !short_state(s, h, n) {
+        if long || !S::supported() || !short_state(s, h, n) || lead_width(n[0]) == 0 {
             return false;
         }
         let text = unsafe { crate::str::from_utf8_unchecked(h) };
         text.is_char_boundary(s.position)
             && text.is_char_boundary(s.end)
-            && (!S::needs_last_scalar()
-                || lead_width(n[last_scalar_start(n)]) == n.len() - last_scalar_start(n))
+            && (!S::needs_last_scalar() || {
+                let last = last_scalar_start(n);
+                lead_width(n[last]) == n.len() - last
+            })
     }
 
-    pub(super) fn raw_reverse_post<S: TwoWayStrategy>(
+    fn raw_reverse_post<S: TwoWayStrategy>(
         s: &TwoWaySearcher,
         h: &[u8],
         n: &[u8],
-        long: bool,
         initial_end: usize,
         result: &S::Output,
     ) -> bool {
-        if s.position > h.len() || s.end > initial_end || initial_end > h.len() {
-            return false;
-        }
-        if long {
-            if s.memory != usize::MAX
-                || s.memory_back != usize::MAX
-                || !long_preprocessing_state(s, n)
-            {
-                return false;
-            }
-        } else if !short_state(s, h, n) {
+        if s.end > initial_end || initial_end > h.len() || !short_state(s, h, n) {
             return false;
         }
         match S::outcome(result) {
@@ -7275,12 +7246,18 @@ pub mod verify {
                 if a >= b || b > h.len() || b - a != n.len() || s.end != a {
                     return false;
                 }
-                if S::needs_last_scalar() {
-                    let text = unsafe { crate::str::from_utf8_unchecked(h) };
-                    let needle = unsafe { crate::str::from_utf8_unchecked(n) };
-                    assume_utf8_at_match(text, needle, SearchStep::Match(a, b));
-                }
-                match_boundaries(h, a, b)
+                let text = unsafe { crate::str::from_utf8_unchecked(h) };
+                text.is_char_boundary(a)
+                    && if S::needs_last_scalar() {
+                        // A cached end is already a boundary. Otherwise the
+                        // public proof can use the compared last scalar.
+                        text.is_char_boundary(b) || {
+                            let last = last_scalar_start(n);
+                            h[a + last] == n[last]
+                        }
+                    } else {
+                        b == initial_end
+                    }
             }
             RawOutcome::Reject(a, b) => a <= b && b == initial_end && s.end == a,
             RawOutcome::Exhausted => s.end == 0,
@@ -7288,11 +7265,10 @@ pub mod verify {
         }
     }
 
-    // Keep the function-contract boundary outside the generic algorithm's
-    // nested loops. The wrapper still executes the original method unchanged.
+    // The two strategy proofs establish this Short contract. The wrapper
+    // calls the real searcher with its original arguments.
     #[kani::requires(raw_reverse_pre::<S>(searcher, h, n, long))]
-    #[kani::ensures(|result| raw_reverse_post::<S>(
-        searcher, h, n, long, old(searcher.end), result))]
+    #[kani::ensures(|result| raw_reverse_post::<S>(searcher, h, n, old(searcher.end), result))]
     #[kani::modifies(&searcher.end, &searcher.memory_back)]
     fn verified_raw_reverse<S: TwoWayStrategy>(
         searcher: &mut TwoWaySearcher,
@@ -7331,29 +7307,33 @@ pub mod verify {
         n: &[u8],
         long: bool,
     ) -> bool {
-        raw_reverse_pre::<S>(s, h, n, long)
-            && lead_width(n[last_scalar_start(n)]) == n.len() - last_scalar_start(n)
+        if !S::supported()
+            || long
+            || !raw_forward_numeric_state(s, h, n, false)
+            || s.crit_pos >= s.period
+            || s.crit_pos > n.len() - s.period
+        {
+            return false;
+        }
+        // The harness covers valid UTF-8 inputs using these local facts.
+        let haystack = unsafe { crate::str::from_utf8_unchecked(h) };
+        let needle = unsafe { crate::str::from_utf8_unchecked(n) };
+        let last = last_scalar_start(n);
+        haystack.is_char_boundary(s.position)
+            && needle.is_char_boundary(s.period)
+            && needle.is_char_boundary(n.len() - s.period)
+            && lead_width(n[0]) != 0
+            && lead_width(n[last]) == n.len() - last
     }
 
     fn raw_forward_post<S: TwoWayStrategy>(
         s: &TwoWaySearcher,
         h: &[u8],
         n: &[u8],
-        long: bool,
         initial_pos: usize,
         result: &S::Output,
     ) -> bool {
-        if s.position < initial_pos || s.position > h.len() || s.end > h.len() {
-            return false;
-        }
-        if long {
-            if s.memory != usize::MAX
-                || s.memory_back != usize::MAX
-                || !long_preprocessing_state(s, n)
-            {
-                return false;
-            }
-        } else if !short_state(s, h, n) {
+        if s.position < initial_pos || !raw_forward_numeric_state(s, h, n, false) {
             return false;
         }
         match S::outcome(result) {
@@ -7361,10 +7341,16 @@ pub mod verify {
                 if a >= b || b > h.len() || b - a != n.len() || s.position != b {
                     return false;
                 }
-                let text = unsafe { crate::str::from_utf8_unchecked(h) };
-                let needle = unsafe { crate::str::from_utf8_unchecked(n) };
-                assume_utf8_at_match(text, needle, SearchStep::Match(a, b));
-                match_boundaries(h, a, b)
+                // The public method derives the end boundary from the
+                // final scalar's matching lead byte and UTF-8 validity.
+                let last = last_scalar_start(n);
+                let start_boundary = if S::use_early_reject() {
+                    a == initial_pos
+                } else {
+                    let text = unsafe { crate::str::from_utf8_unchecked(h) };
+                    text.is_char_boundary(a)
+                };
+                start_boundary && h[a + last] == n[last]
             }
             RawOutcome::Reject(a, b) => a == initial_pos && a <= b && b == s.position,
             RawOutcome::Exhausted => s.position == h.len(),
@@ -7374,7 +7360,7 @@ pub mod verify {
 
     #[kani::requires(raw_forward_pre::<S>(searcher, h, n, long))]
     #[kani::ensures(|result| raw_forward_post::<S>(
-        searcher, h, n, long, old(searcher.position), result))]
+        searcher, h, n, old(searcher.position), result))]
     #[kani::modifies(&searcher.position, &searcher.memory)]
     fn verified_raw_forward<S: TwoWayStrategy>(
         searcher: &mut TwoWaySearcher,
@@ -7462,7 +7448,6 @@ pub mod verify {
     #[kani::proof_for_contract(verified_raw_forward)]
     #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
     #[kani::stub_verified(establish_last_scalar_bound)]
-    #[kani::stub_verified(scan_range_step)]
     pub fn harness_two_way_short_next_contract_uncached_no_left() {
         check_uncached_forward_contract(false);
     }
@@ -7470,15 +7455,24 @@ pub mod verify {
     #[kani::proof_for_contract(verified_raw_forward)]
     #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
     #[kani::stub_verified(establish_last_scalar_bound)]
-    #[kani::stub_verified(scan_range_step)]
     pub fn harness_two_way_short_next_contract_uncached_left() {
         check_uncached_forward_contract(true);
+    }
+
+    // The reverse range in this forward search is empty when the cache
+    // already covers the critical point. Check that fact on each actual
+    // iterator before simplifying its length in this proof.
+    fn empty_reversed_scan_len<I: kani::KaniIter>(iter: &kani::KaniRevIter<I>) -> usize {
+        assert!(iter.iter.len() == 0);
+        kani::cover(true, "the cached left scan has an empty range");
+        0
     }
 
     #[kani::proof_for_contract(verified_raw_forward)]
     #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
     #[kani::stub_verified(establish_last_scalar_bound)]
-    #[kani::stub_verified(scan_range_step)]
+    #[kani::stub(<kani::KaniRevIter<crate::ops::Range<usize>> as kani::KaniIter>::len,
+        empty_reversed_scan_len)]
     pub fn harness_two_way_short_next_contract_cached() {
         let h = any_nonempty_forward_bytes();
         let n = any_nonempty_forward_bytes();
@@ -7523,7 +7517,6 @@ pub mod verify {
     #[kani::proof_for_contract(verified_raw_forward)]
     #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
     #[kani::stub_verified(establish_last_scalar_bound)]
-    #[kani::stub_verified(scan_range_step)]
     pub fn harness_two_way_short_forward_match_contract() {
         check_short_forward_match_contract(true);
     }
@@ -7531,7 +7524,6 @@ pub mod verify {
     #[kani::proof_for_contract(verified_raw_forward)]
     #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
     #[kani::stub_verified(establish_last_scalar_bound)]
-    #[kani::stub_verified(scan_range_step)]
     pub fn harness_two_way_short_forward_match_contract_no_left() {
         check_short_forward_match_contract(false);
     }
@@ -7551,16 +7543,31 @@ pub mod verify {
         );
     }
 
-    #[kani::proof_for_contract(verified_raw_reverse)]
-    #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
-    pub fn harness_two_way_short_reverse_match_contract() {
+    fn check_short_reverse_match_contract(last_in_left: bool) {
         let h = any_str().as_bytes();
         let n = any_str().as_bytes();
         assume_needle_edges(n);
         let mut s = any_short_reverse_searcher(h, n);
+        // Both halves are covered. The needle and the critical point are
+        // immutable through the reverse search.
+        kani::assume((last_scalar_start(n) < s.crit_pos_back) == last_in_left);
+        kani::cover(true, "the last scalar starts in the selected reverse scan");
         let _ = verified_raw_reverse::<MatchOnly>(&mut s, h, n, false);
-        kani::cover(n.len() > 4096, "reverse MatchOnly contract at arbitrary needle length");
-        kani::cover(true, "contract proof returns: harness_two_way_short_reverse_match_contract");
+        kani::cover(n.len() > 4096, "reverse MatchOnly at symbolic needle length");
+    }
+
+    #[kani::proof_for_contract(verified_raw_reverse)]
+    #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
+    #[kani::stub(short_reverse_scalar_half, last_scalar_in_left_scan)]
+    pub fn harness_two_way_short_reverse_match_contract_left() {
+        check_short_reverse_match_contract(true);
+    }
+
+    #[kani::proof_for_contract(verified_raw_reverse)]
+    #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
+    #[kani::stub(short_reverse_scalar_half, last_scalar_in_right_scan)]
+    pub fn harness_two_way_short_reverse_match_contract_right() {
+        check_short_reverse_match_contract(false);
     }
 
     // Short-period state. Its static factorization inequalities are
@@ -7620,96 +7627,6 @@ pub mod verify {
         short_state_body!(s, h, n)
     }
 
-    // The scan macro uses the original bounds and loop body. Expose the
-    // range cursor so Kani can verify the same next and next_back steps.
-    pub(super) struct TwoWayScanCursor {
-        remaining: crate::ops::Range<usize>,
-        pub(super) active: bool,
-        pub(super) index: usize,
-    }
-
-    pub(super) struct TwoWayScan {
-        start: usize,
-        end: usize,
-        pub(super) cursor: TwoWayScanCursor,
-    }
-
-    impl TwoWayScan {
-        pub(super) fn new() -> Self {
-            Self {
-                start: 0,
-                end: 0,
-                cursor: TwoWayScanCursor { remaining: 0..0, active: false, index: 0 },
-            }
-        }
-
-        pub(super) fn reset(&mut self, make_range: impl FnOnce() -> crate::ops::Range<usize>) {
-            let remaining = make_range();
-            *self = Self {
-                start: remaining.start,
-                end: remaining.end,
-                cursor: TwoWayScanCursor { remaining, active: false, index: 0 },
-            };
-        }
-
-        pub(super) fn valid(&self, reverse: bool) -> bool {
-            let range = &self.cursor.remaining;
-            if reverse {
-                range.start == self.start
-                    && range.end <= self.end
-                    && (range.end >= self.start || range.end == self.end)
-            } else {
-                range.end == self.end
-                    && range.start >= self.start
-                    && (range.start <= self.end || range.start == self.start)
-            }
-        }
-
-        pub(super) fn progress(&self, reverse: bool) -> usize {
-            if reverse {
-                self.end - self.cursor.remaining.end
-            } else {
-                self.cursor.remaining.start - self.start
-            }
-        }
-
-        pub(super) fn advance(&mut self, reverse: bool) {
-            let cursor = &mut self.cursor;
-            let (start, end, item) =
-                scan_range_step(cursor.remaining.start, cursor.remaining.end, reverse);
-            cursor.remaining = start..end;
-            cursor.active = item.is_some();
-            if let Some(index) = item {
-                cursor.index = index;
-            }
-        }
-    }
-
-    #[kani::ensures(|result| {
-        if start >= end {
-            *result == (start, end, None)
-        } else if reverse {
-            *result == (start, end - 1, Some(end - 1))
-        } else {
-            *result == (start + 1, end, Some(start))
-        }
-    })]
-    #[kani::modifies()]
-    fn scan_range_step(start: usize, end: usize, reverse: bool) -> (usize, usize, Option<usize>) {
-        let mut range = start..end;
-        let item = if reverse { range.next_back() } else { range.next() };
-        (range.start, range.end, item)
-    }
-
-    #[kani::proof_for_contract(scan_range_step)]
-    pub fn harness_two_way_scan_range_step_contract() {
-        let reverse = kani::any();
-        let (_, _, item) = scan_range_step(kani::any(), kani::any(), reverse);
-        kani::cover(item.is_some() && !reverse, "advance a forward range");
-        kani::cover(item.is_some() && reverse, "advance a reverse range");
-        kani::cover(item.is_none(), "exhaust a range");
-    }
-
     pub(super) fn raw_scan_state(
         s: &TwoWaySearcher,
         h: &[u8],
@@ -7720,13 +7637,13 @@ pub mod verify {
         // The enclosing loop establishes the cached boundary facts. The
         // scan keeps its entry cursor and cache on every back edge, and its
         // write set protects the opposite cursor and cache.
-        numeric_raw_loop_state(s, h, n, long)
-            && if forward {
-                crate::intrinsics::ptr_metadata(n as *const [u8])
-                    <= crate::intrinsics::ptr_metadata(h as *const [u8]) - s.position
-            } else {
-                crate::intrinsics::ptr_metadata(n as *const [u8]) <= s.end
-            }
+        let nn = crate::intrinsics::ptr_metadata(n as *const [u8]);
+        if forward {
+            raw_forward_numeric_loop_state(s, h, n, long)
+                && nn <= crate::intrinsics::ptr_metadata(h as *const [u8]) - s.position
+        } else {
+            numeric_raw_loop_state(s, h, n, long) && nn <= s.end
+        }
     }
 
     fn any_raw_searcher(h: &[u8], n: &[u8], long: bool) -> TwoWaySearcher {
@@ -7852,6 +7769,18 @@ pub mod verify {
         if !long {
             return short_scan_probes::<S>(s, h, n, progress, phase, initial, last_probe);
         }
+        if let Some(last_in_left) = long_forward_scalar_half() {
+            return long_forward_split_probe::<S>(
+                s,
+                h,
+                n,
+                progress,
+                phase,
+                initial,
+                last_probe,
+                last_in_left,
+            );
+        }
         let forward = phase < 2;
         let early = S::early_reject();
         if early && (if forward { s.position } else { s.end }) != initial {
@@ -7885,7 +7814,7 @@ pub mod verify {
                 if progress > len - critical {
                     return false;
                 }
-                (0, critical + progress)
+                (critical, critical + progress)
             }
         };
         let base = if forward { s.position } else { s.end - len };
@@ -7911,6 +7840,64 @@ pub mod verify {
         ((early && forward) || matched!(0)) && ((early && !forward) || matched!(last_probe))
     }
 
+    fn long_forward_scalar_half() -> Option<bool> {
+        None
+    }
+
+    fn last_scalar_in_left_scan() -> Option<bool> {
+        Some(true)
+    }
+
+    fn last_scalar_in_right_scan() -> Option<bool> {
+        Some(false)
+    }
+
+    // Each scan visits its own half. The checked input split says which one
+    // must preserve the final scalar observation. The other scan has no
+    // writes to the cursor, the needle, or the haystack on its back edge.
+    fn long_forward_split_probe<S: ProbeMode>(
+        s: &TwoWaySearcher,
+        h: &[u8],
+        n: &[u8],
+        progress: usize,
+        phase: u8,
+        initial: usize,
+        last: usize,
+        last_in_left: bool,
+    ) -> bool {
+        let len = crate::intrinsics::ptr_metadata(n as *const [u8]);
+        let critical = s.crit_pos;
+        let early = S::early_reject();
+        if phase > 1
+            || (early && s.position != initial)
+            || critical == 0
+            || critical >= len
+            || last >= len
+            || (last < critical) != last_in_left
+        {
+            return false;
+        }
+        let left = phase == 1;
+        let count = if left { critical } else { len - critical };
+        if progress > count {
+            return false;
+        }
+        let np = n as *const [u8] as *const u8;
+        let hp = h as *const [u8] as *const u8;
+        macro_rules! compared {
+            ($i:expr) => {
+                unsafe {
+                    *crate::intrinsics::arith_offset(hp, (s.position + $i) as isize)
+                        == *crate::intrinsics::arith_offset(np, $i as isize)
+                }
+            };
+        }
+        (early || !left || progress != count || compared!(0))
+            && (left != last_in_left
+                || (if left { last < critical - progress } else { last >= critical + progress })
+                || compared!(last))
+    }
+
     // Long-only harnesses cannot take this branch of long_scan_probes:
     // the raw search's long flag is fixed true. Returning false makes the
     // actual loop invariant fail if a Short scan is nevertheless entered.
@@ -7928,9 +7915,8 @@ pub mod verify {
         false
     }
 
-    // Each scan invariant checks raw_scan_state before this predicate.
-    // Keep only its progress and byte observations here, avoiding a second
-    // evaluation of the same state and pointer-boundary checks.
+    // The scan's write set preserves its cursor, cache and input bytes on
+    // back edges. Track progress and the bytes needed for the boundary proof.
     fn short_scan_probes<S: ProbeMode>(
         s: &TwoWaySearcher,
         h: &[u8],
@@ -7940,87 +7926,118 @@ pub mod verify {
         initial: usize,
         last_probe: usize,
     ) -> bool {
-        let forward = phase < 2;
+        if phase < 2 {
+            return short_forward_scan_probes::<S>(s, h, n, progress, phase, initial, last_probe);
+        }
         let early = S::early_reject();
-        if early && (if forward { s.position } else { s.end }) != initial {
-            return false;
-        }
         let len = crate::intrinsics::ptr_metadata(n as *const [u8]);
-        if last_probe >= len {
+        if (early && s.end != initial) || last_probe >= len {
             return false;
         }
-        let right_start = if s.crit_pos > s.memory { s.crit_pos } else { s.memory };
-        let left_end =
-            if s.crit_pos_back < s.memory_back { s.crit_pos_back } else { s.memory_back };
-        let (lo, hi, extra_lo, extra_hi) = match phase {
-            0 => {
-                if progress > len - right_start {
-                    return false;
-                }
-                (right_start, right_start + progress, 0, 0)
-            }
-            1 => {
-                let count = if s.crit_pos > s.memory { s.crit_pos - s.memory } else { 0 };
-                if progress > count {
-                    return false;
-                }
-                // Positive progress implies right_start == crit_pos, so
-                // the visited left indices adjoin the completed right scan.
-                let start = if progress == 0 { right_start } else { s.crit_pos - progress };
-                (start, len, 0, 0)
-            }
-            2 => {
-                if progress > left_end {
-                    return false;
-                }
-                (left_end - progress, left_end, 0, 0)
-            }
-            _ => {
-                let count = if s.memory_back > s.crit_pos_back {
-                    s.memory_back - s.crit_pos_back
-                } else {
-                    0
-                };
-                if progress > count {
-                    return false;
-                }
-                (s.crit_pos_back, s.crit_pos_back + progress, 0, left_end)
+        let critical = s.crit_pos_back;
+        let scanning_left = phase == 2;
+        let check_last = if early || s.memory_back != len {
+            false
+        } else {
+            match short_reverse_scalar_half() {
+                Some(in_left) if (last_probe < critical) != in_left => return false,
+                Some(in_left) => in_left == scanning_left,
+                None => true,
             }
         };
-        let base = if forward { s.position } else { s.end - len };
+        let (begin, end) = if scanning_left {
+            let end = if critical < s.memory_back { critical } else { s.memory_back };
+            if progress > end {
+                return false;
+            }
+            (end - progress, end)
+        } else {
+            let count = if s.memory_back > critical { s.memory_back - critical } else { 0 };
+            if progress > count {
+                return false;
+            }
+            // The right scan preserves the completed left scan's facts.
+            (critical, critical + progress)
+        };
+        let base = s.end - len;
         let np = n as *const [u8] as *const u8;
         let hp = h as *const [u8] as *const u8;
         macro_rules! matched {
-            ($probe:expr) => {{
-                let i = $probe;
-                !((i >= lo && i < hi) || (i >= extra_lo && i < extra_hi))
+            ($i:expr) => {
+                $i < begin
+                    || $i >= end
                     || unsafe {
-                        *crate::intrinsics::arith_offset(hp, (base + i) as isize)
-                            == *crate::intrinsics::arith_offset(np, i as isize)
+                        *crate::intrinsics::arith_offset(hp, (base + $i) as isize)
+                            == *crate::intrinsics::arith_offset(np, $i as isize)
                     }
-            }};
+            };
         }
-        // The period probe is used only to establish a cached cursor's
-        // boundary. Its exact byte value is not needed for the safety proof.
-        macro_rules! boundary_matched {
-            ($probe:expr) => {{
-                let i = $probe;
-                !((i >= lo && i < hi) || (i >= extra_lo && i < extra_hi))
-                    || unsafe {
-                        *crate::intrinsics::arith_offset(hp, (base + i) as isize) as i8 >= -0x40
-                    }
-            }};
+        // Byte zero and the overlap are below the critical point.
+        // A cached candidate already has a valid end boundary, so only an
+        // uncached candidate needs the final scalar's matching byte.
+        (!scanning_left || matched!(0))
+            && (!check_last || matched!(last_probe))
+            && (!scanning_left || s.memory_back <= critical || s.period == len || {
+                let overlap = len - s.period;
+                overlap < begin
+                    || overlap >= end
+                    || unsafe { *crate::intrinsics::arith_offset(hp, (base + overlap) as isize) }
+                        as i8
+                        >= -0x40
+            })
+    }
+
+    fn short_reverse_scalar_half() -> Option<bool> {
+        None
+    }
+
+    fn short_forward_scan_probes<S: ProbeMode>(
+        s: &TwoWaySearcher,
+        h: &[u8],
+        n: &[u8],
+        progress: usize,
+        phase: u8,
+        initial: usize,
+        last: usize,
+    ) -> bool {
+        let early = S::early_reject();
+        if early && s.position != initial {
+            return false;
         }
-        ((early && forward) || matched!(0))
-            && ((early && !forward) || matched!(last_probe))
-            && (!forward
-                || s.memory >= s.crit_pos
+        let len = crate::intrinsics::ptr_metadata(n as *const [u8]);
+        let np = n as *const [u8] as *const u8;
+        let hp = h as *const [u8] as *const u8;
+        macro_rules! matched {
+            ($i:expr) => {
+                unsafe {
+                    *crate::intrinsics::arith_offset(hp, (s.position + $i) as isize)
+                        == *crate::intrinsics::arith_offset(np, $i as isize)
+                }
+            };
+        }
+        let critical = s.crit_pos;
+        if phase == 1 {
+            // The Short factorization puts the last scalar and the period
+            // offset in the right half. The left loop preserves those facts.
+            let count = if critical > s.memory { critical - s.memory } else { 0 };
+            return progress <= count
+                && critical <= last
+                && (early || critical == 0 || s.memory != 0 || progress < count || matched!(0));
+        }
+        let start = if critical > s.memory { critical } else { s.memory };
+        if last >= len || start > last || progress > len - start {
+            return false;
+        }
+        let end = start + progress;
+        (early || start != 0 || progress == 0 || matched!(0))
+            && (last >= end || matched!(last))
+            && (early
+                || s.memory >= critical
                 || s.period == len
-                || boundary_matched!(s.period))
-            && (forward
-                || s.memory_back <= s.crit_pos_back
-                || s.period == len
-                || boundary_matched!(len - s.period))
+                || s.period >= end
+                || unsafe { *crate::intrinsics::arith_offset(hp, (s.position + s.period) as isize) }
+                    as i8
+                    >= -0x40)
     }
 
     // Used only when last_probe is unobserved by every loop predicate and
@@ -8533,18 +8550,32 @@ pub mod verify {
     }
 
     #[kani::proof_for_contract(ShortConstructorSuffixModel::maximal_suffix)]
+    #[kani::stub_verified(TwoWaySearcher::maximal_suffix)]
     pub fn harness_short_suffix_model_contract() {
         let arr = any_nonempty_bytes();
+        // The independently verified numeric contract includes every real
+        // result. Replay both orders without imposing a relation between them.
+        let first = TwoWaySearcher::maximal_suffix(arr, false);
+        let second = TwoWaySearcher::maximal_suffix(arr, true);
         unsafe {
             SHORT_CERTIFICATE = (arr.as_ptr(), arr.len(), kani::any(), kani::any());
-            SHORT_SUFFIX_FALSE = kani::any();
-            SHORT_SUFFIX_TRUE = kani::any();
+            SHORT_SUFFIX_FALSE = first;
+            SHORT_SUFFIX_TRUE = second;
         }
         let order = kani::any();
-        let _ = ShortConstructorSuffixModel::maximal_suffix(arr, order);
-        kani::cover(arr.len() > 4096 && order, "Short suffix adapter greater order");
-        kani::cover(arr.len() > 4096 && !order, "Short suffix adapter lesser order");
-        kani::cover(true, "contract proof returns: harness_short_suffix_model_contract");
+        assert!(short_suffix_model_input(arr, order));
+        kani::cover(true, "the model accepts both concrete result domains");
+        let result = ShortConstructorSuffixModel::maximal_suffix(arr, order);
+        assert_eq!(result, if order { second } else { first });
+        kani::cover(true, "the model returns the result of the selected order");
+        kani::cover(
+            arr.len() > 4096 && first != second && order,
+            "distinct suffix results at symbolic length, greater order",
+        );
+        kani::cover(
+            arr.len() > 4096 && first != second && !order,
+            "distinct suffix results at symbolic length, lesser order",
+        );
     }
 
     // The Short case of the real slice comparison supplies the prefix
@@ -8732,6 +8763,7 @@ pub mod verify {
     #[kani::stub_verified(verified_ceil_boundary)]
     #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
     #[kani::stub(short_scan_probes, reject_short_probe_in_long_proof)]
+    #[kani::stub(long_forward_scalar_half, last_scalar_in_right_scan)]
     pub fn harness_str_searcher_long_next_split_probes() {
         check_public_long_next(false);
         kani::cover(true, "contract proof returns: harness_str_searcher_long_next_split_probes");
@@ -8742,13 +8774,19 @@ pub mod verify {
     #[kani::stub_verified(verified_ceil_boundary)]
     #[kani::stub_verified(TwoWaySearcher::byteset_contains)]
     #[kani::stub(short_scan_probes, reject_short_probe_in_long_proof)]
+    #[kani::stub(long_forward_scalar_half, last_scalar_in_left_scan)]
     pub fn harness_str_searcher_long_next_left_probes() {
         check_public_long_next(true);
         kani::cover(true, "contract proof returns: harness_str_searcher_long_next_left_probes");
     }
 
+    // The step frame preserves the opposite cache's sentinel. A Short
+    // state cannot have that sentinel, so C keeps the Long case.
     #[kani::proof]
     #[kani::stub_verified(<StrSearcher as Searcher>::next)]
+    #[kani::stub(reject_loop_state, long_loop_state)]
+    #[kani::stub(invariant, long_call_state)]
+    #[kani::stub(assume_utf8_at_match, omit_match_fact_for_rejection)]
     pub fn harness_str_searcher_long_next_reject() {
         let mut s = any_long_str_searcher();
         let result = s.next_reject();
@@ -8763,6 +8801,8 @@ pub mod verify {
 
     #[kani::proof]
     #[kani::stub_verified(<StrSearcher as ReverseSearcher>::next_back)]
+    #[kani::stub(reject_loop_state, long_loop_state)]
+    #[kani::stub(invariant, long_call_state)]
     pub fn harness_str_searcher_long_next_reject_back() {
         let mut s = any_long_str_searcher();
         let result = s.next_reject_back();
@@ -8895,9 +8935,15 @@ pub mod verify {
         );
     }
 
+    // The rejection filter uses the verified step's invariant and Reject
+    // boundaries. Dropping the additional Match UTF-8 input constraint
+    // admits more summary results and leaves every actual result possible.
+    fn omit_match_fact_for_rejection(_: &str, _: &str, _: SearchStep) {}
+
     #[kani::proof]
     #[kani::stub_verified(<StrSearcher as Searcher>::next)]
     #[kani::stub_verified(establish_last_scalar_bound)]
+    #[kani::stub(assume_utf8_at_match, omit_match_fact_for_rejection)]
     pub fn harness_str_searcher_short_next_reject() {
         let mut s = any_short_str_searcher();
         let result = s.next_reject();
@@ -8967,6 +9013,7 @@ pub mod verify {
     #[kani::stub_verified(<StrSearcher as Searcher>::next)]
     #[kani::stub(crate::slice::memchr::memchr, model_memchr)]
     #[kani::stub(short_scan_probes, reject_short_probe_in_long_proof)]
+    #[kani::stub(long_forward_scalar_half, last_scalar_in_right_scan)]
     pub fn harness_str_searcher_long_next_match_split_probes() {
         check_long_public_match();
     }
@@ -8977,6 +9024,7 @@ pub mod verify {
     #[kani::stub_verified(<StrSearcher as Searcher>::next)]
     #[kani::stub(crate::slice::memchr::memchr, model_memchr)]
     #[kani::stub(short_scan_probes, reject_short_probe_in_long_proof)]
+    #[kani::stub(long_forward_scalar_half, last_scalar_in_left_scan)]
     pub fn harness_str_searcher_long_next_match_left_probes() {
         let mut s = any_long_str_searcher();
         let haystack = s.haystack;

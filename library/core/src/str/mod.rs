@@ -499,6 +499,13 @@ impl str {
             self.len()
         } else {
             let mut i = index;
+            #[cfg_attr(
+                kani,
+                kani::loop_invariant(crate::str::pattern::verify::ceil_boundary_loop_state(
+                    self, index, i
+                ))
+            )]
+            #[cfg_attr(kani, kani::loop_modifies(&i))]
             while !self.as_bytes()[i].is_utf8_char_boundary() {
                 i += 1;
                 if i >= self.len() {
