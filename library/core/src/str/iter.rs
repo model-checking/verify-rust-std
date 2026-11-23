@@ -1951,9 +1951,10 @@ pub(super) mod verify {
         pub nmb_res: [Option<(usize, usize)>; 2],
     }
 
-    // See verify-rust-std#753 (rust-lang/rust#165681): `Pattern` is still a safe trait on
-    // the pinned toolchain; update to `unsafe impl Pattern for ModelPattern` once synced past rust#165681.
-    impl Pattern for ModelPattern {
+    // SAFETY: `into_searcher` constructs a `ModelSearcher` storing the exact `haystack`
+    // slice passed in (`Searcher::haystack()` returns that same slice), with `front = 0`
+    // and `back = haystack.len()`.
+    unsafe impl Pattern for ModelPattern {
         type Searcher<'a> = ModelSearcher<'a>;
         fn into_searcher(self, haystack: &str) -> ModelSearcher<'_> {
             ModelSearcher {
