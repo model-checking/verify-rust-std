@@ -66,3 +66,69 @@ All proofs must automatically ensure the absence of the following
 
 Note: All solutions to verification challenges need to satisfy the criteria established in the
 [challenge book](../general-rules.md) in addition to the ones listed above.
+
+## Kani proof implementation
+
+The proposed Kani implementation lives in `library/core/src/num/imp/int_log10.rs`
+and the verification-only module `library/core/src/num/imp/int_log2.rs`.
+It does not change the runtime algorithms. The challenge remains open until the
+solution is reviewed and accepted.
+
+| Proof group | Harnesses | Coverage |
+|------------|-----------|----------|
+| Decimal helpers | 6 | Each helper's entire documented positive input domain |
+| Decimal wrappers | 11 | Five unsigned, five signed, and `usize` wrappers |
+| Supporting contracts | 1 | `hint::assert_unchecked` safety contract |
+| Public decimal APIs | 18 | Checked and positive panicking APIs for 12 integer types; six unsigned `NonZero` types |
+| Decimal invalid inputs | 13 | Twelve invalid-input routing proofs and the shared panic helper |
+| Public binary APIs | 18 | Checked and positive panicking APIs for 12 integer types; six unsigned `NonZero` types |
+| Binary invalid inputs | 12 | Invalid-input routing for all 12 integer types |
+
+### Specifications and proof dependencies
+
+The decimal specification compares the input with explicit powers of ten through
+`10^38`; the final interval ends at `u128::MAX`. It neither calls a logarithm API
+nor computes the unrepresentable value `10^39`. Helpers and wrappers have exact
+result contracts. Caller harnesses use `kani::stub_verified` to check callee
+preconditions and reuse independently verified postconditions. This includes
+checking the condition passed to each wrapper's `assert_unchecked` call.
+
+The binary specification requires `r < 128` and `n >> r == 1` for positive input
+`n` widened to `u128`. These conditions mean exactly `2^r <= n < 2^(r+1)`,
+including the interval with `r == 127`. Binary API bodies are verified directly,
+including the nonzero preconditions of `ctlz_nonzero` and arithmetic safety.
+
+Checked APIs are exercised over their entire primitive input domain. Separate
+proofs check the panicking APIs on positive inputs and on nonpositive inputs.
+For the latter, only the shared, no-argument panic helper is replaced by a
+terminal path (`kani::assume(false)`). An assertion after the API call proves
+that no invalid input returns normally; other panics, undefined behavior, or
+unbounded loops remain verification failures. A separate `kani::should_panic`
+harness checks the actual straight-line panic helper. This avoids using an
+existential symbolic `should_panic` check as evidence for all invalid inputs.
+
+### Pointer widths
+
+The `usize` conversion selects `u16`, `u32`, or `u64` with exactly the same width
+as the input, so casting preserves its positive value. Consequently,
+`NonZero::new_unchecked` receives a nonzero value on each supported pointer width.
+The selected unsigned wrappers and the `i16`/`i32` wrappers used by narrower
+`isize` configurations have independent proofs. Pointer-sized APIs and the
+actual `usize` conversion are run on the 64-bit CI configuration, as permitted
+by this challenge; this is not a claim of local execution on 16- or 32-bit targets.
+
+### Reproducing the proofs
+
+From the repository root, run:
+
+```sh
+./scripts/run-kani.sh --kani-args --harness num::imp::int_log
+./scripts/run-kani.sh --kani-args --harness num::imp::int_log -Z valid-value-checks
+```
+
+The filter selects all 79 challenge harnesses, including the supporting contract
+and actual panic-helper proof. The existing Kani workflow discovers them without
+a separate harness allowlist and verifies them across its partitions on Linux
+and macOS. An additional step in partition 1 runs the complete logarithm suite
+with `-Z valid-value-checks` on each OS, without partitioning, to explicitly check
+for invalid values. Normal Rust regression checks remain covered by the Rust Tests workflow.

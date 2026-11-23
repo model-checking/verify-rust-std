@@ -73,6 +73,17 @@ jobs:
       # Step 3: Run Kani on the std library (default configuration)
       - name: Run Kani Verification
         run: head/scripts/run-kani.sh --path ${{github.workspace}}/head
+
+      # Challenge 30 also requires detecting invalid values. Reuse the verifier
+      # built above, but run this focused suite once per OS without sharding.
+      - name: Verify integer logarithms with invalid-value checks
+        if: matrix.partition == 1
+        env:
+          WORKER_INDEX: ''
+          WORKER_TOTAL: ''
+        run: >-
+          head/scripts/run-kani.sh --path ${{github.workspace}}/head
+          --kani-args --harness num::imp::int_log -Z valid-value-checks
    
   kani_autoharness:
     name: Verify std library using autoharness

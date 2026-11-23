@@ -17,6 +17,8 @@ pub mod x87_f80;
 
 pub(crate) mod int_bits;
 pub(crate) mod int_log10;
+#[cfg(kani)]
+mod int_log2;
 pub(crate) mod int_sqrt;
 pub(crate) mod libm;
 pub(crate) mod overflow_panic;
