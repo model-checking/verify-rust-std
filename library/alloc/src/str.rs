@@ -1294,6 +1294,69 @@ mod verify {
         kani::cover(true, "bounded advance_by returned");
     }
 
+    // Assumption 1 (Ch22 spec): the slice module is correct. This models
+    // `slice::Iter::<u8>::advance_by`'s postcondition WITHOUT re-verifying its pointer walk
+    // (the real body OOM'd on symbolic length). Sound re-view via the public `as_slice` — no
+    // field access, no `unsafe` beyond the provably-nonzero `Err`. Ok(()) iff k <= remaining
+    // (advancing to the tail); Err(k - remaining) otherwise — EXACTLY the documented contract,
+    // so `unwrap_unchecked()` in `Chars::advance_by` stays a real obligation, NOT trivialized.
+    #[cfg(kani)]
+    fn stub_u8_iter_advance_by<'a, T>(
+        it: &mut core::slice::Iter<'a, T>,
+        k: usize,
+    ) -> Result<(), core::num::NonZero<usize>>
+    where
+        'a: 'a, // early-bound: stub generic-param count must match the impl method
+    {
+        let s = it.as_slice();
+        if k <= s.len() {
+            *it = s[k..].iter();
+            Ok(())
+        } else {
+            // The documented contract exhausts the iterator when the count exceeds it.
+            *it = s[s.len()..].iter();
+            // SAFETY: k > s.len() >= 0, so k - s.len() > 0.
+            Err(unsafe { core::num::NonZero::new_unchecked(k - s.len()) })
+        }
+    }
+
+    // Chars::advance_by UNBOUNDED: symbolic str length AND fully symbolic count (NO K window).
+    // All three decode loops carry equality-anchor contracts via the raw-field accessors
+    // (invariants read accessors and usize ghosts only — `as_slice()`/`len()` inside an
+    // invariant do not discharge under havoc), with pre-loop concrete length ghosts bounding
+    // the counters. self.iter's `advance_by` is modeled by the assumption-1 stub; the searcher
+    // by assumption-2; the inner fold by a loop-free model proven equal to the real fold.
+    #[kani::proof]
+    #[kani::stub(<CharSearcher<'_> as Searcher<'_>>::next_match, stub_char_next_match)]
+    #[kani::stub(<core::slice::Iter<'_, u8> as core::iter::Iterator>::advance_by, stub_u8_iter_advance_by)]
+    fn check_advance_by_chars_unbounded() {
+        let s = symbolic_str();
+        let mut chars = s.chars();
+        let n: usize = kani::any(); // UNBOUNDED count — no K window
+        let _ = chars.advance_by(n);
+        kani::cover(n >= 32, "a count of at least one full chunk is requested");
+        kani::cover(true, "ch22 unbounded advance_by returned");
+    }
+
+    // Non-vacuity twin: advancing by more chars than the string has bytes (>= its char count)
+    // returns Err; asserting Ok therefore MUST PANIC (`should_panic` makes that the pass
+    // condition, so this stays green in CI while still guarding the stub from a hollow
+    // always-Ok model and the proof from passing vacuously). A width-mutant is structurally
+    // N/A here: under the zeroed/ASCII family every char width is 1.
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::stub(<CharSearcher<'_> as Searcher<'_>>::next_match, stub_char_next_match)]
+    #[kani::stub(<core::slice::Iter<'_, u8> as core::iter::Iterator>::advance_by, stub_u8_iter_advance_by)]
+    fn check_advance_by_chars_unbounded_mutant() {
+        let s = symbolic_str();
+        let blen = s.len();
+        let mut chars = s.chars();
+        let n: usize = kani::any();
+        kani::assume(n > blen); // more chars requested than bytes exist => advance_by is Err
+        let r = chars.advance_by(n);
+        assert!(r.is_ok(), "mutant: advance_by(n > byte_len) claims Ok — this assert must panic");
+    }
+
     // Empty string (n = 0): the zero-length edge the symbolic families structurally
     // exclude — their backing allocation requires n >= 1 (`alloc(0)` is not valid). The
     // `""` literal reaches it directly, covering the exhausted/first-empty-field arms.
@@ -1313,7 +1376,10 @@ mod verify {
     // stubbed per assumption 2; every stubbing harness resets the ghosts first.
     // `#[kani::unwind(4)]` on these harnesses bounds the driver's internal empty-match
     // skip loop; a single stubbed search resolves per call, so the bound is not reached —
-    // verified sufficient (no unwinding-assertion failures in any harness).
+    // verified sufficient (no unwinding-assertion failures in any harness). The INPUT axis
+    // is unbounded: every harness runs at symbolic length (1..2^40), and the discharging
+    // unwinding assertion proves the bound truncates nothing — it is a harness-structure
+    // bound (one driver call), not an input-size bound.
 
     // SplitInternal::next at symbolic length: stub Some drives the match arm, stub None
     // drives get_end — the first call always yields an element.
@@ -1768,5 +1834,115 @@ mod verify {
         kani::cover(c.is_some_and(|ch| ch.len_utf8() == 2), "hybrid back 2-byte decode live");
         kani::cover(c.is_some_and(|ch| ch.len_utf8() == 3), "hybrid back 3-byte decode live");
         kani::cover(c.is_some_and(|ch| ch.len_utf8() == 4), "hybrid back 4-byte decode live");
+    }
+
+    // ---- Chars::size_hint at symbolic length (loop-free: pure length arithmetic) ----
+    #[kani::proof]
+    fn check_size_hint_chars() {
+        let s = symbolic_str();
+        let (lo, hi) = s.chars().size_hint();
+        let len = s.len();
+        assert!(lo == (len + 3) / 4, "lower bound: every char is at most 4 bytes");
+        assert!(hi == Some(len), "upper bound: every char is at least 1 byte");
+        kani::cover(len > 4, "size_hint at nontrivial length live");
+    }
+
+    // ---- CharIndices::{next, next_back} at symbolic length (Chars decode + offset
+    // arithmetic; loop-free) ----
+    #[kani::proof]
+    fn check_next_char_indices() {
+        let s = symbolic_str();
+        let mut it = s.char_indices();
+        let first = it.next();
+        assert!(first.is_some(), "nonempty str yields a first char");
+        if let Some((i, _c)) = first {
+            assert!(i == 0, "first char index is 0");
+        }
+        kani::cover(true, "char_indices next returned");
+    }
+
+    #[kani::proof]
+    fn check_next_back_char_indices() {
+        let s = symbolic_str();
+        let mut it = s.char_indices();
+        let last = it.next_back();
+        assert!(last.is_some(), "nonempty str yields a last char");
+        if let Some((i, _c)) = last {
+            assert!(i < s.len(), "last char index is in bounds");
+        }
+        kani::cover(true, "char_indices next_back returned");
+    }
+
+    // ---- Chars::nth at symbolic length AND symbolic n: the default Iterator::nth routes
+    // through the contracted advance_by (nth(n) == advance_by(n) + next()), so the count
+    // axis stays fully symbolic under the same stubs as the unbounded advance_by harness. ----
+    #[kani::proof]
+    #[kani::stub(<CharSearcher<'_> as Searcher<'_>>::next_match, stub_char_next_match)]
+    #[kani::stub(<core::slice::Iter<'_, u8> as core::iter::Iterator>::advance_by, stub_u8_iter_advance_by)]
+    fn check_nth_chars() {
+        let s = symbolic_str();
+        let mut it = s.chars();
+        let n: usize = kani::any();
+        let r = it.nth(n);
+        kani::cover(r.is_some(), "nth hit live");
+        kani::cover(r.is_none(), "nth exhausted live");
+    }
+
+    // ---- Constructor initial-state invariants: every public &str iterator constructor,
+    // built on a symbolic-length str. Construction itself is the property under proof (it
+    // runs real setup code, incl. CharSearcher::new's needle encoding); where the API
+    // exposes the initial state (as_str/remainder/len), it is asserted as ptr+len equality
+    // (never str content equality — a symbolic-length memcmp). One cover per constructor. ----
+    #[kani::proof]
+    fn check_str_iter_initial_invariants() {
+        let s = symbolic_str();
+        let full = |v: &str| v.as_ptr() == s.as_ptr() && v.len() == s.len();
+
+        assert!(full(s.chars().as_str()), "Chars starts at the full slice");
+        kani::cover(true, "chars ctor");
+        assert!(full(s.char_indices().as_str()), "CharIndices starts at the full slice");
+        kani::cover(true, "char_indices ctor");
+        assert!(s.bytes().len() == s.len(), "Bytes length equals byte length");
+        kani::cover(true, "bytes ctor");
+        assert!(s.split('x').remainder().is_some_and(&full), "Split remainder starts full");
+        kani::cover(true, "split ctor");
+        assert!(s.rsplit('x').remainder().is_some_and(&full), "RSplit remainder starts full");
+        kani::cover(true, "rsplit ctor");
+        assert!(
+            s.split_terminator('x').remainder().is_some_and(&full),
+            "SplitTerminator remainder starts full"
+        );
+        kani::cover(true, "split_terminator ctor");
+        assert!(
+            s.rsplit_terminator('x').remainder().is_some_and(&full),
+            "RSplitTerminator remainder starts full"
+        );
+        kani::cover(true, "rsplit_terminator ctor");
+        assert!(
+            s.split_ascii_whitespace().remainder().is_some_and(&full),
+            "SplitAsciiWhitespace remainder starts full"
+        );
+        kani::cover(true, "split_ascii_whitespace ctor");
+        assert!(
+            s.split_whitespace().remainder().is_some_and(&full),
+            "SplitWhitespace remainder starts full"
+        );
+        kani::cover(true, "split_whitespace ctor");
+        let _ = s.split_inclusive('x');
+        kani::cover(true, "split_inclusive ctor");
+        let _ = s.splitn(2, 'x');
+        kani::cover(true, "splitn ctor");
+        let _ = s.rsplitn(2, 'x');
+        kani::cover(true, "rsplitn ctor");
+        let _ = s.matches('x');
+        kani::cover(true, "matches ctor");
+        let _ = s.rmatches('x');
+        kani::cover(true, "rmatches ctor");
+        let _ = s.match_indices('x');
+        kani::cover(true, "match_indices ctor");
+        let _ = s.rmatch_indices('x');
+        kani::cover(true, "rmatch_indices ctor");
+        let _ = s.lines();
+        kani::cover(true, "lines ctor");
     }
 }

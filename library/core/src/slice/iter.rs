@@ -3402,3 +3402,25 @@ mod verify {
     check_iter_with_ty!(verify_char, char, 50);
     check_iter_with_ty!(verify_tup, (char, u8), 50);
 }
+
+// ==========================================================================================
+// Verification-only raw-cursor accessors for loop contracts over
+// `slice::Iter`. Read the private `ptr`/`end_or_len` WITHOUT the contract-bearing
+// `NonNull::as_ptr`: the equality anchor over these discharges at the pinned Kani commit,
+// while `as_slice()`/`len()`/`as_ptr()` reads inside an invariant do not — they compute
+// end−ptr / route through the contracted `as_ptr` under havoc. Generic over T: used at
+// `Iter<u8>` (Chars::advance_by's self.iter) and `Iter<[u8; 32]>` (its chunk iterator).
+// `#[cfg(kani)]`, additive, no shipped-body change; mirrors the sanctioned macros.rs:33 idiom.
+// ==========================================================================================
+#[cfg(kani)]
+impl<'a, T> Iter<'a, T> {
+    #[inline(always)]
+    pub(crate) fn kani_raw_cursor(&self) -> *const T {
+        // SAFETY: transmute of a NonNull<T> to its *const T address; verification-only read.
+        unsafe { crate::mem::transmute::<NonNull<T>, *const T>(self.ptr) }
+    }
+    #[inline(always)]
+    pub(crate) fn kani_raw_end(&self) -> *const T {
+        self.end_or_len
+    }
+}
