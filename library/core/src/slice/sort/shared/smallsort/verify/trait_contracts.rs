@@ -210,7 +210,7 @@ fn freeze_default_sorts_permutation_noncopy_u8_backing4() {
     kani::assert(enabled, "sort model enabled before call");
     kani::cover(enabled, "sort model enabled before call");
     // `NonCopyKey` is `Freeze` but not `Copy`, so this checks the default general sort with its
-    // private 48-element scratch array.
+    // local 48-element scratch array.
     <NonCopyKey as UnstableSmallSortFreezeTypeImpl>::small_sort(v, &mut cmp);
     kani::assert(backing[0].0 == left && backing[3].0 == right, "outside slice unchanged");
     sort_input_covers(a < b, b < a, a == b);

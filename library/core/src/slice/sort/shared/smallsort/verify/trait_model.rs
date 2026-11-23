@@ -1,6 +1,6 @@
-//! Verification-only sort model. The sorting postcondition applies only to the listed element
-//! types, entry kinds, lengths and comparator function pointers. Snapshots read the initialized
-//! active slice, never scratch storage.
+//! Verification-only sort model. The sorting postcondition applies only to the element types,
+//! entry kinds, lengths and comparator function pointers enabled below. Snapshots read the
+//! initialized active slice, never scratch storage.
 
 use crate::cell::Cell;
 
@@ -100,7 +100,6 @@ fn sorted_permutation(pre: SortSnapshot, post: SortSnapshot) -> bool {
 }
 
 impl SortModel<u64, U64Cmp> for () {
-    // The three u64 entries share this guard.
     fn enabled(_entry: SortEntry, cmp: &U64Cmp, len: usize) -> bool {
         (len == 2 || len == 3) && *cmp as *const () == canonical_less_u64 as *const ()
     }
