@@ -57,9 +57,7 @@ impl<'a> Iterator for Chars<'a> {
         #[cfg(kani)]
         let input = self.iter.as_slice();
         #[cfg(kani)]
-        let cursor = self.iter.kani_cursor_slot();
-        #[cfg(kani)]
-        let requested = remainder;
+        let (cursor, requested) = (self.iter.kani_cursor_slot(), remainder);
 
         if remainder >= CHUNK_SIZE {
             let mut chunks = self.iter.as_slice().as_chunks::<CHUNK_SIZE>().0.iter();
@@ -75,24 +73,29 @@ impl<'a> Iterator for Chars<'a> {
                 bytes_skipped += CHUNK_SIZE;
 
                 let mut start_bytes = [false; CHUNK_SIZE];
-                #[safety::loop_invariant(verify::flags_valid(&raw const start_bytes))]
+
+                #[cfg(kani)]
+                let (slot, is_start) = {
+                    let slot = kani::any::<u8>() as usize % CHUNK_SIZE;
+                    (slot, chunk[slot] & 0xc0 != 0x80)
+                };
+                #[cfg_attr(kani, kani::loop_invariant(
+                    verify::chunk_flags_inv(&raw const start_bytes, slot, is_start, kani::index)
+                ))]
                 #[cfg_attr(kani, kani::loop_modifies(&raw mut start_bytes))]
                 for i in 0..CHUNK_SIZE {
-                    // Check the update and its frame at an arbitrary flag index.
-                    #[cfg(kani)]
-                    let (slot, expected) = {
-                        let slot = kani::any::<u8>() as usize % CHUNK_SIZE;
-                        (slot, if slot == i { chunk[i] & 0xc0 != 0x80 } else { start_bytes[slot] })
-                    };
                     start_bytes[i] = !super::validations::utf8_is_cont_byte(chunk[i]);
-                    #[cfg(kani)]
-                    assert!(start_bytes[slot] == expected);
                 }
 
-                // Each of the 32 iterations writes its flag and preserves the others.
                 #[cfg(kani)]
-                let expected_remainder =
-                    remainder - verify::chunk_start_count(input, chunk, bytes_skipped, start_bytes);
+                let expected_remainder = remainder
+                    - verify::chunk_start_count(
+                        input,
+                        chunk,
+                        bytes_skipped,
+                        start_bytes,
+                        (slot, is_start),
+                    );
                 remainder -= start_bytes.into_iter().map(|i| i as u8).sum::<u8>() as usize;
                 #[cfg(kani)]
                 assert!(remainder == expected_remainder);
@@ -1731,13 +1734,15 @@ mod verify {
     fn symbolic_text_with_storage<const ALLOCATE_EMPTY: bool>() -> &'static str {
         let len: usize = kani::any();
         kani::assume(len <= MAX_ALLOCATION_BYTES);
+        kani::cover(len == MAX_ALLOCATION_BYTES, "maximum symbolic length admitted");
         let p = if len == 0 && !ALLOCATE_EMPTY {
-            // An aligned nonnull dangling pointer is sufficient for an empty str.
-            1usize as *mut u8
+            let address: NonZero<usize> = kani::any();
+            crate::ptr::without_provenance_mut(address.get())
         } else {
             let storage_len = if ALLOCATE_EMPTY { len.max(1) } else { len };
             let p = unsafe { malloc(storage_len) };
             kani::assume(!p.is_null());
+            kani::cover(true, "symbolic allocation succeeds");
             // Initialize the shadow-memory state, then give every byte an
             // independent arbitrary initialized value. Neither builtin unwinds
             // a Rust loop over the symbolic length.
@@ -1752,17 +1757,16 @@ mod verify {
             p
         };
         let bytes = unsafe { slice::from_raw_parts(p, len) };
-        // A valid nonempty input begins at a lead byte. This also justifies
-        // str indexing's optimized check when both endpoints are zero.
+        // Challenge 22 assumes valid UTF-8. Every nonempty input in that
+        // domain starts with a complete scalar followed by a boundary.
         kani::assume(bytes.is_empty() || utf8_sequence_width(bytes, 0) > 0);
-        // The C allocation supplies symbolic bytes. UTF-8 is assumed locally
-        // where bytes are consumed; this overapproximates all valid strings.
+        kani::cover(!bytes.is_empty(), "nonempty UTF-8 prefix admitted");
+        // The model instantiates UTF-8 facts locally on the symbolic bytes.
+        // This condition admits every valid string, and also malformed suffixes.
         unsafe { from_utf8_unchecked(bytes) }
     }
 
-    // At harness exit these goals follow ALL input assumptions and target checks.
-    // Keeping them out of allocation and loop models avoids repeated cover goals
-    // inside induction. Covers check feasibility, not the truth of an assumption.
+    // These witnesses follow the target call and its postcondition checks.
     fn cover_completed_text(s: &str) {
         kani::cover(s.is_empty(), "completed on empty input");
         kani::cover(s.len() > 4096, "completed beyond former input bounds");
@@ -1807,8 +1811,7 @@ mod verify {
 
     fn any_window(s: &str) -> (usize, usize) {
         let (a, b): (usize, usize) = (kani::any(), kani::any());
-        kani::assume(a <= b && b <= s.len());
-        kani::assume(s.is_char_boundary(a) && s.is_char_boundary(b));
+        kani::assume(a <= b && b <= s.len() && s.is_char_boundary(a) && s.is_char_boundary(b));
         kani::cover(true, "a boundary window exists");
         (a, b)
     }
@@ -1886,10 +1889,8 @@ mod verify {
             // On valid UTF-8, any non-continuation byte begins a complete
             // scalar. This fact concerns the original bytes, even if the
             // algorithm supplies an unexpected offset.
-            let width = modeled_utf8_width(lead);
-            kani::assume(width > 0 && width <= input.len() - offset);
-            let next = offset + width;
-            kani::assume(next == input.len() || !utf8_is_cont_byte(input[next]));
+            // The symbolic-length harness covers this path, which the empty-input harness skips.
+            kani::assume(utf8_sequence_width(input, offset) > 0);
         }
     }
 
@@ -1898,13 +1899,50 @@ mod verify {
     fn check_utf8_width_model() {
         let byte: u8 = kani::any();
         assert!(modeled_utf8_width(byte) == super::super::validations::utf8_char_width(byte));
+        kani::cover(byte == 0xf5, "width model checked an invalid lead byte");
     }
 
-    // Read the representation as integers before requiring any typed bool value.
-    pub(super) fn flags_valid(flags: *const [bool; 32]) -> bool {
-        let bytes = unsafe { crate::intrinsics::read_via_copy(flags as *const [u8; 32]) };
+    // A scalar and the first byte after it suffice to check the local rule.
+    #[kani::proof]
+    fn check_utf8_sequence_model() {
+        let storage: [u8; 5] = kani::any();
+        let (width, len): (usize, usize) = (kani::any(), kani::any());
+        kani::assume(1 <= width && width <= 4 && width <= len && len <= storage.len());
+        kani::cover(true, "scalar window admitted");
+        let bytes = &storage[..len];
+        let scalar = char::from_u32(scalar_bits(bytes, 0, width)).is_some_and(|ch| {
+            let mut encoded = [0; 4];
+            let encoded_len = ch.encode_utf8(&mut encoded).len();
+            encoded_len == width
+                && encoded[0] == bytes[0]
+                && (width < 2 || encoded[1] == bytes[1])
+                && (width < 3 || encoded[2] == bytes[2])
+                && (width < 4 || encoded[3] == bytes[3])
+        });
+        let boundary = width == len || bytes[width] & 0xc0 != 0x80;
+        let modeled = utf8_sequence_width(bytes, 0);
+        assert!(modeled <= 4 && modeled <= len);
+        let admitted = modeled == width;
+        assert!(admitted == (scalar && boundary));
+        kani::cover(admitted && width == 1, "UTF-8 sequence: one byte");
+        kani::cover(admitted && width == 2, "UTF-8 sequence: two bytes");
+        kani::cover(admitted && width == 3, "UTF-8 sequence: three bytes");
+        kani::cover(admitted && width == 4, "UTF-8 sequence: four bytes");
+        kani::cover(scalar && !boundary, "UTF-8 sequence: stray continuation after scalar");
+        kani::cover(len < modeled_utf8_width(bytes[0]), "UTF-8 sequence: truncated scalar");
+    }
+
+    pub(super) fn chunk_flags_inv(
+        flags: *const [bool; 32],
+        slot: usize,
+        is_start: bool,
+        filled: usize,
+    ) -> bool {
+        // Check the representations before reading any havoced value as bool.
+        let bytes = unsafe { crate::intrinsics::read_via_copy(flags.cast::<[u8; 32]>()) };
         let [lo, hi]: [u128; 2] = unsafe { crate::intrinsics::transmute(bytes) };
         (lo | hi) & !0x0101_0101_0101_0101_0101_0101_0101_0101 == 0
+            && bytes[slot] == u8::from(slot < filled && is_start)
     }
 
     pub(super) fn chunk_start_count(
@@ -1912,11 +1950,20 @@ mod verify {
         chunk: &[u8; 32],
         skipped: usize,
         flags: [bool; 32],
+        (slot, is_start): (usize, bool),
     ) -> usize {
         assert!(32 <= skipped && skipped <= input.len());
         assert!(chunk.as_ptr() == input.as_ptr().wrapping_add(skipped - 32));
-        // Each true flag has one set bit in its representation.
-        count_flag_words(unsafe { crate::intrinsics::transmute(flags) }) as usize
+        // The arbitrary slot relates all flags to the original chunk at loop exit.
+        assert!(flags[slot] == is_start);
+        // Sum the flags directly, independently of the iterator pipeline.
+        macro_rules! count {
+            ($($i:literal),+ $(,)?) => { 0u8 $(+ flags[$i] as u8)+ };
+        }
+        usize::from(count!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31,
+        ))
     }
 
     fn count_flag_words(words: [u128; 2]) -> u32 {
@@ -1948,15 +1995,12 @@ mod verify {
                 assert!(missing.get() <= n && n - missing.get() <= skipped);
             }
         }
+        kani::cover(n == 0 && text.len() == MAX_ALLOCATION_BYTES, "maximum representable string");
+        kani::cover(result.is_ok() && n == 33 && text.len() > 4096, "large input and chunk path");
+        kani::cover(result.is_ok() && n == 1, "scalar path");
         kani::cover(
-            result.is_ok() && n > 64 && text.len() == MAX_ALLOCATION_BYTES,
-            "maximum representable string and chunk path",
-        );
-        kani::cover(result.is_err() && n > 64, "insufficient characters");
-        kani::cover(result.is_ok() && n > 0 && n < 32, "scalar path");
-        kani::cover(
-            n == usize::MAX && text.len() > 4096 && result.is_err(),
-            "maximum request remains admitted after UTF-8 assumptions",
+            n == usize::MAX && !text.is_empty() && result.is_err(),
+            "maximum request on nonempty input",
         );
         kani::cover(
             text.len() == 4
@@ -1990,7 +2034,7 @@ mod verify {
 
     // Chars decoding and view proofs.
 
-    // Reference scalar from the payload bits of a previously validated sequence.
+    // Extract payload bits from a window of known width. Validity is checked separately.
     fn scalar_bits(bytes: &[u8], start: usize, width: usize) -> u32 {
         let lead = u32::from(bytes[start]);
         let tail = |i| u32::from(bytes[start + i] & 0x3f);
@@ -2013,6 +2057,7 @@ mod verify {
             // The decoder and its unsafe reads are executed without a stub.
             let width = utf8_sequence_width(bytes, a);
             kani::assume(width > 0 && width <= b - a);
+            kani::cover(true, "complete leading scalar admitted");
             width
         } else {
             0
@@ -2044,8 +2089,10 @@ mod verify {
             // This symbolic width is an input witness, not a decoder result.
             let width: usize = kani::any();
             kani::assume(1 <= width && width <= 4 && width <= b - a);
+            kani::cover(true, "trailing scalar width admitted");
             let lead = b - width;
             kani::assume(utf8_sequence_width(bytes, lead) == width);
+            kani::cover(true, "complete trailing scalar admitted");
             width
         } else {
             0
@@ -2090,7 +2137,7 @@ mod verify {
         haystack: &'a str,
         front: usize,
         back: usize,
-        // Split harnesses choose the responses before calling the target.
+        // Consumer harnesses choose the responses before calling the target.
         match_plan: Option<&'a [SearchMatch]>,
     }
 
@@ -2114,14 +2161,11 @@ mod verify {
     fn any_match_range(s: &str, front: usize, back: usize) -> (usize, usize) {
         let a: usize = kani::any();
         let b: usize = kani::any();
-        // These are Searcher guarantees imported under assumption 2, not
-        // properties of SplitInternal assumed after its execution.
-        // CHALLENGE 22 assumption 2: dependency Searcher range guarantee.
-        kani::assume(front <= a && a <= b && b <= back);
-        kani::cover(true, "C22-A08: any_match_range assumption admitted");
-        // CHALLENGE 22 assumption 2: dependency Searcher range guarantee.
-        kani::assume(s.is_char_boundary(a) && s.is_char_boundary(b));
-        kani::cover(true, "C22-A09: any_match_range assumption admitted");
+        // Challenge 22 assumption 2 gives this guarantee for search results.
+        kani::assume(
+            front <= a && a <= b && b <= back && s.is_char_boundary(a) && s.is_char_boundary(b),
+        );
+        kani::cover(true, "valid search interval admitted");
         (a, b)
     }
 
@@ -2135,7 +2179,7 @@ mod verify {
                 return any_search_match(self.haystack, self.front, self.back);
             };
             let Some((&matched, rest)) = plan.split_first() else {
-                panic!("unexpected split search");
+                panic!("unexpected search call");
             };
             self.match_plan = Some(rest);
             if let Some((a, b)) = matched {
@@ -2234,12 +2278,6 @@ mod verify {
         assert!(same_slice(searcher.haystack(), s));
     }
 
-    fn check_piece(s: &str, piece: &str) -> usize {
-        let start = checked_offset(s, piece);
-        check_range(s, piece, start, start + piece.len());
-        start
-    }
-
     // Closure of the safety invariant supports arbitrarily long iterator histories.
     fn check_split(
         s: &str,
@@ -2260,42 +2298,58 @@ mod verify {
         cover_completed_text(s);
     }
 
-    fn check_match(s: &str, searcher: &ModelSearcher<'_>, result: Option<(usize, &str)>) {
+    fn check_search_step(
+        s: &str,
+        searcher: &ModelSearcher<'_>,
+        (front, back): (usize, usize),
+        reverse: bool,
+        matched: SearchMatch,
+    ) {
         check_searcher(s, searcher);
-        if let Some((index, part)) = result {
-            assert!(index == check_piece(s, part));
+        if let Some((a, b)) = matched {
+            assert!(front <= a && a <= b && b <= back);
+            assert!(s.is_char_boundary(a) && s.is_char_boundary(b));
         }
-        kani::cover(result.is_none(), "matches: exhausted");
-        kani::cover(result.is_some_and(|(_, part)| part.is_empty()), "matches: empty match");
-        kani::cover(result.is_some_and(|(_, part)| part.len() > 4096), "matches: large match");
-        cover_completed_text(s);
+        let expected = if reverse {
+            (front, matched.map_or(front, |(a, _)| a))
+        } else {
+            (matched.map_or(back, |(_, b)| b), back)
+        };
+        assert!((searcher.front, searcher.back) == expected);
     }
 
     #[kani::proof]
     fn harness_searcher_protocol() {
+        use super::super::pattern::SearchStep;
+
         let s = symbolic_text();
         let (front, back) = any_window(s);
         let mut searcher = ModelSearcher { haystack: s, front, back, match_plan: None };
         let reverse: bool = kani::any();
-        let result = if reverse { searcher.next_match_back() } else { searcher.next_match() };
-        check_searcher(s, &searcher);
-        if let Some((a, b)) = result {
-            assert!(front <= a && a <= b && b <= back);
-            assert!(s.is_char_boundary(a) && s.is_char_boundary(b));
-            if reverse {
-                assert!(searcher.back == a);
-            } else {
-                assert!(searcher.front == b);
+        if kani::any() {
+            let step = if reverse { searcher.next_back() } else { searcher.next() };
+            let range = match step {
+                SearchStep::Match(a, b) | SearchStep::Reject(a, b) => {
+                    assert!(if reverse { b == back } else { a == front });
+                    Some((a, b))
+                }
+                SearchStep::Done => {
+                    assert!(front == back);
+                    None
+                }
+            };
+            check_search_step(s, &searcher, (front, back), reverse, range);
+            kani::cover(matches!(step, SearchStep::Match(..)), "protocol: matching step");
+            kani::cover(matches!(step, SearchStep::Reject(..)), "protocol: rejecting step");
+            kani::cover(matches!(step, SearchStep::Done), "protocol: exhausted step");
+            kani::cover(range.is_some_and(|(a, b)| a == b), "protocol: zero-width step");
+        } else {
+            let result = if reverse { searcher.next_match_back() } else { searcher.next_match() };
+            check_search_step(s, &searcher, (front, back), reverse, result);
+            if let Some((a, b)) = result {
+                kani::cover(a == b, "protocol: zero-width match");
+                kani::cover(b - a > 4, "protocol: multiple-character match");
             }
-            kani::cover(a == b, "protocol: zero-width match");
-            kani::cover(b - a > 4, "protocol: multiple-character match");
-        } else {
-            assert!(searcher.front == searcher.back);
-        }
-        if reverse {
-            assert!(searcher.front == front);
-        } else {
-            assert!(searcher.back == back);
         }
         cover_completed_text(s);
     }
@@ -2436,36 +2490,52 @@ mod verify {
         check_split(s, &iter, result, expected);
     }
 
+    fn check_match_step<const BACK: bool, const INDEXED: bool>() {
+        let s = symbolic_text();
+        let (front, back) = any_window(s);
+        let expected = any_search_match(s, front, back);
+        let plan = [expected];
+        let searcher = ModelSearcher { haystack: s, front, back, match_plan: Some(&plan) };
+        let (part, searcher) = if INDEXED {
+            let mut iter = MatchIndicesInternal::<ModelPattern>(searcher);
+            let result = if BACK { iter.next_back() } else { iter.next() };
+            assert!(result.map(|(index, _)| index) == expected.map(|(start, _)| start));
+            (result.map(|(_, part)| part), iter.0)
+        } else {
+            let mut iter = MatchesInternal::<ModelPattern>(searcher);
+            let result = if BACK { iter.next_back() } else { iter.next() };
+            (result, iter.0)
+        };
+        check_search_step(s, &searcher, (front, back), BACK, expected);
+        assert!(searcher.match_plan.is_some_and(<[_]>::is_empty));
+        assert!(part.is_some() == expected.is_some());
+        if let (Some(part), Some((a, b))) = (part, expected) {
+            check_range(s, part, a, b);
+        }
+        kani::cover(part.is_none(), "matches: exhausted");
+        kani::cover(part.is_some_and(str::is_empty), "matches: empty match");
+        kani::cover(part.is_some_and(|part| part.len() > 4096), "matches: large match");
+        cover_completed_text(s);
+    }
+
     #[kani::proof]
     fn harness_match_indices_next() {
-        let s = symbolic_text();
-        let mut iter = MatchIndicesInternal::<ModelPattern>(any_split(s).matcher);
-        let result = iter.next();
-        check_match(s, &iter.0, result);
+        check_match_step::<false, true>();
     }
 
     #[kani::proof]
     fn harness_match_indices_next_back() {
-        let s = symbolic_text();
-        let mut iter = MatchIndicesInternal::<ModelPattern>(any_split(s).matcher);
-        let result = iter.next_back();
-        check_match(s, &iter.0, result);
+        check_match_step::<true, true>();
     }
 
     #[kani::proof]
     fn harness_matches_next() {
-        let s = symbolic_text();
-        let mut iter = MatchesInternal::<ModelPattern>(any_split(s).matcher);
-        let result = iter.next().map(|part| (checked_offset(s, part), part));
-        check_match(s, &iter.0, result);
+        check_match_step::<false, false>();
     }
 
     #[kani::proof]
     fn harness_matches_next_back() {
-        let s = symbolic_text();
-        let mut iter = MatchesInternal::<ModelPattern>(any_split(s).matcher);
-        let result = iter.next_back().map(|part| (checked_offset(s, part), part));
-        check_match(s, &iter.0, result);
+        check_match_step::<true, false>();
     }
 
     #[kani::proof]
@@ -2506,6 +2576,7 @@ mod verify {
         // inside a scalar. No character-boundary premise belongs here.
         let (start, end): (usize, usize) = (kani::any(), kani::any());
         kani::assume(start <= end && end <= s.len());
+        kani::cover(start < end, "nonempty byte window admitted");
         let window = unsafe { s.as_bytes().get_unchecked(start..end) };
         let mut iter = Bytes(window.iter().copied());
         let index: usize = kani::any();
@@ -2595,12 +2666,10 @@ mod verify {
 
         fn verifier_nondet_utf8<const N: usize>(buf: &[u8; N]) -> &str {
             let len: usize = kani::any();
-            // INPUT DOMAIN: allocated prefix or index extent.
             kani::assume(len <= N - UTF8_PAD);
-            kani::cover(true, "C22-A01: verifier_nondet_utf8 assumption admitted");
-            // CHALLENGE 22 assumption 4: valid UTF-8 input.
+            kani::cover(len == N - UTF8_PAD, "full auxiliary input length admitted");
             kani::assume(verifier_utf8_valid(buf, len));
-            kani::cover(true, "C22-A02: verifier_nondet_utf8 assumption admitted");
+            kani::cover(len > 0, "nonempty valid auxiliary string admitted");
             // SAFETY: verifier_utf8_valid characterizes valid UTF-8 exactly.
             unsafe { from_utf8_unchecked(&buf[..len]) }
         }
@@ -2640,7 +2709,7 @@ mod verify {
         }
 
         fn fixed_char_search_step_budget() -> Option<usize> {
-            // Each continued step consumes at least one byte. A final empty probe can return.
+            // Each continued step consumes a byte. Allow one final exhausted probe.
             Some(MAX_SEARCH_BYTES + 1)
         }
 
@@ -2663,16 +2732,15 @@ mod verify {
                 };
             }
             check_lengths!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
+            kani::cover(true, "checked every auxiliary byte slice length");
         }
 
         #[kani::proof]
         fn harness_reverse_byte_model() {
             let bytes: [u8; MAX_SEARCH_BYTES] = kani::any();
             let len: usize = kani::any();
-            // INPUT-LENGTH: only prefixes of this initialized array are inputs.
-            // INPUT DOMAIN: allocated prefix or index extent.
             kani::assume(len <= bytes.len());
-            kani::cover(true, "C22-A23: harness_reverse_byte_model assumption admitted");
+            kani::cover(len == bytes.len(), "full byte model input length admitted");
             let needle: u8 = kani::any();
             let result = verifier_last_byte(needle, &bytes[..len]);
             if let Some(index) = result {
@@ -2687,7 +2755,6 @@ mod verify {
             kani::cover(result.is_none(), "byte model: no match");
             kani::cover(len > 0 && result == Some(len - 1), "byte model: final byte matches");
             kani::cover(len == 0 && result.is_none(), "byte model: empty prefix");
-            kani::cover(true, "C22-END: harness_reverse_byte_model completed");
         }
 
         fn assert_char_searcher_direction(reverse: bool) {
@@ -2714,7 +2781,6 @@ mod verify {
         #[kani::stub(crate::slice::memchr::memchr, verifier_first_byte)]
         fn harness_char_searcher_forward_refinement() {
             assert_char_searcher_direction(false);
-            kani::cover(true, "C22-END: harness_char_searcher_forward_refinement completed");
         }
 
         #[kani::proof]
@@ -2726,7 +2792,6 @@ mod verify {
         #[kani::stub(crate::slice::memchr::memrchr, verifier_last_byte)]
         fn harness_char_searcher_reverse_refinement() {
             assert_char_searcher_direction(true);
-            kani::cover(true, "C22-END: harness_char_searcher_reverse_refinement completed");
         }
     }
 }

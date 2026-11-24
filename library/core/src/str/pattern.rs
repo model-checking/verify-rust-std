@@ -2160,7 +2160,7 @@ unsafe fn small_slice_eq(x: &[u8], y: &[u8]) -> bool {
 pub mod verify {
     use super::*;
 
-    // A regression can enable a checked local budget for the search loop.
+    // An auxiliary regression can enable a checked local search budget.
     #[inline(never)]
     pub(in crate::str) fn char_search_step_budget() -> Option<usize> {
         None
@@ -2173,43 +2173,31 @@ pub mod verify {
         }
     }
 
-    #[cfg(all(kani, target_arch = "x86_64"))] // only called on x86
-    #[kani::proof]
+    #[cfg(target_arch = "x86_64")]
+    #[kani::proof_for_contract(small_slice_eq)]
     #[kani::unwind(4)]
     pub fn check_small_slice_eq() {
-        // TODO: ARR_SIZE can be `std::usize::MAX` with cbmc argument
-        // `--arrays-uf-always`
+        // This dependency regression uses bounded backing arrays.
         const ARR_SIZE: usize = 1000;
         let x: [u8; ARR_SIZE] = kani::any();
         let y: [u8; ARR_SIZE] = kani::any();
         let xs = kani::slice::any_slice_of_array(&x);
         let ys = kani::slice::any_slice_of_array(&y);
-        // UNSAFE PRECONDITION: required by the operation under test.
-        kani::assume(xs.len() == ys.len());
-        kani::cover(true, "C22-A26: check_small_slice_eq assumption admitted");
         unsafe {
             small_slice_eq(xs, ys);
         }
-        kani::cover(true, "C22-END: check_small_slice_eq completed");
+        kani::cover(xs.len() < 4, "short slice comparison completed");
+        kani::cover(xs.len() >= 4, "word comparison completed");
     }
 
-    #[cfg(all(kani, target_arch = "x86_64"))] // only called on x86
+    #[cfg(target_arch = "x86_64")]
     #[kani::proof]
     #[kani::unwind(4)]
     pub fn check_small_slice_eq_empty() {
-        // Zero-length raw slices still require non-null pointers. Make the
-        // former any_where filters explicit so each has a coverage witness.
-        let address_x: usize = kani::any();
-        // UNSAFE PRECONDITION: required by the operation under test.
-        kani::assume(address_x != 0);
-        kani::cover(true, "C22-A27: check_small_slice_eq_empty assumption admitted");
-        let address_y: usize = kani::any();
-        // UNSAFE PRECONDITION: required by the operation under test.
-        kani::assume(address_y != 0);
-        kani::cover(true, "C22-A28: check_small_slice_eq_empty assumption admitted");
-        let ptr_x = address_x as *const u8;
-        let ptr_y = address_y as *const u8;
-        // u8 has alignment one; prove this instead of filtering inputs.
+        use crate::num::NonZero;
+
+        let ptr_x = crate::ptr::without_provenance::<u8>(kani::any::<NonZero<usize>>().get());
+        let ptr_y = crate::ptr::without_provenance::<u8>(kani::any::<NonZero<usize>>().get());
         assert!(ptr_x.is_aligned());
         assert!(ptr_y.is_aligned());
         assert_eq!(
@@ -2221,7 +2209,7 @@ pub mod verify {
             },
             true
         );
-        kani::cover(true, "C22-END: check_small_slice_eq_empty completed");
+        kani::cover(true, "empty slice comparison completed");
     }
 
     fn char_searcher_invariant(searcher: &CharSearcher<'_>) -> bool {

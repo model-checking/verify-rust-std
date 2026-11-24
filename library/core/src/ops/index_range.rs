@@ -40,13 +40,6 @@ impl IndexRange {
         IndexRange { start: 0, end }
     }
 
-    // The fold model uses this constructor inside a contracted loop.
-    #[cfg(kani)]
-    pub(crate) fn kani_from_bounds(start: usize, end: usize) -> Self {
-        assert!(start <= end);
-        Self { start, end }
-    }
-
     #[inline]
     pub(crate) const fn start(&self) -> usize {
         self.start
@@ -245,6 +238,15 @@ impl FusedIterator for IndexRange {}
 #[cfg(kani)]
 mod verify {
     use super::*;
+
+    impl IndexRange {
+        // A direct range assignment keeps the fold model's write set explicit.
+        pub(crate) fn kani_from_bounds(start: usize, end: usize) -> Self {
+            assert!(start <= end);
+            Self { start, end }
+        }
+    }
+
     #[kani::proof_for_contract(IndexRange::new_unchecked)]
     fn proof_for_index_range_new_unchecked() {
         let start = kani::any::<usize>();

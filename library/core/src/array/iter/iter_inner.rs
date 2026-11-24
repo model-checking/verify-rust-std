@@ -191,10 +191,8 @@ impl Challenge22FoldElement for bool {
 impl<T> PolymorphicIter<[MaybeUninit<T>]> {
     /// Loop-free replacement used only by the Challenge 22 harnesses.
     ///
-    /// Unlike a non-consuming sum oracle, this advances `alive` before each
-    /// callback, just as `try_fold` does. Ordinary drop therefore sees exactly
-    /// the same remaining elements, including if a callback panics.
-    /// The assertions make uses outside the proved, fixed-size domain fail.
+    /// Advance `alive` before each callback, as `try_fold` does, so drop sees
+    /// the same remaining elements even if the callback panics.
     #[cfg(kani)]
     pub(crate) fn kani_fold_at_most_32<B>(&mut self, init: B, mut f: impl FnMut(B, T) -> B) -> B {
         assert!(<T as Challenge22FoldElement>::admitted());
@@ -206,52 +204,22 @@ impl<T> PolymorphicIter<[MaybeUninit<T>]> {
         let data = self.data.as_ptr().cast::<T>();
         let mut accum = init;
         macro_rules! step {
-            ($k:expr) => {
-                if start + $k < end {
-                    let idx = start + $k;
-                    // A direct range assignment keeps the model's write target
-                    // visible to CBMC's loop-frame inference.
-                    self.alive = IndexRange::kani_from_bounds(idx + 1, end);
-                    // SAFETY: The range update transfers the initialized
-                    // element's ownership to the callback.
-                    let ptr = data.wrapping_add(idx);
-                    let elem = unsafe { crate::intrinsics::read_via_copy(ptr) };
-                    accum = f(accum, elem);
-                }
+            ($($k:literal),+ $(,)?) => {
+                $(
+                    if start + $k < end {
+                        let idx = start + $k;
+                        self.alive = IndexRange::kani_from_bounds(idx + 1, end);
+                        // SAFETY: This step consumes an initialized live element.
+                        let elem = unsafe { crate::intrinsics::read_via_copy(data.wrapping_add(idx)) };
+                        accum = f(accum, elem);
+                    }
+                )+
             };
         }
-        step!(0);
-        step!(1);
-        step!(2);
-        step!(3);
-        step!(4);
-        step!(5);
-        step!(6);
-        step!(7);
-        step!(8);
-        step!(9);
-        step!(10);
-        step!(11);
-        step!(12);
-        step!(13);
-        step!(14);
-        step!(15);
-        step!(16);
-        step!(17);
-        step!(18);
-        step!(19);
-        step!(20);
-        step!(21);
-        step!(22);
-        step!(23);
-        step!(24);
-        step!(25);
-        step!(26);
-        step!(27);
-        step!(28);
-        step!(29);
-        step!(30);
-        step!(31);
+        step!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31,
+        );
         accum
     }
 
@@ -427,6 +395,7 @@ mod verify {
         let start: usize = kani::any();
         let end: usize = kani::any();
         kani::assume(start <= end && end <= 32);
+        kani::cover(start < end, "nonempty live range admitted");
         // Same representation conversion as IntoIterator for arrays, without
         // array::map's unrelated construction and draining machinery.
         let data: [MaybeUninit<bool>; 32] = unsafe { crate::mem::transmute(flags) };
