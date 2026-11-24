@@ -854,10 +854,8 @@ impl<T: Ord, A: Allocator> BinaryHeap<T, A> {
     unsafe fn sift_down_range(&mut self, pos: usize, end: usize) -> usize {
         // SAFETY: The caller guarantees that pos < end <= self.len().
         let mut hole = unsafe { Hole::new(&mut self.data, pos) };
-        // `2 * hole.pos() + 1` can overflow for a zero-sized `T` (FIXME below). If it does, the
-        // sift panics; Kani proves safety for the paths where it doesn't.
         #[cfg(kani)]
-        kani::assume(hole.pos() <= isize::MAX as usize);
+        hole.before_child_index();
         let mut child = 2 * hole.pos() + 1;
 
         // Loop invariant: child == 2 * hole.pos() + 1.
@@ -884,7 +882,7 @@ impl<T: Ord, A: Allocator> BinaryHeap<T, A> {
             // SAFETY: same as above.
             unsafe { hole.move_to(child) };
             #[cfg(kani)]
-            kani::assume(hole.pos() <= isize::MAX as usize);
+            hole.before_child_index();
             child = 2 * hole.pos() + 1;
         }
 
@@ -929,10 +927,8 @@ impl<T: Ord, A: Allocator> BinaryHeap<T, A> {
 
         // SAFETY: The caller guarantees that pos < self.len().
         let mut hole = unsafe { Hole::new(&mut self.data, pos) };
-        // `2 * hole.pos() + 1` can overflow for a zero-sized `T` (FIXME below). If it does, the
-        // sift panics; Kani proves safety for the paths where it doesn't.
         #[cfg(kani)]
-        kani::assume(hole.pos() <= isize::MAX as usize);
+        hole.before_child_index();
         let mut child = 2 * hole.pos() + 1;
 
         // Loop invariant: child == 2 * hole.pos() + 1.
@@ -951,7 +947,7 @@ impl<T: Ord, A: Allocator> BinaryHeap<T, A> {
             // SAFETY: Same as above
             unsafe { hole.move_to(child) };
             #[cfg(kani)]
-            kani::assume(hole.pos() <= isize::MAX as usize);
+            hole.before_child_index();
             child = 2 * hole.pos() + 1;
         }
 
@@ -1580,6 +1576,9 @@ impl<T> Hole<'_, T> {
     fn slots(&self) -> *const [T] {
         ptr::slice_from_raw_parts(self.data.as_ptr(), self.data.len())
     }
+
+    /// No-op hook before the sifts compute `2 * pos + 1`; harnesses can replace it (`kani::stub`).
+    fn before_child_index(&self) {}
 }
 
 #[cfg(kani)]
@@ -2809,27 +2808,27 @@ mod verify {
         }
 
         macro_rules! harnesses_for {
-            ($T:ty $(, #[$attr:meta])*) => {
+            ($T:ty $(, [$(#[$stub:meta])*], [$(#[$solver:meta])*])?) => {
                 check_hole_new!($T);
                 check_hole_get!($T);
                 check_hole_move_to!($T);
                 check_hole_fills_on_drop!($T);
                 check_sift_up!($T);
-                check_sift_down_range!($T);
-                check_sift_down!($T);
-                check_sift_down_to_bottom!($T);
+                check_sift_down_range!($T $($(, #[$stub])*)?);
+                check_sift_down!($T $($(, #[$stub])*)?);
+                check_sift_down_to_bottom!($T $($(, #[$stub])*)?);
                 check_push!($T);
-                check_pop!($T);
-                check_peek_mut!($T);
+                check_pop!($T $($(, #[$stub])*)?);
+                check_peek_mut!($T $($(, #[$stub])*)?);
                 check_peek_mut_read!($T);
-                check_rebuild!($T);
-                check_from_vec!($T);
-                check_rebuild_tail!($T $(, #[$attr])*);
-                check_append!($T $(, #[$attr])*);
-                check_into_sorted_vec!($T);
-                check_as_mut_slice!($T);
-                check_into_iter_sorted!($T);
-                check_drain_sorted!($T);
+                check_rebuild!($T $($(, #[$stub])*)?);
+                check_from_vec!($T $($(, #[$stub])*)?);
+                check_rebuild_tail!($T $($(, #[$stub])* $(, #[$solver])*)?);
+                check_append!($T $($(, #[$solver])*)?);
+                check_into_sorted_vec!($T $($(, #[$stub])*)?);
+                check_as_mut_slice!($T $($(, #[$stub])*)?);
+                check_into_iter_sorted!($T $($(, #[$stub])*)?);
+                check_drain_sorted!($T $($(, #[$stub])*)?);
             };
         }
 
@@ -2859,7 +2858,18 @@ mod verify {
 
         mod zero_sized {
             use super::*;
-            harnesses_for!(ZeroSized, #[kani::solver(kissat)]);
+            harnesses_for!(
+                ZeroSized,
+                [#[kani::stub(Hole::before_child_index, Hole::assume_child_index_fits)]],
+                [#[kani::solver(kissat)]]
+            );
+
+            // Skip the calls where `2 * pos + 1` overflows (a ZST heap can exceed `isize::MAX`).
+            impl<T> Hole<'_, T> {
+                fn assume_child_index_fits(&self) {
+                    kani::assume(self.pos <= isize::MAX as usize);
+                }
+            }
         }
 
         // A mutating `cmp` only matters where elements are compared, so only those harnesses run.
@@ -2894,9 +2904,7 @@ mod verify {
         drop_or_forget(heap);
     }
 
-    // A `ZeroSized` heap can be longer than `isize::MAX`. The sifts assume their child index
-    // doesn't overflow there; these harnesses show the other overflows panic, and in each the
-    // overflow is the first check that can fail.
+    // A `ZeroSized` heap can be longer than `isize::MAX`; these harnesses show the overflows panic.
     mod zero_sized_overflow {
         use super::*;
 
