@@ -2706,9 +2706,7 @@ mod verify {
                     let mut a = arbitrary_heap::<$T>();
                     let mut b = arbitrary_heap::<$T>();
                     let (a_len, b_len) = (a.len(), b.len());
-                    kani::assume(a_len.checked_add(b_len).is_some_and(|total| {
-                        !rebuild_tail_overflows(total, if a_len < b_len { b_len } else { a_len })
-                    }));
+                    kani::assume(a_len.checked_add(b_len).is_some());
                     a.append(&mut b);
                     assert!(a.len() == a_len + b_len && b.is_empty());
                     kani::cover(a_len < b_len && a_len > 0, "swapped before appending");
