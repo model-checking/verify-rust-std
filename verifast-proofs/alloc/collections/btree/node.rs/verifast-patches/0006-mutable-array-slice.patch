@@ -1,0 +1,230 @@
+diff --git a/bin/rust/aliasing.rsspec b/bin/rust/aliasing.rsspec
+index 57b00d6..7a4936f 100644
+--- a/bin/rust/aliasing.rsspec
++++ b/bin/rust/aliasing.rsspec
+@@ -105,6 +105,19 @@ fn unsize_shared_array_ref<T, N, 'a>(array: &'a [T; N]) -> &'a [T];
+ //@ ens [f]ref_initialized(array) &*& result as *T == array as *T &*& result.len() == int_of_const(typeid(N));
+ //@ on_unwind_ens false;
+ 
++fn unsize_mut_array_ref<T, N, 'a>(array: &'a mut [T; N]) -> &'a mut [T];
++//@ req *array |-> ?items;
++//@ ens *array |-> items &*& result as *T == array as *T &*& result.len() == int_of_const(typeid(N));
++//@ on_unwind_ens false;
++
++/*@
++pred slice_ref_mut_end_token<T>(slice: *[T]; source: *T, count: usize);
++
++lem end_slice_ref_mut<T>(slice: *[T]);
++    req slice_ref_mut_end_token(slice, ?source, ?count) &*& (slice as *T)[..count] |-> ?elements;
++    ens source[..count] |-> elements;
++@*/
++
+ fn create_slice_ref<T>(x: &'static [T]) -> &'static [T];
+ //@ req true; // TODO
+ //@ ens result == x;
+diff --git a/bin/rust/std/lib.rsspec b/bin/rust/std/lib.rsspec
+index df09e22..8b1cd59 100644
+--- a/bin/rust/std/lib.rsspec
++++ b/bin/rust/std/lib.rsspec
+@@ -63,6 +63,11 @@ mod ops {
+         start: Idx,
+         end: Idx,
+     }
++
++    struct RangeTo<Idx> {
++        end: Idx,
++    }
++
+     
+     impl std::iter::IntoIterator for std::ops::Range<usize> {
+     
+@@ -784,6 +789,34 @@ mod slice {
+     //@ ens [f]ref_initialized(element) &*& result == element;
+     //@ on_unwind_ens false;
+ 
++    unsafe fn get_unchecked_mut_range<T, 'a>(self: &'a mut [T], index: std::ops::Range<usize>) -> &'a mut [T];
++    /*@
++    req 0 <= index.start &*& index.start <= index.end &*& index.end <= self.len() &*&
++        (self as *T)[index.start..index.end] |-> ?elements;
++    @*/
++    /*@
++    ens (result as *T)[..result.len()] |-> elements &*& result.len() == index.end - index.start &*&
++        slice_ref_mut_end_token(result, (self as *T) + index.start, result.len()) &*&
++        ref_origin(result as *T) == ref_origin((self as *T) + index.start);
++    @*/
++    //@ on_unwind_ens false;
++
++    unsafe fn get_unchecked_mut_range_to<T, 'a>(self: &'a mut [T], index: std::ops::RangeTo<usize>) -> &'a mut [T];
++    //@ req 0 <= index.end &*& index.end <= self.len() &*& (self as *T)[..index.end] |-> ?elements;
++    /*@
++    ens (result as *T)[..index.end] |-> elements &*& result.len() == index.end &*&
++        slice_ref_mut_end_token(result, self as *T, index.end) &*& ref_origin(result as *T) == ref_origin(self as *T);
++    @*/
++    //@ on_unwind_ens false;
++
++    unsafe fn get_unchecked_mut_usize<T, 'a>(self: &'a mut [T], index: usize) -> &'a mut T;
++    //@ req 0 <= index &*& index < self.len() &*& *((self as *T) + index) |-> ?element;
++    /*@
++    ens *result |-> element &*& ref_mut_end_token(result, (self as *T) + index) &*&
++        ref_origin(result) == ref_origin((self as *T) + index);
++    @*/
++    //@ on_unwind_ens false;
++
+     struct Iter<'a, T>;
+     
+     struct IterMut<'a, T>;
+diff --git a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+index 24a1aea..19a92cd 100644
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -2636,7 +2636,23 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+                     translate_regular_fn_call [element; lifetime] "std::slice::get_unchecked_usize"
+                 | _ -> translate_regular_fn_call substs fn_name
+                 end
+-            | "std::slice::<impl [T]>::as_ptr" ->
++            | "std::slice::<impl [T]>::get_unchecked_mut" ->
++                begin match substs_cpn, substs with
++                | [_; { kind = Type { kind = UInt USize } }; _], [element; _; lifetime] ->
++                    translate_regular_fn_call [element; lifetime] "std::slice::get_unchecked_mut_usize"
++                | [_; { kind = Type { kind = Adt { id = { name };
++                      substs = [{ kind = Type { kind = UInt USize } }] } } }; _],
++                  [element; _; lifetime] when name = "std::ops::Range" || name = "std::ops::RangeTo" ->
++                    let spec =
++                      if name = "std::ops::Range" then "std::slice::get_unchecked_mut_range"
++                      else "std::slice::get_unchecked_mut_range_to"
++                    in
++                    translate_regular_fn_call [element; lifetime] spec
++                | _ -> translate_regular_fn_call substs fn_name
++                end
++            | "std::array::<impl [T; N]>::as_mut_slice" ->
++                translate_regular_fn_call substs "unsize_mut_array_ref"
++            | "std::slice::<impl [T]>::as_ptr" | "std::slice::<impl [T]>::as_mut_ptr" ->
+                 let [ Mir.GenArgType gen_arg_ty_info; _ ] = substs in
+                 let [ arg ] = args in
+                 Ok
+@@ -3260,12 +3276,13 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+           let place_does_not_need_drop = place_does_not_need_drop_get ref_data_cpn in
+           let* place_expr, place_is_mutable = translate_place place_cpn loc in
+           let (path, line, _), _ = Ast.lexed_loc loc in
++          let place_ty = decode_ty (D.decode_ty (place_ty_get ref_data_cpn)) in
+           let ignore_ref_creation =
+-            bor_kind = Mut
+-            ||
+-            not place_is_mutable && place_does_not_need_drop
++            (match bor_kind, place_ty with
++             | Mut, `Array -> false
++             | Mut, _ -> true  (* Other mutable borrow forms are not tracked yet. *)
++             | Shared, _ -> not place_is_mutable && place_does_not_need_drop)
+             ||
+-            (* ignore &mut E for now *)
+             if TranslatorArgs.ignore_ref_creation then true
+             else
+               let directives =
+@@ -3293,9 +3310,6 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+           if ignore_ref_creation then
+             Ok (`TrRvalueExpr (Ast.AddressOf (loc, place_expr)))
+           else
+-            let place_ty =
+-              decode_ty (D.decode_ty (place_ty_get ref_data_cpn))
+-            in
+             let is_implicit = is_implicit_get ref_data_cpn in
+             let place_kind =
+               VfMirRd.PlaceKind.get (VfMirRd.Place.kind_get place_cpn)
+@@ -3396,15 +3410,18 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+                   Static ))
+             in
+             Ok (`TrRvalueExpr (result_of_outcome loc e))
+-          | { kind = PointerCoercion; ty = { kind = Ref { mutability = Not; ty = { kind = Slice _ } } } } ->
+-            (* A pointer coercion to a shared slice reference is array unsizing.
+-               Keep the array reference's tag and attach its static length. *)
++          | { kind = PointerCoercion; ty = { kind = Ref { mutability; ty = { kind = Slice _ } } } } ->
++            (* Array-to-slice coercion keeps the reference tag and adds the array length. *)
+             let expr =
+               match operand with
+               | `TrOperandCopy expr | `TrOperandMove (expr, _) -> expr
+               | _ -> Ast.static_error loc "Expected an array reference operand for slice unsizing" None
+             in
+-            let call = Ast.CallExpr (loc, "unsize_shared_array_ref", [], [], [LitPat expr], Static) in
++            let unsize = match mutability with
++              | Not -> "unsize_shared_array_ref"
++              | Mut -> "unsize_mut_array_ref"
++            in
++            let call = Ast.CallExpr (loc, unsize, [], [], [LitPat expr], Static) in
+             Ok (`TrRvalueExpr (result_of_outcome loc call))
+           | _ ->
+           let* ty_info = translate_decoded_ty cast_data.ty loc in
+diff --git a/tests/rust/purely_unsafe/mutable_array_slice.rs b/tests/rust/purely_unsafe/mutable_array_slice.rs
+new file mode 100644
+index 0000000..dc08696
+--- /dev/null
++++ b/tests/rust/purely_unsafe/mutable_array_slice.rs
+@@ -0,0 +1,58 @@
++unsafe fn update_array(array: *mut [u32; 3], first: usize, last: usize)
++//@ req (array as *u32)[..3] |-> ?slots &*& first < 3 &*& first <= last &*& last <= 3;
++//@ ens (array as *u32)[..3] |-> append(take(first, slots), cons(42, drop(first + 1, slots)));
++//@ on_unwind_ens false;
++{
++    //@ close_points_to(array);
++    unsafe {
++        let borrowed = &mut *array;
++        let values = borrowed.as_mut_slice();
++        let base = values.as_mut_ptr();
++        //@ open_points_to(borrowed);
++
++        //@ array_split(base, first);
++        //@ array_split(base + first, last - first);
++        let range = values.get_unchecked_mut(first..last);
++        //@ assert range.len() == last - first;
++        //@ end_slice_ref_mut(range);
++        //@ array_join(base + first);
++        //@ array_join(base);
++
++        //@ array_split(base, last);
++        let prefix = values.get_unchecked_mut(..last);
++        //@ assert prefix.len() == last;
++        //@ end_slice_ref_mut(prefix);
++        //@ array_join(base);
++
++        //@ array_split(base, first);
++        //@ array_split(base + first, 1);
++        //@ open array(base + first, 1, _);
++        let slot = values.get_unchecked_mut(first);
++        //@ points_to_limits(slot);
++        *slot = 42;
++        //@ end_ref_mut(slot);
++        //@ close array(base + first, 1, [42]);
++        //@ array_join(base + first);
++        //@ array_join(base);
++        //@ length_drop(first, slots);
++        //@ drop_n_plus_one(first, slots);
++        //@ close_points_to(borrowed);
++        //@ end_ref_mut(borrowed);
++    }
++    //@ open_points_to(array);
++}
++
++unsafe fn reject_write_through_parent(x: &mut [u32]) -> u32
++//@ req 0 < x.len() &*& *(x as *u32) |-> ?value;
++//@ ens *(x as *u32) |-> value &*& result == value;
++//@ on_unwind_ens false;
++{
++    let old = x.as_mut_ptr();
++    let borrow = unsafe { x.get_unchecked_mut(0) };
++    unsafe { *old = 42 }; //~should_fail
++    let observed = *borrow;
++    //@ end_ref_mut(borrow);
++    observed
++}
++
++fn main() {}
+diff --git a/tests/rust/testsuite.mysh b/tests/rust/testsuite.mysh
+--- a/tests/rust/testsuite.mysh
++++ b/tests/rust/testsuite.mysh
+@@ -65,6 +65,7 @@ cd purely_unsafe
+   verifast -ignore_unwind_paths tree.rs
+   verifast -ignore_unwind_paths -allow_assume tree2.rs
+   verifast traits0.rs
++  verifast -skip_specless_fns -allow_dead_code -allow_should_fail mutable_array_slice.rs
+   verifast -allow_should_fail -allow_dead_code traits0_error.rs
+   verifast -allow_should_fail -allow_dead_code traits0_error2.rs
+   verifast pred_fam.rs

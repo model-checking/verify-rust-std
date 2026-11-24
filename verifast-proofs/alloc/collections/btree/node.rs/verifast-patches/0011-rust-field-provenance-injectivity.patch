@@ -1,0 +1,50 @@
+diff --git a/bin/rust/prelude_core.rsspec b/bin/rust/prelude_core.rsspec
+index 34d3057..2a4e145 100644
+--- a/bin/rust/prelude_core.rsspec
++++ b/bin/rust/prelude_core.rsspec
+@@ -111,11 +111,8 @@ fix ptr_add_strip_metadata(p: pointer, offset: i32) -> pointer {
+ }
+ 
+ fix field_ptr_provenance(p: pointer, structTypeid: *_, fieldOffset: i32) -> pointer_provenance;
+-fix field_ptr_provenance_parent(pr: pointer_provenance, fieldOffset: i32) -> pointer;
+-
+-lem_auto(field_ptr_provenance(p, structTypeid, fieldOffset)) field_ptr_provenance_injective(p: pointer, structTypeid: *_, fieldOffset: i32);
+-    req true;
+-    ens field_ptr_provenance_parent(field_ptr_provenance(p, structTypeid, fieldOffset), fieldOffset) == p;
++// Rust field projections retain the base provenance. The provenance
++// and field offset therefore cannot recover the base address.
+ 
+ fix field_ptr(p: pointer, structTypeid: *_, fieldOffset: i32) -> pointer {
+     pointer_ctor(field_ptr_provenance(p, structTypeid, fieldOffset), p.address + fieldOffset, pointer_metadata_none)
+diff --git a/tests/rust/purely_unsafe/field_projection_addresses.rs b/tests/rust/purely_unsafe/field_projection_addresses.rs
+new file mode 100644
+index 0000000..11991b9
+--- /dev/null
++++ b/tests/rust/purely_unsafe/field_projection_addresses.rs
+@@ -0,0 +1,14 @@
++/*@
++lem distinct_fields(p: pointer)
++    req true;
++    ens true;
++{
++    let q = ptr_add(p, 1);
++    let a = last_field_ptr(p, typeid(i32), 0);
++    let b = last_field_ptr(q, typeid(i32), 0);
++    assert a != b;
++    assert a == b; //~should_fail
++}
++@*/
++
++fn main() {}
+diff --git a/tests/rust/testsuite.mysh b/tests/rust/testsuite.mysh
+index 94c290b..db88fe4 100644
+--- a/tests/rust/testsuite.mysh
++++ b/tests/rust/testsuite.mysh
+@@ -43,6 +43,7 @@ cd purely_unsafe
+   verifast -skip_specless_fns box_projection.rs
+   verifast -skip_specless_fns -allow_dead_code -allow_should_fail borrowed_box_projection.rs
+   verifast -skip_specless_fns merge_fractions_before_borrow.rs
++  verifast -skip_specless_fns -allow_should_fail field_projection_addresses.rs
+   verifast -allow_assume std_thread.rs
+   verifast -allow_should_fail -allow_dead_code nonmut_let_immut.rs
+   verifast struct_exprs.rs

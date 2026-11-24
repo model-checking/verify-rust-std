@@ -1,0 +1,242 @@
+diff --git a/src/refinement_checker/refinement_checker.ml b/src/refinement_checker/refinement_checker.ml
+index 6c582f2..8b6407a 100644
+--- a/src/refinement_checker/refinement_checker.ml
++++ b/src/refinement_checker/refinement_checker.ml
+@@ -1664,6 +1664,7 @@ let commands_of_rvalue = function
+ | ThreadLocalRef -> failwith "TODO: ThreadLocalRef"
+ | RawPtr rvalue_raw_ptr_data -> [RawPtr rvalue_raw_ptr_data]
+ | Cast {operand=Copy {local; projection=[BoxAsNonNull _]}} -> [LoadLocal local; BoxAsPtr]
++| Cast {operand=Copy {local; projection=[Deref; BoxAsNonNull _]}} -> [LoadLocal local; Deref; BoxAsPtr]
+ | Cast {operand; ty} -> commands_of_operand operand @ [Cast ty]
+ | BinaryOp {operator; operandl; operandr} -> commands_of_operand operandl @ commands_of_operand operandr @ [BinaryOp operator]
+ | UnaryOp {operator; operand} -> commands_of_operand operand @ [UnaryOp operator]
+diff --git a/src/rust_frontend/vf_mir_exporter/src/lib.rs b/src/rust_frontend/vf_mir_exporter/src/lib.rs
+index ef0ba83..902bd17 100644
+--- a/src/rust_frontend/vf_mir_exporter/src/lib.rs
++++ b/src/rust_frontend/vf_mir_exporter/src/lib.rs
+@@ -628,6 +628,17 @@ use rustc_span::RemapPathScopeComponents;
+         Adt,
+         Other,
+     }
++
++    struct LocalUses(Vec<usize>);
++
++    impl<'tcx> mir::visit::Visitor<'tcx> for LocalUses {
++        fn visit_local(&mut self, local: mir::Local, context: mir::visit::PlaceContext, _: mir::Location) {
++            if context.is_use() || matches!(context, mir::visit::PlaceContext::NonUse(mir::visit::NonUseContext::VarDebugInfo)) {
++                self.0[local.as_usize()] += 1;
++            }
++        }
++    }
++
+     struct EncCtx<'tcx, 'a> {
+         req_adts: Vec<ty::AdtDef<'tcx>>,
+         tcx: TyCtxt<'tcx>,
+@@ -1426,6 +1437,7 @@ use rustc_span::RemapPathScopeComponents;
+                 },
+             );
+ 
++            let mut local_uses = None;
+             body_cpn.fill_basic_blocks(
+                 body.basic_blocks.iter_enumerated(),
+                 |basic_block_cpn, (basic_block_idx, basic_block)| {
+@@ -1434,6 +1446,7 @@ use rustc_span::RemapPathScopeComponents;
+                         enc_ctx,
+                         basic_block_idx,
+                         basic_block,
++                        &mut local_uses,
+                         basic_block_cpn,
+                     );
+                 },
+@@ -2080,17 +2093,59 @@ use rustc_span::RemapPathScopeComponents;
+             enc_ctx: &mut EncCtx<'tcx, 'a>,
+             basic_block_idx: mir::BasicBlock,
+             basic_block_data: &mir::BasicBlockData<'tcx>,
++            local_uses: &mut Option<LocalUses>,
+             mut basic_block_cpn: basic_block_cpn::Builder<'_>,
+         ) {
+             let basic_block_id_cpn = basic_block_cpn.reborrow().init_id();
+             Self::encode_basic_block_id(basic_block_idx, basic_block_id_cpn);
+ 
+-            basic_block_cpn.fill_statements(
+-                &basic_block_data.statements,
+-                |statement_cpn, statement| {
+-                    Self::encode_statement(tcx, enc_ctx, statement, statement_cpn);
+-                },
+-            );
++            let mut rewritten_statements = None;
++            for (i, pair) in basic_block_data.statements.windows(2).enumerate() {
++                // Derefer copies a Box through a reference without a retag before
++                // ElaborateBoxDerefs extracts its pointer. When that extraction
++                // is the temporary's only read, project from the original place.
++                let [copy, cast] = pair else { unreachable!() };
++                let mir::StatementKind::Assign((tmp, mir::Rvalue::Use(
++                    mir::Operand::Copy(source), mir::WithRetag::No,
++                ))) = &copy.kind else { continue };
++                let mir::StatementKind::Assign((target, mir::Rvalue::Cast(
++                    mir::CastKind::BoxDerefTransmute, mir::Operand::Copy(field), ty,
++                ))) = &cast.kind else { continue };
++                let body = enc_ctx.body();
++                let tmp_decl = &body.local_decls[tmp.local];
++                if !tmp.projection.is_empty()
++                    || tmp.local.as_usize() <= body.arg_count
++                    || source.projection.as_slice() != [mir::PlaceElem::Deref]
++                    || tmp.local != field.local
++                    || !matches!(field.projection.as_slice(), [mir::PlaceElem::Field(index, _)] if index.as_usize() == 0)
++                    || !matches!(body.local_decls[source.local].ty.kind(),
++                        ty::Ref(_, boxed, mir::Mutability::Mut) if boxed.is_box() && *boxed == tmp_decl.ty)
++                {
++                    continue;
++                }
++                let uses = local_uses.get_or_insert_with(|| {
++                    let mut counts = LocalUses(vec![0; body.local_decls.len()]);
++                    mir::visit::Visitor::visit_body(&mut counts, body);
++                    counts
++                });
++                if uses.0[tmp.local.as_usize()] != 2 {
++                    continue;
++                }
++                let place = mir::Place {
++                    local: source.local,
++                    projection: tcx.mk_place_elems(&[mir::PlaceElem::Deref, field.projection[0]]),
++                };
++                let statements = rewritten_statements.get_or_insert_with(|| basic_block_data.statements.clone());
++                statements[i].kind = mir::StatementKind::Nop;
++                statements[i + 1].kind = mir::StatementKind::Assign((
++                    *target,
++                    mir::Rvalue::Cast(mir::CastKind::BoxDerefTransmute, mir::Operand::Copy(place), *ty),
++                ).into());
++            }
++            let statements = rewritten_statements.as_deref().unwrap_or(&basic_block_data.statements);
++            basic_block_cpn.fill_statements(statements, |statement_cpn, statement| {
++                Self::encode_statement(tcx, enc_ctx, statement, statement_cpn);
++            });
+ 
+             let terminator_cpn = basic_block_cpn.reborrow().init_terminator();
+             Self::encode_terminator(tcx, enc_ctx, basic_block_data.terminator(), terminator_cpn);
+@@ -2911,20 +2966,27 @@ use rustc_span::RemapPathScopeComponents;
+             let local = &enc_ctx.body().local_decls()[place.local];
+             let mut pty = mir::PlaceTy::from_ty(local.ty);
+             let mut kind = PlaceKind::Other;
+-            let is_box_field0_projection = local.ty.is_box()
+-                && !place.projection.is_empty()
++            let (box_ty, prefix_len) = match (local.ty.kind(), place.projection.first()) {
++                (ty::Ref(_, target, mir::Mutability::Mut), Some(mir::PlaceElem::Deref)) => (*target, 1),
++                _ => (local.ty, 0),
++            };
++            let fields = &place.projection.as_slice()[prefix_len..];
++            let is_box_field0_projection = box_ty.is_box()
++                && !fields.is_empty()
+                 && place.projection.len() <= 2
+-                && place.projection.iter().all(|elem| {
++                && fields.iter().all(|elem| {
+                     matches!(elem, mir::ProjectionElem::Field(field_idx, _) if field_idx.as_usize() == 0)
+                 });
+             if is_box_field0_projection {
+-                // The only projections that can be applied to a Box are
+-                // `X.0: std::ptr::Unique<T>` (emitted by ElaborateBoxDerefs) and
+-                // `(X.0: std::ptr::Unique<T>).0: std::ptr::NonNull<T>` (emitted by drop glue).
+-                let place_projection_cpn = place_cpn.reborrow().init_projection(1);
+-                let place_elem_cpn = place_projection_cpn.get(0);
+-                let ty_cpn = place_elem_cpn.init_box_as_non_null();
+-                Self::encode_ty(enc_ctx.tcx, enc_ctx, local.ty.boxed_ty().unwrap(), ty_cpn);
++                // Box's first field is its pointer. Drop glue also projects
++                // Unique's first field to obtain NonNull.
++                let mut projection = place_cpn.reborrow().init_projection(prefix_len + 1);
++                if prefix_len == 1 {
++                    projection.reborrow().get(0).set_deref(());
++                    kind = PlaceKind::MutableRef;
++                }
++                let ty_cpn = projection.get(prefix_len).init_box_as_non_null();
++                Self::encode_ty(enc_ctx.tcx, enc_ctx, box_ty.boxed_ty().unwrap(), ty_cpn);
+             } else {
+                 place_cpn.reborrow().fill_projection(place.projection, |place_elm_cpn, place_elm| {
+                     kind = Self::encode_place_element(enc_ctx, pty.ty, &place_elm, place_elm_cpn, kind);
+diff --git a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+index ff7a380..21feb7e 100644
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -3410,15 +3410,16 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+               cast_data.ty
+           end;
+           match cast_data with
+-            {operand=Copy {local; projection=[BoxAsNonNull _]}} ->
+-            let id = translate_local_decl_id_ local.name in
++            {operand=Copy {local; projection=([BoxAsNonNull _] | [Deref; BoxAsNonNull _]) as projection}} ->
++            let var = Ast.Var (loc, translate_local_decl_id_ local.name) in
++            let box_ref = if List.length projection = 1 then Ast.AddressOf (loc, var) else var in
+             let e =
+               ( Ast.CallExpr
+                 ( loc,
+                   "std::boxed::Box::<T, A>::as_mut_ptr",
+                   [],
+                   [],
+-                  [ LitPat (AddressOf (loc, Var (loc, id))) ],
++                  [ LitPat box_ref ],
+                   Static ))
+             in
+             Ok (`TrRvalueExpr (result_of_outcome loc e))
+diff --git a/tests/rust/purely_unsafe/borrowed_box_projection.rs b/tests/rust/purely_unsafe/borrowed_box_projection.rs
+new file mode 100644
+index 0000000..b4083fb
+--- /dev/null
++++ b/tests/rust/purely_unsafe/borrowed_box_projection.rs
+@@ -0,0 +1,46 @@
++#![allow(dead_code)]
++
++unsafe fn replace_borrowed_box_contents(mut owner: Box<i32>, value: i32) -> Box<i32>
++/*@
++req thread_token(?t) &*& std::boxed::Box_in(t, owner, ?id, _) &*&
++    exists::<lifetime_t>(?k) &*& [?q]lifetime_token(k) &*& lifetime_inclusion(k, id.lft) == true;
++@*/
++//@ ens thread_token(t) &*& std::boxed::Box_in(t, result, id, value) &*& [q]lifetime_token(k);
++//@ on_unwind_ens false;
++{
++    //@ open exists(k);
++    let view = &mut owner; //~track_ref_creation
++    //@ let contents = std::boxed::Box_separate_contents(view);
++    //@ let traded = lifetime_token_trade(k, q, id.lft);
++    //@ open_points_to_at_lft(contents, traded);
++    //@ points_to_limits(contents);
++    let destination: &mut i32 = view; //~track_ref_creation
++    *destination = value;
++    //@ end_ref_mut(destination);
++    //@ close_points_to_at_lft(contents);
++    //@ lifetime_token_trade_back(traded, id.lft);
++    //@ std::boxed::Box_unseparate_contents(view);
++    //@ end_ref_mut(view);
++    owner
++}
++
++unsafe fn borrow_another_box(mut owner: Box<i32>, mut other: Box<i32>)
++/*@
++req thread_token(?t) &*& std::boxed::Box_in(t, owner, ?id, _) &*& std::boxed::Box_in(t, other, _, _) &*&
++    exists::<lifetime_t>(?k) &*& [?q]lifetime_token(k) &*& lifetime_inclusion(k, id.lft) == true;
++@*/
++//@ ens thread_token(t) &*& [q]lifetime_token(k);
++//@ on_unwind_ens false;
++{
++    //@ open exists(k);
++    let _view = &mut owner; //~track_ref_creation
++    //@ let contents = std::boxed::Box_separate_contents(_view);
++    //@ let traded = lifetime_token_trade(k, q, id.lft);
++    //@ open_points_to_at_lft(contents, traded);
++    //@ points_to_limits(contents);
++
++    let other_view = &mut other; //~track_ref_creation
++    let _destination: &mut i32 = other_view; //~should_fail
++}
++
++fn main() {}
+diff --git a/tests/rust/testsuite.mysh b/tests/rust/testsuite.mysh
+index e92cdb3..138a69e 100644
+--- a/tests/rust/testsuite.mysh
++++ b/tests/rust/testsuite.mysh
+@@ -41,6 +41,7 @@ cd purely_unsafe
+   verifast -skip_specless_fns fixed_array_index.rs
+   !verifast -skip_specless_fns fixed_array_index_bad.rs
+   verifast -skip_specless_fns box_projection.rs
++  verifast -skip_specless_fns -allow_dead_code -allow_should_fail borrowed_box_projection.rs
+   verifast -allow_assume std_thread.rs
+   verifast -allow_should_fail -allow_dead_code nonmut_let_immut.rs
+   verifast struct_exprs.rs

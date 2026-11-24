@@ -1,0 +1,370 @@
+# Case bad-internal-capacity
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -10014,5 +10014,5 @@
+         //@ let len_view = precreate_ref(&self.node);
+         //@ init_ref_readonly(len_view, 1/2);
+-        let fits = self.node.merge_len() < CAPACITY;
++        let fits = self.node.merge_len() <= CAPACITY;
+         //@ end_ref_readonly(len_view);
+         //@ merge_fractions points_to(&self.node, _);
+# Case bad-key-range
+--- a/verified/operations.rs
++++ b/verified/operations.rs
+@@ -1155,5 +1155,5 @@
+         //@ drop_twice(last - first, first, slots);
+         
+-        let lent = unsafe { view.get_unchecked_mut(index) };
++        let lent = unsafe { view.get_unchecked_mut(0..index.end) };
+         //@ close move_slice(lent as *MaybeUninit<K>, last - first, _);
+         //@ close leaf_without_keys(storage, parent, idx, len, vals);
+# Case bad-leaf-capacity
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -10295,5 +10295,5 @@
+         //@ let len_view = precreate_ref(&self.node);
+         //@ init_ref_readonly(len_view,1/2);
+-        let fits = unsafe { self.node.merge_len() < CAPACITY };
++        let fits = unsafe { self.node.merge_len() <= CAPACITY };
+         //@ end_ref_readonly(len_view);
+         //@ merge_fractions points_to(&self.node,_);
+# Case bad-relink-read
+--- a/verified/relink.rs
++++ b/verified/relink.rs
+@@ -484,5 +484,5 @@
+         //@ let slot = precreate_ref(base + self.idx);
+         //@ init_ref_readonly(slot, 1/2);
+-        let edge = unsafe { (*parent_ptr).edges.get_unchecked(self.idx).assume_init_read() };
++        let edge = unsafe { (*parent_ptr).edges.get_unchecked(CAPACITY + 1).assume_init_read() };
+         //@ end_ref_readonly(slot);
+         //@ merge_fractions points_to(base + self.idx, _);
+# Case bad-root-edge
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -10536,5 +10536,5 @@
+         //@ assert array(first_edge+1,CAPACITY,?tail);
+         //@ open array(first_edge,1,_);
+-        new_node.edges[0].write(child.node);
++        new_node.edges[1].write(child.node);
+         //@ close array(first_edge,1,[MaybeUninit::new(child.node)]);
+         //@ array_join(first_edge);
+# Case bad-separator
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -4227,5 +4227,5 @@
+         //@ drop_append(old_parent_len, active_after, drop(old_parent_len, p));
+ 
+-        left_node.key_area_slot_mut/*@::<'a,K,V,marker::LeafOrInternal,'short>@*/(old_left_len).write(entry);
++        left_node.key_area_slot_mut/*@::<'a,K,V,marker::LeafOrInternal,'short>@*/(0).write(entry);
+         //@ assert keys_slot_loan(left, ?slot, old_left_len, l_parent, l_idx, l_len, l_vals, _, _);
+         //@ end_keys_slot(left, slot);
+# Case bad-split-boundaries
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -9331,5 +9331,5 @@
+                     //@ move_slice_offset(vals_base, CAPACITY, new_len);
+                     //@ array_split(vals_base, new_len);
+-                    let vals_target = &mut vals_array[..new_len];
++                    let vals_target = &mut vals_array[..new_len + 1];
+                     //@ close move_slice(vals_target as *MaybeUninit<V>, new_len, _);
+                     vals_target
+# Case bad-suffix-range
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -8695,5 +8695,5 @@
+                         move_to_slice(
+                             left.edge_area_range_mut/*@::<'a,K,V,'short>@*/(new_left_len + 1..old_left_len + 1),
+-                            right_child.edge_area_range_mut/*@::<'a,K,V,'short>@*/(1..new_right_len + 1),
++                            right_child.edge_area_range_mut/*@::<'a,K,V,'short>@*/(0..new_right_len),
+                         );
+                         //@ assert edges_range_loan(left_edges.as_ptr(), ?source, new_left_len + 1, old_left_len + 1, left_data, _, _);
+# Case drop-next-pair
+--- a/original/whole/node.rs
++++ b/original/whole/node.rs
+@@ -462,5 +462,5 @@
+             // If `kv.drop_key_val()` panics, the guard would drop
+             // the rest and skip the panicked kv.
+-            let guard = DropGuard { node: self, idx: idx + 1 };
++            let guard = DropGuard { node: self, idx: idx + 2 };
+             // SAFETY: idx < len and the kv has been initialized and
+             // it won't touch the idx-th more than once
+# Case drop-value-guard
+--- a/original/whole/node.rs
++++ b/original/whole/node.rs
+@@ -1304,4 +1304,5 @@
+             let val = leaf.vals.get_unchecked_mut(self.idx);
+             let _guard = Dropper(val);
++            std::mem::forget(_guard);
+             key.assume_init_drop();
+             // dropping the guard will drop the value
+# Case drop-loop-index
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -9142,5 +9142,5 @@
+         match next {
+             None => break,
+-            Some(i) => unsafe { drop_at(node, i) },
++            Some(_i) => unsafe { drop_at(node, start) },
+         }
+     }
+# Case whole-insert-loop
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -5926,5 +5926,5 @@
+                         //@ open exists(fresh);
+                         //@ close completed_levels::<K,V>(t,alloc_id,k, cons(Placement(receiving,fresh,current_key,current_value),completed));
+-                        unsafe { pending.forget_node_type() }
++                        return unsafe { inserted.awaken() };
+                     }
+                 }
+# Case missing-insert-relink
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -9904,5 +9904,5 @@
+         //@ close exists(parent);
+         //@ close exists(pair(initialized_edges(before), inactive));
+-        self.node.relink_range/*@::<'a,K,V,'short>@*/(self.idx + 1..new_len + 1); //~track_ref_creation
++        self.node.relink_range/*@::<'a,K,V,'short>@*/(self.idx + 2..new_len + 1); //~track_ref_creation
+         //@ assert ref_mut_end_token(?relink_receiver, &(*self).node);
+         //@ end_ref_mut(relink_receiver);
+# Case missing-internal-relink
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -9533,5 +9533,4 @@
+         //@ close exists(node);
+         //@ close exists(tail);
+-        unsafe { this.borrow_mut().correct_all_childrens_parent_links() };
+         //@ close node_arrays(root, Array_elems(contents.data.keys), Array_elems(contents.data.vals), Array_elems(contents.edges));
+         //@ initialized_edge_count(children);
+# Case production-steal-range
+--- a/original/node.rs
++++ b/original/node.rs
+@@ -1784,5 +1784,5 @@
+                     slice_shl(right.edge_area_mut(..old_right_len + 1), count);
+ 
+-                    left.correct_childrens_parent_links(old_left_len + 1..new_left_len + 1);
++                    left.correct_childrens_parent_links(old_left_len + 2..new_left_len + 1);
+                     right.correct_childrens_parent_links(0..new_right_len + 1);
+                 }
+# Case root-guard
+--- a/original/whole/mem.rs
++++ b/original/whole/mem.rs
+@@ -23,6 +23,7 @@
+         }
+     }
+     let guard = PanicGuard;
++    mem::forget(guard);
+     // SAFETY: v is valid for reads and we write a new value before returning.
+     let value = unsafe { ptr::read(v) };
+     let (new_value, ret) = change(value);
+@@ -30,6 +31,5 @@
+     unsafe {
+         ptr::write(v, new_value);
+     }
+-    mem::forget(guard);
+     ret
+ }
+# Case short-edges
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -9662,5 +9662,5 @@
+                 //@ move_slice_offset(right_base, CAPACITY + 1, moved_count);
+                 //@ array_split(right_base, moved_count);
+-                let right_edges = &mut right_array[..new_len + 1];
++                let right_edges = &mut right_array[..new_len];
+                 //@ close move_slice(right_edges as *MaybeUninit<BoxedNode<K,V>>, moved_count, _);
+                 right_edges
+# Case skipped-merge
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -7389,5 +7389,5 @@
+         let merging = self;
+         //@ close_points_to(&self);
+-        let child = unsafe { merging.merge_tracking_child/*@::<'a,K,V,A>@*/(alloc) };
++        let child = merging.left_child;
+         //@ let new_len = l + 1 + r;
+         //@ let surviving = append(take(index + 1, pc), drop(index + 2, pc));
+# Case skipped-stolen-edge
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -7990,5 +7990,5 @@
+                     //@ close exists(pair(nil::<MaybeUninit<BoxedNode<K,V>>>,tail));
+                     //@ length_append(moved,right_children);
+-                    right_internal.relink_range/*@::<'a,K,V,'short>@*/(0..new_right_len + 1);
++                    right_internal.relink_range/*@::<'a,K,V,'short>@*/(1..new_right_len + 1);
+                     //@ close_points_to(&(*right_edges.as_ptr()).data);
+                     //@ close internal_without_edges(right_edges.as_ptr(),right_data);
+# Case wrong-drop-slot
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -8887,5 +8887,5 @@
+                     slice
+                 },
+-                self.idx,
++                self.idx + 1,
+             );
+         //@ close drop_slot_loan(&(*leaf).keys,key_array,key_slot,index,take(index,keys),drop(index+1,keys));
+# Case wrong-layout
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -6748,5 +6748,5 @@
+                     //@ std::ptr::NonNull_Sized_as_ptr(right_internal_node.node);
+                     //@ std::ptr::NonNull_as_ptr_new(right_internal_node.node.as_ptr() as *u8);
+-                    alloc.deallocate/*@::<A,'call>@*/(right_internal_node.node.cast(), std::alloc::Layout::new::<InternalNode<K,V>>());
++                    alloc.deallocate/*@::<A,'call>@*/(right_internal_node.node.cast(), std::alloc::Layout::new::<LeafNode<K,V>>());
+                     //@ close_points_to(&right_internal_node);
+                     //@ leak Allocator::<&'call A>(t, view, id);
+# Case wrong-left-steal-offset
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -5479,5 +5479,5 @@
+ {
+     unsafe {
+-        Handle::<NodeRef<marker::Mut<'_>, K, V, marker::LeafOrInternal>, marker::Edge>::new_edge(child, 1 + tracked_idx)
++        Handle::<NodeRef<marker::Mut<'_>, K, V, marker::LeafOrInternal>, marker::Edge>::new_edge(child, 1 - tracked_idx)
+     }
+ }
+# Case wrong-merge-offset
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -4799,5 +4799,5 @@
+     let new_idx = match track_edge_idx {
+         LeftOrRight::Left(idx) => idx,
+-        LeftOrRight::Right(idx) => old_left_len + 1 + idx,
++        LeftOrRight::Right(idx) => old_left_len + idx,
+     };
+     unsafe {
+# Case allocator-drop-bound
+--- /dev/null
++++ b/verified/allocator-drop.rs
+@@ -0,0 +1,23 @@
++#![allow(dead_code)]
++
++unsafe fn claimed_no_unwind<T>(value: T)
++//@ req thread_token(?t) &*& type_interp::<T>() &*& <T>.own(t, value);
++//@ ens thread_token(t) &*& type_interp::<T>();
++//@ on_unwind_ens false;
++{
++    //@ std::alloc::open_Allocator_own::<T>(value);
++    //@ std::alloc::Allocator_to_own::<T>(value);
++    let mut primary = value;
++    //@ close_points_to(&mut primary);
++}
++
++struct Panicking;
++impl Drop for Panicking {
++    fn drop(&mut self) {
++        panic!("destructor unwinds");
++    }
++}
++
++fn main() {
++    assert!(std::panic::catch_unwind(|| unsafe { claimed_no_unwind(Panicking) }).is_err());
++}
+# Case production-root-callback
+--- a/callers/entry.rs
++++ b/callers/entry.rs
+@@ -463,7 +463,7 @@
+                 // SAFETY: Pushing a new root node doesn't invalidate
+                 // handles to existing nodes.
+                 let map = unsafe { self.dormant_map.reborrow() };
+-                let root = map.root.as_mut().unwrap(); // same as ins.left
++                let root = map.root.as_mut().filter(|_| false).unwrap();
+                 root.push_internal_level(self.alloc.clone()).push(ins.kv.0, ins.kv.1, ins.right)
+             }),
+         };
+# Case unwind-order
+--- /dev/null
++++ b/original/unwind_order.rs
+@@ -0,0 +1,7 @@
++fn cleanup_order<T, U>(first: T, second: U, action: impl FnOnce()) {
++    action();
++    drop(second);
++    drop(first);
++}
++
++fn main() {}
+--- /dev/null
++++ b/verified/unwind_order.rs
+@@ -0,0 +1,8 @@
++fn cleanup_order<T, U>(first: T, second: U, action: impl FnOnce()) {
++    let first = first;
++    action();
++    drop(second);
++    drop(first);
++}
++
++fn main() {}
+# Case production-leaf-dispatch
+--- a/original/node.rs
++++ b/original/node.rs
+@@ -1048,7 +1048,7 @@
+         Option<SplitResult<'a, K, V, marker::Leaf>>,
+         Handle<NodeRef<marker::DormantMut, K, V, marker::Leaf>, marker::KV>,
+     ) {
+-        if self.node.len() < CAPACITY {
++        if self.node.len() <= CAPACITY {
+             // SAFETY: There is enough space in the node for insertion.
+             let handle = unsafe { self.insert_fit(key, val) };
+             (None, handle.dormant())
+# Case production-ascend
+--- a/portable/node.rs
++++ b/portable/node.rs
+@@ -347,7 +347,7 @@
+             .map(|parent| Handle {
+                 node: NodeRef::from_internal(*parent, self.height + 1),
+                 // ignore-tidy-undocumented-unsafe
+-                idx: unsafe { usize::from((*leaf_ptr).parent_idx.assume_init()) },
++                idx: unsafe { usize::from((*leaf_ptr).parent_idx.assume_init()) }.saturating_add(1),
+                 _marker: PhantomData,
+             })
+             .ok_or(self)
+
+# Case duplicate-key-loan
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -10801,5 +10801,7 @@
+                 )
+             };
++            let raw_key = key_slot.as_mut_ptr();
+             let key = key_slot.assume_init_mut();
++            let _duplicate = &mut *raw_key; //~track_ref_creation
+             //@ close exists::<*MaybeUninit<K>>(key_slot);
+             //@ close initialized_array_slot(key_base,index,key,take(index,keys),drop(index+1,keys));
+
+# Case invalid-parent-nonnull
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -6010,5 +6010,5 @@
+         //@ std::ptr::NonNull_new_as_ptr(parent);
+         let parent_ptr = self.node.node.as_ptr() as *mut InternalNode<K, V>;
+-        let parent_link = unsafe { NonNull::new_unchecked(parent_ptr) };
++        let parent_link = unsafe { NonNull::new_unchecked(std::ptr::null_mut::<InternalNode<K, V>>()) };
+         //@ std::ptr::NonNull_new_as_ptr(parent_link);
+         // BEGIN_RAW_EDGE_READ
+
+# Case write-shared-node-length
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -10757,4 +10757,6 @@
+         //@ close [store/2]leaf_slots(root,len,key_slots,vals);
+         //@ open_points_to(leaf);
++        let len_ptr = (&raw const leaf.len) as *mut u16;
++        unsafe { *len_ptr = 0 };
+         //@ let keys_addr = &(*leaf).keys;
+         //@ close_points_to(keys_addr,store/2);
+
+# Case uninitialized-key-prefix
+--- a/verified/insertion.rs
++++ b/verified/insertion.rs
+@@ -10782,6 +10782,8 @@
+         //@ assert (base as *u8 + len * std::mem::size_of::<K>()) as pointer == (base + len) as pointer;
+         //@ slots_are_initialized(t,take(len,key_slots));
+-        let prefix = unsafe { <[MaybeUninit<K>]>::get_unchecked(key_slice, ..usize::from(leaf.len)) };
+-        //@ array_split(base,len);
++        let live_len = usize::from(leaf.len);
++        let end = if live_len < CAPACITY { live_len + 1 } else { live_len };
++        let prefix = unsafe { <[MaybeUninit<K>]>::get_unchecked(key_slice, ..end) };
++        //@ array_split(base,end);
+         let result = unsafe { <[MaybeUninit<K>]>::assume_init_ref/*@::<K,'short>@*/(prefix) };
+         //@ array_join(base);

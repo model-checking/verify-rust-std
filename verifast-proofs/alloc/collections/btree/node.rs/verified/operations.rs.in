@@ -1,0 +1,1004 @@
+#![feature(allocator_ext)]
+//! Ancestor ownership and the key, value, and child moves used during splitting.
+//! Refinement checks the production `as_leaf_ptr` and `set_parent_link`.
+
+#![allow(dead_code)]
+
+use std::marker::PhantomData;
+use std::mem::MaybeUninit;
+use std::ptr::NonNull;
+
+//@ use std::mem::{MaybeUninit, open_MaybeUninit, close_MaybeUninit};
+//@ use std::option::Option;
+//@ use std::ptr::NonNull;
+
+const B: usize = 6;
+
+const CAPACITY: usize = 2 * B - 1;
+
+//@ fix B() -> usize { 6 }
+
+//@ fix CAPACITY() -> usize { 2 * B - 1 }
+
+struct LeafNode<K, V> {
+    /// We want to be covariant in `K` and `V`.
+    parent: Option<NonNull<InternalNode<K, V>>>,
+
+    /// This node's index into the parent node's `edges` array.
+    /// `*node.parent.edges[node.parent_idx]` should be the same thing as `node`.
+    /// This is only guaranteed to be initialized when `parent` is non-null.
+    parent_idx: MaybeUninit<u16>,
+
+    /// The number of keys and values this node stores.
+    len: u16,
+
+    /// The arrays storing the actual data of the node. Only the first `len` elements of each
+    /// array are initialized and valid.
+    keys: [MaybeUninit<K>; CAPACITY],
+    vals: [MaybeUninit<V>; CAPACITY],
+}
+
+#[repr(C)]
+struct InternalNode<K, V> {
+    data: LeafNode<K, V>,
+
+    /// The pointers to the children of this node. `len + 1` of these are considered
+    /// initialized and valid, except that near the end, while the tree is held
+    /// through borrow type `Dying`, some of these pointers are dangling.
+    edges: [MaybeUninit<BoxedNode<K, V>>; 2 * B],
+}
+
+type BoxedNode<K, V> = NonNull<LeafNode<K, V>>;
+
+struct NodeRef<BorrowType, K, V, Type> {
+    /// The number of levels that the node and the level of leaves are apart, a
+    /// constant of the node that cannot be entirely described by `Type`, and that
+    /// the node itself does not store. We only need to store the height of the root
+    /// node, and derive every other node's height from it.
+    /// Must be zero if `Type` is `Leaf` and non-zero if `Type` is `Internal`.
+    height: usize,
+    /// The pointer to the leaf or internal node. The definition of `InternalNode`
+    /// ensures that the pointer is valid either way.
+    node: NonNull<LeafNode<K, V>>,
+    _marker: PhantomData<(BorrowType, Type)>,
+}
+
+mod marker {
+    use super::PhantomData;
+    pub(crate) struct Mut<'a>(PhantomData<&'a mut ()>);
+    pub(crate) enum LeafOrInternal {}
+    pub(crate) enum DormantMut {}
+    pub(crate) enum Owned {}
+    pub(crate) enum Dying {}
+    pub(crate) enum Leaf {}
+    pub(crate) enum Internal {}
+    pub(crate) enum KV {}
+    pub(crate) enum Edge {}
+}
+
+use std::alloc::AllocatorClone;
+use std::ptr;
+
+const KV_IDX_CENTER: usize = B - 1;
+//@ fix KV_IDX_CENTER() -> usize { B - 1 }
+const EDGE_IDX_LEFT_OF_CENTER: usize = B - 1;
+//@ fix EDGE_IDX_LEFT_OF_CENTER() -> usize { B - 1 }
+const EDGE_IDX_RIGHT_OF_CENTER: usize = B;
+//@ fix EDGE_IDX_RIGHT_OF_CENTER() -> usize { B }
+
+enum LeftOrRight<T> {
+    Left(T),
+    Right(T),
+}
+
+struct SplitResult<'a, K, V, NodeType> {
+    // Altered node in existing tree with elements and edges that belong to the left of `kv`.
+    pub left: NodeRef<marker::Mut<'a>, K, V, NodeType>,
+    // Some key and value that existed before and were split off, to be inserted elsewhere.
+    pub kv: (K, V),
+    // Owned, unattached, new node with elements and edges that belong to the right of `kv`.
+    pub right: NodeRef<marker::Owned, K, V, NodeType>,
+}
+
+type Root<K, V> = NodeRef<marker::Owned, K, V, marker::LeafOrInternal>;
+
+struct Handle<Node, Type> {
+    node: Node,
+    idx: usize,
+    _marker: PhantomData<Type>,
+}
+
+// SOURCE unsafe fn slice_insert<T>(slice: &mut [MaybeUninit<T>], idx: usize, val: T)
+
+impl<K, V, Type> NodeRef<marker::DormantMut, K, V, Type> {
+// SOURCE     unsafe fn awaken<'a>(self) -> NodeRef<marker::Mut<'a>, K, V, Type>
+}
+
+impl<K, V, NodeType, HandleType> Handle<NodeRef<marker::DormantMut, K, V, NodeType>, HandleType> {
+// SOURCE     unsafe fn awaken<'a>(self) -> Handle<NodeRef<marker::Mut<'a>, K, V, NodeType>, HandleType>
+}
+
+impl<'a, K, V, Type> NodeRef<marker::Mut<'a>, K, V, Type> {
+// SOURCE     unsafe fn dormant<'b>(&'b self) -> NodeRef<marker::DormantMut, K, V, Type>
+}
+
+impl<'a, K, V, NodeType, HandleType> Handle<NodeRef<marker::Mut<'a>, K, V, NodeType>, HandleType> {
+// SOURCE     unsafe fn dormant<'b>(&'b self) -> Handle<NodeRef<marker::DormantMut, K, V, NodeType>, HandleType>
+}
+
+struct DormantMutRef<'a, T> {
+    ptr: NonNull<T>,
+    _marker: PhantomData<&'a mut T>,
+}
+
+impl<'a, T> DormantMutRef<'a, T> {
+// SOURCE     unsafe fn reborrow(&mut self) -> &'a mut T
+}
+
+// SOURCE unsafe fn clone_allocator<A: AllocatorClone>(alloc: &mut A) -> A
+
+// SOURCE unsafe fn read_promoted<T>(slot: *const MaybeUninit<T>) -> T
+
+// SOURCE unsafe fn slice_shl<T>(slice: &mut [MaybeUninit<T>], distance: usize)
+
+// SOURCE unsafe fn slice_shr<T>(slice: &mut [MaybeUninit<T>], distance: usize)
+
+// SOURCE unsafe fn move_to_slice<T>(src: &mut [MaybeUninit<T>], dst: &mut [MaybeUninit<T>])
+
+// SOURCE unsafe fn slice_remove<T>(slice: &mut [MaybeUninit<T>], idx: usize) -> T
+
+// SOURCE unsafe fn move_slice_mut<'a, T>(base: *mut MaybeUninit<T>, len: usize) -> &'a mut [MaybeUninit<T>]
+
+// SOURCE unsafe fn merge_payload<T>(
+
+unsafe fn merge_field<T>(
+    parent: *mut MaybeUninit<T>,
+    left: *mut MaybeUninit<T>,
+    right: *mut MaybeUninit<T>,
+    parent_idx: usize,
+    old_parent_len: usize,
+    old_left_len: usize,
+    right_len: usize,
+    new_left_len: usize,
+)
+/*@
+req thread_token(?t) &*& type_interp::<T>() &*&
+    0 <= parent_idx &*& parent_idx < old_parent_len &*& old_parent_len <= CAPACITY &*&
+    0 <= old_left_len &*& 0 <= right_len &*& new_left_len == old_left_len + 1 + right_len &*& new_left_len <= CAPACITY &*&
+    parent[..CAPACITY] |-> ?p &*& left[..CAPACITY] |-> ?l &*& right[..CAPACITY] |-> ?r &*&
+    slot_owners(t, take(old_parent_len, p)) &*& slot_owners(t, take(old_left_len, l)) &*&
+    slot_owners(t, take(right_len, r));
+@*/
+/*@
+ens thread_token(t) &*& type_interp::<T>() &*&
+    parent[..CAPACITY] |-> ?p_after &*& left[..CAPACITY] |-> ?l_after &*& right[..CAPACITY] |-> r &*&
+    slot_owners(t, take(old_parent_len - 1, p_after)) &*& slot_owners(t, take(new_left_len, l_after));
+@*/
+//@ on_unwind_ens false;
+{
+    //@ own_move_array(parent, CAPACITY);
+    //@ own_move_array(left, CAPACITY);
+    //@ own_move_array(right, CAPACITY);
+    //@ split_move_slice(parent, CAPACITY, old_parent_len);
+    //@ split_move_slice(left, CAPACITY, new_left_len);
+    //@ split_move_slice(right, CAPACITY, right_len);
+    //@ take_twice(l, old_left_len, new_left_len);
+    unsafe { merge_payload(parent, left, right, parent_idx, old_parent_len, old_left_len, right_len, new_left_len) };
+    //@ assert move_slice(parent, old_parent_len, ?new_p);
+    //@ assert move_slice(left, new_left_len, ?new_l);
+    //@ move_slice_length(parent, old_parent_len);
+    //@ move_slice_length(left, new_left_len);
+    //@ join_move_slices(parent, old_parent_len, CAPACITY - old_parent_len);
+    //@ join_move_slices(left, new_left_len, CAPACITY - new_left_len);
+    //@ join_move_slices(right, right_len, CAPACITY - right_len);
+    //@ take_append_l(old_parent_len - 1, new_p, drop(old_parent_len, p));
+    //@ take_append_l(new_left_len, new_l, drop(new_left_len, l));
+    //@ take_length(new_l);
+    //@ append_take_drop_n(r, right_len);
+    //@ open move_slice(parent, CAPACITY, _);
+    //@ open move_slice(left, CAPACITY, _);
+    //@ open move_slice(right, CAPACITY, r);
+}
+
+// SOURCE unsafe fn release_balancing_node<'alloc, T, A: std::alloc::Allocator>(
+
+// SOURCE unsafe fn merge_keys<'a, 'short, K, V>(
+
+// SOURCE unsafe fn merge_vals<'a, 'short, K, V>(
+
+// SOURCE unsafe fn remove_merged_edge<'a, 'short, K, V>(
+
+// SOURCE unsafe fn append_merged_edges<'a, 'short, K, V>(
+
+impl<BorrowType, K, V> NodeRef<BorrowType, K, V, marker::Leaf> {
+// SOURCE_IN_IMPL     unsafe fn forget_type(self) -> NodeRef<BorrowType, K, V, marker::LeafOrInternal>
+}
+
+impl<BorrowType, K, V> NodeRef<BorrowType, K, V, marker::Internal> {
+// SOURCE_IN_IMPL     unsafe fn forget_type(self) -> NodeRef<BorrowType, K, V, marker::LeafOrInternal>
+}
+
+impl<'a, K, V> SplitResult<'a, K, V, marker::Leaf> {
+// SOURCE_IN_IMPL     unsafe fn forget_node_type(self) -> SplitResult<'a, K, V, marker::LeafOrInternal>
+}
+
+impl<'a, K, V> SplitResult<'a, K, V, marker::Internal> {
+// SOURCE_IN_IMPL     unsafe fn forget_node_type(self) -> SplitResult<'a, K, V, marker::LeafOrInternal>
+}
+
+impl<K, V> LeafNode<K, V> {
+// SOURCE     unsafe fn init(this: *mut Self)
+
+// SOURCE_IN_IMPL     unsafe fn new<A: AllocatorClone>(alloc: A) -> Box<Self, A>
+}
+
+impl<K, V> InternalNode<K, V> {
+// SOURCE_IN_IMPL     unsafe fn new<A: AllocatorClone>(alloc: A) -> Box<Self, A>
+}
+
+impl<BorrowType, K, V, Type> NodeRef<BorrowType, K, V, Type> {
+    fn as_leaf_ptr(this: &Self) -> *mut LeafNode<K, V> {
+        // The node must be valid for at least the LeafNode portion.
+        // This is not a reference in the NodeRef type because we don't know if
+        // it should be unique or shared.
+        this.node.as_ptr()
+    }
+}
+
+impl<BorrowType, K, V> NodeRef<BorrowType, K, V, marker::Internal> {
+// SOURCE     unsafe fn as_internal_ptr(this: &Self) -> *mut InternalNode<K, V>
+}
+
+impl<'a, K, V, Type> NodeRef<marker::Mut<'a>, K, V, Type> {
+// SOURCE     unsafe fn as_leaf_mut<'short>(&'short mut self) -> &'short mut LeafNode<K, V>
+}
+
+impl<'a, K, V, Type> NodeRef<marker::Mut<'a>, K, V, Type> {
+// SOURCE     unsafe fn key_area_range_mut<'short>(
+}
+
+impl<'a, K, V, Type> NodeRef<marker::Mut<'a>, K, V, Type> {
+// SOURCE     unsafe fn key_area_prefix_mut<'short>(
+}
+
+impl<'a, K, V, Type> NodeRef<marker::Mut<'a>, K, V, Type> {
+// SOURCE     unsafe fn key_area_slot_mut<'short>(
+}
+
+impl<'a, K, V, Type> NodeRef<marker::Mut<'a>, K, V, Type> {
+// SOURCE     unsafe fn val_area_range_mut<'short>(
+}
+
+impl<'a, K, V, Type> NodeRef<marker::Mut<'a>, K, V, Type> {
+// SOURCE     unsafe fn val_area_prefix_mut<'short>(
+}
+
+impl<'a, K, V, Type> NodeRef<marker::Mut<'a>, K, V, Type> {
+// SOURCE     unsafe fn val_area_slot_mut<'short>(
+}
+
+impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+// SOURCE     unsafe fn as_internal_mut<'short>(&'short mut self) -> &'short mut InternalNode<K, V>
+}
+
+impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+// SOURCE     unsafe fn edge_area_range_mut<'short>(
+}
+
+impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+// SOURCE     unsafe fn edge_area_prefix_mut<'short>(
+}
+
+impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+// SOURCE     unsafe fn edge_area_slot_mut<'short>(
+}
+
+/*@
+pred leaf_without_len<K,V>(leaf: *LeafNode<K,V>;
+    parent: Option<NonNull<InternalNode<K,V>>>, index: MaybeUninit<u16>,
+    keys: list<MaybeUninit<K>>, vals: list<MaybeUninit<V>>) =
+    struct_LeafNode_padding(leaf) &*&
+    (*leaf).parent |-> parent &*& (*leaf).parent_idx |-> index &*&
+    (*leaf).keys[..CAPACITY] |-> keys &*& (*leaf).vals[..CAPACITY] |-> vals;
+
+pred len_loan<K,V>(leaf: *LeafNode<K,V>, lent: *u16,
+    parent: Option<NonNull<InternalNode<K,V>>>, index: MaybeUninit<u16>,
+    keys: list<MaybeUninit<K>>, vals: list<MaybeUninit<V>>) =
+    exists::<*LeafNode<K,V>>(?view) &*& ref_mut_end_token(view, leaf) &*&
+    ref_mut_end_token(lent, &(*view).len) &*& leaf_without_len(view, parent, index, keys, vals);
+
+lem end_len_loan<K,V>(leaf: *LeafNode<K,V>, lent: *u16)
+    req len_loan(leaf, lent, ?parent, ?index, ?keys, ?vals) &*& *lent |-> ?updated;
+    ens leaf_without_len(leaf, parent, index, keys, vals) &*& (*leaf).len |-> updated;
+{
+    open len_loan(leaf, lent, parent, index, keys, vals);
+    open exists::<*LeafNode<K,V>>(?view);
+    end_ref_mut(lent);
+    open leaf_without_len(view, parent, index, keys, vals);
+    close_points_to(view);
+    end_ref_mut(view);
+    open_points_to(leaf);
+    close leaf_without_len(leaf, parent, index, keys, vals);
+}
+@*/
+
+impl<'a, K, V, Type> NodeRef<marker::Mut<'a>, K, V, Type> {
+// SOURCE     unsafe fn len_mut<'short>(&'short mut self) -> &'short mut u16
+}
+
+impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal> {
+// SOURCE     unsafe fn cast_to_internal_unchecked(self) -> NodeRef<marker::Mut<'a>, K, V, marker::Internal>
+}
+
+fn main() {}
+
+
+struct BalancingContext<'a, K, V> {
+    parent: Handle<NodeRef<marker::Mut<'a>, K, V, marker::Internal>, marker::KV>,
+    left_child: NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal>,
+    right_child: NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal>,
+}
+
+impl<BorrowType, K, V, Type> NodeRef<BorrowType, K, V, Type> {
+// SOURCE     unsafe fn reborrow_mut<'b>(&'b mut self) -> NodeRef<marker::Mut<'b>, K, V, Type>
+}
+
+impl<BorrowType, K, V, Type> NodeRef<BorrowType, K, V, Type> {
+// SOURCE     unsafe fn merge_len(&self) -> usize
+}
+
+impl<'a, K: 'a, V: 'a> BalancingContext<'a, K, V> {
+// SOURCE     unsafe fn do_merge_production<
+}
+
+// SOURCE unsafe fn call_merge__VeriFast_wrapper<P, C, F: FnOnce(P, C) -> R, R>(finish: F, parent: P, child: C) -> R
+
+impl<BorrowType, K, V> Handle<NodeRef<BorrowType, K, V, marker::LeafOrInternal>, marker::Edge> {
+    unsafe fn new_edge(node: NodeRef<BorrowType, K, V, marker::LeafOrInternal>, idx: usize) -> Self
+    //@ req (*node.node.as_ptr()).len |-> ?len &*& idx <= len;
+    //@ ens result.node == node &*& result.idx == idx &*& (*node.node.as_ptr()).len |-> len;
+    //@ on_unwind_ens false;
+    {
+        unsafe { debug_assert!(idx <= node.merge_len()) };
+        let edge = Handle { node, idx, _marker: PhantomData };
+        //@ close_points_to(&node, 1/2);
+        edge
+    }
+}
+
+impl<'a, K: 'a, V: 'a> BalancingContext<'a, K, V> {
+// SOURCE     unsafe fn merge_tracking_child<A: std::alloc::Allocator>(
+
+// SOURCE     unsafe fn merge_child_production<A: std::alloc::Allocator>(
+
+// SOURCE     unsafe fn merge_tracking_child_edge<A: std::alloc::Allocator>(
+}
+
+// SOURCE unsafe fn select_merged_child<'a,K,V>(
+
+// SOURCE unsafe fn finish_merge_tracking__VeriFast_wrapper<'tree, K, V>(
+
+// SOURCE unsafe fn borrow_initialized_slot<'short,T>(slot: &'short mut MaybeUninit<T>) -> &'short mut T
+
+/*@
+fix replace_slot<T>(index: usize, entry: T, slots: list<T>) -> list<T> {
+    append(take(index,slots),cons(entry,drop(index+1,slots)))
+}
+@*/
+
+impl<'a, K:'a, V:'a, NodeType> Handle<NodeRef<marker::Mut<'a>,K,V,NodeType>,marker::KV> {
+// SOURCE     unsafe fn replace_kv_production<'short>(&'short mut self, k:K, v:V) -> (K,V)
+}
+
+enum ForceResult<Leaf, Internal> {
+    Leaf(Leaf),
+    Internal(Internal),
+}
+
+impl<BorrowType, K, V> NodeRef<BorrowType, K, V, marker::LeafOrInternal> {
+// SOURCE     unsafe fn force(
+}
+
+
+/*@
+lem open_slot_owner<T>(t: thread_id_t, slots: list<MaybeUninit<T>>, len: usize, idx: usize)
+    req 0 <= idx &*& idx < len &*& len <= length(slots) &*& slot_owners(t,take(len,slots));
+    ens slot_owners(t,take(idx,slots)) &*& slot_owners(t,drop(idx+1,take(len,slots))) &*&
+        nth(idx,slots).inner() == some(?value) &*& nth(idx,slots) == MaybeUninit::new(value) &*& <T>.own(t,value);
+{
+    let live = take(len,slots);
+    length_take(len,slots);
+    split_slot_owners(t,live,idx);
+    take_twice(slots,idx,len);
+    drop_n_plus_one(idx,live);
+    drop_twice(1,idx,live);
+    open slot_owners(t,drop(idx,live));
+    nth_take_range(slots,len,idx);
+}
+
+lem restore_slot_owner<T>(t: thread_id_t, slots: list<MaybeUninit<T>>, len: usize, idx: usize, value: T)
+    req 0 <= idx &*& idx < len &*& len <= length(slots) &*&
+        slot_owners(t,take(idx,slots)) &*& slot_owners(t,drop(idx+1,take(len,slots))) &*& <T>.own(t,value);
+    ens slot_owners(t,take(len,replace_slot(idx,MaybeUninit::new(value),slots)));
+{
+    let head = take(idx,slots);
+    let middle = [MaybeUninit::new(value)];
+    let tail = drop(idx+1,take(len,slots));
+    take_after_drop(slots,idx+1,len-idx-1);
+    length_take(idx,slots);
+    length_append(head,middle);
+    append_assoc(head,middle,drop(idx+1,slots));
+    take_append(len,append(head,middle),drop(idx+1,slots));
+    close slot_owners::<T>(t,nil);
+    close slot_owners(t,middle);
+    join_slot_owners(t,head,middle);
+    join_slot_owners(t,append(head,middle),tail);
+}
+
+lem join_stolen_prefix<T>(
+    t: thread_id_t, l: list<MaybeUninit<T>>, r: list<MaybeUninit<T>>,
+    shifted: list<MaybeUninit<T>>, copied: list<MaybeUninit<T>>, written: list<MaybeUninit<T>>,
+    left_len: usize, right_len: usize, count: usize, saved: T
+)
+    req 0 < count &*& count <= left_len &*& left_len <= length(l) &*&
+        0 <= right_len &*& right_len+count <= length(r) &*&
+        shifted == append(take(count,take(right_len+count,r)),append(take(right_len,r),drop(right_len+count,r))) &*&
+        copied == append(take(count-1,drop(left_len-count+1,l)),drop(count-1,shifted)) &*&
+        written == replace_slot(count-1,MaybeUninit::new(saved),copied) &*&
+        slot_owners(t,drop(left_len-count+1,take(left_len,l))) &*&
+        slot_owners(t,take(right_len,r)) &*& <T>.own(t,saved);
+    ens slot_owners(t,take(right_len+count,written));
+{
+    let stolen = take(count-1,drop(left_len-count+1,l));
+    let kept = take(right_len,r);
+    let prefix = take(count,take(right_len+count,r));
+    let tail = drop(right_len+count,r);
+    let separator = [MaybeUninit::new(saved)];
+    length_take(right_len+count,r);
+    length_take(count,take(right_len+count,r));
+    take_after_drop(l,left_len-count+1,count-1);
+    length_drop(left_len-count+1,l);
+    length_take(count-1,drop(left_len-count+1,l));
+    take_append_l(count-1,stolen,drop(count-1,shifted));
+    take_length(stolen);
+    drop_append(count,stolen,drop(count-1,shifted));
+    drop_twice(1,count-1,shifted);
+    drop_append(count,prefix,append(kept,tail));
+    drop_0(append(kept,tail));
+    append_assoc(stolen,separator,append(kept,tail));
+    append_assoc(append(stolen,separator),kept,tail);
+    length_take(right_len,r);
+    length_append(stolen,separator);
+    length_append(append(stolen,separator),kept);
+    take_append_l(right_len+count,append(append(stolen,separator),kept),tail);
+    take_length(append(append(stolen,separator),kept));
+    close slot_owners::<T>(t,nil);
+    close slot_owners(t,separator);
+    join_slot_owners(t,stolen,separator);
+    join_slot_owners(t,append(stolen,separator),kept);
+}
+
+lem join_right_steal<T>(
+    t: thread_id_t, l: list<MaybeUninit<T>>, r: list<MaybeUninit<T>>,
+    written: list<MaybeUninit<T>>, copied: list<MaybeUninit<T>>, shifted: list<MaybeUninit<T>>,
+    left_len: usize, right_len: usize, count: usize, saved: T
+)
+    req 0 < count &*& count <= right_len &*& right_len <= length(r) &*&
+        0 <= left_len &*& left_len+count <= length(l) &*&
+        written == replace_slot(left_len,MaybeUninit::new(saved),l) &*&
+        copied == append(take(left_len+1,written),append(take(count-1,r),drop(left_len+count,written))) &*&
+        shifted == append(append(drop(count,take(right_len,r)),drop(right_len-count,take(right_len,r))),drop(right_len,r)) &*&
+        slot_owners(t,take(count-1,take(right_len,r))) &*& slot_owners(t,drop(count,take(right_len,r))) &*&
+        slot_owners(t,take(left_len,l)) &*& <T>.own(t,saved);
+    ens slot_owners(t,take(left_len+count,copied)) &*& slot_owners(t,take(right_len-count,shifted));
+{
+    let kept_left = take(left_len,l);
+    let separator = [MaybeUninit::new(saved)];
+    let left_head = append(kept_left,separator);
+    let stolen = take(count-1,r);
+    let kept_right = drop(count,take(right_len,r));
+    length_take(left_len,l);
+    length_append(kept_left,separator);
+    append_assoc(kept_left,separator,drop(left_len+1,l));
+    assert written == append(left_head,drop(left_len+1,l));
+    take_append_l(left_len+1,left_head,drop(left_len+1,l));
+    take_length(left_head);
+    assert take(left_len+1,written) == left_head;
+    take_twice(r,count-1,right_len);
+    length_take(count-1,r);
+    append_assoc(left_head,stolen,drop(left_len+count,written));
+    length_append(left_head,stolen);
+    take_append_l(left_len+count,append(left_head,stolen),drop(left_len+count,written));
+    take_length(append(left_head,stolen));
+    close slot_owners::<T>(t,nil);
+    close slot_owners(t,separator);
+    join_slot_owners(t,kept_left,separator);
+    join_slot_owners(t,left_head,stolen);
+    length_take(right_len,r);
+    length_drop(count,take(right_len,r));
+    append_assoc(kept_right,drop(right_len-count,take(right_len,r)),drop(right_len,r));
+    take_append_l(right_len-count,kept_right,append(drop(right_len-count,take(right_len,r)),drop(right_len,r)));
+    take_length(kept_right);
+}
+@*/
+
+impl<'a, K: 'a, V: 'a> BalancingContext<'a, K, V> {
+// SOURCE     unsafe fn bulk_steal_left_production<'short>(&'short mut self, count: usize)
+
+// SOURCE     unsafe fn bulk_steal_right_production<'short>(&'short mut self, count: usize)
+
+// SOURCE     unsafe fn steal_left_production(
+
+// SOURCE     unsafe fn steal_right_production(
+}
+
+
+impl<'a, K, V, Type, Kind> Handle<NodeRef<marker::Mut<'a>, K, V, Type>, Kind> {
+// SOURCE     unsafe fn reborrow_handle_mut<'short>(&'short mut self) -> Handle<NodeRef<marker::Mut<'short>, K, V, Type>, Kind>
+}
+
+impl<Node, Kind> Handle<Node, Kind> {
+// SOURCE     unsafe fn into_node(self) -> Node
+}
+
+impl<'a, K: 'a, V: 'a> Handle<NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal>, marker::Edge> {
+// SOURCE     unsafe fn move_suffix_production<'short>(
+}
+
+
+
+// BEGIN_DROP_VALUE
+// SOURCE unsafe fn drop_slot_production<'slot, T>(slot: &'slot mut MaybeUninit<T>)
+
+struct Dropper<'a, T>(&'a mut MaybeUninit<T>);
+
+impl<'a, T> Dropper<'a, T> {
+// SOURCE     unsafe fn drop_value_guard(&mut self)
+}
+// END_DROP_VALUE
+
+// The storage remains reusable after either exit from the destructor.
+// SOURCE unsafe fn drop_initialized_slot<T>(slot: *mut MaybeUninit<T>)
+
+// SOURCE unsafe fn drop_guarded_value<T>(slot: *mut MaybeUninit<T>)
+
+// SOURCE unsafe fn drop_pair<K, V>(key: *mut MaybeUninit<K>, value: *mut MaybeUninit<V>)
+
+
+impl<BorrowType, K, V> NodeRef<BorrowType, K, V, marker::LeafOrInternal> {
+// SOURCE_IN_IMPL     unsafe fn len(&self) -> usize
+}
+
+// The production cleanup edges are checked separately. A key unwind
+// leaves its value pending. Its value guard completes that slot before
+// the node guard resumes at the next pair.
+
+impl<K, V, Type> NodeRef<marker::Dying, K, V, Type> {
+// SOURCE     unsafe fn as_leaf_dying<'short>(&'short mut self) -> &'short mut LeafNode<K, V>
+}
+
+// SOURCE unsafe fn duplicate_dying<K,V>(
+
+/*@
+pred drop_slot_loan<T,N>(
+    field: *[MaybeUninit<T>; N], array: *[MaybeUninit<T>; N], slot: *MaybeUninit<T>, index: usize,
+    prior: list<MaybeUninit<T>>, later: list<MaybeUninit<T>>
+) =
+    ref_mut_end_token(array, field) &*&
+    ref_mut_end_token(slot, array as *MaybeUninit<T> + index) &*&
+    (array as *MaybeUninit<T>)[..index] |-> prior &*&
+    (array as *MaybeUninit<T>)[index+1..int_of_const(typeid(N))] |-> later;
+
+lem close_drop_array<T, N>(p: *[T; N])
+    req (p as *T)[..int_of_const(typeid(N))] |-> ?values;
+    ens *p |-> ?value &*& Array_elems(value) == values;
+{
+    let base = p as *T;
+    close_points_to(p, 1/2);
+    assert [1/2](*p |-> ?value);
+    Array_to_array(p);
+    merge_fractions array(base, int_of_const(typeid(N)), _);
+    assert Array_elems(value) == values;
+    close_points_to(p);
+}
+
+lem end_drop_slot<T,N>(field: *[MaybeUninit<T>; N], slot: *MaybeUninit<T>, index: usize)
+    req drop_slot_loan(field,?array,slot,index,?before,?after) &*& *slot |-> ?entry;
+    ens *field |-> ?entries &*& Array_elems(entries) == append(before,cons(entry,after));
+{
+    open drop_slot_loan(field,array,slot,index,before,after);
+    let base = array as *MaybeUninit<T>;
+    end_ref_mut(slot);
+    close array(base+index+1,0,[]);
+    close array(base+index,1,[entry]);
+    array_join(base+index);
+    array_join(base);
+    close_drop_array(array);
+    end_ref_mut(array);
+}
+@*/
+
+impl<K, V, NodeType> Handle<NodeRef<marker::Dying, K, V, NodeType>, marker::KV> {
+// SOURCE     unsafe fn project_drop_slots<'short>(
+}
+
+/*@
+pred drop_kv_frame<K,V>(
+    node: *LeafNode<K,V>, leaf: *LeafNode<K,V>, key: *MaybeUninit<K>, value: *MaybeUninit<V>,
+    index: usize, len: usize, keys: list<MaybeUninit<K>>, vals: list<MaybeUninit<V>>,
+    parent: Option<NonNull<InternalNode<K,V>>>, parent_idx: MaybeUninit<u16>
+) =
+    ref_mut_end_token(leaf,node) &*&
+    leaf_header(leaf,parent,parent_idx) &*& (*leaf).len |-> len as u16 &*&
+    drop_slot_loan(&(*leaf).keys,?keys_ref,key,index,take(index,keys),drop(index+1,keys)) &*&
+    drop_slot_loan(&(*leaf).vals,?vals_ref,value,index,take(index,vals),drop(index+1,vals));
+
+lem take_after_replacing_cell<T>(entries: list<T>, len: usize, index: usize, cell: T)
+    req 0 <= index &*& index < len &*& len <= length(entries);
+    ens drop(index+1,take(len,replace_slot(index,cell,entries))) == drop(index+1,take(len,entries));
+{
+    let before = take(index,entries);
+    let head = append(before,[cell]);
+    let tail = drop(index+1,entries);
+    length_take(index,entries);
+    length_append(before,[cell]);
+    append_assoc(before,[cell],tail);
+    take_append(len,head,tail);
+    drop_append(index+1,head,take(len-index-1,tail));
+    drop_0(take(len-index-1,tail));
+    take_after_drop(entries,index+1,len-index-1);
+}
+
+lem restore_dropped_kv<K,V>(
+    node: *LeafNode<K,V>, leaf: *LeafNode<K,V>, key: *MaybeUninit<K>, value: *MaybeUninit<V>,
+    index: usize, len: usize, keys: list<MaybeUninit<K>>, vals: list<MaybeUninit<V>>,
+    parent: Option<NonNull<InternalNode<K,V>>>, parent_idx: MaybeUninit<u16>
+)
+    req drop_kv_frame(node,leaf,key,value,index,len,keys,vals,parent,parent_idx) &*&
+        *(key as *K) |-> _ &*& *(value as *V) |-> _ &*&
+        0 <= index &*& index < len &*& len <= CAPACITY &*& length(keys) == CAPACITY &*& length(vals) == CAPACITY;
+    ens leaf_header(node,parent,parent_idx) &*& leaf_slots(node,len,?next_keys,?next_vals) &*&
+        drop(index+1,take(len,next_keys)) == drop(index+1,take(len,keys)) &*&
+        drop(index+1,take(len,next_vals)) == drop(index+1,take(len,vals));
+{
+    open drop_kv_frame(node,leaf,key,value,index,len,keys,vals,parent,parent_idx);
+    std::mem::close_MaybeUninit_(key);
+    std::mem::close_MaybeUninit_(value);
+    assert *key |-> ?dead_key;
+    assert *value |-> ?dead_val;
+    end_drop_slot(&(*leaf).keys,key,index);
+    end_drop_slot(&(*leaf).vals,value,index);
+    assert *(&(*leaf).keys) |-> ?repacked_keys;
+    assert *(&(*leaf).vals) |-> ?repacked_vals;
+    assert Array_elems(repacked_keys) == replace_slot(index,dead_key,keys);
+    assert Array_elems(repacked_vals) == replace_slot(index,dead_val,vals);
+    Array_to_array(&(*leaf).keys);
+    Array_to_array(&(*leaf).vals);
+    assert (*leaf).keys[..CAPACITY] |-> replace_slot(index,dead_key,keys);
+    assert (*leaf).vals[..CAPACITY] |-> replace_slot(index,dead_val,vals);
+    open leaf_header(leaf,parent,parent_idx);
+    close_points_to(leaf);
+    end_ref_mut(leaf);
+    open_points_to(node);
+    assert (*node).keys[..CAPACITY] |-> replace_slot(index,dead_key,keys);
+    assert (*node).vals[..CAPACITY] |-> replace_slot(index,dead_val,vals);
+    close leaf_header(node,parent,parent_idx);
+    close leaf_slots(node,len,_,_);
+    take_after_replacing_cell(keys,len,index,dead_key);
+    take_after_replacing_cell(vals,len,index,dead_val);
+}
+@*/
+
+impl<K,V,NodeType> Handle<NodeRef<marker::Dying,K,V,NodeType>,marker::KV> {
+// SOURCE     unsafe fn drop_key_val_step(mut self)
+}
+
+impl<K,V> Handle<NodeRef<marker::Dying,K,V,marker::LeafOrInternal>,marker::KV> {
+// SOURCE     unsafe fn new_dying_kv(node: NodeRef<marker::Dying,K,V,marker::LeafOrInternal>, idx: usize) -> Self
+}
+
+// SOURCE unsafe fn drop_at<K,V>(
+
+// SOURCE unsafe fn drop_remaining<K,V>(
+
+/*@ pred resume_phase(inside_value: bool) = true; @*/
+
+// SOURCE unsafe fn finish_drop_value<V>(value: *mut MaybeUninit<V>, pending: bool)
+
+// SOURCE unsafe fn resume_drop_remaining<K,V>(
+
+
+use std::num::NonZero;
+
+impl<'a, K: 'a, V: 'a, NodeType> Handle<NodeRef<marker::Mut<'a>, K, V, NodeType>, marker::KV> {
+// SOURCE     unsafe fn split_leaf_data<'short, 'dst>(&'short mut self, new_node: &'dst mut LeafNode<K, V>) -> (K, V)
+}
+
+impl<K, V> NodeRef<marker::Owned, K, V, marker::Leaf> {
+// SOURCE     unsafe fn from_new_leaf<A: AllocatorClone>(leaf: Box<LeafNode<K, V>, A>) -> Self
+}
+
+impl<'a, K: 'a, V: 'a> Handle<NodeRef<marker::Mut<'a>, K, V, marker::Leaf>, marker::KV> {
+// SOURCE     unsafe fn split_production_leaf<A: AllocatorClone>(
+}
+
+impl<K, V> NodeRef<marker::Owned, K, V, marker::Internal> {
+// SOURCE     unsafe fn from_new_internal<A: AllocatorClone>(
+}
+
+// The two half permissions describe the same cells. Their agreement
+// carries the element list through the enclosing Box value.
+/*@
+lem close_known_array<T, N>(p: *[T; N])
+    req (p as *T)[..int_of_const(typeid(N))] |-> ?values;
+    ens *p |-> ?value &*& Array_elems(value) == values;
+{
+    let base = p as *T;
+    close_points_to(p, 1/2);
+    assert [1/2](*p |-> ?value);
+    Array_to_array(p);
+    merge_fractions array(base, int_of_const(typeid(N)), _);
+    assert Array_elems(value) == values;
+    close_points_to(p);
+}
+@*/
+
+impl<'a, K: 'a, V: 'a> Handle<NodeRef<marker::Mut<'a>, K, V, marker::Internal>, marker::KV> {
+// SOURCE     unsafe fn split_production_internal<A: AllocatorClone>(
+}
+
+impl<K, V, Type> NodeRef<marker::Owned, K, V, Type> {
+// SOURCE     unsafe fn borrow_mut<'b>(&'b mut self) -> NodeRef<marker::Mut<'b>, K, V, Type>
+}
+
+// SOURCE unsafe fn splitpoint(edge_idx: usize) -> (usize, LeftOrRight<usize>)
+
+impl<BorrowType, K, V> Handle<NodeRef<BorrowType, K, V, marker::Internal>, marker::Edge> {
+// SOURCE     unsafe fn new_edge(node: NodeRef<BorrowType, K, V, marker::Internal>, idx: usize) -> Self
+}
+
+impl<BorrowType, K, V> Handle<NodeRef<BorrowType, K, V, marker::Internal>, marker::KV> {
+// SOURCE     unsafe fn new_kv(node: NodeRef<BorrowType, K, V, marker::Internal>, idx: usize) -> Self
+}
+
+impl<'a, K: 'a, V: 'a> Handle<NodeRef<marker::Mut<'a>, K, V, marker::Internal>, marker::Edge> {
+// SOURCE     unsafe fn insert_fit_production<'short>(&'short mut self, key: K, val: V, edge: Root<K, V>)
+}
+
+/*@
+fix insert_item<T>(items: list<T>, at: usize, item: T) -> list<T> {
+    append(take(at, items), cons(item, drop(at, items)))
+}
+
+lem insert_item_across_split<T>(items: list<T>, cut: usize, at: usize, item: T)
+    req 0 <= cut &*& cut <= length(items) &*& 0 <= at &*& at <= length(items);
+    ens insert_item(items, at, item) == if at <= cut {
+        append(insert_item(take(cut, items), at, item), drop(cut, items))
+    } else {
+        append(take(cut, items), insert_item(drop(cut, items), at - cut, item))
+    };
+{
+    if at <= cut {
+        take_twice(items, at, cut);
+        take_after_drop(items, at, cut - at);
+        drop_twice(cut - at, at, items);
+        append_take_drop_n(drop(at, items), cut - at);
+        append_assoc(take(at, items), cons(item, drop(at, take(cut, items))), drop(cut, items));
+    } else {
+        length_take(cut, items);
+        append_take_drop_n(items, cut);
+        take_append(at, take(cut, items), drop(cut, items));
+        drop_twice(at - cut, cut, items);
+        append_assoc(take(cut, items), take(at - cut, drop(cut, items)), cons(item, drop(at, items)));
+    }
+}
+@*/
+
+impl<'a, K: 'a, V: 'a> Handle<NodeRef<marker::Mut<'a>, K, V, marker::Internal>, marker::Edge> {
+// SOURCE     unsafe fn insert_production<A: AllocatorClone>(
+}
+
+impl<'tree, K: 'tree, V: 'tree> Handle<NodeRef<marker::Mut<'tree>, K, V, marker::Internal>, marker::Edge> {
+// SOURCE     unsafe fn insert<A: AllocatorClone>(self, key: K, val: V, edge: Root<K,V>, alloc: A)
+}
+
+impl<BorrowType, K, V> Handle<NodeRef<BorrowType, K, V, marker::Leaf>, marker::Edge> {
+    unsafe fn new_edge(node: NodeRef<BorrowType, K, V, marker::Leaf>, idx: usize) -> Self
+    //@ req (*node.node.as_ptr()).len |-> ?len &*& idx <= len;
+    //@ ens result.node == node &*& result.idx == idx &*& (*node.node.as_ptr()).len |-> len;
+    //@ on_unwind_ens false;
+    {
+        unsafe { debug_assert!(idx <= node.merge_len()) };
+        let edge = Handle { node, idx, _marker: PhantomData };
+        //@ close_points_to(&node, 1/2);
+        edge
+    }
+}
+
+impl<BorrowType, K, V> Handle<NodeRef<BorrowType, K, V, marker::Leaf>, marker::KV> {
+    unsafe fn new_kv(node: NodeRef<BorrowType, K, V, marker::Leaf>, idx: usize) -> Self
+    //@ req (*node.node.as_ptr()).len |-> ?len &*& idx < len;
+    //@ ens result.node == node &*& result.idx == idx &*& (*node.node.as_ptr()).len |-> len;
+    //@ on_unwind_ens false;
+    {
+        unsafe { debug_assert!(idx < node.merge_len()) };
+        let edge = Handle { node, idx, _marker: PhantomData };
+        //@ close_points_to(&node, 1/2);
+        edge
+    }
+}
+
+impl<'a, K: 'a, V: 'a> Handle<NodeRef<marker::Mut<'a>, K, V, marker::Leaf>, marker::Edge> {
+// SOURCE     unsafe fn insert_fit_leaf_production(mut self, key: K, val: V)
+}
+
+impl<'a, K: 'a, V: 'a> Handle<NodeRef<marker::Mut<'a>, K, V, marker::Leaf>, marker::Edge> {
+// SOURCE     unsafe fn insert_leaf_production<A: AllocatorClone>(mut self, key: K, val: V, alloc: A) -> (
+}
+
+impl<'a, K: 'a, V: 'a> Handle<NodeRef<marker::Mut<'a>, K, V, marker::Leaf>, marker::Edge> {
+// SOURCE     unsafe fn insert<A: AllocatorClone>(
+}
+
+impl<K, V> NodeRef<marker::Owned, K, V, marker::Internal> {
+// SOURCE     unsafe fn new_internal_production<A: AllocatorClone>(child: Root<K,V>, alloc: A) -> Self
+}
+
+impl<'a, K: 'a, V: 'a> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+// SOURCE     unsafe fn push_production<'short>(&'short mut self, key: K, val: V, edge: Root<K, V>)
+}
+
+// SOURCE unsafe fn install_root_split<'tree, 'slot, K, V, A: AllocatorClone>(
+
+// SOURCE unsafe fn write_child_backlink<K, V>(
+
+// The production iterator is specialized to the two range types used by its
+// callers. The invariant preserves the edge slots and separates the repaired
+// prefix from the pending suffix.
+
+// BEGIN_NODE_LEN
+impl<BorrowType, K, V, Type> NodeRef<BorrowType, K, V, Type> {
+// SOURCE     unsafe fn relink_len(&self) -> usize
+}
+// END_NODE_LEN
+
+// BEGIN_NODE_REBORROW
+impl<BorrowType, K, V, Type> NodeRef<BorrowType, K, V, Type> {
+// SOURCE     unsafe fn relink_reborrow<'b>(&'b mut self) -> NodeRef<marker::Mut<'b>, K, V, Type>
+}
+// END_NODE_REBORROW
+
+// BEGIN_NEW_EDGE
+impl<BorrowType, K, V, Type> Handle<NodeRef<BorrowType, K, V, Type>, marker::Edge> {
+// SOURCE     unsafe fn new_relink_edge(node: NodeRef<BorrowType, K, V, Type>, idx: usize) -> Self
+}
+// END_NEW_EDGE
+
+// The generator binds the read and the two stores to descend and set_parent_link.
+impl<'a, K, V> Handle<NodeRef<marker::Mut<'a>, K, V, marker::Internal>, marker::Edge> {
+// SOURCE     unsafe fn correct_parent_link(self)
+}
+
+// BEGIN_RELINK_STEP
+// SOURCE unsafe fn repair_one__VeriFast_wrapper<'a, 'b, K, V>(
+
+// END_RELINK_STEP
+
+
+
+impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+// SOURCE     unsafe fn relink_range<'b>(&'b mut self, range: std::ops::Range<usize>)
+}
+
+impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+// SOURCE     unsafe fn relink_inclusive<'b>(&'b mut self, range: std::ops::RangeInclusive<usize>)
+}
+
+impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+// SOURCE     unsafe fn correct_all_childrens_parent_links<'b>(&'b mut self)
+}
+use std::{alloc::Global, boxed::Box, mem::ManuallyDrop};
+
+pub struct BTreeMap<
+    K,
+    V,
+    A: AllocatorClone = Global,
+> {
+    root: Option<Root<K, V>>,
+    length: usize,
+    /// `ManuallyDrop` to control drop order (needs to be dropped after all the nodes).
+    // Although some of the accessory types store a copy of the allocator, the nodes do not.
+    // Because allocations will remain live as long as any copy (like this one) of the allocator
+    // is live, it's unnecessary to store the allocator in each node.
+    alloc: ManuallyDrop<A>,
+    // For dropck; the `Box` avoids making the `Unpin` impl more strict than before
+    _marker: PhantomData<Box<(K, V), A>>,
+}
+
+pub struct CursorMutKey<
+    'a,
+    K: 'a,
+    V: 'a,
+    A = Global,
+> {
+    // If current is None then it means the tree has not been allocated yet.
+    current: Option<Handle<NodeRef<marker::Mut<'a>, K, V, marker::Leaf>, marker::Edge>>,
+    root: DormantMutRef<'a, Option<Root<K, V>>>,
+    length: &'a mut usize,
+    alloc: &'a mut A,
+}
+
+pub struct VacantEntry<
+    'a,
+    K,
+    V,
+    A: AllocatorClone = Global,
+> {
+    key: K,
+    /// `None` for a (empty) map without root
+    handle: Option<Handle<NodeRef<marker::Mut<'a>, K, V, marker::Leaf>, marker::Edge>>,
+    dormant_map: DormantMutRef<'a, BTreeMap<K, V, A>>,
+
+    /// The BTreeMap will outlive this IntoIter so we don't care about drop order for `alloc`.
+    alloc: A,
+
+    // Be invariant in `K` and `V`
+    _marker: PhantomData<&'a mut (K, V)>,
+}
+
+type RootInputs<'a, K, V, A> = (&'a mut Root<K, V>, A, K, V, Root<K, V>);
+
+impl<'a, K, V, A: AllocatorClone> CursorMutKey<'a, K, V, A> {
+    fn project_root_inputs_0(
+        &mut self, split: Option<SplitResult<'a, K, V, marker::LeafOrInternal>>,
+    ) -> Option<RootInputs<'a, K, V, A>> {
+        let capture = &mut self.root;
+        let alloc = &*self.alloc;
+        match split {
+            None => None,
+            Some(ins) => {
+                drop(ins.left);
+                let root = unsafe { capture.reborrow().as_mut().unwrap() };
+                let inputs = (root, alloc.clone(), ins.kv.0, ins.kv.1, ins.right);
+                Some(inputs)
+            }
+        }
+    }
+}
+
+impl<'a, K, V, A: AllocatorClone> CursorMutKey<'a, K, V, A> {
+    fn project_root_inputs_1(
+        &mut self, split: Option<SplitResult<'a, K, V, marker::LeafOrInternal>>,
+    ) -> Option<RootInputs<'a, K, V, A>> {
+        let capture = &mut self.root;
+        let alloc = &*self.alloc;
+        match split {
+            None => None,
+            Some(ins) => {
+                drop(ins.left);
+                let root = unsafe { capture.reborrow().as_mut().unwrap() };
+                let inputs = (root, alloc.clone(), ins.kv.0, ins.kv.1, ins.right);
+                Some(inputs)
+            }
+        }
+    }
+}
+
+impl<'a, K, V, A: AllocatorClone> VacantEntry<'a, K, V, A> {
+    fn project_root_inputs_0(
+        &mut self, split: Option<SplitResult<'a, K, V, marker::LeafOrInternal>>,
+    ) -> Option<RootInputs<'a, K, V, A>> {
+        let capture = &mut self.dormant_map;
+        let alloc = &self.alloc;
+        match split {
+            None => None,
+            Some(ins) => {
+                drop(ins.left);
+                let map = unsafe { capture.reborrow() };
+                let root = map.root.as_mut().unwrap();
+                let inputs = (root, alloc.clone(), ins.kv.0, ins.kv.1, ins.right);
+                Some(inputs)
+            }
+        }
+    }
+}

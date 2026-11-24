@@ -196,7 +196,6 @@
 //
 // Language features:
 // tidy-alphabetical-start
-#![cfg_attr(kani, feature(proc_macro_hygiene))]
 #![feature(allocator_internals)]
 #![feature(allow_internal_unstable)]
 #![feature(cfg_sanitize)]

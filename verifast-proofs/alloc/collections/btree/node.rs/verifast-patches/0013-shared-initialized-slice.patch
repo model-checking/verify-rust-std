@@ -1,0 +1,93 @@
+--- a/bin/rust/aliasing.rsspec
++++ b/bin/rust/aliasing.rsspec
+@@ -102,7 +102,7 @@
+ // Unsizing preserves the lifetime and reference tag of the array borrow.
+ fn unsize_shared_array_ref<T, N, 'a>(array: &'a [T; N]) -> &'a [T];
+ //@ req [?f]ref_initialized(array);
+-//@ ens [f]ref_initialized(array) &*& result as *T == array as *T &*& result.len() == int_of_const(typeid(N));
++//@ ens [f]ref_initialized(array) &*& [_]ref_initialized(result) &*& strip_pointer_metadata(result as pointer) == array as pointer &*& result as *T == array as *T &*& result.len() == int_of_const(typeid(N));
+ //@ on_unwind_ens false;
+ 
+ fn unsize_mut_array_ref<T, N, 'a>(array: &'a mut [T; N]) -> &'a mut [T];
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -2634,8 +2634,14 @@
+                 begin match substs_cpn, substs with
+                 | [_; { kind = Type { kind = UInt USize } }; _], [element; _; lifetime] ->
+                     translate_regular_fn_call [element; lifetime] "std::slice::get_unchecked_usize"
++                | [_; { kind = Type { kind = Adt { id = { name = "std::ops::RangeTo" };
++                      substs = [{ kind = Type { kind = UInt USize } }] } } }; _],
++                  [element; _; lifetime] ->
++                    translate_regular_fn_call [element; lifetime] "std::slice::get_unchecked_range_to"
+                 | _ -> translate_regular_fn_call substs fn_name
+                 end
++            | "<[std::mem::MaybeUninit<T>]>::assume_init_ref" ->
++                translate_regular_fn_call substs "std::mem::assume_init_slice_ref"
+             | "std::slice::<impl [T]>::get_unchecked_mut" ->
+                 begin match substs_cpn, substs with
+                 | [_; { kind = Type { kind = UInt USize } }; _], [element; _; lifetime] ->
+--- a/bin/rust/std/lib.rsspec
++++ b/bin/rust/std/lib.rsspec
+@@ -492,6 +492,11 @@
+     
+     impl<T> MaybeUninit<T> {
+     
++        unsafe fn assume_init_mut<'a>(self: &'a mut MaybeUninit<T>) -> &'a mut T;
++        //@ req *self |-> ?bits &*& bits.inner() == some(?value);
++        //@ ens *result |-> value &*& ref_mut_end_token(result, self as *T) &*& ref_origin(result) == ref_origin(self as *T);
++        //@ on_unwind_ens false;
++
+         fn write<'a>(self: &'a mut MaybeUninit<T>, value: T) -> &'a mut T;
+         //@ req *self |-> _;
+         //@ ens *self |-> MaybeUninit::new(value);
+@@ -499,6 +504,30 @@
+         
+     }
+     
++    /*@
++    fix initialized_slots<T>(slots: list<MaybeUninit<T>>) -> bool {
++        match slots {
++            nil => true,
++            cons(slot, tail) => slot.inner() != none && initialized_slots(tail)
++        }
++    }
++    @*/
++
++    unsafe fn assume_init_slice_ref<T, 'a>(self: &'a [MaybeUninit<T>]) -> &'a [T];
++    /*@
++    req [?f]ref_initialized(self) &*& [?q]lifetime_token('a) &*&
++        [?g](strip_pointer_metadata(self as pointer) as *MaybeUninit<T>)[..self.len()] |-> ?slots &*&
++        initialized_slots(slots) == true &*&
++        object_pointer_within_limits(strip_pointer_metadata(self as pointer) as *u8, self.len() * std::mem::size_of::<T>()) == true &*&
++        (strip_pointer_metadata(self as pointer).address % std::mem::align_of::<T>()) == 0 &*&
++        self.len() * std::mem::size_of::<T>() <= isize::MAX;
++    @*/
++    /*@
++    ens [f]ref_initialized(self) &*& [q]lifetime_token('a) &*& [_]ref_initialized(result) &*&
++        [g](strip_pointer_metadata(self as pointer) as *MaybeUninit<T>)[..self.len()] |-> slots &*&
++        result as pointer == self as pointer;
++    @*/
++    //@ on_unwind_ens false;
+     struct Alignment;
+     
+     //@ fix Alignment::as_nonzero_usize(align: Alignment) -> std::num::NonZero<usize>;
+@@ -789,6 +818,19 @@
+     //@ ens [f]ref_initialized(element) &*& result == element;
+     //@ on_unwind_ens false;
+ 
++    // RangeTo starts at zero, so the shared pointer keeps its origin and base.
++    unsafe fn get_unchecked_range_to<T, 'a>(self: &'a [T], index: std::ops::RangeTo<usize>) -> &'a [T];
++    /*@
++    req [?f]ref_initialized(self) &*& 0 <= index.end &*& index.end <= self.len() &*&
++        [?g](strip_pointer_metadata(self as pointer) as *T)[..self.len()] |-> ?items;
++    @*/
++    /*@
++    ens [f]ref_initialized(self) &*& [_]ref_initialized(result) &*&
++        [g](strip_pointer_metadata(self as pointer) as *T)[..self.len()] |-> items &*&
++        strip_pointer_metadata(result as pointer) == strip_pointer_metadata(self as pointer) &*& result.len() == index.end;
++    @*/
++    //@ on_unwind_ens false;
++
+     unsafe fn get_unchecked_mut_range<T, 'a>(self: &'a mut [T], index: std::ops::Range<usize>) -> &'a mut [T];
+     /*@
+     req 0 <= index.start &*& index.start <= index.end &*& index.end <= self.len() &*&

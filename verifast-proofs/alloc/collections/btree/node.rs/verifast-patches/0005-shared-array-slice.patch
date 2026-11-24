@@ -1,0 +1,119 @@
+diff --git a/bin/rust/aliasing.rsspec b/bin/rust/aliasing.rsspec
+index e9864ee..3664ccc 100644
+--- a/bin/rust/aliasing.rsspec
++++ b/bin/rust/aliasing.rsspec
+@@ -99,6 +99,12 @@ fn create_ref_UnsafeCell(x: *_) -> *_;
+ //@ ens ref_origin(result) == ref_origin(x);
+ //@ on_unwind_ens false;
+ 
++// Unsizing preserves the lifetime and reference tag of the array borrow.
++fn unsize_shared_array_ref<T, N, 'a>(array: &'a [T; N]) -> &'a [T];
++//@ req [?f]ref_initialized(array);
++//@ ens [f]ref_initialized(array) &*& result as *T == array as *T &*& result.len() == int_of_const(typeid(N));
++//@ on_unwind_ens false;
++
+ fn create_slice_ref<T>(x: &'static [T]) -> &'static [T];
+ //@ req true; // TODO
+ //@ ens result == x;
+diff --git a/bin/rust/std/lib.rsspec b/bin/rust/std/lib.rsspec
+index 2696613..f959297 100644
+--- a/bin/rust/std/lib.rsspec
++++ b/bin/rust/std/lib.rsspec
+@@ -777,6 +777,13 @@ mod ptr {
+ 
+ mod slice {
+ 
++    // The usize implementation requires an in-bounds offset and creates a
++    // shared reference to the same element via &*index.get_unchecked(self).
++    unsafe fn get_unchecked_usize<T, 'a>(self: &'a [T], index: usize) -> &'a T;
++    //@ req index < self.len() &*& ref_precreated_token((self as *T) + index, ?element) &*& [?f]ref_initialized(element);
++    //@ ens [f]ref_initialized(element) &*& result == element;
++    //@ on_unwind_ens false;
++
+     struct Iter<'a, T>;
+     
+     struct IterMut<'a, T>;
+diff --git a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+index 666b69e..24a1aea 100644
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -2630,6 +2630,12 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+                 Ok
+                   ( tmp_rvalue_binders,
+                     FnCallResult (CastExpr (fn_loc, PtrTypeExpr (fn_loc, ManifestTypeExpr (fn_loc, Int (Unsigned, FixedWidthRank 0))), arg)) )
++            | "std::slice::<impl [T]>::get_unchecked" ->
++                begin match substs_cpn, substs with
++                | [_; { kind = Type { kind = UInt USize } }; _], [element; _; lifetime] ->
++                    translate_regular_fn_call [element; lifetime] "std::slice::get_unchecked_usize"
++                | _ -> translate_regular_fn_call substs fn_name
++                end
+             | "std::slice::<impl [T]>::as_ptr" ->
+                 let [ Mir.GenArgType gen_arg_ty_info; _ ] = substs in
+                 let [ arg ] = args in
+@@ -3390,6 +3396,16 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+                   Static ))
+             in
+             Ok (`TrRvalueExpr (result_of_outcome loc e))
++          | { kind = PointerCoercion; ty = { kind = Ref { mutability = Not; ty = { kind = Slice _ } } } } ->
++            (* A pointer coercion to a shared slice reference is array unsizing.
++               Keep the array reference's tag and attach its static length. *)
++            let expr =
++              match operand with
++              | `TrOperandCopy expr | `TrOperandMove (expr, _) -> expr
++              | _ -> Ast.static_error loc "Expected an array reference operand for slice unsizing" None
++            in
++            let call = Ast.CallExpr (loc, "unsize_shared_array_ref", [], [], [LitPat expr], Static) in
++            Ok (`TrRvalueExpr (result_of_outcome loc call))
+           | _ ->
+           let* ty_info = translate_decoded_ty cast_data.ty loc in
+           let ty = ty_info.vf_ty in
+diff --git a/tests/rust/purely_unsafe/shared_array_slice.rs b/tests/rust/purely_unsafe/shared_array_slice.rs
+new file mode 100644
+index 0000000..8512efd
+--- /dev/null
++++ b/tests/rust/purely_unsafe/shared_array_slice.rs
+@@ -0,0 +1,33 @@
++unsafe fn read_array(array: *const [u32; 3], index: usize) -> u32
++//@ req (array as *u32)[..3] |-> ?items &*& index < 3;
++//@ ens (array as *u32)[..3] |-> items &*& result == nth(index, items);
++//@ on_unwind_ens false;
++{
++    //@ close_points_to(array);
++    //@ let view = precreate_ref(array);
++    //@ init_ref_readonly(view, 1/2);
++    //@ open_points_to(view);
++    //@ let base = view as *u32;
++    //@ array_inv::<u32>();
++    //@ array_split(base, index);
++    //@ array_split(base + index, 1);
++    //@ nth_drop(0, index, items);
++    //@ open [1/2]array(base + index, 1, _);
++    //@ open [1/2]array(base + index + 1, 0, _);
++    //@ let slot = precreate_ref(base + index);
++    //@ init_ref_readonly(slot, 1/2);
++    //@ points_to_limits(slot);
++    let value = unsafe { *(*array).get_unchecked(index) };
++    //@ end_ref_readonly(slot);
++    //@ merge_fractions points_to(base + index, _);
++    //@ close [1/2]array(base + index, 1, [nth(index, items)]);
++    //@ array_join(base + index);
++    //@ array_join(base);
++    //@ close_points_to(view, 1/2);
++    //@ end_ref_readonly(view);
++    //@ merge_fractions points_to(array, _);
++    //@ open_points_to(array);
++    value
++}
++
++fn main() {}
+diff --git a/tests/rust/testsuite.mysh b/tests/rust/testsuite.mysh
+--- a/tests/rust/testsuite.mysh
++++ b/tests/rust/testsuite.mysh
+@@ -58,6 +58,7 @@ cd purely_unsafe
+   verifast -ignore_unwind_paths account.rs
+   verifast -ignore_unwind_paths account_value.rs
+   verifast -ignore_unwind_paths point_value.rs
++  verifast -skip_specless_fns shared_array_slice.rs
+   verifast -ignore_unwind_paths account_with_box.rs
+   verifast -ignore_unwind_paths deque_i32.rs
+   verifast -ignore_unwind_paths deque.rs

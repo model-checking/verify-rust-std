@@ -1,0 +1,44 @@
+diff --git a/src/verify_expr.ml b/src/verify_expr.ml
+index ee42f9e..a4a0bf6 100644
+--- a/src/verify_expr.ml
++++ b/src/verify_expr.ml
+@@ -1553,7 +1553,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
+         List.iter (fun p -> pat_expr_mark_addr_taken p locals) pats;
+         (match eopt with None -> () | Some(e) -> expr_mark_addr_taken e locals); 
+         cont locals
+-    | MergeFractionsStmt(_, a) -> ass_mark_addr_taken a locals;
++    | MergeFractionsStmt(_, a) -> ass_mark_addr_taken a locals; cont locals
+     | CreateHandleStmt(_, _, _, _, e) -> expr_mark_addr_taken e locals; cont locals
+     | DisposeBoxStmt(_, _, pats, clauses) -> 
+         List.iter (fun p -> pat_expr_mark_addr_taken p locals) pats;
+diff --git a/tests/rust/purely_unsafe/merge_fractions_before_borrow.rs b/tests/rust/purely_unsafe/merge_fractions_before_borrow.rs
+new file mode 100644
+index 0000000..c0fd4b9
+--- /dev/null
++++ b/tests/rust/purely_unsafe/merge_fractions_before_borrow.rs
+@@ -0,0 +1,13 @@
++unsafe fn write_after_merge(ptr: *mut u8) -> u8
++//@ req [1/2](*ptr |-> ?value) &*& [1/2](*ptr |-> value);
++//@ ens *ptr |-> value &*& result == 2;
++//@ on_unwind_ens false;
++{
++    //@ merge_fractions points_to(ptr, _);
++    let mut local = 1;
++    let address = &raw mut local;
++    unsafe { *address = 2 };
++    local
++}
++
++fn main() {}
+diff --git a/tests/rust/testsuite.mysh b/tests/rust/testsuite.mysh
+index 138a69e..94c290b 100644
+--- a/tests/rust/testsuite.mysh
++++ b/tests/rust/testsuite.mysh
+@@ -42,6 +42,7 @@ cd purely_unsafe
+   !verifast -skip_specless_fns fixed_array_index_bad.rs
+   verifast -skip_specless_fns box_projection.rs
+   verifast -skip_specless_fns -allow_dead_code -allow_should_fail borrowed_box_projection.rs
++  verifast -skip_specless_fns merge_fractions_before_borrow.rs
+   verifast -allow_assume std_thread.rs
+   verifast -allow_should_fail -allow_dead_code nonmut_let_immut.rs
+   verifast struct_exprs.rs

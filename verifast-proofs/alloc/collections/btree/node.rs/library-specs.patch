@@ -1,0 +1,315 @@
+diff --git a/bin/rust/prelude.rsspec b/bin/rust/prelude.rsspec
+index e7e07fe..4b701ae 100644
+--- a/bin/rust/prelude.rsspec
++++ b/bin/rust/prelude.rsspec
+@@ -33,6 +33,18 @@ lem close_tuple_0_own(t: thread_id_t);
+ 
+ pred<T1, T2> <(T1, T2)>.share(k, t, l) = <T1>.share(k, t, &(*l).0) &*& <T2>.share(k, t, &(*l).1);
+ 
++lem close_tuple_1_own<T>(t: thread_id_t, v: (T,));
++    req <T>.own(t, v.0);
++    ens <(T,)>.own(t, v);
++
++lem close_tuple_2_own<T, R>(t: thread_id_t, v: (T, R));
++    req <T>.own(t, v.0) &*& <R>.own(t, v.1);
++    ens <(T, R)>.own(t, v);
++
++lem open_tuple_2_own<T, R>(t: thread_id_t, v: (T, R));
++    req <(T, R)>.own(t, v);
++    ens <T>.own(t, v.0) &*& <R>.own(t, v.1);
++
+ lem open_tuple_4_own<T1, T2, T3, T4>(t: thread_id_t, v: (T1, T2, T3, T4));
+     req <(T1, T2, T3, T4)>.own(t, v);
+     ens <T1>.own(t, v.0) &*& <T2>.own(t, v.1) &*& <T3>.own(t, v.2) &*& <T4>.own(t, v.3);
+--- a/bin/rust/std/lib.rsspec
++++ b/bin/rust/std/lib.rsspec
+@@ -28,6 +28,20 @@
+ 
+ }
+ 
++mod clone {
++    //@ pred allocator_clone_bound<A>();
++
++    trait Clone {
++        fn clone<'a>(self: &'a Self) -> Self;
++        /*@
++        req thread_token(?t) &*& [_]allocator_clone_bound::<Self>() &*&
++            [_]std::alloc::Allocator_share::<Self>(?k,t,self,?alloc_id) &*& [?q]lifetime_token(k);
++        @*/
++        //@ ens thread_token(t) &*& std::alloc::Allocator::<Self>(t,result,alloc_id) &*& [q]lifetime_token(k);
++        //@ on_unwind_ens false;
++    }
++}
++
+ mod ops {
+ 
+     trait FnOnce<Args> {
+@@ -93,6 +107,40 @@
+         
+     }
+     
++    struct RangeInclusive<Idx> {
++        start: Idx,
++        end: Idx,
++        exhausted: bool,
++    }
++
++    impl<Idx> RangeInclusive<Idx> {
++        fn new(start: Idx, end: Idx) -> RangeInclusive<Idx>;
++        //@ req true;
++        //@ ens result == RangeInclusive::<Idx> { start, end, exhausted: false };
++        //@ on_unwind_ens false;
++    }
++
++    impl std::iter::IntoIterator for std::ops::RangeInclusive<usize> {
++        fn into_iter(self: RangeInclusive<usize>) -> RangeInclusive<usize>;
++        //@ req self.exhausted == false;
++        //@ ens result == self;
++        //@ on_unwind_ens false;
++    }
++
++    impl std::iter::Iterator for std::ops::RangeInclusive<usize> {
++        fn next<'a>(self: &'a mut RangeInclusive<usize>) -> std::option::Option<usize>;
++        //@ req *self |-> ?state &*& state.exhausted == false &*& state.end < usize::MAX;
++        /*@
++        ens if state.start <= state.end {
++                *self |-> RangeInclusive::<usize> { start: state.start + 1, end: state.end, exhausted: false } &*&
++                result == std::option::Option::Some(state.start)
++            } else {
++                *self |-> state &*& result == std::option::Option::None
++            };
++        @*/
++        //@ on_unwind_ens false;
++    }
++
+     enum ControlFlow<B, C> {
+         Continue(C),
+         Break(B)
+@@ -272,6 +320,32 @@
+     //@ fix NonZero::get<T>(nz: NonZero<T>) -> T;
+     
+     /*@
++    fix NonZero::is_zero<T>(n: T) -> bool;
++
++    lem_auto(NonZero::is_zero::<usize>(n)) NonZero_is_zero_usize(n: usize);
++        req true;
++        ens NonZero::is_zero(n) == (n == 0);
++    @*/
++
++    impl<T> NonZero<T> {
++        unsafe fn new_unchecked(n: T) -> NonZero<T>;
++        //@ req NonZero::is_zero(n) == false;
++        //@ ens result.get() == n;
++        //@ on_unwind_ens false;
++
++        fn new(n: T) -> std::option::Option<NonZero<T>>;
++        //@ req true;
++        /*@
++        ens match result {
++            Option::None => NonZero::is_zero(n) == true,
++            Option::Some(v) => NonZero::get(v) == n &*& NonZero::is_zero(n) == false
++        };
++        @*/
++        //@ on_unwind_ens false;
++    }
++
++
++    /*@
+     
+     lem NonZero_usize_limits(nz: NonZero<usize>);
+         req true;
+@@ -445,16 +519,16 @@
+         ens MaybeUninit::new_maybe_uninit(v).inner() == v;
+     
+     lem open_MaybeUninit<T>(self: *MaybeUninit<T>);
+-        req *self |-> ?value;
+-        ens *(self as *T) |-?-> value.inner();
++        req [?f](*self |-> ?value);
++        ens [f](*(self as *T) |-?-> value.inner());
+     
+     lem close_MaybeUninit_<T>(self: *MaybeUninit<T>);
+         req *(self as *T) |-?-> ?value;
+         ens *self |-> MaybeUninit::new_maybe_uninit(value);
+         
+     lem close_MaybeUninit<T>(self: *MaybeUninit<T>);
+-        req *(self as *T) |-> ?value;
+-        ens *self |-> MaybeUninit::new(value);
++        req [?f](*(self as *T) |-> ?value);
++        ens [f](*self |-> MaybeUninit::new(value));
+     
+     lem open_MaybeUninit_<T>(self: *MaybeUninit<T>);
+         req *self |-?-> ?value;
+@@ -492,6 +566,16 @@
+     
+     impl<T> MaybeUninit<T> {
+     
++        fn as_mut_ptr<'a>(self: &'a mut MaybeUninit<T>) -> *mut T;
++        //@ req true;
++        //@ ens result == self as *mut T;
++        //@ on_unwind_ens false;
++
++        unsafe fn assume_init_read<'a>(self: &'a MaybeUninit<T>) -> T;
++        //@ req [?f](*self |-> ?bits) &*& bits.inner() == some(?value);
++        //@ ens [f](*self |-> bits) &*& result == value;
++        //@ on_unwind_ens false;
++
+         unsafe fn assume_init_ref<'a>(self: &'a MaybeUninit<T>) -> &'a T;
+         /*@
+         req [?f](*self |-> ?bits) &*& bits.inner() == some(?value) &*&
+@@ -590,31 +674,19 @@
+ 
+     unsafe fn copy<T>(src: *mut T, dst: *mut T, count: usize);
+     /*@
+-    req exists::<option<isize>>(?offset_opt) &*&
+-        match offset_opt {
+-            none => // No overlap
+-                [?f](src as *u8)[..count * std::mem::size_of::<T>()] |-?-> ?bs &*& (dst as *u8)[..count * std::mem::size_of::<T>()] |-> _ &*&
+-                ens [f](src as *u8)[..count * std::mem::size_of::<T>()] |-?-> bs &*& (dst as *u8)[..count * std::mem::size_of::<T>()] |-?-> bs,
+-            some(offset) =>
+-                dst == src + offset &*&
+-                if offset == 0 {
+-                    // The docs require write access even in this case
+-                    (dst as *u8)[..count * std::mem::size_of::<T>()] |-?-> ?bs &*&
+-                    ens (dst as *u8)[..count * std::mem::size_of::<T>()] |-?-> bs
+-                } else if offset > 0 {
+-                    // TODO: Require only read access for the part of `src` that does not overlap with `dst`
+-                    (src as *u8)[..count * std::mem::size_of::<T>()] |-?-> ?bs &*& ((src + count) as *u8)[..offset * std::mem::size_of::<T>()] |-> _ &*&
+-                    ens (src as *u8)[..offset * std::mem::size_of::<T>()] |-?-> take(offset * std::mem::size_of::<T>(), bs) &*&
+-                        (dst as *u8)[..count * std::mem::size_of::<T>()] |-?-> bs
++    req exists::<bool>(?right) &*& exists::<usize>(?distance) &*& 0 <= distance &*&
++        (if right { dst == src + distance } else { src == dst + distance }) == true &*&
++        src as usize % std::mem::align_of::<T>() == 0 &*& dst as usize % std::mem::align_of::<T>() == 0 &*&
++        ((if right { src } else { dst }) as *u8)[..(count + distance) * std::mem::size_of::<T>()] |-?-> ?bytes;
++    @*/
++    /*@
++    ens ((if right { src } else { dst }) as *u8)[..(count + distance) * std::mem::size_of::<T>()] |-?->
++        (if right {
++            append(take(distance * std::mem::size_of::<T>(), bytes), take(count * std::mem::size_of::<T>(), bytes))
+                 } else {
+-                    // TODO: Require only read access for the part of `src` that does not overlap with `dst`
+-                    (src as *u8)[..count * std::mem::size_of::<T>()] |-?-> ?bs &*& (dst as *u8)[..-offset * std::mem::size_of::<T>()] |-> _ &*&
+-                    ens ((dst + count) as *u8)[..-offset * std::mem::size_of::<T>()] |-?-> drop((count + offset) * std::mem::size_of::<T>(), bs) &*&
+-                        (dst as *u8)[..count * std::mem::size_of::<T>()] |-?-> bs
+-                }
+-        };
++            append(drop(distance * std::mem::size_of::<T>(), bytes), drop(count * std::mem::size_of::<T>(), bytes))
++        });
+     @*/
+-    //@ ens true;
+     //@ on_unwind_ens false;
+     //@ terminates;
+ 
+@@ -652,10 +724,12 @@
+     //@ ens result == (strip_pointer_metadata(self as pointer) as *T) + index &*& [f](*result |-?-> slot);
+     //@ on_unwind_ens false;
+ 
++    //@ fix drop_may_unwind<T: ?Sized>() -> bool;
++
+     unsafe fn drop_in_place<T: ?Sized>(to_drop: *mut T);
+     //@ req thread_token(?t) &*& *to_drop |-> ?v &*& <T>.own(t, v);
+     //@ ens thread_token(t) &*& *to_drop |-> _;
+-    //@ on_unwind_ens thread_token(t) &*& *to_drop |-> _;
++    //@ on_unwind_ens drop_may_unwind::<T>() == true &*& thread_token(t) &*& *to_drop |-> _;
+ 
+     struct NonNull<T>;
+     
+@@ -750,6 +824,7 @@
+         fn cast<U>(self: NonNull<T>) -> NonNull<U>;
+         //@ req true;
+         //@ ens result == NonNull::new(self.as_ptr() as *U);
++        //@ on_unwind_ens false;
+         
+     }
+     
+@@ -1409,7 +1484,7 @@
+         unsafe fn deallocate<'a>(self: &'a Self, ptr: std::ptr::NonNull<u8>, layout: Layout);
+         //@ req thread_token(?t) &*& Allocator::<&'a Self>(t, self, ?alloc_id) &*& alloc_block_in(alloc_id, ptr.as_ptr(), layout) &*& array_at_lft_(alloc_id.lft, ptr.as_ptr(), layout.size(), _);
+         //@ ens thread_token(t) &*& Allocator::<&'a Self>(t, self, alloc_id);
+-        //@ on_unwind_ens thread_token(t) &*& Allocator::<&'a Self>(t, self, alloc_id);
++        //@ on_unwind_ens false;
+         
+         unsafe fn grow<'a>(self: &'a Self, ptr: std::ptr::NonNull<u8>, old_layout: Layout, new_layout: Layout) -> std::result::Result<std::ptr::NonNull<[u8]>, AllocError>;
+         /*@
+@@ -1598,6 +1673,7 @@
+         fn assume_init(b: Box<std::mem::MaybeUninit<T>, A>) -> Box<T, A>;
+         //@ req Box_in(?t, b, ?alloc_id, ?value) &*& std::mem::MaybeUninit::inner(value) == some(?value_);
+         //@ ens Box_in(t, result, alloc_id, value_);
++        //@ on_unwind_ens false;
+ 
+     }
+ 
+@@ -1665,6 +1741,17 @@
+     
+     impl<T> Option<T> {
+     
++        fn as_mut<'a>(self: &'a mut Option<T>) -> Option<&'a mut T>;
++        //@ req *self |-> ?value;
++        /*@
++        ens match value {
++            Option::None => *self |-> Option::None &*& result == Option::None,
++            Option::Some(v) => Option_Some(self) &*& *Option_Some_0_ptr(self) |-> v &*&
++                result == Option::Some(Option_Some_0_ptr(self))
++        };
++        @*/
++        //@ on_unwind_ens false;
++
+         fn is_some<'a>(self: &'a Option<T>) -> bool;
+         //@ req [?f](*self |-> ?v);
+         //@ ens [f](*self |-> v) &*& result == (v != Option::None);
+@@ -2190,12 +2277,52 @@
+ 
+     type Infallible = !;
+     
+-    trait Into<T> {
++    /*@
++    fix known_from<S, T>(value: S) -> option<T>;
+     
+-        fn into(self: Self) -> T;
+-        //@ req thread_token(currentThread) &*& <Self>.own(currentThread, self);
+-        //@ ens thread_token(currentThread) &*& <T>.own(currentThread, result);
++    lem_auto(known_from::<u16, usize>(value)) known_u16_to_usize(value: u16);
++        req true;
++        ens known_from::<u16, usize>(value) == some(value as usize);
++    @*/
++
++    trait From<S> {
++        fn from(value: S) -> Self;
++        /*@
++        req if known_from::<S, Self>(value) == none {
++            thread_token(currentThread) &*& <S>.own(currentThread, value)
++        } else { true };
++        @*/
++        /*@
++        ens match known_from::<S, Self>(value) {
++            none => thread_token(currentThread) &*& <Self>.own(currentThread, result),
++            some(converted) => result == converted
++        };
++        @*/
++        //@ on_unwind_ens known_from::<S, Self>(value) == none &*& thread_token(currentThread);
++    }
++
++    /*@
++    fix known_into<S, T>(value: S) -> option<T>;
+     
++    lem_auto(known_into::<std::num::NonZero<usize>, usize>(value)) known_nonzero_usize_into(value: std::num::NonZero<usize>);
++        req true;
++        ens known_into::<std::num::NonZero<usize>, usize>(value) == some(value.get());
++    @*/
++
++    trait Into<T> {
++        fn into(self: Self) -> T;
++        /*@
++        req if known_into::<Self,T>(self) == none {
++            thread_token(currentThread) &*& <Self>.own(currentThread, self)
++        } else { true };
++        @*/
++        /*@
++        ens match known_into::<Self,T>(self) {
++            none => thread_token(currentThread) &*& <T>.own(currentThread, result),
++            some(v) => result == v
++        };
++        @*/
++        //@ on_unwind_ens known_into::<Self,T>(self) == none &*& thread_token(currentThread);
+     }
+     
+ }
