@@ -9,6 +9,12 @@ on:
     branches: [ main ]
     types: [labeled, synchronize, reopened]
 
+# kani.yml reads earlier runs to compare results with main; a called workflow cannot have more
+# permissions than its caller.
+permissions:
+  actions: read
+  contents: read
+
 jobs:
   autoharness:
     if: >-

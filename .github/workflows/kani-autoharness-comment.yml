@@ -1,0 +1,93 @@
+# Posts the autoharness results of a pull request as a comment on it, and updates that comment
+# on later runs. Every pull request gets the comment when it goes through the merge queue; one
+# with the run-autoharness label gets it earlier. The runs cannot do this themselves: for a pull
+# request from a fork their token is read-only. This workflow runs after them, with a token that
+# can write. It never checks out or runs code of the pull request; it only posts what that run
+# uploaded.
+name: Kani autoharness comment
+
+on:
+  workflow_run:
+    workflows: ["Kani autoharness on request", "Kani"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+  HEAD_RUN: ${{ github.event.workflow_run.id }}
+
+jobs:
+  comment:
+    # Of the "Kani" runs, only those of the merge queue run autoharness for a pull request.
+    # A failed run gets a comment too: it says so, and lists what no longer verifies.
+    if: >-
+      contains(fromJSON('["success", "failure"]'), github.event.workflow_run.conclusion) &&
+      (github.event.workflow_run.name == 'Kani autoharness on request' ||
+       github.event.workflow_run.event == 'merge_group')
+    runs-on: ubuntu-24.04
+    # One comment per branch: runs that finish close together must not each create one.
+    concurrency:
+      group: autoharness-comment-${{ github.event.workflow_run.head_repository.owner.login }}-${{ github.event.workflow_run.head_branch }}
+    env:
+      HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+      HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      EVENT: ${{ github.event.workflow_run.event }}
+      CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+    steps:
+      - name: Find the pull request
+        run: |
+          # The merge queue tests a pull request on a branch named after it. A branch of a
+          # fork can carry such a name too, so trust the name only in a merge queue run.
+          if [[ "$EVENT" == merge_group && "$HEAD_BRANCH" =~ ^gh-readonly-queue/.*/pr-([0-9]+)-[0-9a-f]+$ ]]; then
+            pr=${BASH_REMATCH[1]}
+          else
+            # Only if the run is of the pull request's latest commit: an older run that
+            # finishes late must not replace the results of a newer one.
+            pr=$(gh api -X GET "repos/$GH_REPO/pulls" -f state=open -f base=main -f head="$HEAD_OWNER:$HEAD_BRANCH" \
+              --jq '.[] | select(.head.sha == env.HEAD_SHA) | .number')
+          fi
+          if [ -z "$pr" ]; then
+            echo "No pull request with $HEAD_OWNER:$HEAD_BRANCH at $HEAD_SHA."
+          fi
+          echo "PR=$pr" >> "$GITHUB_ENV"
+
+      # shortcut: reports the Linux results only, add macOS if the two ever differ.
+      - name: Post comment
+        if: env.PR != ''
+        run: |
+          gh run download "$HEAD_RUN" --name ubuntu-latest-summary.md --dir head \
+            || echo "Run $HEAD_RUN uploaded no summary."
+          {
+            echo "<!-- autoharness-results -->"
+            if [ "$CONCLUSION" != success ]; then
+              echo "**[This run]($RUN_URL) failed.**"
+              echo
+            fi
+            if [ -f head/summary.md ]; then
+              cat head/summary.md
+            else
+              echo "It produced no autoharness results."
+            fi
+          } > comment.md
+          # A comment holds 65,536 characters; a longer one is refused.
+          if [ "$(wc -c < comment.md)" -gt 60000 ]; then
+            head -c 60000 comment.md > short.md
+            printf '\n\n</details>\n\nCut short: the full text is in the job summary of the run.\n' >> short.md
+            mv short.md comment.md
+          fi
+          # Not piped into `head`: a failed request must fail the step, not look like "none".
+          comments=$(gh api "repos/$GH_REPO/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- autoharness-results -->"))) | .id')
+          comment=${comments%%$'\n'*}
+          if [ -n "$comment" ]; then
+            gh api -X PATCH "repos/$GH_REPO/issues/comments/$comment" -F body=@comment.md
+          else
+            gh api -X POST "repos/$GH_REPO/issues/$PR/comments" -F body=@comment.md
+          fi
