@@ -1294,6 +1294,84 @@ mod verify {
         kani::cover(true, "bounded advance_by returned");
     }
 
+    // ---- Functional-contract companions: stub-free, model-free, bounded ----
+    // Each asserts a documented result contract on the full-content bounded family,
+    // checked against an independent in-harness computation (stepwise iteration and
+    // re-encoding) rather than a reference model. The symbolic-length harnesses above
+    // carry safety; these pin result correctness: three cross-check the real UTF-8
+    // decoder (re-encode roundtrip, forward/reverse agreement, char_indices tiling),
+    // and one brackets `size_hint` against the true char count.
+    // `advance_by`/`nth` post-state is out of reach here: their annotated loops are
+    // abstracted by invariants that do not pin exact exit state (the should_panic twin
+    // keeps that proof non-vacuous instead).
+
+    // Decoder correctness: re-encoding every char yielded by `next` reproduces the
+    // exact source bytes — a wrong decode (value, width, or skipped byte) breaks it.
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn check_chars_reencode_roundtrip() {
+        let s = any_valid_str_bounded();
+        let mut buf = [0u8; 32];
+        let mut pos = 0;
+        let mut multi = false;
+        for ch in s.chars() {
+            multi |= ch.len_utf8() > 1;
+            pos += ch.encode_utf8(&mut buf[pos..]).len();
+        }
+        assert_eq!(&buf[..pos], s.as_bytes());
+        kani::cover(multi, "multi-byte char decoded");
+    }
+
+    // Reverse-decoder agreement: `next_back` yields exactly the forward sequence in
+    // reverse (`next_code_point_reverse` is a separate decode path from `next`'s).
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn check_chars_double_ended_agree() {
+        let s = any_valid_str_bounded();
+        let mut fwd = [None::<char>; 8];
+        let mut n = 0;
+        for ch in s.chars() {
+            fwd[n] = Some(ch);
+            n += 1;
+        }
+        let mut it = s.chars();
+        while let Some(ch) = it.next_back() {
+            n -= 1;
+            assert_eq!(Some(ch), fwd[n]);
+        }
+        assert_eq!(n, 0);
+    }
+
+    // char_indices decomposition: offsets are the exact contiguous byte positions —
+    // each (i, ch) re-reads as the char at byte i, and the offsets tile the string.
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn check_char_indices_decomposition() {
+        let s = any_valid_str_bounded();
+        let mut expect = 0;
+        for (i, ch) in s.char_indices() {
+            assert_eq!(i, expect);
+            assert_eq!(s[i..].chars().next(), Some(ch));
+            expect = i + ch.len_utf8();
+        }
+        assert_eq!(expect, s.len());
+    }
+
+    // size_hint brackets the true count (tied to actual iteration, not the formula).
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn check_size_hint_brackets_count() {
+        let s = any_valid_str_bounded();
+        let (lo, hi) = s.chars().size_hint();
+        let mut n = 0;
+        for _ in s.chars() {
+            n += 1;
+        }
+        assert!(lo <= n);
+        assert_eq!(hi, Some(s.len()));
+        assert!(n <= s.len());
+    }
+
     // Assumption 1 (Ch22 spec): the slice module is correct. This models
     // `slice::Iter::<u8>::advance_by`'s postcondition WITHOUT re-verifying its pointer walk
     // (the real body OOM'd on symbolic length). Sound re-view via the public `as_slice` — no
