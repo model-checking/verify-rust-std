@@ -324,3 +324,71 @@ impl<T> PolymorphicIter<[MaybeUninit<T>]> {
         })
     }
 }
+
+#[cfg(kani)]
+impl<T: Copy> PolymorphicIter<[MaybeUninit<T>]> {
+    /// A model of `fold` for iterators of at most 32 elements of a `Copy` type. It has no loop,
+    /// it calls no function that has a contract, and it does not write to the iterator.
+    ///
+    /// `fold` runs a loop in `IndexRange::try_fold`. When `fold` is called from a loop that has
+    /// a loop contract, that inner loop cannot be given a contract of its own, and CBMC then
+    /// rejects the writes to its local variables. Besides, inside a loop with a contract every
+    /// call of a function that has a function contract costs a copy of the loop's write set.
+    /// The proof of `Chars::advance_by` in `str::iter` uses this model for that reason.
+    ///
+    /// Like `fold`, it passes all elements to `f` in order. Unlike `fold`, it leaves them in
+    /// the iterator: a write to `self.alive` goes through a pointer to an unsized type, and
+    /// CBMC cannot find its target when it infers what the calling loop writes. For a `Copy`
+    /// type the difference shows only in what is left in the iterator, and the callers of
+    /// `fold` that this model is for (`Iterator::sum` on an array's `IntoIter`) only drop it,
+    /// which does nothing for a `Copy` type.
+    pub(crate) fn kani_fold_32<B>(&mut self, init: B, mut f: impl FnMut(B, T) -> B) -> B {
+        let (start, end) = (self.alive.start(), self.alive.end());
+        assert!(end - start <= 32);
+        let data = self.data.as_ptr() as *const T;
+        let mut acc = init;
+        macro_rules! step {
+            ($k:expr) => {
+                if start + $k < end {
+                    // SAFETY: the element is alive, and `T` is `Copy`.
+                    let elem =
+                        unsafe { crate::intrinsics::read_via_copy(data.wrapping_add(start + $k)) };
+                    acc = f(acc, elem);
+                }
+            };
+        }
+        step!(0);
+        step!(1);
+        step!(2);
+        step!(3);
+        step!(4);
+        step!(5);
+        step!(6);
+        step!(7);
+        step!(8);
+        step!(9);
+        step!(10);
+        step!(11);
+        step!(12);
+        step!(13);
+        step!(14);
+        step!(15);
+        step!(16);
+        step!(17);
+        step!(18);
+        step!(19);
+        step!(20);
+        step!(21);
+        step!(22);
+        step!(23);
+        step!(24);
+        step!(25);
+        step!(26);
+        step!(27);
+        step!(28);
+        step!(29);
+        step!(30);
+        step!(31);
+        acc
+    }
+}
