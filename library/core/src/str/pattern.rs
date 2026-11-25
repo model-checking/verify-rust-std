@@ -489,7 +489,11 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
     }
     #[inline]
     fn next_match(&mut self) -> Option<(usize, usize)> {
+        #[cfg(kani)]
+        let mut step_budget = verify::char_search_step_budget();
         loop {
+            #[cfg(kani)]
+            verify::take_char_search_step(&mut step_budget);
             // get the haystack after the last character found
             let bytes = self.haystack.as_bytes().get(self.finger..self.finger_back)?;
             // the last byte of the utf8 encoded needle
@@ -557,7 +561,11 @@ unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
     #[inline]
     fn next_match_back(&mut self) -> Option<(usize, usize)> {
         let haystack = self.haystack.as_bytes();
+        #[cfg(kani)]
+        let mut step_budget = verify::char_search_step_budget();
         loop {
+            #[cfg(kani)]
+            verify::take_char_search_step(&mut step_budget);
             // get the haystack up to but not including the last character searched
             let bytes = haystack.get(self.finger..self.finger_back)?;
             // the last byte of the utf8 encoded needle
@@ -2152,31 +2160,46 @@ unsafe fn small_slice_eq(x: &[u8], y: &[u8]) -> bool {
 pub mod verify {
     use super::*;
 
-    #[cfg(all(kani, target_arch = "x86_64"))] // only called on x86
-    #[kani::proof]
+    // An auxiliary regression can enable a checked local search budget.
+    #[inline(never)]
+    pub(in crate::str) fn char_search_step_budget() -> Option<usize> {
+        None
+    }
+
+    pub(super) fn take_char_search_step(budget: &mut Option<usize>) {
+        if let Some(remaining) = budget {
+            assert!(*remaining > 0, "CharSearcher exceeded the regression step budget");
+            *remaining -= 1;
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[kani::proof_for_contract(small_slice_eq)]
     #[kani::unwind(4)]
     pub fn check_small_slice_eq() {
-        // TODO: ARR_SIZE can be `std::usize::MAX` with cbmc argument
-        // `--arrays-uf-always`
+        // This dependency regression uses bounded backing arrays.
         const ARR_SIZE: usize = 1000;
         let x: [u8; ARR_SIZE] = kani::any();
         let y: [u8; ARR_SIZE] = kani::any();
         let xs = kani::slice::any_slice_of_array(&x);
         let ys = kani::slice::any_slice_of_array(&y);
-        kani::assume(xs.len() == ys.len());
         unsafe {
             small_slice_eq(xs, ys);
         }
+        kani::cover(xs.len() < 4, "short slice comparison completed");
+        kani::cover(xs.len() >= 4, "word comparison completed");
     }
 
-    #[cfg(all(kani, target_arch = "x86_64"))] // only called on x86
+    #[cfg(target_arch = "x86_64")]
     #[kani::proof]
     #[kani::unwind(4)]
     pub fn check_small_slice_eq_empty() {
-        let ptr_x = kani::any_where::<usize, _>(|val| *val != 0) as *const u8;
-        let ptr_y = kani::any_where::<usize, _>(|val| *val != 0) as *const u8;
-        kani::assume(ptr_x.is_aligned());
-        kani::assume(ptr_y.is_aligned());
+        use crate::num::NonZero;
+
+        let ptr_x = crate::ptr::without_provenance::<u8>(kani::any::<NonZero<usize>>().get());
+        let ptr_y = crate::ptr::without_provenance::<u8>(kani::any::<NonZero<usize>>().get());
+        assert!(ptr_x.is_aligned());
+        assert!(ptr_y.is_aligned());
         assert_eq!(
             unsafe {
                 small_slice_eq(
@@ -2186,5 +2209,71 @@ pub mod verify {
             },
             true
         );
+        kani::cover(true, "empty slice comparison completed");
+    }
+
+    fn char_searcher_invariant(searcher: &CharSearcher<'_>) -> bool {
+        let haystack = searcher.haystack;
+        let mut encoded = [0u8; 4];
+        let width = searcher.needle.encode_utf8(&mut encoded).len();
+        searcher.finger <= searcher.finger_back
+            && searcher.finger_back <= haystack.len()
+            && haystack.is_char_boundary(searcher.finger)
+            && haystack.is_char_boundary(searcher.finger_back)
+            && searcher.utf8_size() == width
+            && searcher.utf8_encoded[0] == encoded[0]
+            && (width < 2 || searcher.utf8_encoded[1] == encoded[1])
+            && (width < 3 || searcher.utf8_encoded[2] == encoded[2])
+            && (width < 4 || searcher.utf8_encoded[3] == encoded[3])
+    }
+
+    // Check the concrete searcher's result and iterator state against the
+    // range guarantees used by Challenge 22's symbolic searcher model.
+    pub(in crate::str) fn assert_char_searcher_step(
+        haystack: &str,
+        needle: char,
+        front: usize,
+        back: usize,
+        reverse: bool,
+    ) -> Option<(usize, usize)> {
+        assert!(front <= back && back <= haystack.len());
+        assert!(haystack.is_char_boundary(front) && haystack.is_char_boundary(back));
+        let mut searcher = needle.into_searcher(haystack);
+        searcher.finger = front;
+        searcher.finger_back = back;
+        assert!(char_searcher_invariant(&searcher));
+        let encoding = searcher.utf8_encoded;
+        let width = searcher.utf8_size;
+        let result = if reverse { searcher.next_match_back() } else { searcher.next_match() };
+        assert!(char_searcher_invariant(&searcher));
+        assert_eq!(searcher.haystack.as_ptr(), haystack.as_ptr());
+        assert_eq!(searcher.haystack.len(), haystack.len());
+        assert_eq!(searcher.needle, needle);
+        assert_eq!(searcher.utf8_size, width);
+        for i in 0..4 {
+            assert_eq!(searcher.utf8_encoded[i], encoding[i]);
+        }
+        if reverse {
+            assert_eq!(searcher.finger, front);
+        } else {
+            assert_eq!(searcher.finger_back, back);
+        }
+        match result {
+            Some((a, b)) => {
+                assert!(front <= a && a < b && b <= back);
+                assert_eq!(b - a, needle.len_utf8());
+                assert!(haystack.is_char_boundary(a) && haystack.is_char_boundary(b));
+                let mut matched = haystack[a..b].chars();
+                assert_eq!(matched.next(), Some(needle));
+                assert!(matched.next().is_none());
+                if reverse {
+                    assert_eq!(searcher.finger_back, a);
+                } else {
+                    assert_eq!(searcher.finger, b);
+                }
+            }
+            None => assert_eq!(searcher.finger, searcher.finger_back),
+        }
+        result
     }
 }

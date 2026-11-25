@@ -168,6 +168,30 @@ impl<T> AsRef<[T]> for Iter<'_, T> {
     }
 }
 
+#[cfg(kani)]
+impl<'a, T> Iter<'a, T> {
+    /// Expose the updated cursor as a raw pointer for Kani's loop write set.
+    pub(crate) fn kani_cursor_slot(&mut self) -> *mut *const T {
+        // NonNull<T> is transparent over its pointer.
+        (&raw mut self.ptr).cast()
+    }
+
+    /// Clause-only copy: CBMC adds a write-set parameter to ordinary calls,
+    /// whereas calls from loop clauses have a different calling convention.
+    ///
+    /// # Safety
+    /// `this` must point to readable iterator storage. The pointer fields are
+    /// read as raw pointer representations, so a havoc candidate need not yet
+    /// satisfy the NonNull or iterator range invariants.
+    pub(crate) unsafe fn kani_loop_raw_parts(this: *const Self) -> (*const T, *const T) {
+        // Read the representation before requiring NonNull's validity. Havoc
+        // can produce invalid candidates, which the invariant must exclude.
+        let ptr = unsafe { &raw const (*this).ptr } as *const *const T;
+        let end = unsafe { &raw const (*this).end_or_len };
+        unsafe { (crate::intrinsics::read_via_copy(ptr), crate::intrinsics::read_via_copy(end)) }
+    }
+}
+
 #[unstable(feature = "ub_checks", issue = "none")]
 impl<T> Invariant for Iter<'_, T> {
     /// An iterator can be safely used if its pointer can be read for its current length.

@@ -167,7 +167,62 @@ impl<T: TrivialClone, const N: usize> SpecPolymorphicIterClone<N> for T {
     }
 }
 
+// Fail closed if the harness-wide fold stub reaches an unproved element
+// instantiation. The actual advance_by pipeline and refinement proofs use bool.
+#[cfg(kani)]
+trait Challenge22FoldElement {
+    fn admitted() -> bool;
+}
+
+#[cfg(kani)]
+impl<T> Challenge22FoldElement for T {
+    default fn admitted() -> bool {
+        false
+    }
+}
+
+#[cfg(kani)]
+impl Challenge22FoldElement for bool {
+    fn admitted() -> bool {
+        true
+    }
+}
+
 impl<T> PolymorphicIter<[MaybeUninit<T>]> {
+    /// Loop-free replacement used only by the Challenge 22 harnesses.
+    ///
+    /// Advance `alive` before each callback, as `try_fold` does, so drop sees
+    /// the same remaining elements even if the callback panics.
+    #[cfg(kani)]
+    pub(crate) fn kani_fold_at_most_32<B>(&mut self, init: B, mut f: impl FnMut(B, T) -> B) -> B {
+        assert!(<T as Challenge22FoldElement>::admitted());
+        assert!(self.alive.start() <= self.alive.end());
+        assert!(self.alive.end() <= self.data.len());
+        assert!(self.data.len() == 32);
+        let start = self.alive.start();
+        let end = self.alive.end();
+        let data = self.data.as_ptr().cast::<T>();
+        let mut accum = init;
+        macro_rules! step {
+            ($($k:literal),+ $(,)?) => {
+                $(
+                    if start + $k < end {
+                        let idx = start + $k;
+                        self.alive = IndexRange::kani_from_bounds(idx + 1, end);
+                        // SAFETY: This step consumes an initialized live element.
+                        let elem = unsafe { crate::intrinsics::read_via_copy(data.wrapping_add(idx)) };
+                        accum = f(accum, elem);
+                    }
+                )+
+            };
+        }
+        step!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31,
+        );
+        accum
+    }
+
     #[inline]
     pub(super) fn as_slice(&self) -> &[T] {
         // SAFETY: We know that all elements within `alive` are properly initialized.
@@ -322,5 +377,48 @@ impl<T> PolymorphicIter<[MaybeUninit<T>]> {
             let elem = unsafe { data.get_unchecked(idx).assume_init_read() };
             f(accum, elem)
         })
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    // In addition to the sum used by advance_by, record the entire sequence
+    // (at most 32 bits) and the callback count. Compare the actual implementation
+    // directly with the model; neither implementation is stubbed in this proof.
+    #[kani::proof]
+    fn check_consuming_fold_model() {
+        let flags: [bool; 32] = kani::any();
+        let start: usize = kani::any();
+        let end: usize = kani::any();
+        kani::assume(start <= end && end <= 32);
+        kani::cover(start < end, "nonempty live range admitted");
+        // Same representation conversion as IntoIterator for arrays, without
+        // array::map's unrelated construction and draining machinery.
+        let data: [MaybeUninit<bool>; 32] = unsafe { crate::mem::transmute(flags) };
+        let mut actual =
+            unsafe { PolymorphicIter::new_unchecked(IndexRange::new_unchecked(start, end), data) };
+        let mut model =
+            unsafe { PolymorphicIter::new_unchecked(IndexRange::new_unchecked(start, end), data) };
+        let actual: &mut PolymorphicIter<[MaybeUninit<bool>]> = &mut actual;
+        let model: &mut PolymorphicIter<[MaybeUninit<bool>]> = &mut model;
+        let observe = |(sum, trace, calls): (u8, u64, u8), flag: bool| {
+            assert!(calls < 32, "fold called the callback more than 32 times");
+            (sum + flag as u8, (trace << 1) | flag as u64, calls + 1)
+        };
+        let expected = actual.fold((0, 0, 0), observe);
+        let result = model.kani_fold_at_most_32((0, 0, 0), observe);
+        assert!(result == expected);
+        assert!(actual.alive == model.alive);
+        assert!(model.alive.start() == end && model.alive.end() == end);
+        assert!(result.2 as usize == end - start);
+        assert!(model.next().is_none() && actual.next().is_none());
+        kani::cover(start == 0 && end == 32, "all 32 independent flags consumed");
+        kani::cover(start == end, "empty alive range");
+        kani::cover(0 < start && start < end && end < 32, "interior alive range");
+        // Both ordinary destructors run; bool has no destructor of its own.
     }
 }

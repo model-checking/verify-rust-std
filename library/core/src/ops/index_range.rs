@@ -238,6 +238,15 @@ impl FusedIterator for IndexRange {}
 #[cfg(kani)]
 mod verify {
     use super::*;
+
+    impl IndexRange {
+        // A direct range assignment keeps the fold model's write set explicit.
+        pub(crate) fn kani_from_bounds(start: usize, end: usize) -> Self {
+            assert!(start <= end);
+            Self { start, end }
+        }
+    }
+
     #[kani::proof_for_contract(IndexRange::new_unchecked)]
     fn proof_for_index_range_new_unchecked() {
         let start = kani::any::<usize>();
