@@ -4002,14 +4002,14 @@ mod verify {
     #[kani::proof]
     #[kani::stub_verified(transmute_unchecked_wrapper)]
     fn should_succeed_i8_to_bool() {
-        let src: u8 = kani::any_where(|x| *x as u8 <= 1);
+        let src: i8 = kani::any_where(|x| *x == 0 || *x == 1);
         let dst: bool = unsafe { transmute_unchecked_wrapper(src) };
     }
 
     #[kani::proof]
     fn should_fail_i8_to_bool() {
-        let src: u8 = kani::any_where(|x| *x as u8 > 1);
-        assert!(!ub_checks::can_dereference(&src as *const u8 as *const bool));
+        let src: i8 = kani::any_where(|x| *x != 0 && *x != 1);
+        assert!(!ub_checks::can_dereference(&src as *const i8 as *const bool));
     }
 
     //The following harnesses do the same as above, but for compound types
