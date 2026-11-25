@@ -321,3 +321,55 @@ impl<I: Default> Default for Enumerate<I> {
         Enumerate::new(Default::default())
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Harnesses for `__iterator_get_unchecked` for Enumerate.
+    macro_rules! generate_enumerate_get_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(
+                            <Enumerate<
+                                crate::iter::Map<crate::ops::Range<usize>, fn(usize) -> $ty>,
+                            > as crate::iter::Iterator>::__iterator_get_unchecked
+                        )]
+            pub fn $name() {
+                let count: usize = kani::any();
+                let end: usize = kani::any();
+                let idx: usize = kani::any();
+                let value: $ty = kani::any();
+                let source = (count..end).map(move |_| value);
+                let mut iter = Enumerate { iter: source, count };
+                let _ = unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
+                let len = end - count;
+                kani::cover(count == 0 && idx == 0, "first element");
+                kani::cover(
+                    count > 0 && idx > 0 && idx < len - 1,
+                    "interior element after a prefix",
+                );
+                kani::cover(idx == len - 1, "last element");
+                kani::cover(count == usize::MAX - 1 && idx == 0, "large enumeration offset");
+                kani::cover(
+                    len == usize::MAX && idx == len - 1,
+                    "last element at the maximum logical length",
+                );
+            }
+        };
+    }
+
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_i8, i8);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_i16, i16);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_i32, i32);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_i64, i64);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_i128, i128);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_u8, u8);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_u16, u16);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_u32, u32);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_u64, u64);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_u128, u128);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_array, [u8; 4]);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_bool, bool);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_unit, ());
+}
