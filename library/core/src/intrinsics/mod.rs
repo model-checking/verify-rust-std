@@ -109,15 +109,19 @@ use crate::sync::atomic::{
 /// A type for atomic ordering parameters for intrinsics. This is a separate type from
 /// `atomic::Ordering` so that we can make it `ConstParamTy` and fix the values used here without a
 /// risk of leaking that to stable code.
-#[allow(missing_docs)]
 #[derive(Debug, ConstParamTy, PartialEq, Eq)]
 pub enum AtomicOrdering {
     // These values must match the compiler's `AtomicOrdering` defined in
     // `rustc_middle/src/ty/consts/int.rs`!
+    /// [`Ordering::Relaxed`][`crate::sync::atomic::Ordering::Relaxed`]
     Relaxed = 0,
+    /// [`Ordering::Release`][`crate::sync::atomic::Ordering::Release`]
     Release = 1,
+    /// [`Ordering::Acquire`][`crate::sync::atomic::Ordering::Acquire`]
     Acquire = 2,
+    /// [`Ordering::AcqRel`][`crate::sync::atomic::Ordering::AcqRel`]
     AcqRel = 3,
+    /// [`Ordering::SeqCst`][`crate::sync::atomic::Ordering::SeqCst`]
     SeqCst = 4,
 }
 
@@ -3934,8 +3938,10 @@ mod verify {
     //The follow are harnesses that check our function contract (specifically the weakness/strength
     //of our generic validity precondition)
     //In particular, should_succeed harnesses check that type-specific validity preconditions imply our generic precondition
-    //should_fail harnesses check that when we assume the negation of a type-specific validity
-    //precondition, the harness should trigger at least one failure
+    // The `should_fail_*` harnesses show that `transmute_unchecked_wrapper`'s precondition
+    // rejects every input whose bytes aren't a valid value of the output type. They assert that
+    // the precondition is false rather than calling the wrapper under `should_panic`: Kani
+    // doesn't count a failed contract condition as a panic.
 
     #[kani::proof]
     #[kani::stub_verified(transmute_unchecked_wrapper)]
@@ -3945,11 +3951,9 @@ mod verify {
     }
 
     #[kani::proof]
-    #[kani::stub_verified(transmute_unchecked_wrapper)]
-    #[kani::should_panic]
     fn should_fail_u32_to_char() {
         let src: u32 = kani::any_where(|x| !core::char::from_u32(*x).is_some());
-        let dst: char = unsafe { transmute_unchecked_wrapper(src) };
+        assert!(!ub_checks::can_dereference(&src as *const u32 as *const char));
     }
 
     #[kani::proof]
@@ -3962,13 +3966,11 @@ mod verify {
     }
 
     #[kani::proof]
-    #[kani::stub_verified(transmute_unchecked_wrapper)]
-    #[kani::should_panic]
     fn should_fail_f32_to_char() {
         let src: f32 = kani::any_where(|x| {
             !char::from_u32(unsafe { *(x as *const f32 as *const u32) }).is_some()
         });
-        let dst: char = unsafe { transmute_unchecked_wrapper(src) };
+        assert!(!ub_checks::can_dereference(&src as *const f32 as *const char));
     }
 
     #[kani::proof]
@@ -3979,11 +3981,9 @@ mod verify {
     }
 
     #[kani::proof]
-    #[kani::stub_verified(transmute_unchecked_wrapper)]
-    #[kani::should_panic]
     fn should_fail_i32_to_char() {
         let src: i32 = kani::any_where(|x| !char::from_u32(*x as u32).is_some());
-        let dst: char = unsafe { transmute_unchecked_wrapper(src) };
+        assert!(!ub_checks::can_dereference(&src as *const i32 as *const char));
     }
 
     #[kani::proof]
@@ -3994,26 +3994,22 @@ mod verify {
     }
 
     #[kani::proof]
-    #[kani::stub_verified(transmute_unchecked_wrapper)]
-    #[kani::should_panic]
     fn should_fail_u8_to_bool() {
         let src: u8 = kani::any_where(|x| *x > 1);
-        let dst: bool = unsafe { transmute_unchecked_wrapper(src) };
+        assert!(!ub_checks::can_dereference(&src as *const u8 as *const bool));
     }
 
     #[kani::proof]
     #[kani::stub_verified(transmute_unchecked_wrapper)]
     fn should_succeed_i8_to_bool() {
-        let src: u8 = kani::any_where(|x| *x as u8 <= 1);
+        let src: i8 = kani::any_where(|x| *x == 0 || *x == 1);
         let dst: bool = unsafe { transmute_unchecked_wrapper(src) };
     }
 
     #[kani::proof]
-    #[kani::stub_verified(transmute_unchecked_wrapper)]
-    #[kani::should_panic]
     fn should_fail_i8_to_bool() {
-        let src: u8 = kani::any_where(|x| *x as u8 > 1);
-        let dst: bool = unsafe { transmute_unchecked_wrapper(src) };
+        let src: i8 = kani::any_where(|x| *x != 0 && *x != 1);
+        assert!(!ub_checks::can_dereference(&src as *const i8 as *const bool));
     }
 
     //The following harnesses do the same as above, but for compound types
@@ -4039,11 +4035,9 @@ mod verify {
     }
 
     #[kani::proof]
-    #[kani::stub_verified(transmute_unchecked_wrapper)]
-    #[kani::should_panic]
     fn should_fail_tuple_to_struct() {
         let src: (u8, u8) = (kani::any(), kani::any_where(|x| *x > 1));
-        let dst: struct_A = unsafe { transmute_unchecked_wrapper(src) };
+        assert!(!ub_checks::can_dereference(&src as *const (u8, u8) as *const struct_A));
     }
 
     #[kani::proof]
@@ -4054,11 +4048,9 @@ mod verify {
     }
 
     #[kani::proof]
-    #[kani::stub_verified(transmute_unchecked_wrapper)]
-    #[kani::should_panic]
     fn should_fail_tuple_to_tuple() {
         let src: (u8, u8) = (kani::any(), kani::any_where(|x| *x > 1));
-        let dst: (u8, bool) = unsafe { transmute_unchecked_wrapper(src) };
+        assert!(!ub_checks::can_dereference(&src as *const (u8, u8) as *const (u8, bool)));
     }
 
     #[kani::proof]
@@ -4069,11 +4061,9 @@ mod verify {
     }
 
     #[kani::proof]
-    #[kani::stub_verified(transmute_unchecked_wrapper)]
-    #[kani::should_panic]
     fn should_fail_tuple_to_array() {
         let src: (u8, u8) = (kani::any_where(|x| *x > 1), kani::any_where(|x| *x > 1));
-        let dst: [bool; 2] = unsafe { transmute_unchecked_wrapper(src) };
+        assert!(!ub_checks::can_dereference(&src as *const (u8, u8) as *const [bool; 2]));
     }
 
     //generates should_succeed harnesses when the output type has no possible invalid values, like ints
