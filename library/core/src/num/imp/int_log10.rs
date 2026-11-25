@@ -1,10 +1,16 @@
 //! These functions compute the integer logarithm of their type, assuming
 //! that someone has already checked that the value is strictly positive.
 
+use safety::{ensures, requires};
+
+#[cfg(kani)]
+use crate::kani;
 use crate::num::NonZero;
 
 // 0 < val <= u8::MAX
 #[inline]
+#[requires(val > 0)]
+#[ensures(|result: &u32| is_ilog(val as u128, 10, *result))]
 const fn u8_impl(val: u8) -> u32 {
     let val = val as u32;
 
@@ -26,6 +32,8 @@ const fn u8_impl(val: u8) -> u32 {
 
 // 0 < val < 100_000
 #[inline]
+#[requires(0 < val && val < 100_000)]
+#[ensures(|result: &u32| is_ilog(val as u128, 10, *result))]
 const fn less_than_5(val: u32) -> u32 {
     // Similar to u8, when adding one of these constants to val,
     // we get two possible bit patterns above the low 17 bits,
@@ -47,12 +55,16 @@ const fn less_than_5(val: u32) -> u32 {
 
 // 0 < val <= u16::MAX
 #[inline]
+#[requires(val > 0)]
+#[ensures(|result: &u32| is_ilog(val as u128, 10, *result))]
 const fn u16_impl(val: u16) -> u32 {
     less_than_5(val as u32)
 }
 
 // 0 < val <= u32::MAX
 #[inline]
+#[requires(val > 0)]
+#[ensures(|result: &u32| is_ilog(old(val) as u128, 10, *result))]
 const fn u32_impl(mut val: u32) -> u32 {
     let mut log = 0;
     if val >= 100_000 {
@@ -64,6 +76,8 @@ const fn u32_impl(mut val: u32) -> u32 {
 
 // 0 < val <= u64::MAX
 #[inline]
+#[requires(val > 0)]
+#[ensures(|result: &u32| is_ilog(old(val) as u128, 10, *result))]
 const fn u64_impl(mut val: u64) -> u32 {
     let mut log = 0;
     if val >= 10_000_000_000 {
@@ -79,6 +93,8 @@ const fn u64_impl(mut val: u64) -> u32 {
 
 // 0 < val <= u128::MAX
 #[inline]
+#[requires(val > 0)]
+#[ensures(|result: &u32| is_ilog(old(val) as u128, 10, *result))]
 const fn u128_impl(mut val: u128) -> u32 {
     let mut log = 0;
     if val >= 100_000_000_000_000_000_000_000_000_000_000 {
@@ -96,6 +112,7 @@ const fn u128_impl(mut val: u128) -> u32 {
 macro_rules! define_unsigned_ilog10 {
     ($($ty:ident => $impl_fn:ident,)*) => {$(
         #[inline]
+        #[ensures(|result: &u32| is_ilog(val.get() as u128, 10, *result))]
         pub(in crate::num) const fn $ty(val: NonZero<$ty>) -> u32 {
             let result = $impl_fn(val.get());
 
@@ -117,6 +134,7 @@ define_unsigned_ilog10! {
 }
 
 #[inline]
+#[ensures(|result: &u32| is_ilog(val.get() as u128, 10, *result))]
 pub(in crate::num) const fn usize(val: NonZero<usize>) -> u32 {
     #[cfg(target_pointer_width = "16")]
     let impl_fn = u16;
@@ -136,6 +154,10 @@ macro_rules! define_signed_ilog10 {
     ($($ty:ident => $impl_fn:ident,)*) => {$(
         // 0 < val <= $ty::MAX
         #[inline]
+        #[ensures(|result: &Option<u32>| match *result {
+            Some(log) => val > 0 && is_ilog(val as u128, 10, log),
+            None => val <= 0,
+        })]
         pub(in crate::num) const fn $ty(val: $ty) -> Option<u32> {
             if val > 0 {
                 let result = $impl_fn(val.cast_unsigned());
@@ -168,4 +190,64 @@ define_signed_ilog10! {
 #[track_caller]
 pub(in crate::num) const fn panic_for_nonpositive_argument() -> ! {
     panic!("argument of integer logarithm must be positive")
+}
+
+/// Returns whether `log` is the largest `r` with `base^r <= value`.
+///
+/// `value / base < base^log` means `value < base^(log + 1)`, but can't overflow. This doesn't use
+/// `checked_pow` because its loop contract makes Kani lose track of the result.
+#[cfg(kani)]
+pub(in crate::num) const fn is_ilog(value: u128, base: u128, log: u32) -> bool {
+    let mut power: u128 = 1;
+    let mut i = 0;
+    while i < log {
+        power = match power.checked_mul(base) {
+            Some(power) => power,
+            None => return false,
+        };
+        i += 1;
+    }
+    power <= value && value / base < power
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    macro_rules! check_contract {
+        ($($function:path => $harness:ident;)*) => {$(
+            #[kani::proof_for_contract($function)]
+            fn $harness() {
+                let _ = $function(kani::any());
+            }
+        )*};
+    }
+
+    check_contract! {
+        less_than_5 => check_less_than_5;
+
+        u8_impl => check_u8_impl;
+        u16_impl => check_u16_impl;
+        u32_impl => check_u32_impl;
+        u64_impl => check_u64_impl;
+        u128_impl => check_u128_impl;
+
+        super::u8 => check_u8;
+        super::u16 => check_u16;
+        super::u32 => check_u32;
+        super::u64 => check_u64;
+        super::u128 => check_u128;
+
+        super::i8 => check_i8;
+        super::i16 => check_i16;
+        super::i32 => check_i32;
+        super::i64 => check_i64;
+        super::i128 => check_i128;
+
+        // `usize` is 64-bit on CI; on 16- and 32-bit targets it calls `u16` or `u32`, proved above.
+        super::usize => check_usize;
+
+        // No `isize`: it calls whichever of `i16`, `i32` or `i64` matches its width.
+    }
 }
