@@ -1,5 +1,7 @@
 use crate::iter::adapters::SourceIter;
 use crate::iter::{FusedIterator, InPlaceIterable, TrustedFused};
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::{ManuallyDrop, MaybeUninit};
 use crate::num::NonZero;
 use crate::ops::{ControlFlow, Try};
@@ -210,4 +212,55 @@ where
 unsafe impl<I: InPlaceIterable, F> InPlaceIterable for FilterMap<I, F> {
     const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
     const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // next_chunk (uses get_unchecked_mut, copy_nonoverlapping, array_assume_init,
+    //             IntoIter::new_unchecked)
+    // End-to-end bounded harness: exercises full next_chunk path
+    // including both Ok (Break) and Err (Continue) exit paths.
+    // N >= 1 in these harnesses: the SAFETY argument for the unchecked
+    // `copy_nonoverlapping` into `array` requires N >= 1 -- with N = 0 the
+    // write precedes the loop's break check, so no in-bounds argument exists
+    // for index 0.
+    // Boundedness is structural at the pinned toolchain: the traversal loop
+    // lives in the generic default `Iterator::try_for_each` behind a capturing
+    // closure, so no adapter-level loop contract can attach to it, and
+    // contracting the shared default would route every std proof through the
+    // loop-contract transform. The exit-path unsafe ops depend only on
+    // 0 <= initialized <= N.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_filter_map_next_chunk_n2_u8() {
+        const MAX_LEN: usize = 8;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = FilterMap::new(slice.iter(), |&x: &u8| if x < 128 { Some(x) } else { None });
+        let _ = iter.next_chunk::<2>();
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_filter_map_next_chunk_n3_u8() {
+        const MAX_LEN: usize = 8;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = FilterMap::new(slice.iter(), |&x: &u8| if x < 128 { Some(x) } else { None });
+        let _ = iter.next_chunk::<3>();
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_filter_map_next_chunk_n2_char() {
+        const MAX_LEN: usize = 8;
+        let array: [char; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter =
+            FilterMap::new(slice.iter(), |&x: &char| if (x as u32) < 128 { Some(x) } else { None });
+        let _ = iter.next_chunk::<2>();
+    }
 }
