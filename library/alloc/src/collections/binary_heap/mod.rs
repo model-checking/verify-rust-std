@@ -979,6 +979,8 @@ impl<T: Ord, A: Allocator> BinaryHeap<T, A> {
 
     /// Moves all the elements of `other` into `self`, leaving `other` empty.
     ///
+    /// For performance, `self` and `other` may be swapped before appending.
+    ///
     /// # Examples
     ///
     /// Basic usage:
@@ -1439,7 +1441,8 @@ impl<T, A: Allocator> BinaryHeap<T, A> {
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_confusables("length", "size")]
-    pub fn len(&self) -> usize {
+    #[rustc_const_stable(feature = "const_binary_heap_len", since = "1.101.0")]
+    pub const fn len(&self) -> usize {
         self.data.len()
     }
 
@@ -1463,7 +1466,8 @@ impl<T, A: Allocator> BinaryHeap<T, A> {
     /// ```
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub fn is_empty(&self) -> bool {
+    #[rustc_const_stable(feature = "const_binary_heap_len", since = "1.101.0")]
+    pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 

@@ -84,7 +84,7 @@ use crate::{fmt, hash, intrinsics, mem, ptr};
 // Flux cannot lower the pattern-type field; treat the struct as opaque.
 #[cfg_attr(flux, flux::opaque)]
 pub struct NonNull<#[rustc_assert_variance(covariant)] T: PointeeSized> {
-    pointer: crate::pattern_type!(*const T is !null),
+    pointer: crate::pat::pattern_type!(*const T is !null),
 }
 
 /// `NonNull` pointers are not `Send` because the data they reference may be aliased.
@@ -429,9 +429,9 @@ impl<T: PointeeSized> NonNull<T> {
     /// ```
     #[stable(feature = "nonnull", since = "1.25.0")]
     #[rustc_const_stable(feature = "const_nonnull_as_ptr", since = "1.32.0")]
-    #[rustc_never_returns_null_ptr]
     #[must_use]
     #[inline(always)]
+    #[lint::never_returns_null_ptr]
     // Ensures the address of the resulting pointer is the same as the
     // original. `addr_eq` (rather than `==`) makes this well-defined for
     // wide pointers too: comparing `*mut dyn Trait` with `==` also compares
@@ -578,7 +578,7 @@ impl<T: PointeeSized> NonNull<T> {
     /// assert!(aligned.try_cast_aligned::<u32>().is_some());
     /// assert!(unaligned.try_cast_aligned::<u32>().is_none());
     /// ```
-    #[stable(feature = "pointer_try_cast_aligned", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "pointer_try_cast_aligned", since = "1.101.0")]
     #[must_use = "this returns the result of the operation, \
                   without modifying the original"]
     #[inline]
@@ -631,11 +631,14 @@ impl<T: PointeeSized> NonNull<T> {
     /// `count` is in units of **bytes**.
     ///
     /// This is purely a convenience for casting to a `u8` pointer and
-    /// using [offset][pointer::offset] on it. See that method for documentation
-    /// and safety requirements.
+    /// using [offset][pointer::offset] on it.
     ///
     /// For non-`Sized` pointees this operation changes only the data pointer,
     /// leaving the metadata untouched.
+    ///
+    /// # Safety
+    ///
+    /// See [offset][pointer::offset] for documentation and safety requirements.
     #[must_use]
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
@@ -705,11 +708,14 @@ impl<T: PointeeSized> NonNull<T> {
     /// `count` is in units of bytes.
     ///
     /// This is purely a convenience for casting to a `u8` pointer and
-    /// using [`add`][NonNull::add] on it. See that method for documentation
-    /// and safety requirements.
+    /// using [`add`][NonNull::add] on it.
     ///
     /// For non-`Sized` pointees this operation changes only the data pointer,
     /// leaving the metadata untouched.
+    ///
+    /// # Safety
+    ///
+    /// See [`add`][NonNull::add] for documentation and safety requirements.
     #[must_use]
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
@@ -786,11 +792,14 @@ impl<T: PointeeSized> NonNull<T> {
     /// `count` is in units of bytes.
     ///
     /// This is purely a convenience for casting to a `u8` pointer and
-    /// using [`sub`][NonNull::sub] on it. See that method for documentation
-    /// and safety requirements.
+    /// using [`sub`][NonNull::sub] on it.
     ///
     /// For non-`Sized` pointees this operation changes only the data pointer,
     /// leaving the metadata untouched.
+    ///
+    /// # Safety
+    ///
+    /// See [`sub`][NonNull::sub] for documentation and safety requirements.
     #[must_use]
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
@@ -920,11 +929,14 @@ impl<T: PointeeSized> NonNull<T> {
     /// units of **bytes**.
     ///
     /// This is purely a convenience for casting to a `u8` pointer and
-    /// using [`offset_from`][NonNull::offset_from] on it. See that method for
-    /// documentation and safety requirements.
+    /// using [`offset_from`][NonNull::offset_from] on it.
     ///
     /// For non-`Sized` pointees this operation considers only the data pointers,
     /// ignoring the metadata.
+    ///
+    /// # Safety
+    ///
+    /// See [`offset_from`][NonNull::offset_from] for documentation and safety requirements.
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
@@ -1032,10 +1044,13 @@ impl<T: PointeeSized> NonNull<T> {
     ///
     /// This is purely a convenience for casting to a `u8` pointer and
     /// using [`offset_from_unsigned`][NonNull::offset_from_unsigned] on it.
-    /// See that method for documentation and safety requirements.
     ///
     /// For non-`Sized` pointees this operation considers only the data pointers,
     /// ignoring the metadata.
+    ///
+    /// # Safety
+    ///
+    /// See [`offset_from_unsigned`][NonNull::offset_from_unsigned] for documentation and safety requirements.
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "ptr_sub_ptr", since = "1.87.0")]
@@ -1047,6 +1062,8 @@ impl<T: PointeeSized> NonNull<T> {
 
     /// Reads the value from `self` without moving it. This leaves the
     /// memory in `self` unchanged.
+    ///
+    /// # Safety
     ///
     /// See [`ptr::read`] for safety concerns and examples.
     ///
@@ -1071,6 +1088,8 @@ impl<T: PointeeSized> NonNull<T> {
     /// to not be elided or reordered by the compiler across other volatile
     /// operations.
     ///
+    /// # Safety
+    ///
     /// See [`ptr::read_volatile`] for safety concerns and examples.
     ///
     /// [`ptr::read_volatile`]: crate::ptr::read_volatile()
@@ -1092,6 +1111,8 @@ impl<T: PointeeSized> NonNull<T> {
     ///
     /// Unlike `read`, the pointer may be unaligned.
     ///
+    /// # Safety
+    ///
     /// See [`ptr::read_unaligned`] for safety concerns and examples.
     ///
     /// [`ptr::read_unaligned`]: crate::ptr::read_unaligned()
@@ -1112,6 +1133,8 @@ impl<T: PointeeSized> NonNull<T> {
     /// and destination may overlap.
     ///
     /// NOTE: this has the *same* argument order as [`ptr::copy`].
+    ///
+    /// # Safety
     ///
     /// See [`ptr::copy`] for safety concerns and examples.
     ///
@@ -1138,6 +1161,8 @@ impl<T: PointeeSized> NonNull<T> {
     /// and destination may *not* overlap.
     ///
     /// NOTE: this has the *same* argument order as [`ptr::copy_nonoverlapping`].
+    ///
+    /// # Safety
     ///
     /// See [`ptr::copy_nonoverlapping`] for safety concerns and examples.
     ///
@@ -1166,6 +1191,8 @@ impl<T: PointeeSized> NonNull<T> {
     ///
     /// NOTE: this has the *opposite* argument order of [`ptr::copy`].
     ///
+    /// # Safety
+    ///
     /// See [`ptr::copy`] for safety concerns and examples.
     ///
     /// [`ptr::copy`]: crate::ptr::copy()
@@ -1192,6 +1219,8 @@ impl<T: PointeeSized> NonNull<T> {
     ///
     /// NOTE: this has the *opposite* argument order of [`ptr::copy_nonoverlapping`].
     ///
+    /// # Safety
+    ///
     /// See [`ptr::copy_nonoverlapping`] for safety concerns and examples.
     ///
     /// [`ptr::copy_nonoverlapping`]: crate::ptr::copy_nonoverlapping()
@@ -1216,6 +1245,8 @@ impl<T: PointeeSized> NonNull<T> {
 
     /// Executes the destructor (if any) of the pointed-to value.
     ///
+    /// # Safety
+    ///
     /// See [`ptr::drop_in_place`] for safety concerns and examples.
     ///
     /// [`ptr::drop_in_place`]: crate::ptr::drop_in_place()
@@ -1234,6 +1265,8 @@ impl<T: PointeeSized> NonNull<T> {
 
     /// Overwrites a memory location with the given value without reading or
     /// dropping the old value.
+    ///
+    /// # Safety
     ///
     /// See [`ptr::write`] for safety concerns and examples.
     ///
@@ -1254,6 +1287,8 @@ impl<T: PointeeSized> NonNull<T> {
 
     /// Invokes memset on the specified pointer, setting `count * size_of::<T>()`
     /// bytes of memory starting at `self` to `val`.
+    ///
+    /// # Safety
     ///
     /// See [`ptr::write_bytes`] for safety concerns and examples.
     ///
@@ -1285,6 +1320,8 @@ impl<T: PointeeSized> NonNull<T> {
     /// to not be elided or reordered by the compiler across other volatile
     /// operations.
     ///
+    /// # Safety
+    ///
     /// See [`ptr::write_volatile`] for safety concerns and examples.
     ///
     /// [`ptr::write_volatile`]: crate::ptr::write_volatile()
@@ -1307,6 +1344,8 @@ impl<T: PointeeSized> NonNull<T> {
     ///
     /// Unlike `write`, the pointer may be unaligned.
     ///
+    /// # Safety
+    ///
     /// See [`ptr::write_unaligned`] for safety concerns and examples.
     ///
     /// [`ptr::write_unaligned`]: crate::ptr::write_unaligned()
@@ -1326,6 +1365,8 @@ impl<T: PointeeSized> NonNull<T> {
 
     /// Replaces the value at `self` with `src`, returning the old
     /// value, without dropping either.
+    ///
+    /// # Safety
     ///
     /// See [`ptr::replace`] for safety concerns and examples.
     ///
@@ -1347,6 +1388,8 @@ impl<T: PointeeSized> NonNull<T> {
     /// Swaps the values at two mutable locations of the same type, without
     /// deinitializing either. They may overlap, unlike `mem::swap` which is
     /// otherwise equivalent.
+    ///
+    /// # Safety
     ///
     /// See [`ptr::swap`] for safety concerns and examples.
     ///
@@ -1538,13 +1581,13 @@ impl<T> NonNull<T> {
     ///
     /// The `len` argument is the number of **elements**, not the number of bytes.
     ///
-    /// This function is safe, but dereferencing the return value is unsafe.
-    /// See the documentation of [`slice::from_raw_parts`] for slice safety requirements.
+    /// See [`ptr::slice_from_raw_parts`] for more information.
+    ///
+    /// [`ptr::slice_from_raw_parts`]: crate::ptr::slice_from_raw_parts
     ///
     /// # Examples
     ///
     /// ```rust
-    /// #![feature(ptr_cast_slice)]
     /// use std::ptr::NonNull;
     ///
     /// // create a slice pointer when starting out with a pointer to the first element
@@ -1558,7 +1601,8 @@ impl<T> NonNull<T> {
     /// but `let slice = NonNull::from(&x[..]);` would be a better way to write code like this.)
     #[inline]
     #[must_use]
-    #[unstable(feature = "ptr_cast_slice", issue = "149103")]
+    #[stable(feature = "ptr_cast_slice", since = "1.101.0")]
+    #[rustc_const_stable(feature = "ptr_cast_slice", since = "1.101.0")]
     pub const fn cast_slice(self, len: usize) -> NonNull<[T]> {
         NonNull::slice_from_raw_parts(self, len)
     }
@@ -1690,7 +1734,7 @@ impl<T> NonNull<[T]> {
     #[inline]
     #[must_use]
     #[unstable(feature = "slice_ptr_get", issue = "74265")]
-    #[rustc_never_returns_null_ptr]
+    #[lint::never_returns_null_ptr]
     // Address preservation; see as_ptr regarding the use of addr_eq.
     #[ensures(|result: &*mut T| core::ptr::addr_eq(*result, self.as_ptr()))]
     pub const fn as_mut_ptr(self) -> *mut T {
@@ -1826,6 +1870,8 @@ impl<T> NonNull<[T]> {
 
     /// Returns a raw pointer to an element or subslice, without doing bounds
     /// checking.
+    ///
+    /// # Safety
     ///
     /// Calling this method with an [out-of-bounds index] or when `self` is not dereferenceable
     /// is *[undefined behavior]* even if the resulting pointer is not used.

@@ -2,8 +2,13 @@ use core::any::Any;
 use core::error::Error;
 #[cfg(not(no_global_oom_handling))]
 use core::fmt;
-use core::mem;
+#[cfg(kani)]
+use core::kani;
 use core::pin::Pin;
+#[cfg(kani)]
+use core::ub_checks;
+
+use safety::{ensures, requires};
 
 use crate::alloc::{Allocator, StaticAllocator};
 #[cfg(not(no_global_oom_handling))]
@@ -245,15 +250,14 @@ impl<T, const N: usize> From<[T; N]> for Box<[T]> {
 /// # Safety
 ///
 /// `boxed_slice.len()` must be exactly `N`.
+#[requires(boxed_slice.len() == N)]
 unsafe fn boxed_slice_as_array_unchecked<T, A: Allocator, const N: usize>(
     boxed_slice: Box<[T], A>,
 ) -> Box<[T; N], A> {
     debug_assert_eq!(boxed_slice.len(), N);
 
-    let (ptr, alloc) = Box::into_raw_with_allocator(boxed_slice);
-    // SAFETY: Pointer and allocator came from an existing box,
-    // and our safety condition requires that the length is exactly `N`
-    unsafe { Box::from_raw_in(ptr as *mut [T; N], alloc) }
+    // SAFETY: Caller ensures that the length is correct.
+    unsafe { Box::cast_unchecked(boxed_slice) }
 }
 
 #[stable(feature = "boxed_slice_try_from", since = "1.43.0")]
@@ -286,13 +290,12 @@ impl<T, const N: usize, A: Allocator> TryFrom<Vec<T, A>> for Box<[T; N], A> {
 
     /// Attempts to convert a `Vec<T>` into a `Box<[T; N]>`.
     ///
-    /// Like [`Vec::into_boxed_slice`], this is in-place if `vec.capacity() == N`,
-    /// but will require a reallocation otherwise.
+    /// For allocation behavior, see [`Vec::into_boxed_slice`].
     ///
     /// # Errors
     ///
     /// Returns the original `Vec<T>` in the `Err` variant if
-    /// `boxed_slice.len()` does not equal `N`.
+    /// `vec.len()` does not equal `N`.
     ///
     /// # Examples
     ///
@@ -309,6 +312,28 @@ impl<T, const N: usize, A: Allocator> TryFrom<Vec<T, A>> for Box<[T; N], A> {
             Ok(unsafe { boxed_slice_as_array_unchecked(boxed_slice) })
         } else {
             Err(vec)
+        }
+    }
+}
+
+impl<T: ?Sized + 'static, A: Allocator> Box<T, A> {
+    fn downcast_any<Dst: 'static>(this: Self) -> Result<Box<Dst, A>, Self> {
+        if T::type_id(&this) == core::any::TypeId::of::<Dst>() {
+            // SAFETY: The type is correct
+            Ok(unsafe { Self::cast_unchecked(this) })
+        } else {
+            Err(this)
+        }
+    }
+}
+impl<T: ?Sized, A: Allocator> Box<T, A> {
+    /// Casts a box by converting to a raw pointer and back, whatever that means
+    /// in the given context.
+    unsafe fn cast_unchecked<Dst>(this: Self) -> Box<Dst, A> {
+        // SAFETY: Caller ensures the cast is correct
+        unsafe {
+            let (raw, alloc) = Box::into_raw_with_allocator(this);
+            Box::from_raw_in(raw.cast(), alloc)
         }
     }
 }
@@ -334,8 +359,7 @@ impl<A: Allocator> Box<dyn Any, A> {
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn downcast<T: Any>(self) -> Result<Box<T, A>, Self> {
-        // SAFETY: Check ensures the type is correct.
-        if self.is::<T>() { unsafe { Ok(self.downcast_unchecked::<T>()) } } else { Err(self) }
+        Self::downcast_any(self)
     }
 
     /// Downcasts the box to a concrete type.
@@ -364,13 +388,12 @@ impl<A: Allocator> Box<dyn Any, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
+    #[requires(self.is::<T>())]
+    #[ensures(|result| ub_checks::can_dereference(&**result as *const T))]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         // SAFETY: Caller ensures the type is correct.
-        unsafe {
-            let (raw, alloc): (*mut dyn Any, _) = Box::into_raw_with_allocator(self);
-            Box::from_raw_in(raw as *mut T, alloc)
-        }
+        unsafe { Self::cast_unchecked(self) }
     }
 }
 
@@ -395,8 +418,7 @@ impl<A: Allocator> Box<dyn Any + Send, A> {
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn downcast<T: Any>(self) -> Result<Box<T, A>, Self> {
-        // SAFETY: Check ensures the type is correct.
-        if self.is::<T>() { unsafe { Ok(self.downcast_unchecked::<T>()) } } else { Err(self) }
+        Self::downcast_any(self)
     }
 
     /// Downcasts the box to a concrete type.
@@ -425,13 +447,12 @@ impl<A: Allocator> Box<dyn Any + Send, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
+    #[requires(self.is::<T>())]
+    #[ensures(|result| ub_checks::can_dereference(&**result as *const T))]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         // SAFETY: Caller ensures the type is correct.
-        unsafe {
-            let (raw, alloc): (*mut (dyn Any + Send), _) = Box::into_raw_with_allocator(self);
-            Box::from_raw_in(raw as *mut T, alloc)
-        }
+        unsafe { Self::cast_unchecked(self) }
     }
 }
 
@@ -456,8 +477,7 @@ impl<A: Allocator> Box<dyn Any + Send + Sync, A> {
     #[inline]
     #[stable(feature = "box_send_sync_any_downcast", since = "1.51.0")]
     pub fn downcast<T: Any>(self) -> Result<Box<T, A>, Self> {
-        // SAFETY: Check ensures the type is correct.
-        if self.is::<T>() { unsafe { Ok(self.downcast_unchecked::<T>()) } } else { Err(self) }
+        Self::downcast_any(self)
     }
 
     /// Downcasts the box to a concrete type.
@@ -486,14 +506,12 @@ impl<A: Allocator> Box<dyn Any + Send + Sync, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
+    #[requires(self.is::<T>())]
+    #[ensures(|result| ub_checks::can_dereference(&**result as *const T))]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         // SAFETY: Caller ensures the type is correct.
-        unsafe {
-            let (raw, alloc): (*mut (dyn Any + Send + Sync), _) =
-                Box::into_raw_with_allocator(self);
-            Box::from_raw_in(raw as *mut T, alloc)
-        }
+        unsafe { Self::cast_unchecked(self) }
     }
 }
 
@@ -711,21 +729,24 @@ impl<'a, 'b> From<Cow<'b, str>> for Box<dyn Error + 'a> {
     }
 }
 
+impl<T: Error + ?Sized + 'static, A: Allocator> Box<T, A> {
+    fn downcast_error<Dst: 'static>(this: Self) -> Result<Box<Dst, A>, Self> {
+        if core::error::error_type_id::<T>(&this) == core::any::TypeId::of::<Dst>() {
+            // SAFETY: The type is correct
+            Ok(unsafe { Self::cast_unchecked(this) })
+        } else {
+            Err(this)
+        }
+    }
+}
+
 impl dyn Error {
     /// Attempts to downcast the box to a concrete type.
     #[inline]
     #[stable(feature = "error_downcast", since = "1.3.0")]
     #[rustc_allow_incoherent_impl]
     pub fn downcast<T: Error + 'static>(self: Box<Self>) -> Result<Box<T>, Box<dyn Error>> {
-        if self.is::<T>() {
-            // SAFETY: Check ensures the type is correct.
-            unsafe {
-                let raw: *mut dyn Error = Box::into_raw(self);
-                Ok(Box::from_raw(raw as *mut T))
-            }
-        } else {
-            Err(self)
-        }
+        Box::downcast_error(self)
     }
 }
 
@@ -735,10 +756,7 @@ impl dyn Error + Send {
     #[stable(feature = "error_downcast", since = "1.3.0")]
     #[rustc_allow_incoherent_impl]
     pub fn downcast<T: Error + 'static>(self: Box<Self>) -> Result<Box<T>, Box<dyn Error + Send>> {
-        let err: Box<dyn Error> = self;
-        <dyn Error>::downcast(err)
-            // SAFETY: Reapplying the `Send` marker we already know to hold.
-            .map_err(|s| unsafe { mem::transmute::<Box<dyn Error>, Box<dyn Error + Send>>(s) })
+        Box::downcast_error(self)
     }
 }
 
@@ -748,10 +766,231 @@ impl dyn Error + Send + Sync {
     #[stable(feature = "error_downcast", since = "1.3.0")]
     #[rustc_allow_incoherent_impl]
     pub fn downcast<T: Error + 'static>(self: Box<Self>) -> Result<Box<T>, Box<Self>> {
-        let err: Box<dyn Error> = self;
-        // SAFETY: Reapplying the `Send` and `Sync` markers we already know to hold.
-        <dyn Error>::downcast(err).map_err(|s| unsafe {
-            mem::transmute::<Box<dyn Error>, Box<dyn Error + Send + Sync>>(s)
-        })
+        Box::downcast_error(self)
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    #![allow(missing_docs)]
+
+    use core::any::Any;
+    use core::error::Error;
+    use core::{fmt, kani};
+
+    use super::boxed_slice_as_array_unchecked;
+    use crate::boxed::Box;
+    use crate::vec::Vec;
+
+    #[derive(Debug)]
+    struct ProbeError(i32);
+
+    impl fmt::Display for ProbeError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "probe")
+        }
+    }
+
+    impl Error for ProbeError {}
+
+    #[derive(Debug)]
+    struct OtherError;
+
+    impl fmt::Display for OtherError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "other")
+        }
+    }
+
+    impl Error for OtherError {}
+
+    // Clone but not Copy, so slice conversion exercises element cloning.
+    #[derive(Clone)]
+    struct CloneCell(u8);
+
+    /// Shows that the assumed precondition does not rule out every execution.
+    fn cover_reached() {
+        kani::cover(true, "non-vacuity witness: reached with the precondition assumed");
+    }
+
+    // The challenge table lists `<dyn Error>::downcast_unchecked`. That API
+    // does not exist: unchecked downcast lives on `Box<dyn Any (+ Send) (+ Sync)>`.
+    // Those impls sit in this module rather than in `Box`'s own, and Kani's
+    // contract resolver could not match such out-of-module impls until
+    // model-checking/kani#4778, which the pinned Kani includes. The target paths
+    // use the impl's generic name `A` and fully qualified auto traits, the
+    // spelling that fix matches.
+
+    #[kani::proof_for_contract(Box::<dyn core::any::Any + 'static, A>::downcast_unchecked::<i32>)]
+    pub fn check_downcast_unchecked_any() {
+        let value: i32 = kani::any();
+        let erased: Box<dyn Any> = Box::new(value);
+        let boxed = unsafe { erased.downcast_unchecked::<i32>() };
+        assert!(*boxed == value);
+        cover_reached();
+    }
+
+    #[kani::proof_for_contract(Box::<dyn core::any::Any + core::marker::Send + 'static, A>::downcast_unchecked::<i32>)]
+    pub fn check_downcast_unchecked_any_send() {
+        let value: i32 = kani::any();
+        let erased: Box<dyn Any + Send> = Box::new(value);
+        let boxed = unsafe { erased.downcast_unchecked::<i32>() };
+        assert!(*boxed == value);
+        cover_reached();
+    }
+
+    #[kani::proof_for_contract(Box::<dyn core::any::Any + core::marker::Send + core::marker::Sync + 'static, A>::downcast_unchecked::<bool>)]
+    pub fn check_downcast_unchecked_any_send_sync() {
+        let value: bool = kani::any();
+        let erased: Box<dyn Any + Send + Sync> = Box::new(value);
+        let boxed = unsafe { erased.downcast_unchecked::<bool>() };
+        assert!(*boxed == value);
+        cover_reached();
+    }
+
+    #[kani::proof]
+    pub fn check_from_slice_trivial_clone() {
+        let data: [u8; 2] = kani::any();
+        let boxed = Box::<[u8]>::from(&data[..]);
+        assert!(&*boxed == &data);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(3)]
+    pub fn check_from_slice_clone() {
+        let data = [CloneCell(kani::any())];
+        let boxed = Box::<[CloneCell]>::from(&data[..]);
+        assert!(boxed.len() == 1);
+        assert!(boxed[0].0 == data[0].0);
+    }
+
+    #[kani::proof]
+    pub fn check_from_str() {
+        let boxed: Box<str> = Box::from("xy");
+        assert!(&*boxed == "xy");
+    }
+
+    #[kani::proof]
+    pub fn check_from_box_str_to_bytes() {
+        let boxed: Box<str> = Box::from("xy");
+        let bytes: Box<[u8]> = Box::from(boxed);
+        assert!(&*bytes == b"xy");
+    }
+
+    #[kani::proof]
+    pub fn check_try_from_boxed_slice() {
+        // One element more than N, so the slice can be shorter or longer than N.
+        let data: [i32; 3] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&data);
+        let boxed: Box<[i32]> = Box::from(slice);
+        let len = boxed.len();
+        kani::cover(len < 2, "slice shorter than N");
+        kani::cover(len == 2, "slice of length N");
+        kani::cover(len > 2, "slice longer than N");
+        match Box::<[i32; 2]>::try_from(boxed) {
+            Ok(_arr) => assert!(len == 2),
+            Err(rest) => assert!(rest.len() != 2),
+        }
+    }
+
+    #[kani::proof]
+    pub fn check_try_from_vec() {
+        // One element more than N, so the vector can be shorter or longer than N.
+        let data: [i32; 3] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&data);
+        let vec: Vec<i32> = slice.to_vec();
+        let len = vec.len();
+        kani::cover(len < 2, "vector shorter than N");
+        kani::cover(len == 2, "vector of length N");
+        kani::cover(len > 2, "vector longer than N");
+        match Box::<[i32; 2]>::try_from(vec) {
+            Ok(_arr) => assert!(len == 2),
+            Err(rest) => assert!(rest.len() != 2),
+        }
+    }
+
+    #[kani::proof_for_contract(boxed_slice_as_array_unchecked)]
+    pub fn check_boxed_slice_as_array_unchecked() {
+        let data: [u8; 2] = kani::any();
+        let boxed: Box<[u8]> = Box::from(data);
+        let arr = unsafe { boxed_slice_as_array_unchecked::<u8, _, 2>(boxed) };
+        assert!(arr[0] == data[0] && arr[1] == data[1]);
+        cover_reached();
+    }
+
+    #[kani::proof]
+    pub fn check_downcast_any() {
+        let value: i32 = kani::any();
+        let ok: Box<dyn Any> = Box::new(value);
+        let ok = ok.downcast::<i32>();
+        kani::cover(ok.is_ok(), "Ok: downcast to the stored type");
+        assert!(ok.is_ok());
+        let err: Box<dyn Any> = Box::new(value);
+        let err = err.downcast::<u8>();
+        kani::cover(err.is_err(), "Err: downcast to another type");
+        assert!(err.is_err());
+    }
+
+    #[kani::proof]
+    pub fn check_downcast_any_send() {
+        let value: i32 = kani::any();
+        let ok: Box<dyn Any + Send> = Box::new(value);
+        let ok = ok.downcast::<i32>();
+        kani::cover(ok.is_ok(), "Ok: downcast to the stored type");
+        assert!(ok.is_ok());
+        let err: Box<dyn Any + Send> = Box::new(value);
+        let err = err.downcast::<u8>();
+        kani::cover(err.is_err(), "Err: downcast to another type");
+        assert!(err.is_err());
+    }
+
+    #[kani::proof]
+    pub fn check_downcast_any_send_sync() {
+        let value: i32 = kani::any();
+        let ok: Box<dyn Any + Send + Sync> = Box::new(value);
+        let ok = ok.downcast::<i32>();
+        kani::cover(ok.is_ok(), "Ok: downcast to the stored type");
+        assert!(ok.is_ok());
+        let err: Box<dyn Any + Send + Sync> = Box::new(value);
+        let err = err.downcast::<bool>();
+        kani::cover(err.is_err(), "Err: downcast to another type");
+        assert!(err.is_err());
+    }
+
+    #[kani::proof]
+    pub fn check_downcast_error() {
+        let ok: Box<dyn Error> = Box::new(ProbeError(kani::any()));
+        let ok = ok.downcast::<ProbeError>();
+        kani::cover(ok.is_ok(), "Ok: downcast to the stored type");
+        assert!(ok.is_ok());
+        let err: Box<dyn Error> = Box::new(ProbeError(0));
+        let err = err.downcast::<OtherError>();
+        kani::cover(err.is_err(), "Err: downcast to another type");
+        assert!(err.is_err());
+    }
+
+    #[kani::proof]
+    pub fn check_downcast_error_send() {
+        let ok: Box<dyn Error + Send> = Box::new(ProbeError(kani::any()));
+        let ok = ok.downcast::<ProbeError>();
+        kani::cover(ok.is_ok(), "Ok: downcast to the stored type");
+        assert!(ok.is_ok());
+        let err: Box<dyn Error + Send> = Box::new(ProbeError(0));
+        let err = err.downcast::<OtherError>();
+        kani::cover(err.is_err(), "Err: downcast to another type");
+        assert!(err.is_err());
+    }
+
+    #[kani::proof]
+    pub fn check_downcast_error_send_sync() {
+        let ok: Box<dyn Error + Send + Sync> = Box::new(ProbeError(kani::any()));
+        let ok = ok.downcast::<ProbeError>();
+        kani::cover(ok.is_ok(), "Ok: downcast to the stored type");
+        assert!(ok.is_ok());
+        let err: Box<dyn Error + Send + Sync> = Box::new(ProbeError(0));
+        let err = err.downcast::<OtherError>();
+        kani::cover(err.is_err(), "Err: downcast to another type");
+        assert!(err.is_err());
     }
 }

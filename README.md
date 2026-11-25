@@ -8,7 +8,7 @@ This repository is a fork of the official Rust programming
 language repository, created solely to verify the Rust standard
 library. It should not be used as an alternative to the official
 Rust releases. The repository is tool agnostic and welcomes the addition of
-new tools. The currently accepted tools are [Flux](https://model-checking.github.io/verify-rust-std/tools/flux.html), [GOTO Transcoder (ESBMC)](https://model-checking.github.io/verify-rust-std/tools/goto-transcoder.html), [Kani](https://model-checking.github.io/verify-rust-std/tools/kani.html), [KMIR](https://model-checking.github.io/verify-rust-std/tools/kmir.html), and [VeriFast](https://model-checking.github.io/verify-rust-std/tools/verifast.html).
+new tools. The currently accepted tools are [Flux](https://model-checking.github.io/verify-rust-std/tools/flux.html), [ESBMC](https://model-checking.github.io/verify-rust-std/tools/esbmc.html), [Kani](https://model-checking.github.io/verify-rust-std/tools/kani.html), [KMIR](https://model-checking.github.io/verify-rust-std/tools/kmir.html), and [VeriFast](https://model-checking.github.io/verify-rust-std/tools/verifast.html).
 
 The goal is to have a verified [Rust standard library](https://doc.rust-lang.org/std/) and prove that it is safe.
 1. Contributing to the core mechanism of verifying the rust standard library
@@ -106,10 +106,7 @@ See [SECURITY](https://github.com/model-checking/kani/security/policy) for more 
 Kani is distributed under the terms of both the MIT license and the Apache License (Version 2.0).
 See [LICENSE-APACHE](https://github.com/model-checking/kani/blob/main/LICENSE-APACHE) and [LICENSE-MIT](https://github.com/model-checking/kani/blob/main/LICENSE-MIT) for details.
 
-### GOTO Transcoder (ESBMC)
-The [goto-transcoder](https://github.com/rafaelsamenezes/goto-transcoder) is distributed under the terms of the MIT license.
-See [LICENSE](https://github.com/rafaelsamenezes/goto-transcoder/blob/main/LICENSE) for details.
-
+### ESBMC
 [ESBMC](https://github.com/esbmc/esbmc) is distributed under the terms of the Apache License (Version 2.0).
 See [COPYING](https://github.com/esbmc/esbmc/blob/master/COPYING) for details.
 
