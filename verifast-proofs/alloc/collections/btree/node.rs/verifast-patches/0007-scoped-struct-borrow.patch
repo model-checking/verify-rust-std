@@ -1,0 +1,142 @@
+diff --git a/bin/rust/aliasing.rsspec b/bin/rust/aliasing.rsspec
+index 7a4936f..b37594a 100644
+--- a/bin/rust/aliasing.rsspec
++++ b/bin/rust/aliasing.rsspec
+@@ -54,7 +54,7 @@ lem end_ref_readonly<T>(p: *T);
+ 
+ fn create_ref_mut<T>(x: *T) -> *T;
+ //@ req *x |-> ?v;
+-//@ ens *result |-> v &*& ref_mut_end_token(result, x);
++//@ ens *result |-> v &*& ref_mut_end_token(result, x) &*& ref_origin(result) == ref_origin(x);
+ //@ on_unwind_ens false;
+ 
+ fn reborrow_ref_mut_implicit<T>(x: *T) -> *T;
+diff --git a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+index 19a92cd..c52f73e 100644
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -3277,43 +3277,44 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+           let* place_expr, place_is_mutable = translate_place place_cpn loc in
+           let (path, line, _), _ = Ast.lexed_loc loc in
+           let place_ty = decode_ty (D.decode_ty (place_ty_get ref_data_cpn)) in
++          let place_kind = VfMirRd.PlaceKind.get (VfMirRd.Place.kind_get place_cpn) in
++          let directive_on_line name =
++            List.find_opt
++              (fun { Mir.span; raw } ->
++                let (source_path, source_line, _), _ = Ast.lexed_loc span in
++                raw = name && source_path = path && source_line = line)
++              Args.body_tr_defs_ctx.directives
++          in
++          (* Opt in for fresh mutable borrows from raw places. Reborrows
++             retain their existing treatment. *)
++          let track_fresh_mut_ref =
++            bor_kind = Mut && place_kind = Other
++            && Option.is_some (directive_on_line "track_ref_creation")
++          in
+           let ignore_ref_creation =
+-            (match bor_kind, place_ty with
+-             | Mut, `Array -> false
+-             | Mut, _ -> true  (* Other mutable borrow forms are not tracked yet. *)
+-             | Shared, _ -> not place_is_mutable && place_does_not_need_drop)
+-            ||
+-            if TranslatorArgs.ignore_ref_creation then true
++            if track_fresh_mut_ref then false
+             else
+-              let directives =
+-                Util.flatmap
+-                  (fun { Mir.span; raw } ->
+-                    if
+-                      raw = "ignore_ref_creation"
+-                      &&
+-                      let (path', line', _), _ = Ast.lexed_loc span in
+-                      path' = path && line' = line
+-                    then [ span ]
+-                    else [])
+-                  Args.body_tr_defs_ctx.directives
+-              in
+-              match directives with
+-              | directive_span :: _ ->
+-                  if not TranslatorArgs.allow_ignore_ref_creation then
+-                    Ast.static_error directive_span
+-                      "Ignoring reference creation is not allowed; specify \
+-                       -allow_ignore_ref_creation on the command line to allow"
+-                      None;
+-                  true
+-              | [] -> false
++              (match bor_kind, place_ty with
++               | Mut, `Array -> false
++               | Mut, _ -> true  (* Other mutable borrow forms are not tracked yet. *)
++               | Shared, _ -> not place_is_mutable && place_does_not_need_drop)
++              ||
++              if TranslatorArgs.ignore_ref_creation then true
++              else
++                match directive_on_line "ignore_ref_creation" with
++                | Some directive ->
++                    if not TranslatorArgs.allow_ignore_ref_creation then
++                      Ast.static_error directive.Mir.span
++                        "Ignoring reference creation is not allowed; specify \
++                         -allow_ignore_ref_creation on the command line to allow"
++                        None;
++                    true
++                | None -> false
+           in
+           if ignore_ref_creation then
+             Ok (`TrRvalueExpr (Ast.AddressOf (loc, place_expr)))
+           else
+             let is_implicit = is_implicit_get ref_data_cpn in
+-            let place_kind =
+-              VfMirRd.PlaceKind.get (VfMirRd.Place.kind_get place_cpn)
+-            in
+             (*
+             Printf.printf "ref creation at %s: place_ty=%s, bor_kind=%s, place_kind=%s, is_implicit=%b\n"
+               (Ast.string_of_loc loc)
+@@ -8032,7 +8033,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+       let* directives = ListAux.try_map translate_annotation directives_cpn in
+       let vf_mir_translator_directives, vf_directives =
+         directives
+-        |> List.partition (fun { Mir.raw } -> raw = "ignore_ref_creation")
++        |> List.partition (fun { Mir.raw } -> raw = "ignore_ref_creation" || raw = "track_ref_creation")
+       in
+       vf_directives
+       |> List.iter (fun ({ span; raw } : Mir.annot) ->
+diff --git a/tests/rust/testsuite.mysh b/tests/rust/testsuite.mysh
+index 9697d51..5e4d3fd 100644
+--- a/tests/rust/testsuite.mysh
++++ b/tests/rust/testsuite.mysh
+@@ -36,6 +36,7 @@ cd purely_unsafe
+   verifast enum_discr.rs
+   verifast -ignore_unwind_paths leftpad.rs
+   verifast arrays.rs
++  verifast -allow_dead_code -skip_specless_fns mutable_struct_borrow.rs
+   verifast -skip_specless_fns fixed_array_index.rs
+   !verifast -skip_specless_fns fixed_array_index_bad.rs
+   verifast -skip_specless_fns box_projection.rs
+diff --git a/tests/rust/purely_unsafe/mutable_struct_borrow.rs b/tests/rust/purely_unsafe/mutable_struct_borrow.rs
+new file mode 100644
+index 0000000..168799c
+--- /dev/null
++++ b/tests/rust/purely_unsafe/mutable_struct_borrow.rs
+@@ -0,0 +1,23 @@
++struct Record { size: u16, entries: [u16; 2] }
++
++unsafe fn borrow_record<'a>(ptr: *mut Record) -> &'a mut Record
++//@ req *ptr |-> ?value;
++//@ ens *result |-> value &*& ref_mut_end_token(result, ptr) &*& ref_origin(result) == ref_origin(ptr);
++//@ on_unwind_ens false;
++{
++    unsafe { &mut *ptr } //~track_ref_creation
++}
++
++unsafe fn update(ptr: *mut Record)
++//@ req *ptr |-> ?value;
++//@ ens *ptr |-> Record { size: 1, entries: value.entries };
++//@ on_unwind_ens false;
++{
++    let reference = unsafe { borrow_record(ptr) };
++    //@ open_points_to(reference);
++    reference.size = 1;
++    //@ close_points_to(reference);
++    //@ end_ref_mut(reference);
++}
++
++fn main() {}

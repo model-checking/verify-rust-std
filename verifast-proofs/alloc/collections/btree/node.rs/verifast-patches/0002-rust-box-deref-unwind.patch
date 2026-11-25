@@ -1,0 +1,62 @@
+diff --git a/bin/rust/std/lib.rsspec b/bin/rust/std/lib.rsspec
+index a5d925d..2696613 100644
+--- a/bin/rust/std/lib.rsspec
++++ b/bin/rust/std/lib.rsspec
+@@ -1453,6 +1453,7 @@ mod boxed {
+         fn as_mut_ptr<'a>(self: &'a mut Box<T, A>) -> *mut T;
+         //@ req Box_minus_contents_in(?f, ?t, ?fs, self, ?alloc_id, ?contents_ptr);
+         //@ ens Box_minus_contents_in(f, t, fs, self, alloc_id, contents_ptr) &*& result == contents_ptr;
++        //@ on_unwind_ens false;
+         
+     }
+     
+diff --git a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+index 4e237a6..7e36cfc 100644
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -3372,7 +3372,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+                   [ LitPat (AddressOf (loc, Var (loc, id))) ],
+                   Static ))
+             in
+-            Ok (`TrRvalueExpr e)
++            Ok (`TrRvalueExpr (result_of_outcome loc e))
+           | _ ->
+           let* ty_info = translate_decoded_ty cast_data.ty loc in
+           let ty = ty_info.vf_ty in
+diff --git a/tests/rust/purely_unsafe/box_projection.rs b/tests/rust/purely_unsafe/box_projection.rs
+new file mode 100644
+index 0000000..498688e
+--- /dev/null
++++ b/tests/rust/purely_unsafe/box_projection.rs
+@@ -0,0 +1,19 @@
++unsafe fn replace_box_contents(mut owner: Box<i32>, value: i32) -> Box<i32>
++/*@
++req thread_token(?t) &*& std::boxed::Box_in(t, owner, ?id, _) &*&
++    exists::<lifetime_t>(?k) &*& [?q]lifetime_token(k) &*& lifetime_inclusion(k,id.lft) == true;
++@*/
++//@ ens thread_token(t) &*& std::boxed::Box_in(t, result, id, value) &*& [q]lifetime_token(k);
++//@ on_unwind_ens false;
++{
++    //@ open exists(k);
++    //@ let contents = std::boxed::Box_separate_contents(&mut owner);
++    //@ let traded = lifetime_token_trade(k, q, id.lft);
++    //@ open_points_to_at_lft(contents, traded);
++    //@ points_to_limits(contents);
++    *owner = value;
++    //@ close_points_to_at_lft(contents);
++    //@ lifetime_token_trade_back(traded, id.lft);
++    //@ std::boxed::Box_unseparate_contents(&mut owner);
++    owner
++}
+diff --git a/tests/rust/testsuite.mysh b/tests/rust/testsuite.mysh
+index 3c5ed1d..0de6dbd 100644
+--- a/tests/rust/testsuite.mysh
++++ b/tests/rust/testsuite.mysh
+@@ -36,6 +36,7 @@ cd purely_unsafe
+   verifast enum_discr.rs
+   verifast -ignore_unwind_paths leftpad.rs
+   verifast arrays.rs
++  verifast -skip_specless_fns box_projection.rs
+   verifast -allow_assume std_thread.rs
+   verifast -allow_should_fail -allow_dead_code nonmut_let_immut.rs
+   verifast struct_exprs.rs

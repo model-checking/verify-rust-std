@@ -1,0 +1,1175 @@
+--- a/original/operations.rs
++++ b/original/operations.rs
+@@ -123,5 +123,5 @@
+ 
+ impl<K, V, Type> NodeRef<marker::DormantMut, K, V, Type> {
+-    pub(super) unsafe fn awaken<'a>(self) -> NodeRef<marker::Mut<'a>, K, V, Type> {
++    unsafe fn awaken<'a>(self) -> NodeRef<marker::Mut<'a>, K, V, Type> {
+         NodeRef { height: self.height, node: self.node, _marker: PhantomData }
+     }
+@@ -129,5 +129,5 @@
+ 
+ impl<K, V, NodeType, HandleType> Handle<NodeRef<marker::DormantMut, K, V, NodeType>, HandleType> {
+-    pub(super) unsafe fn awaken<'a>(
++    unsafe fn awaken<'a>(
+         self,
+     ) -> Handle<NodeRef<marker::Mut<'a>, K, V, NodeType>, HandleType> {
+@@ -138,5 +138,5 @@
+ 
+ impl<'a, K, V, Type> NodeRef<marker::Mut<'a>, K, V, Type> {
+-    pub(super) fn dormant(&self) -> NodeRef<marker::DormantMut, K, V, Type> {
++    fn dormant(&self) -> NodeRef<marker::DormantMut, K, V, Type> {
+         NodeRef { height: self.height, node: self.node, _marker: PhantomData }
+     }
+@@ -144,5 +144,5 @@
+ 
+ impl<'a, K, V, NodeType, HandleType> Handle<NodeRef<marker::Mut<'a>, K, V, NodeType>, HandleType> {
+-    pub(super) fn dormant(
++    fn dormant(
+         &self,
+     ) -> Handle<NodeRef<marker::DormantMut, K, V, NodeType>, HandleType> {
+@@ -151,5 +151,5 @@
+ }
+ 
+-pub(super) struct DormantMutRef<'a, T> {
++struct DormantMutRef<'a, T> {
+     ptr: NonNull<T>,
+     _marker: PhantomData<&'a mut T>,
+@@ -157,5 +157,5 @@
+ 
+ impl<'a, T> DormantMutRef<'a, T> {
+-    pub(super) unsafe fn reborrow(&mut self) -> &'a mut T {
++    unsafe fn reborrow(&mut self) -> &'a mut T {
+         // SAFETY: our own safety conditions imply this reference is again unique.
+         unsafe { &mut *self.ptr.as_ptr() }
+@@ -341,5 +341,5 @@
+ 
+ impl<BorrowType, K, V> NodeRef<BorrowType, K, V, marker::Leaf> {
+-    pub(super) fn forget_type(self) -> NodeRef<BorrowType, K, V, marker::LeafOrInternal> {
++    fn forget_type(self) -> NodeRef<BorrowType, K, V, marker::LeafOrInternal> {
+         NodeRef { height: self.height, node: self.node, _marker: PhantomData }
+     }
+@@ -347,5 +347,5 @@
+ 
+ impl<BorrowType, K, V> NodeRef<BorrowType, K, V, marker::Internal> {
+-    pub(super) fn forget_type(self) -> NodeRef<BorrowType, K, V, marker::LeafOrInternal> {
++    fn forget_type(self) -> NodeRef<BorrowType, K, V, marker::LeafOrInternal> {
+         NodeRef { height: self.height, node: self.node, _marker: PhantomData }
+     }
+@@ -353,5 +353,5 @@
+ 
+ impl<'a, K, V> SplitResult<'a, K, V, marker::Leaf> {
+-    pub(super) fn forget_node_type(self) -> SplitResult<'a, K, V, marker::LeafOrInternal> {
++    fn forget_node_type(self) -> SplitResult<'a, K, V, marker::LeafOrInternal> {
+         SplitResult { left: self.left.forget_type(), kv: self.kv, right: self.right.forget_type() }
+     }
+@@ -359,5 +359,5 @@
+ 
+ impl<'a, K, V> SplitResult<'a, K, V, marker::Internal> {
+-    pub(super) fn forget_node_type(self) -> SplitResult<'a, K, V, marker::LeafOrInternal> {
++    fn forget_node_type(self) -> SplitResult<'a, K, V, marker::LeafOrInternal> {
+         SplitResult { left: self.left.forget_type(), kv: self.kv, right: self.right.forget_type() }
+     }
+@@ -537,5 +537,5 @@
+ 
+ impl<BorrowType, K, V, Type> NodeRef<BorrowType, K, V, Type> {
+-    pub(super) fn len(&self) -> usize {
++    fn merge_len(&self) -> usize {
+         // SAFETY: We only access the `len` field here. If BorrowType is marker::ValMut,
+         // there might be outstanding mutable references to values that we must not invalidate.
+@@ -545,5 +545,5 @@
+ 
+ impl<'a, K: 'a, V: 'a> BalancingContext<'a, K, V> {
+-    fn do_merge<
++    fn do_merge_production<
+         F: FnOnce(
+             NodeRef<marker::Mut<'a>, K, V, marker::Internal>,
+@@ -551,16 +551,16 @@
+         ) -> R,
+         R,
+-        A: Allocator,
++        A: std::alloc::Allocator,
+     >(
+         self,
+         result: F,
+-        alloc: A,
++        /*@~mut@*/ alloc: A,
+     ) -> R {
+         let Handle { node: mut parent_node, idx: parent_idx, _marker } = self.parent;
+-        let old_parent_len = parent_node.len();
++        let old_parent_len = parent_node.merge_len();
+         let mut left_node = self.left_child;
+-        let old_left_len = left_node.len();
++        let old_left_len = left_node.merge_len();
+         let mut right_node = self.right_child;
+-        let right_len = right_node.len();
++        let right_len = right_node.merge_len();
+         let new_left_len = old_left_len + 1 + right_len;
+ 
+@@ -571,20 +571,20 @@
+             *left_node.len_mut() = new_left_len as u16;
+ 
+-            let parent_key = slice_remove(parent_node.key_area_mut(..old_parent_len), parent_idx);
+-            left_node.key_area_mut(old_left_len).write(parent_key);
++            let parent_key = slice_remove(parent_node.key_area_prefix_mut(..old_parent_len), parent_idx);
++            left_node.key_area_slot_mut(old_left_len).write(parent_key);
+             move_to_slice(
+-                right_node.key_area_mut(..right_len),
+-                left_node.key_area_mut(old_left_len + 1..new_left_len),
++                right_node.key_area_prefix_mut(..right_len),
++                left_node.key_area_range_mut(old_left_len + 1..new_left_len),
+             );
+ 
+-            let parent_val = slice_remove(parent_node.val_area_mut(..old_parent_len), parent_idx);
+-            left_node.val_area_mut(old_left_len).write(parent_val);
++            let parent_val = slice_remove(parent_node.val_area_prefix_mut(..old_parent_len), parent_idx);
++            left_node.val_area_slot_mut(old_left_len).write(parent_val);
+             move_to_slice(
+-                right_node.val_area_mut(..right_len),
+-                left_node.val_area_mut(old_left_len + 1..new_left_len),
++                right_node.val_area_prefix_mut(..right_len),
++                left_node.val_area_range_mut(old_left_len + 1..new_left_len),
+             );
+ 
+-            slice_remove(parent_node.edge_area_mut(..old_parent_len + 1), parent_idx + 1);
+-            parent_node.correct_childrens_parent_links(parent_idx + 1..old_parent_len);
++            slice_remove(parent_node.edge_area_prefix_mut(..old_parent_len + 1), parent_idx + 1);
++            parent_node.relink_range(parent_idx + 1..old_parent_len);
+             *parent_node.len_mut() -= 1;
+ 
+@@ -595,13 +595,13 @@
+                 let mut right_node = right_node.cast_to_internal_unchecked();
+                 move_to_slice(
+-                    right_node.edge_area_mut(..right_len + 1),
+-                    left_node.edge_area_mut(old_left_len + 1..new_left_len + 1),
++                    right_node.edge_area_prefix_mut(..right_len + 1),
++                    left_node.edge_area_range_mut(old_left_len + 1..new_left_len + 1),
+                 );
+ 
+-                left_node.correct_childrens_parent_links(old_left_len + 1..new_left_len + 1);
++                left_node.relink_range(old_left_len + 1..new_left_len + 1);
+ 
+-                alloc.deallocate(right_node.node.cast(), Layout::new::<InternalNode<K, V>>());
++                alloc.deallocate(right_node.node.cast(), std::alloc::Layout::new::<InternalNode<K, V>>());
+             } else {
+-                alloc.deallocate(right_node.node.cast(), Layout::new::<LeafNode<K, V>>());
++                alloc.deallocate(right_node.node.cast(), std::alloc::Layout::new::<LeafNode<K, V>>());
+             }
+         }
+@@ -626,22 +626,14 @@
+     }
+ 
+-    fn do_merge<
+-        F: FnOnce(
+-            NodeRef<marker::Mut<'a>, K, V, marker::Internal>,
+-            NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal>,
+-        ) -> R,
+-        R,
+-        A: Allocator,
+-    >(
++    fn merge_child_production<A: std::alloc::Allocator>(
+         self,
+-        result: F,
+-        alloc: A,
+-    ) -> R {
++        /*@~mut@*/ alloc: A,
++    ) -> NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal> {
+         let Handle { node: mut parent_node, idx: parent_idx, _marker } = self.parent;
+-        let old_parent_len = parent_node.len();
++        let old_parent_len = parent_node.merge_len();
+         let mut left_node = self.left_child;
+-        let old_left_len = left_node.len();
++        let old_left_len = left_node.merge_len();
+         let mut right_node = self.right_child;
+-        let right_len = right_node.len();
++        let right_len = right_node.merge_len();
+         let new_left_len = old_left_len + 1 + right_len;
+ 
+@@ -652,20 +644,20 @@
+             *left_node.len_mut() = new_left_len as u16;
+ 
+-            let parent_key = slice_remove(parent_node.key_area_mut(..old_parent_len), parent_idx);
+-            left_node.key_area_mut(old_left_len).write(parent_key);
++            let parent_key = slice_remove(parent_node.key_area_prefix_mut(..old_parent_len), parent_idx);
++            left_node.key_area_slot_mut(old_left_len).write(parent_key);
+             move_to_slice(
+-                right_node.key_area_mut(..right_len),
+-                left_node.key_area_mut(old_left_len + 1..new_left_len),
++                right_node.key_area_prefix_mut(..right_len),
++                left_node.key_area_range_mut(old_left_len + 1..new_left_len),
+             );
+ 
+-            let parent_val = slice_remove(parent_node.val_area_mut(..old_parent_len), parent_idx);
+-            left_node.val_area_mut(old_left_len).write(parent_val);
++            let parent_val = slice_remove(parent_node.val_area_prefix_mut(..old_parent_len), parent_idx);
++            left_node.val_area_slot_mut(old_left_len).write(parent_val);
+             move_to_slice(
+-                right_node.val_area_mut(..right_len),
+-                left_node.val_area_mut(old_left_len + 1..new_left_len),
++                right_node.val_area_prefix_mut(..right_len),
++                left_node.val_area_range_mut(old_left_len + 1..new_left_len),
+             );
+ 
+-            slice_remove(parent_node.edge_area_mut(..old_parent_len + 1), parent_idx + 1);
+-            parent_node.correct_childrens_parent_links(parent_idx + 1..old_parent_len);
++            slice_remove(parent_node.edge_area_prefix_mut(..old_parent_len + 1), parent_idx + 1);
++            parent_node.relink_range(parent_idx + 1..old_parent_len);
+             *parent_node.len_mut() -= 1;
+ 
+@@ -676,16 +668,16 @@
+                 let mut right_node = right_node.cast_to_internal_unchecked();
+                 move_to_slice(
+-                    right_node.edge_area_mut(..right_len + 1),
+-                    left_node.edge_area_mut(old_left_len + 1..new_left_len + 1),
++                    right_node.edge_area_prefix_mut(..right_len + 1),
++                    left_node.edge_area_range_mut(old_left_len + 1..new_left_len + 1),
+                 );
+ 
+-                left_node.correct_childrens_parent_links(old_left_len + 1..new_left_len + 1);
++                left_node.relink_range(old_left_len + 1..new_left_len + 1);
+ 
+-                alloc.deallocate(right_node.node.cast(), Layout::new::<InternalNode<K, V>>());
++                alloc.deallocate(right_node.node.cast(), std::alloc::Layout::new::<InternalNode<K, V>>());
+             } else {
+-                alloc.deallocate(right_node.node.cast(), Layout::new::<LeafNode<K, V>>());
++                alloc.deallocate(right_node.node.cast(), std::alloc::Layout::new::<LeafNode<K, V>>());
+             }
+         }
+-        result(parent_node, left_node)
++        select_merged_child(parent_node, left_node)
+     }
+ 
+@@ -780,12 +772,12 @@
+ 
+ impl<'a, K: 'a, V: 'a> BalancingContext<'a, K, V> {
+-    pub(super) fn bulk_steal_left(&mut self, count: usize) {
++    unsafe fn bulk_steal_left_production<'short>(&'short mut self, count: usize) {
+         assert!(count > 0);
+         // ignore-tidy-undocumented-unsafe
+         unsafe {
+             let left_node = &mut self.left_child;
+-            let old_left_len = left_node.len();
++            let old_left_len = left_node.merge_len();
+             let right_node = &mut self.right_child;
+-            let old_right_len = right_node.len();
++            let old_right_len = right_node.merge_len();
+ 
+             // Make sure that we may steal safely.
+@@ -801,25 +793,25 @@
+             {
+                 // Make room for stolen elements in the right child.
+-                slice_shr(right_node.key_area_mut(..new_right_len), count);
+-                slice_shr(right_node.val_area_mut(..new_right_len), count);
++                slice_shr(right_node.key_area_prefix_mut(..new_right_len), count);
++                slice_shr(right_node.val_area_prefix_mut(..new_right_len), count);
+ 
+                 // Move elements from the left child to the right one.
+                 move_to_slice(
+-                    left_node.key_area_mut(new_left_len + 1..old_left_len),
+-                    right_node.key_area_mut(..count - 1),
++                    left_node.key_area_range_mut(new_left_len + 1..old_left_len),
++                    right_node.key_area_prefix_mut(..count - 1),
+                 );
+                 move_to_slice(
+-                    left_node.val_area_mut(new_left_len + 1..old_left_len),
+-                    right_node.val_area_mut(..count - 1),
++                    left_node.val_area_range_mut(new_left_len + 1..old_left_len),
++                    right_node.val_area_prefix_mut(..count - 1),
+                 );
+ 
+                 // Move the leftmost stolen pair to the parent.
+-                let k = left_node.key_area_mut(new_left_len).assume_init_read();
+-                let v = left_node.val_area_mut(new_left_len).assume_init_read();
+-                let (k, v) = self.parent.replace_kv(k, v);
++                let k = left_node.key_area_slot_mut(new_left_len).assume_init_read();
++                let v = left_node.val_area_slot_mut(new_left_len).assume_init_read();
++                let (k, v) = self.parent.replace_kv_production(k, v);
+ 
+                 // Move parent's key-value pair to the right child.
+-                right_node.key_area_mut(count - 1).write(k);
+-                right_node.val_area_mut(count - 1).write(v);
++                right_node.key_area_slot_mut(count - 1).write(k);
++                right_node.val_area_slot_mut(count - 1).write(v);
+             }
+ 
+@@ -827,13 +819,13 @@
+                 (ForceResult::Internal(mut left), ForceResult::Internal(mut right)) => {
+                     // Make room for stolen edges.
+-                    slice_shr(right.edge_area_mut(..new_right_len + 1), count);
++                    slice_shr(right.edge_area_prefix_mut(..new_right_len + 1), count);
+ 
+                     // Steal edges.
+                     move_to_slice(
+-                        left.edge_area_mut(new_left_len + 1..old_left_len + 1),
+-                        right.edge_area_mut(..count),
++                        left.edge_area_range_mut(new_left_len + 1..old_left_len + 1),
++                        right.edge_area_prefix_mut(..count),
+                     );
+ 
+-                    right.correct_childrens_parent_links(0..new_right_len + 1);
++                    right.relink_range(0..new_right_len + 1);
+                 }
+                 (ForceResult::Leaf(_), ForceResult::Leaf(_)) => {}
+@@ -843,12 +835,12 @@
+     }
+ 
+-    pub(super) fn bulk_steal_right(&mut self, count: usize) {
++    unsafe fn bulk_steal_right_production<'short>(&'short mut self, count: usize) {
+         assert!(count > 0);
+         // ignore-tidy-undocumented-unsafe
+         unsafe {
+             let left_node = &mut self.left_child;
+-            let old_left_len = left_node.len();
++            let old_left_len = left_node.merge_len();
+             let right_node = &mut self.right_child;
+-            let old_right_len = right_node.len();
++            let old_right_len = right_node.merge_len();
+ 
+             // Make sure that we may steal safely.
+@@ -864,25 +856,25 @@
+             {
+                 // Move the rightmost stolen pair to the parent.
+-                let k = right_node.key_area_mut(count - 1).assume_init_read();
+-                let v = right_node.val_area_mut(count - 1).assume_init_read();
+-                let (k, v) = self.parent.replace_kv(k, v);
++                let k = right_node.key_area_slot_mut(count - 1).assume_init_read();
++                let v = right_node.val_area_slot_mut(count - 1).assume_init_read();
++                let (k, v) = self.parent.replace_kv_production(k, v);
+ 
+                 // Move parent's key-value pair to the left child.
+-                left_node.key_area_mut(old_left_len).write(k);
+-                left_node.val_area_mut(old_left_len).write(v);
++                left_node.key_area_slot_mut(old_left_len).write(k);
++                left_node.val_area_slot_mut(old_left_len).write(v);
+ 
+                 // Move elements from the right child to the left one.
+                 move_to_slice(
+-                    right_node.key_area_mut(..count - 1),
+-                    left_node.key_area_mut(old_left_len + 1..new_left_len),
++                    right_node.key_area_prefix_mut(..count - 1),
++                    left_node.key_area_range_mut(old_left_len + 1..new_left_len),
+                 );
+                 move_to_slice(
+-                    right_node.val_area_mut(..count - 1),
+-                    left_node.val_area_mut(old_left_len + 1..new_left_len),
++                    right_node.val_area_prefix_mut(..count - 1),
++                    left_node.val_area_range_mut(old_left_len + 1..new_left_len),
+                 );
+ 
+                 // Fill gap where stolen elements used to be.
+-                slice_shl(right_node.key_area_mut(..old_right_len), count);
+-                slice_shl(right_node.val_area_mut(..old_right_len), count);
++                slice_shl(right_node.key_area_prefix_mut(..old_right_len), count);
++                slice_shl(right_node.val_area_prefix_mut(..old_right_len), count);
+             }
+ 
+@@ -891,13 +883,13 @@
+                     // Steal edges.
+                     move_to_slice(
+-                        right.edge_area_mut(..count),
+-                        left.edge_area_mut(old_left_len + 1..new_left_len + 1),
++                        right.edge_area_prefix_mut(..count),
++                        left.edge_area_range_mut(old_left_len + 1..new_left_len + 1),
+                     );
+ 
+                     // Fill gap where stolen edges used to be.
+-                    slice_shl(right.edge_area_mut(..old_right_len + 1), count);
++                    slice_shl(right.edge_area_prefix_mut(..old_right_len + 1), count);
+ 
+-                    left.correct_childrens_parent_links(old_left_len + 1..new_left_len + 1);
+-                    right.correct_childrens_parent_links(0..new_right_len + 1);
++                    left.relink_range(old_left_len + 1..new_left_len + 1);
++                    right.relink_range(0..new_right_len + 1);
+                 }
+                 (ForceResult::Leaf(_), ForceResult::Leaf(_)) => {}
+@@ -907,20 +899,20 @@
+     }
+ 
+-    pub(super) fn steal_left(
++    unsafe fn steal_left_production(
+         mut self,
+         track_right_edge_idx: usize,
+     ) -> Handle<NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal>, marker::Edge> {
+-        self.bulk_steal_left(1);
++        self.bulk_steal_left_production(1);
+         // ignore-tidy-undocumented-unsafe
+-        unsafe { Handle::new_edge(self.right_child, 1 + track_right_edge_idx) }
++        unsafe { Handle::<NodeRef<_, K, V, marker::LeafOrInternal>, marker::Edge>::new_edge(self.right_child, 1 + track_right_edge_idx) }
+     }
+ 
+-    pub(super) fn steal_right(
++    unsafe fn steal_right_production(
+         mut self,
+         track_left_edge_idx: usize,
+     ) -> Handle<NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal>, marker::Edge> {
+-        self.bulk_steal_right(1);
++        self.bulk_steal_right_production(1);
+         // ignore-tidy-undocumented-unsafe
+-        unsafe { Handle::new_edge(self.left_child, track_left_edge_idx) }
++        unsafe { Handle::<NodeRef<_, K, V, marker::LeafOrInternal>, marker::Edge>::new_edge(self.left_child, track_left_edge_idx) }
+     }
+ }
+@@ -942,18 +934,18 @@
+ 
+ impl<'a, K: 'a, V: 'a> Handle<NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal>, marker::Edge> {
+-    pub(super) fn move_suffix(
+-        &mut self,
+-        right: &mut NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal>,
++    unsafe fn move_suffix_production<'short>(
++        &'short mut self,
++        right: &'short mut NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal>,
+     ) {
+         // ignore-tidy-undocumented-unsafe
+         unsafe {
+             let new_left_len = self.idx;
+-            let mut left_node = self.reborrow_mut().into_node();
+-            let old_left_len = left_node.len();
++            let mut left_node = self.reborrow_handle_mut().into_node();
++            let old_left_len = left_node.merge_len();
+ 
+             let new_right_len = old_left_len - new_left_len;
+             let mut right_node = right.reborrow_mut();
+ 
+-            assert!(right_node.len() == 0);
++            assert!(right_node.merge_len() == 0);
+             assert!(left_node.height == right_node.height);
+ 
+@@ -963,18 +955,18 @@
+ 
+                 move_to_slice(
+-                    left_node.key_area_mut(new_left_len..old_left_len),
+-                    right_node.key_area_mut(..new_right_len),
++                    left_node.key_area_range_mut(new_left_len..old_left_len),
++                    right_node.key_area_prefix_mut(..new_right_len),
+                 );
+                 move_to_slice(
+-                    left_node.val_area_mut(new_left_len..old_left_len),
+-                    right_node.val_area_mut(..new_right_len),
++                    left_node.val_area_range_mut(new_left_len..old_left_len),
++                    right_node.val_area_prefix_mut(..new_right_len),
+                 );
+                 match (left_node.force(), right_node.force()) {
+                     (ForceResult::Internal(mut left), ForceResult::Internal(mut right)) => {
+                         move_to_slice(
+-                            left.edge_area_mut(new_left_len + 1..old_left_len + 1),
+-                            right.edge_area_mut(1..new_right_len + 1),
++                            left.edge_area_range_mut(new_left_len + 1..old_left_len + 1),
++                            right.edge_area_range_mut(1..new_right_len + 1),
+                         );
+-                        right.correct_childrens_parent_links(1..new_right_len + 1);
++                        right.relink_range(1..new_right_len + 1);
+                     }
+                     (ForceResult::Leaf(_), ForceResult::Leaf(_)) => {}
+@@ -1359,19 +1351,19 @@
+ impl<'a, K: 'a, V: 'a, NodeType> Handle<NodeRef<marker::Mut<'a>, K, V, NodeType>, marker::KV> {
+     fn split_leaf_data(&mut self, new_node: &mut LeafNode<K, V>) -> (K, V) {
+-        debug_assert!(self.idx < self.node.len());
+-        let old_len = self.node.len();
++        debug_assert!(self.idx < self.node.merge_len());
++        let old_len = self.node.merge_len();
+         let new_len = old_len - self.idx - 1;
+         new_node.len = new_len as u16;
+         // ignore-tidy-undocumented-unsafe
+         unsafe {
+-            let k = self.node.key_area_mut(self.idx).assume_init_read();
+-            let v = self.node.val_area_mut(self.idx).assume_init_read();
++            let k = self.node.key_area_slot_mut(self.idx).assume_init_read();
++            let v = self.node.val_area_slot_mut(self.idx).assume_init_read();
+ 
+             move_to_slice(
+-                self.node.key_area_mut(self.idx + 1..old_len),
++                self.node.key_area_range_mut(self.idx + 1..old_len),
+                 &mut new_node.keys[..new_len],
+             );
+             move_to_slice(
+-                self.node.val_area_mut(self.idx + 1..old_len),
++                self.node.val_area_range_mut(self.idx + 1..old_len),
+                 &mut new_node.vals[..new_len],
+             );
+@@ -1392,5 +1384,5 @@
+ 
+ impl<'a, K: 'a, V: 'a> Handle<NodeRef<marker::Mut<'a>, K, V, marker::Leaf>, marker::KV> {
+-    pub(super) fn split<A: AllocatorClone>(
++    fn split_production_leaf<A: AllocatorClone>(
+         mut self,
+         alloc: A,
+@@ -1413,5 +1405,5 @@
+         let (node, _alloc) = Box::into_non_null_with_allocator(internal);
+         let mut this = NodeRef { height: height.into(), node: node.cast(), _marker: PhantomData };
+-        this.borrow_mut().correct_all_childrens_parent_links();
++        unsafe { this.borrow_mut().correct_all_childrens_parent_links() };
+         this
+     }
+@@ -1419,9 +1411,9 @@
+ 
+ impl<'a, K: 'a, V: 'a> Handle<NodeRef<marker::Mut<'a>, K, V, marker::Internal>, marker::KV> {
+-    pub(super) fn split<A: AllocatorClone>(
++    fn split_production_internal<A: AllocatorClone>(
+         mut self,
+         alloc: A,
+     ) -> SplitResult<'a, K, V, marker::Internal> {
+-        let old_len = self.node.len();
++        let old_len = unsafe { self.node.merge_len() };
+         // ignore-tidy-undocumented-unsafe
+         unsafe {
+@@ -1430,5 +1422,5 @@
+             let new_len = usize::from(new_node.data.len);
+             move_to_slice(
+-                self.node.edge_area_mut(self.idx + 1..old_len + 1),
++                self.node.edge_area_range_mut(self.idx + 1..old_len + 1),
+                 &mut new_node.edges[..new_len + 1],
+             );
+@@ -1444,5 +1436,5 @@
+ 
+ impl<K, V, Type> NodeRef<marker::Owned, K, V, Type> {
+-    pub(super) fn borrow_mut(&mut self) -> NodeRef<marker::Mut<'_>, K, V, Type> {
++fn borrow_mut(&mut self) -> NodeRef<marker::Mut<'_>, K, V, Type> {
+         NodeRef { height: self.height, node: self.node, _marker: PhantomData }
+     }
+@@ -1461,6 +1453,6 @@
+ 
+ impl<BorrowType, K, V> Handle<NodeRef<BorrowType, K, V, marker::Internal>, marker::Edge> {
+-    pub(super) unsafe fn new_edge(node: NodeRef<BorrowType, K, V, NodeType>, idx: usize) -> Self {
+-        debug_assert!(idx <= node.len());
++    unsafe fn new_edge(node: NodeRef<BorrowType, K, V, marker::Internal>, idx: usize) -> Self {
++        debug_assert!(idx <= node.merge_len());
+ 
+         Handle { node, idx, _marker: PhantomData }
+@@ -1469,6 +1461,6 @@
+ 
+ impl<BorrowType, K, V> Handle<NodeRef<BorrowType, K, V, marker::Internal>, marker::KV> {
+-    pub(super) unsafe fn new_kv(node: NodeRef<BorrowType, K, V, NodeType>, idx: usize) -> Self {
+-        debug_assert!(idx < node.len());
++    unsafe fn new_kv(node: NodeRef<BorrowType, K, V, marker::Internal>, idx: usize) -> Self {
++        debug_assert!(idx < node.merge_len());
+ 
+         Handle { node, idx, _marker: PhantomData }
+@@ -1477,17 +1469,17 @@
+ 
+ impl<'a, K: 'a, V: 'a> Handle<NodeRef<marker::Mut<'a>, K, V, marker::Internal>, marker::Edge> {
+-    fn insert_fit(&mut self, key: K, val: V, edge: Root<K, V>) {
+-        debug_assert!(self.node.len() < CAPACITY);
++    fn insert_fit_production(&mut self, key: K, val: V, edge: Root<K, V>) {
++        debug_assert!(self.node.merge_len() < CAPACITY);
+         debug_assert!(edge.height == self.node.height - 1);
+-        let new_len = self.node.len() + 1;
++        let new_len = self.node.merge_len() + 1;
+ 
+         // ignore-tidy-undocumented-unsafe
+         unsafe {
+-            slice_insert(self.node.key_area_mut(..new_len), self.idx, key);
+-            slice_insert(self.node.val_area_mut(..new_len), self.idx, val);
+-            slice_insert(self.node.edge_area_mut(..new_len + 1), self.idx + 1, edge.node);
++            slice_insert(self.node.key_area_prefix_mut(..new_len), self.idx, key);
++            slice_insert(self.node.val_area_prefix_mut(..new_len), self.idx, val);
++            slice_insert(self.node.edge_area_prefix_mut(..new_len + 1), self.idx + 1, edge.node);
+             *self.node.len_mut() = new_len as u16;
+ 
+-            self.node.correct_childrens_parent_links(self.idx + 1..new_len + 1);
++            self.node.relink_range(self.idx + 1..new_len + 1);
+         }
+     }
+@@ -1495,5 +1487,5 @@
+ 
+ impl<'a, K: 'a, V: 'a> Handle<NodeRef<marker::Mut<'a>, K, V, marker::Internal>, marker::Edge> {
+-    fn insert<A: AllocatorClone>(
++    fn insert_production<A: AllocatorClone>(
+         mut self,
+         key: K,
+@@ -1504,23 +1496,23 @@
+         assert!(edge.height == self.node.height - 1);
+ 
+-        if self.node.len() < CAPACITY {
+-            self.insert_fit(key, val, edge);
++        if self.node.merge_len() < CAPACITY {
++            self.insert_fit_production(key, val, edge);
+             None
+         } else {
+             let (middle_kv_idx, insertion) = splitpoint(self.idx);
+             // ignore-tidy-undocumented-unsafe
+-            let middle = unsafe { Handle::new_kv(self.node, middle_kv_idx) };
+-            let mut result = middle.split(alloc);
++            let middle = unsafe { Handle::<NodeRef<_, K, V, marker::Internal>, marker::KV>::new_kv(self.node, middle_kv_idx) };
++            let mut result = middle.split_production_internal(alloc);
+             let mut insertion_edge = match insertion {
+                 // ignore-tidy-undocumented-unsafe
+                 LeftOrRight::Left(insert_idx) => unsafe {
+-                    Handle::new_edge(result.left.reborrow_mut(), insert_idx)
++                    Handle::<NodeRef<_, K, V, marker::Internal>, marker::Edge>::new_edge(result.left.reborrow_mut(), insert_idx)
+                 },
+                 // ignore-tidy-undocumented-unsafe
+                 LeftOrRight::Right(insert_idx) => unsafe {
+-                    Handle::new_edge(result.right.borrow_mut(), insert_idx)
++                    Handle::<NodeRef<_, K, V, marker::Internal>, marker::Edge>::new_edge(result.right.borrow_mut(), insert_idx)
+                 },
+             };
+-            insertion_edge.insert_fit(key, val, edge);
++            insertion_edge.insert_fit_production(key, val, edge);
+             Some(result)
+         }
+@@ -1537,6 +1529,6 @@
+ 
+ impl<BorrowType, K, V> Handle<NodeRef<BorrowType, K, V, marker::Leaf>, marker::Edge> {
+-    pub(super) unsafe fn new_edge(node: NodeRef<BorrowType, K, V, NodeType>, idx: usize) -> Self {
+-        debug_assert!(idx <= node.len());
++    unsafe fn new_edge(node: NodeRef<BorrowType, K, V, marker::Leaf>, idx: usize) -> Self {
++        debug_assert!(idx <= node.merge_len());
+ 
+         Handle { node, idx, _marker: PhantomData }
+@@ -1545,6 +1537,6 @@
+ 
+ impl<BorrowType, K, V> Handle<NodeRef<BorrowType, K, V, marker::Leaf>, marker::KV> {
+-    pub(super) unsafe fn new_kv(node: NodeRef<BorrowType, K, V, NodeType>, idx: usize) -> Self {
+-        debug_assert!(idx < node.len());
++    unsafe fn new_kv(node: NodeRef<BorrowType, K, V, marker::Leaf>, idx: usize) -> Self {
++        debug_assert!(idx < node.merge_len());
+ 
+         Handle { node, idx, _marker: PhantomData }
+@@ -1553,19 +1545,19 @@
+ 
+ impl<'a, K: 'a, V: 'a> Handle<NodeRef<marker::Mut<'a>, K, V, marker::Leaf>, marker::Edge> {
+-    unsafe fn insert_fit(
++    unsafe fn insert_fit_leaf_production(
+         mut self,
+         key: K,
+         val: V,
+     ) -> Handle<NodeRef<marker::Mut<'a>, K, V, marker::Leaf>, marker::KV> {
+-        debug_assert!(self.node.len() < CAPACITY);
+-        let new_len = self.node.len() + 1;
++        debug_assert!(self.node.merge_len() < CAPACITY);
++        let new_len = self.node.merge_len() + 1;
+ 
+         // ignore-tidy-undocumented-unsafe
+         unsafe {
+-            slice_insert(self.node.key_area_mut(..new_len), self.idx, key);
+-            slice_insert(self.node.val_area_mut(..new_len), self.idx, val);
++            slice_insert(self.node.key_area_prefix_mut(..new_len), self.idx, key);
++            slice_insert(self.node.val_area_prefix_mut(..new_len), self.idx, val);
+             *self.node.len_mut() = new_len as u16;
+ 
+-            Handle::new_kv(self.node, self.idx)
++            Handle::<NodeRef<_, K, V, marker::Leaf>, marker::KV>::new_kv(self.node, self.idx)
+         }
+     }
+@@ -1573,5 +1565,5 @@
+ 
+ impl<'a, K: 'a, V: 'a> Handle<NodeRef<marker::Mut<'a>, K, V, marker::Leaf>, marker::Edge> {
+-    fn insert<A: AllocatorClone>(
++    fn insert_leaf_production<A: AllocatorClone>(
+         self,
+         key: K,
+@@ -1582,26 +1574,26 @@
+         Handle<NodeRef<marker::DormantMut, K, V, marker::Leaf>, marker::KV>,
+     ) {
+-        if self.node.len() < CAPACITY {
++        if self.node.merge_len() < CAPACITY {
+             // SAFETY: There is enough space in the node for insertion.
+-            let handle = unsafe { self.insert_fit(key, val) };
++            let handle = unsafe { self.insert_fit_leaf_production(key, val) };
+             (None, handle.dormant())
+         } else {
+             let (middle_kv_idx, insertion) = splitpoint(self.idx);
+             // ignore-tidy-undocumented-unsafe
+-            let middle = unsafe { Handle::new_kv(self.node, middle_kv_idx) };
+-            let mut result = middle.split(alloc);
++            let middle = unsafe { Handle::<NodeRef<_, K, V, marker::Leaf>, marker::KV>::new_kv(self.node, middle_kv_idx) };
++            let mut result = middle.split_production_leaf(alloc);
+             let insertion_edge = match insertion {
+                 // ignore-tidy-undocumented-unsafe
+                 LeftOrRight::Left(insert_idx) => unsafe {
+-                    Handle::new_edge(result.left.reborrow_mut(), insert_idx)
++                    Handle::<NodeRef<_, K, V, marker::Leaf>, marker::Edge>::new_edge(result.left.reborrow_mut(), insert_idx)
+                 },
+                 // ignore-tidy-undocumented-unsafe
+                 LeftOrRight::Right(insert_idx) => unsafe {
+-                    Handle::new_edge(result.right.borrow_mut(), insert_idx)
++                    Handle::<NodeRef<_, K, V, marker::Leaf>, marker::Edge>::new_edge(result.right.borrow_mut(), insert_idx)
+                 },
+             };
+             // SAFETY: We just split the node, so there is enough space for
+             // insertion.
+-            let handle = unsafe { insertion_edge.insert_fit(key, val).dormant() };
++            let handle = unsafe { insertion_edge.insert_fit_leaf_production(key, val).dormant() };
+             (Some(result), handle)
+         }
+@@ -1622,5 +1614,5 @@
+ 
+ impl<K, V> NodeRef<marker::Owned, K, V, marker::Internal> {
+-    fn new_internal<A: AllocatorClone>(child: Root<K, V>, alloc: A) -> Self {
++    fn new_internal_production<A: AllocatorClone>(child: Root<K, V>, alloc: A) -> Self {
+         // ignore-tidy-undocumented-unsafe
+         let mut new_node = unsafe { InternalNode::new(alloc) };
+@@ -1631,5 +1623,5 @@
+ 
+ impl<'a, K: 'a, V: 'a> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+-    pub(super) fn push(&mut self, key: K, val: V, edge: Root<K, V>) {
++    fn push_production(&mut self, key: K, val: V, edge: Root<K, V>) {
+         assert!(edge.height == self.height - 1);
+ 
+@@ -1640,8 +1632,8 @@
+         // ignore-tidy-undocumented-unsafe
+         unsafe {
+-            self.key_area_mut(idx).write(key);
+-            self.val_area_mut(idx).write(val);
+-            self.edge_area_mut(idx + 1).write(edge.node);
+-            Handle::new_edge(self.reborrow_mut(), idx + 1).correct_parent_link();
++            self.key_area_slot_mut(idx).write(key);
++            self.val_area_slot_mut(idx).write(val);
++            self.edge_area_slot_mut(idx + 1).write(edge.node);
++            Handle::<NodeRef<_, K, V, marker::Internal>, marker::Edge>::new_edge(self.reborrow_mut(), idx + 1).correct_parent_link();
+         }
+     }
+--- a/original/loop_regions.rs
++++ b/original/loop_regions.rs
+@@ -25,5 +25,6 @@
+ 
+ impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+-    unsafe fn correct_childrens_parent_links<R: Iterator<Item = usize>>(&mut self, range: R) {
++    unsafe fn relink_range<'b>(&'b mut self, range: std::ops::Range<usize>)
++        {
+         for i in range {
+             debug_assert!(i <= self.len());
+@@ -35,5 +36,6 @@
+ 
+ impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+-    unsafe fn correct_childrens_parent_links<R: Iterator<Item = usize>>(&mut self, range: R) {
++    unsafe fn relink_inclusive<'b>(&'b mut self, range: std::ops::RangeInclusive<usize>)
++        {
+         for i in range {
+             debug_assert!(i <= self.len());
+@@ -45,8 +47,9 @@
+ 
+ impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+-    fn correct_all_childrens_parent_links(&mut self) {
++    unsafe fn relink_all<'b>(&'b mut self)
++        {
+         let len = self.len();
+         // ignore-tidy-undocumented-unsafe
+-        unsafe { self.correct_childrens_parent_links(0..=len) };
++        unsafe { self.relink_inclusive(0..=len) };
+     }
+ }
+@@ -60,5 +63,5 @@
+ 
+ impl<'a, K: 'a, V: 'a> BalancingContext<'a, K, V> {
+-    pub(super) fn merge_tracking_child_edge<A: AllocatorClone>(
++    pub(super) fn compare_merge_tracking_child_edge<A: AllocatorClone>(
+         self,
+         track_edge_idx: LeftOrRight<usize>,
+@@ -82,5 +85,5 @@
+ 
+ impl<'a, K: 'a, V: 'a> BalancingContext<'a, K, V> {
+-    pub(super) fn steal_left(
++    pub(super) fn compare_steal_left(
+         mut self,
+         track_right_edge_idx: usize,
+@@ -91,5 +94,5 @@
+     }
+ 
+-    pub(super) fn steal_right(
++    pub(super) fn compare_steal_right(
+         mut self,
+         track_left_edge_idx: usize,
+--- a/verified/operations.rs
++++ b/verified/operations.rs
+@@ -5318,5 +5318,5 @@
+     //@ on_unwind_ens false;
+     {
+-        unsafe { debug_assert!(idx <= node.len()) };
++        unsafe { debug_assert!(idx <= node.merge_len()) };
+         let edge = Handle { node, idx, _marker: PhantomData };
+         //@ close_points_to(&node, 1/2);
+@@ -5331,5 +5331,5 @@
+     //@ on_unwind_ens false;
+     {
+-        unsafe { debug_assert!(idx < node.len()) };
++        unsafe { debug_assert!(idx < node.merge_len()) };
+         let edge = Handle { node, idx, _marker: PhantomData };
+         //@ close_points_to(&node, 1/2);
+@@ -6462,5 +6462,5 @@
+                     //@ close exists(parent);
+                     //@ close exists(child);
+-                    unsafe { repair_one__VeriFast_wrapper/*@::<K,V,'a,'b>@*/(self, i) };
++                    unsafe { repair_one/*@::<K,V,'a,'b>@*/(self, i) };
+                     //@ append_linked_header(prefix, child, parent, first);
+                     //@ append_assoc(prefix, [child], remaining);
+@@ -6538,5 +6538,5 @@
+                     //@ close exists(parent);
+                     //@ close exists(child);
+-                    unsafe { repair_one__VeriFast_wrapper/*@::<K,V,'a,'b>@*/(self, i) };
++                    unsafe { repair_one/*@::<K,V,'a,'b>@*/(self, i) };
+                     //@ append_linked_header(prefix, child, parent, first);
+                     //@ append_assoc(prefix, [child], remaining);
+--- a/verified/loop_regions.rs
++++ b/verified/loop_regions.rs
+@@ -77,5 +77,5 @@
+     //@ close_points_to(&split, 1/2);
+     unsafe {
+-        install_root_split/*@::<K,V,A,'tree,'slot,'slot>@*/(root_slot, allocator, original_root, key, value, sibling);
++        install_root_split__VeriFast_wrapper/*@::<K,V,A,'tree,'slot,'slot>@*/(root_slot, allocator, original_root, key, value, sibling);
+         inserted.awaken/*@::<K,V,marker::Leaf,marker::KV,'tree>@*/()
+     }
+@@ -108,7 +108,7 @@
+     //@ close exists(parent);
+     //@ close exists(child);
+-    unsafe { Handle::new_relink_edge/*@::<marker::Mut<'b>,K,V,marker::Internal>@*/(
+-        node.relink_reborrow/*@::<marker::Mut<'a>,K,V,marker::Internal,'b>@*/(), i
+-    ).correct_parent_link/*@::<'b,K,V>@*/() };
++    unsafe { Handle::new_edge(
++        node.reborrow_mut(), i
++    ).correct_parent_link() };
+ }
+ 
+@@ -170,5 +170,5 @@
+                     //@ let view = precreate_ref(self);
+                     //@ init_ref_readonly(view, 1/2);
+-                    unsafe { debug_assert!(i <= self.relink_len()) };
++                    unsafe { debug_assert!(i <= self.len()) };
+                     //@ end_ref_readonly(view);
+                     //@ merge_fractions points_to(self,_);
+@@ -246,5 +246,5 @@
+                     //@ let view = precreate_ref(self);
+                     //@ init_ref_readonly(view, 1/2);
+-                    unsafe { debug_assert!(i <= self.relink_len()) };
++                    unsafe { debug_assert!(i <= self.len()) };
+                     //@ end_ref_readonly(view);
+                     //@ merge_fractions points_to(self,_);
+@@ -266,5 +266,5 @@
+ 
+ impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+-    unsafe fn correct_all_childrens_parent_links<'b>(&'b mut self)
++    unsafe fn relink_all<'b>(&'b mut self)
+     /*@
+     req thread_token(?t) &*& type_interp::<K>() &*& type_interp::<V>() &*&
+@@ -288,5 +288,5 @@
+         //@ let view = precreate_ref(self);
+         //@ init_ref_readonly(view, 1/2);
+-        let len = unsafe { self.relink_len() };
++        let len = unsafe { self.len() };
+         //@ end_ref_readonly(view);
+         //@ merge_fractions points_to(self, _);
+--- a/portable/node.rs
++++ b/portable/node.rs
+@@ -40,5 +40,4 @@
+ use core::slice::SliceIndex;
+ 
+-use safety::{ensures, requires};
+ 
+ use crate::alloc::{Allocator, AllocatorClone, Layout};
+@@ -77,7 +76,4 @@
+     ///
+     /// The caller must ensure that `this` points to a (possibly uninitialized) `LeafNode`
+-    #[requires(core::ub_checks::can_write(this))]
+-    #[ensures(|_| unsafe { (*this).parent.is_none() })]
+-    #[ensures(|_| unsafe { (*this).len == 0 })]
+     #[cfg_attr(kani, kani::modifies(this))]
+     unsafe fn init(this: *mut Self) {
+@@ -335,18 +331,4 @@
+     /// `edge.descend().ascend().unwrap()` and `node.ascend().unwrap().descend()` should
+     /// both, upon success, do nothing.
+-    #[requires(verify::can_ascend(&self))]
+-    #[ensures(|result| {
+-        let original_node = old(self.node);
+-        let original_height = old(self.height);
+-        match (old(verify::ascend_link(&self)), result) {
+-            (Some((parent, idx)), Ok(edge)) => {
+-                edge.node.node == parent.cast()
+-                    && edge.node.height == original_height + 1
+-                    && edge.idx == idx
+-            }
+-            (None, Err(root)) => root.node == original_node && root.height == original_height,
+-            _ => false,
+-        }
+-    })]
+     pub(super) fn ascend(
+         self,
+@@ -1078,8 +1060,4 @@
+     /// Fixes the parent pointer and index in the child node that this edge
+     /// links to. This is useful when the ordering of edges has been changed,
+-    #[requires(verify::can_relink(&self.node, self.idx))]
+-    #[ensures(|_| verify::has_parent_link(
+-        old(verify::relink_child(&self.node, self.idx)), old(self.node.node.cast()), old(self.idx),
+-    ))]
+     #[cfg_attr(kani, kani::modifies(
+         unsafe { &raw mut (*verify::relink_child(&self.node, self.idx)).parent },
+@@ -1335,9 +1313,4 @@
+     /// Helps implementations of `split` for a particular `NodeType`,
+     /// by taking care of leaf data.
+-    #[requires(verify::can_split_leaf_data(&self.node, self.idx, new_node))]
+-    #[ensures(|_| {
+-        self.node.len() == old(self.idx)
+-            && usize::from(new_node.len) == old(self.node.len() - self.idx - 1)
+-    })]
+     #[cfg_attr(kani, kani::modifies(
+         unsafe { &raw mut (*NodeRef::as_leaf_ptr(&self.node)).len },
+@@ -1966,5 +1939,4 @@
+ /// # Safety
+ /// The slice has more than `idx` elements.
+-#[requires(idx < slice.len())]
+ #[cfg_attr(kani, kani::modifies(ptr::slice_from_raw_parts_mut(
+     unsafe { slice.as_mut_ptr().add(idx) },
+@@ -2028,5 +2000,4 @@
+ /// of uninitialized elements, leaving behind `src` as all uninitialized.
+ /// Works like `dst.copy_from_slice(src)` but does not require `T` to be `Copy`.
+-#[requires(src.len() == dst.len())]
+ #[cfg_attr(kani, kani::modifies(dst))]
+ fn move_to_slice<T>(src: &mut [MaybeUninit<T>], dst: &mut [MaybeUninit<T>]) {
+--- a/portable/mem.rs
++++ b/portable/mem.rs
+@@ -1,3 +1,3 @@
+-use core::{intrinsics, mem, ptr};
++use core::{mem, ptr};
+ 
+ /// This replaces the value behind the `v` unique reference by calling the
+@@ -20,5 +20,5 @@
+     impl Drop for PanicGuard {
+         fn drop(&mut self) {
+-            intrinsics::abort_immediate()
++            std::process::abort()
+         }
+     }
+--- a/verified/backlinks.rs
++++ b/verified/backlinks.rs
+@@ -1,3 +1,2 @@
+-#![feature(allocator_ext)]
+ //! Ancestor ownership and the key, value, and child moves used during splitting.
+ //! Refinement checks the production `as_leaf_ptr` and `set_parent_link`.
+@@ -70,5 +69,4 @@
+     pub(crate) enum DormantMut {}
+     pub(crate) enum Owned {}
+-    pub(crate) enum Dying {}
+     pub(crate) enum Leaf {}
+     pub(crate) enum Internal {}
+--- a/original/backlinks.rs.in
++++ b/original/backlinks.rs.in
+@@ -1,3 +1,2 @@
+-#![feature(allocator_ext)]
+ //! Ancestor ownership and the key, value, and child moves used during splitting.
+ //! Refinement checks the production `as_leaf_ptr` and `set_parent_link`.
+@@ -70,5 +69,4 @@
+     pub(crate) enum DormantMut {}
+     pub(crate) enum Owned {}
+-    pub(crate) enum Dying {}
+     pub(crate) enum Leaf {}
+     pub(crate) enum Internal {}
+@@ -352,38 +350,10 @@
+ }
+ 
+-// BEGIN_BACKLINK_METHODS
+ impl<BorrowType, K, V, Type> NodeRef<BorrowType, K, V, Type> {
+-    unsafe fn as_leaf_ptr(this: &Self) -> *mut LeafNode<K, V>
+-/*@
+-    req [?f](*this |-> ?node_ref);
+-    @*/
+-    /*@
+-    ens [f](*this |-> node_ref) &*& result == node_ref.node.as_ptr();
+-    @*/
+-    //@ on_unwind_ens false;
+-    {
+-        //@ open_points_to(this);
+-        let ptr = this.node.as_ptr();
+-        //@ close_points_to(this, f);
+-        ptr
+-    }
++// SOURCE     fn as_leaf_ptr(this: &Self) -> *mut LeafNode<K, V> {
+ }
+ 
+ impl<'a, K: 'a, V: 'a> NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal> {
+-    unsafe fn set_parent_link(&mut self, parent: NonNull<InternalNode<K, V>>, parent_idx: usize)
+-    //@ req *self |-> ?node_ref &*& (*node_ref.node.as_ptr()).parent |-> _ &*& (*node_ref.node.as_ptr()).parent_idx |-> _ &*& parent_idx <= CAPACITY;
+-    //@ ens *self |-> node_ref &*& (*node_ref.node.as_ptr()).parent |-> Option::Some(parent) &*& (*node_ref.node.as_ptr()).parent_idx |-> MaybeUninit::new(parent_idx as u16);
+-    //@ on_unwind_ens false;
+-    {
+-        //@ let view = precreate_ref(self);
+-        //@ init_ref_readonly(view, 1/2);
+-        let leaf = unsafe { Self::as_leaf_ptr(self) };
+-        //@ end_ref_readonly(view);
+-        //@ merge_fractions points_to(self, _);
+-        unsafe { (*leaf).parent = Some(parent) };
+-        //@ open LeafNode_parent_idx_(leaf, _);
+-        //@ points_to__limits(&(*leaf).parent_idx);
+-        unsafe { (*leaf).parent_idx.write(parent_idx as u16) };
+-    }
++// SOURCE     fn set_parent_link(&mut self, parent: NonNull<InternalNode<K, V>>, parent_idx: usize) {
+ }
+ 
+--- a/verified/root-level-body.rs
++++ b/verified/root-level-body.rs
+@@ -1,14 +1,4 @@
+ // BEGIN_ROOT_INSTALL
+-    let borrowed_root = unsafe { root_slot.reborrow() };
+-    let root_payload = borrowed_root.as_mut().unwrap();
+-    let root_allocator = unsafe { clone_allocator(allocator) };
+-    let old = unsafe { ptr::read(root_payload) };
+-    let new = unsafe {
+-        NodeRef::<marker::Owned,K,V,marker::Internal>::new_internal_production(old,root_allocator).forget_type()
+-    };
+-    unsafe { ptr::write(root_payload,new) };
+-    let mut view = NodeRef::<marker::Mut<'slot>,K,V,marker::Internal> {
+-        height: root_payload.height, node: root_payload.node, _marker: PhantomData
+-    };
+-    unsafe { view.push_production(key,value,right) }; //~track_ref_creation
++    super::mem::take_mut(self, |old_root| NodeRef::new_internal(old_root, alloc).forget_type());
++    NodeRef { height: self.height, node: self.node, _marker: PhantomData }
+ // END_ROOT_INSTALL
+--- a/verified/ascend-body.rs
++++ b/verified/ascend-body.rs
+@@ -1,35 +1,18 @@
+ // BEGIN_ASCEND
+-    let leaf_ptr: *const _ = unsafe { Self::as_leaf_ptr(&self) };
+-    let height = self.height;
+-    let node = self.node;
+-    let successor = unsafe { open_next_parent(leaf_ptr) };
+-    let result = match successor {
+-        None => None,
+-        Some((parent, observed_index)) => {
+-            let parent_height = height + 1;
+-            Some(Handle {
+-                node: unsafe { NodeRef::from_internal(parent, parent_height) },
+-                idx: observed_index as usize,
+-                _marker: PhantomData,
+-            })
+-        }
+-    };
+-    result.ok_or(NodeRef { height, node, _marker: PhantomData })
++    const {
++        assert!(BorrowType::TRAVERSAL_PERMIT);
++    }
++    let leaf_ptr: *const _ = Self::as_leaf_ptr(&self);
++    unsafe { (*leaf_ptr).parent }
++        .as_ref()
++        .map(|parent| Handle {
++            node: NodeRef::from_internal(*parent, self.height + 1),
++            idx: unsafe { usize::from((*leaf_ptr).parent_idx.assume_init()) },
++            _marker: PhantomData,
++        })
++        .ok_or(self)
+ // END_ASCEND
+ // BEGIN_FROM_INTERNAL
+     debug_assert!(height > 0);
+-    let leaf = unsafe { NonNull::new_unchecked(node.as_ptr() as *mut LeafNode<K, V>) };
+-    NodeRef { height, node: leaf, _marker: PhantomData }
++    NodeRef { height, node: node.cast(), _marker: PhantomData }
+ // END_FROM_INTERNAL
+-// BEGIN_OPEN_NEXT_PARENT
+-    let backlink = unsafe { (*child).parent };
+-    match backlink {
+-        None => {
+-            None
+-        }
+-        Some(parent) => {
+-            let observed_index = unsafe { *((&raw const (*child).parent_idx) as *const u16) };
+-            Some((parent, observed_index))
+-        }
+-    }
+-// END_OPEN_NEXT_PARENT
+--- a/verified/drop-bodies.rs
++++ b/verified/drop-bodies.rs
+@@ -1,69 +1,43 @@
+ // body drop_kvs
+-// unsafe fn drop_remaining<
+-    let count = unsafe { (*node).len() };
+-    let mut iter = (start..count).into_iter();
+-    loop {
+-        let iter_ref = &mut iter;
+-        let next = iter_ref.next();
+-        match next {
+-            None => break,
+-            Some(i) => unsafe { drop_at(node, i) },
++    struct DropGuard<'a, K, V> {
++        node: &'a NodeRef<marker::Dying, K, V, marker::LeafOrInternal>,
++        idx: usize,
++    }
++    impl<'a, K, V> Drop for DropGuard<'a, K, V> {
++        fn drop(&mut self) {
++            let len = self.node.len();
++            for i in self.idx..len {
++                unsafe {
++                    let kv = Handle::new_kv(ptr::read(self.node), i);
++                    kv.drop_key_val();
++                }
++            }
++        }
++    }
++    let len = self.len();
++    for idx in 0..len {
++        let guard = DropGuard { node: self, idx: idx + 1 };
++        unsafe {
++            let kv = Handle::new_kv(ptr::read(self), idx);
++            kv.drop_key_val();
+         }
++        core::mem::forget(guard);
+     }
+-// unsafe fn drop_at<
+-    let kv = unsafe { Handle::new_dying_kv(duplicate_dying(node), index) };
+-    unsafe { kv.drop_key_val_step() };
+-// unsafe fn duplicate_dying<
+-    let duplicated = unsafe { std::ptr::read(node) };
+-    duplicated
+-//     unsafe fn new_dying_kv(
+-    unsafe { debug_assert!(idx < node.len()) };
+-    let result = Handle { node, idx, _marker: PhantomData };
+-    result
+-// unsafe fn resume_drop_remaining<
+-    unsafe { finish_drop_value(value, pending) };
+-    unsafe { drop_remaining(node, index + 1) };
+ // body drop_key_val
+-// unsafe fn finish_drop_value<
+-    if pending {
+-        unsafe { drop_guarded_value(value) };
++    struct Dropper<'a, T>(&'a mut MaybeUninit<T>);
++    impl<T> Drop for Dropper<'_, T> {
++        #[inline]
++        fn drop(&mut self) {
++            unsafe {
++                self.0.assume_init_drop();
++            }
++        }
++    }
++    debug_assert!(self.idx < self.node.len());
++    let leaf = self.node.as_leaf_dying();
++    unsafe {
++        let key = leaf.keys.get_unchecked_mut(self.idx);
++        let val = leaf.vals.get_unchecked_mut(self.idx);
++        let _guard = Dropper(val);
++        key.assume_init_drop();
+     }
+-//     unsafe fn drop_key_val_step(
+-    let (key_slot,value_slot) = self.project_drop_slots();
+-    unsafe { drop_pair(key_slot,value_slot) };
+-//     unsafe fn project_drop_slots<
+-    debug_assert!(self.idx < self.node.merge_len());
+-    let leaf = unsafe { self.node.as_leaf_dying() }; //~track_ref_creation
+-    let key_slot =
+-        <[MaybeUninit<K>]>::get_unchecked_mut(
+-            {
+-                let key_array = &mut leaf.keys; //~track_ref_creation
+-                let slice: &mut [MaybeUninit<K>] = key_array;
+-                slice
+-            },
+-            self.idx,
+-        );
+-    let val_slot =
+-        <[MaybeUninit<V>]>::get_unchecked_mut(
+-            {
+-                let val_array = &mut leaf.vals; //~track_ref_creation
+-                let slice: &mut [MaybeUninit<V>] = val_array;
+-                slice
+-            },
+-            self.idx,
+-        );
+-    (key_slot, val_slot)
+-// unsafe fn drop_pair<
+-    unsafe { drop_initialized_slot(key) };
+-    unsafe { drop_guarded_value(value) };
+-// unsafe fn drop_initialized_slot<
+-    unsafe { drop_slot_production(&mut *slot) }
+-// unsafe fn drop_guarded_value<
+-    let mut guard = Dropper(unsafe { &mut *slot });
+-    unsafe { guard.drop_value_guard() };
+-//     unsafe fn drop_value_guard(
+-    let slot = &mut *self.0;
+-    unsafe { drop_slot_production(slot) };
+-// unsafe fn drop_slot_production<
+-    let ptr = slot.as_mut_ptr();
+-    unsafe { std::ptr::drop_in_place(ptr) }

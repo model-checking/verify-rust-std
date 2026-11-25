@@ -1,0 +1,189 @@
+diff --git a/src/refinement_checker/refinement_checker.ml b/src/refinement_checker/refinement_checker.ml
+index 77c3c28..cf2a08f 100644
+--- a/src/refinement_checker/refinement_checker.ml
++++ b/src/refinement_checker/refinement_checker.ml
+@@ -1910,10 +1910,13 @@ let rec process_commands bodies (env: env) opnds (i_bb: basic_block_info) i_s (s
+     | Aggregate (Closure _, n) ->
+       let vs, opnds = popn n opnds in
+       cont env (Closure vs::opnds)
+-    | RawPtr raw_ptr_data ->
+-      begin match raw_ptr_data.place.projection with
++    | RawPtr {kind; place}
++      when kind = FakeForPtrMetadata || (kind = RawMut && place.kind = MutableRef) ->
++      (* Keep the existing reference-to-pointer coercion used in reservation
++         lowering. Match other raw borrows with their kind and place intact. *)
++      begin match place.projection with
+         [Deref] ->
+-          let placeLocalPath = {lv_caller=i_bb#id.bb_caller; lv_name=raw_ptr_data.place.local.name} in
++          let placeLocalPath = {lv_caller=i_bb#id.bb_caller; lv_name=place.local.name} in
+           begin match List.assoc placeLocalPath env with
+             Value placeValue ->
+             cont env (placeValue::opnds)
+@@ -2655,7 +2658,18 @@ let check_body_refines_body bodies0 bodies1 def_path body0 body1 =
+               let v = fresh_symbol () in
+               cont env0 (v::opnds0) env1 (v::opnds1)
+             end
+-        | RawPtr raw_ptr_data_cpn0, RawPtr raw_ptr_data_cpn1 -> error "RawPtr: not yet supported"
++        | RawPtr raw0, RawPtr raw1 ->
++            if raw0.kind = Unknown || raw1.kind = Unknown then
++              error "RawPtr: The exporter did not provide the raw pointer kind";
++            if raw0.kind <> raw1.kind || raw0.mutability <> raw1.mutability then
++              error "RawPtr: The pointer kinds do not match";
++            begin match check_place_refines_place env0 caller0 raw0.place env1 caller1 raw1.place with
++              (Local x0, Local x1) | (LocalProjection x0, LocalProjection x1) ->
++                local_address_taken x0 x1
++            | Nonlocal, Nonlocal ->
++                let address = fresh_symbol () in
++                cont env0 (address::opnds0) env1 (address::opnds1)
++            end
+         | Cast ty0, Cast ty1 ->
+             let v, opnds0, opnds1 = consume_operand opnds0 opnds1 in
+             if decode_ty i_bb0#genv ty0 <> decode_ty i_bb1#genv ty1 then
+diff --git a/src/rust_frontend/vf_mir/vf_mir.capnp b/src/rust_frontend/vf_mir/vf_mir.capnp
+index 9e81d09..e31f8fb 100644
+--- a/src/rust_frontend/vf_mir/vf_mir.capnp
++++ b/src/rust_frontend/vf_mir/vf_mir.capnp
+@@ -618,9 +618,17 @@ struct Rvalue {
+         count @1: TyConst;
+     }
+ 
++    enum RawPtrKind {
++        unknown @0;
++        rawConst @1;
++        rawMut @2;
++        fakeForPtrMetadata @3;
++    }
++
+     struct RawPtrData {
+         mutability @0: Mutability;
+         place @1: Place;
++        kind @2: RawPtrKind;
+     }
+ 
+     struct BinaryOpData {
+diff --git a/src/rust_frontend/vf_mir_exporter/src/lib.rs b/src/rust_frontend/vf_mir_exporter/src/lib.rs
+index 9621ba9..8306e22 100644
+--- a/src/rust_frontend/vf_mir_exporter/src/lib.rs
++++ b/src/rust_frontend/vf_mir_exporter/src/lib.rs
+@@ -2261,6 +2261,11 @@ use rustc_span::RemapPathScopeComponents;
+                 mir::Rvalue::ThreadLocalRef(def_id) => rvalue_cpn.set_thread_local_ref(()),
+                 mir::Rvalue::RawPtr(raw_ptr_kind, place) => {
+                     let mut raw_ptr_data_cpn = rvalue_cpn.init_raw_ptr();
++                    raw_ptr_data_cpn.set_kind(match raw_ptr_kind {
++                        mir::RawPtrKind::Const => rvalue_cpn::RawPtrKind::RawConst,
++                        mir::RawPtrKind::Mut => rvalue_cpn::RawPtrKind::RawMut,
++                        mir::RawPtrKind::FakeForPtrMetadata => rvalue_cpn::RawPtrKind::FakeForPtrMetadata,
++                    });
+                     let mutability_cpn = raw_ptr_data_cpn.reborrow().init_mutability();
+                     Self::encode_mutability(match raw_ptr_kind {
+                         mir::RawPtrKind::Mut => mir::Mutability::Mut,
+diff --git a/tests/rust/refinement_checker/raw-pointer_orig.rs b/tests/rust/refinement_checker/raw-pointer_orig.rs
+new file mode 100644
+index 0000000..aee9572
+--- /dev/null
++++ b/tests/rust/refinement_checker/raw-pointer_orig.rs
+@@ -0,0 +1,17 @@
++#[repr(C)]
++struct Pair {
++    left: i32,
++    right: i32,
++}
++
++unsafe fn field_addr(pair: *mut Pair) -> usize {
++    let field = unsafe { &raw mut (*pair).left };
++    field as usize
++}
++
++fn local_addr() -> i32 {
++    let mut value = 1;
++    let ptr = &raw mut value;
++    unsafe { *ptr = 2 };
++    value
++}
+diff --git a/tests/rust/refinement_checker/raw-pointer_verified.rs b/tests/rust/refinement_checker/raw-pointer_verified.rs
+new file mode 100644
+index 0000000..cd5a6d6
+--- /dev/null
++++ b/tests/rust/refinement_checker/raw-pointer_verified.rs
+@@ -0,0 +1,19 @@
++#[repr(C)]
++struct Pair {
++    left: i32,
++    right: i32,
++}
++
++unsafe fn field_addr(pair: *mut Pair) -> usize {
++    //@ assert true;
++    let field = unsafe { &raw mut (*pair).left };
++    field as usize
++}
++
++fn local_addr() -> i32 {
++    let mut value = 1;
++    //@ assert true;
++    let ptr = &raw mut value;
++    unsafe { *ptr = 2 };
++    value
++}
+diff --git a/tests/rust/refinement_checker/raw-pointer_verified_bad_field.rs b/tests/rust/refinement_checker/raw-pointer_verified_bad_field.rs
+new file mode 100644
+index 0000000..040a603
+--- /dev/null
++++ b/tests/rust/refinement_checker/raw-pointer_verified_bad_field.rs
+@@ -0,0 +1,19 @@
++#[repr(C)]
++struct Pair {
++    left: i32,
++    right: i32,
++}
++
++unsafe fn field_addr(pair: *mut Pair) -> usize {
++    //@ assert true;
++    let field = unsafe { &raw mut (*pair).right };
++    field as usize
++}
++
++fn local_addr() -> i32 {
++    let mut value = 1;
++    //@ assert true;
++    let ptr = &raw mut value;
++    unsafe { *ptr = 2 };
++    value
++}
+diff --git a/tests/rust/refinement_checker/raw-pointer_verified_bad_kind.rs b/tests/rust/refinement_checker/raw-pointer_verified_bad_kind.rs
+new file mode 100644
+index 0000000..7363a33
+--- /dev/null
++++ b/tests/rust/refinement_checker/raw-pointer_verified_bad_kind.rs
+@@ -0,0 +1,19 @@
++#[repr(C)]
++struct Pair {
++    left: i32,
++    right: i32,
++}
++
++unsafe fn field_addr(pair: *mut Pair) -> usize {
++    //@ assert true;
++    let field = unsafe { &raw const (*pair).left };
++    field as usize
++}
++
++fn local_addr() -> i32 {
++    let mut value = 1;
++    //@ assert true;
++    let ptr = &raw mut value;
++    unsafe { *ptr = 2 };
++    value
++}
+diff --git a/tests/rust/refinement_checker/testsuite.mysh b/tests/rust/refinement_checker/testsuite.mysh
+index ec62e86..56a5b63 100644
+--- a/tests/rust/refinement_checker/testsuite.mysh
++++ b/tests/rust/refinement_checker/testsuite.mysh
+@@ -42,4 +42,7 @@ begin_parallel
+   refinement-checker result-map_orig.rs result-map_verified.rs
+   refinement-checker result-map_err_orig.rs result-map_err_verified.rs
+   refinement-checker override-local-mut_orig.rs override-local-mut_verified.rs
++  refinement-checker raw-pointer_orig.rs raw-pointer_verified.rs
++  !refinement-checker raw-pointer_orig.rs raw-pointer_verified_bad_field.rs
++  !refinement-checker raw-pointer_orig.rs raw-pointer_verified_bad_kind.rs
+ end_parallel

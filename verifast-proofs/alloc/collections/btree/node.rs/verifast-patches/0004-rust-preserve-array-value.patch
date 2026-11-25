@@ -1,0 +1,34 @@
+diff --git a/src/verify_expr.ml b/src/verify_expr.ml
+index b26182a..ee42f9e 100644
+--- a/src/verify_expr.ml
++++ b/src/verify_expr.ml
+@@ -1792,6 +1792,9 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
+         in
+         iter h env (Z.to_int elemCount) es $. fun h env elems ->
+         produce_array_chunk h env false elemTp addr elems elemCountTerm
++      | _, Term elems when is_rust ->
++        (* Rust array values use the same list as the array chunk. *)
++        produce_array_chunk h env false elemTp addr elems elemCountTerm
+       | _, MaybeUninitTerm term ->
+         produce_array_chunk h env true elemTp addr term elemCountTerm
+       | _ ->
+diff --git a/tests/rust/purely_unsafe/arrays.rs b/tests/rust/purely_unsafe/arrays.rs
+index da1bc3d..72afcf1 100644
+--- a/tests/rust/purely_unsafe/arrays.rs
++++ b/tests/rust/purely_unsafe/arrays.rs
+@@ -59,6 +59,15 @@ unsafe fn test3(xs: *mut [i32; 3])
+     //@ array_to_Array(xs);
+ }
+ 
++unsafe fn keep_array(xs: *mut [i32; 3])
++//@ req (xs as *i32)[..3] |-> [10, 20, 30];
++//@ ens (xs as *i32)[..3] |-> [10, 20, 30];
++//@ on_unwind_ens false;
++{
++    //@ close_points_to(xs);
++    //@ open_points_to(xs);
++}
++
+ fn main() {
+     test1();
+     test2();

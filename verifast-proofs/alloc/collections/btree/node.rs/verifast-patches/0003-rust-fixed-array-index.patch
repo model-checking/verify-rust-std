@@ -1,0 +1,326 @@
+diff --git a/src/refinement_checker/refinement_checker.ml b/src/refinement_checker/refinement_checker.ml
+index cf2a08f..6c582f2 100644
+--- a/src/refinement_checker/refinement_checker.ml
++++ b/src/refinement_checker/refinement_checker.ml
+@@ -362,7 +362,11 @@ let string_of_local_var_state = function
+ 
+ let eval_mir_const genv mir_const_cpn =
+   match mir_const_cpn with
+-    Ty mir_ty_const_cpn -> failwith "Using typesystem constant expressions as MIR constant operands is not yet supported"
++    Ty {const; _} ->
++      begin match decode_const_expr genv const with
++        LiteralConstExpr literal -> ScalarInt literal
++      | ParamConstExpr _ -> failwith "Symbolic typesystem constant as a MIR operand is not yet supported"
++      end
+   | Val mir_val_const_cpn ->
+     let ty = decode_ty genv mir_val_const_cpn.ty in
+     let mir_const_value_cpn = mir_val_const_cpn.const_value in
+@@ -1599,6 +1603,7 @@ type command =
+ | LoadLocal of local_decl_id (* Push the value of the specified local variable onto the operand stack *)
+ | Deref (* Pop a value from the top of the operand stack, which is an address, and push the value at that address *)
+ | Field of int (* Pop a value from the top of the operand stack, which is an aggregate value, and push the specified field of the aggregate value *)
++| ReadArrayElement of Vf_mir_decoder.ty
+ | BoxAsPtr (* Pop a value from the top of the operand stack, which is a Box, and push a pointer to the contents of the Box *)
+ | Downcast of int (* Pop a value from the top of the operand stack, which is an enum value, and push the specified variant of the enum value *)
+ | Constant of const_operand (* Push a constant operand onto the operand stack *)
+@@ -1621,6 +1626,7 @@ let string_of_command c =
+   | LoadLocal {name} -> Printf.sprintf "LoadLocal %s" name
+   | Deref -> "Deref"
+   | Field i -> Printf.sprintf "Field %d" i
++  | ReadArrayElement _ -> "ReadArrayElement"
+   | BoxAsPtr -> "BoxAsPtr"
+   | Downcast i -> Printf.sprintf "Downcast %d" i
+   | Constant {const} -> Printf.sprintf "Constant %s" (string_of_mir_const const)
+@@ -1637,10 +1643,12 @@ let string_of_command c =
+ 
+ let commands_for_loading_place {local; projection}: command list =
+   let proj_cmds =
+-    projection |> List.map @@ function
+-      (Deref: place_elem) -> (Deref: command)
+-    | Field {index} -> Field (Stdint.Uint32.to_int index)
+-    | Downcast index -> Downcast (Stdint.Uint32.to_int index)
++    projection |> List.concat_map @@ function
++      (Deref: place_elem) -> [(Deref: command)]
++    | Field {index} -> [Field (Stdint.Uint32.to_int index)]
++    | Downcast index -> [Downcast (Stdint.Uint32.to_int index)]
++    | ArrayIndex {index_local; elem_ty} -> [LoadLocal index_local; ReadArrayElement elem_ty]
++    | _ -> failwith "Unsupported projection when loading a place"
+   in
+   LoadLocal local::proj_cmds
+ 
+@@ -1965,6 +1973,8 @@ let check_place_element_refines_place_element (elem0: place_elem) (elem1: place_
+       if fieldIndex0 <> fieldIndex1 then failwith "Field indices do not match"
+   | BoxAsNonNull _, BoxAsNonNull _ -> ()
+   | Index, Index -> failwith "PlaceElement::Index not supported"
++  | ArrayIndex index0, ArrayIndex index1 ->
++      if index0.elem_ty <> index1.elem_ty then failwith "Array element types do not match"
+   | ConstantIndex, ConstantIndex -> failwith "PlaceElement::ConstantIndex not supported"
+   | Subslice, Subslice -> failwith "PlaceElement::Subslice not supported"
+   | Downcast variant_idx0, Downcast variant_idx1 ->
+@@ -1993,7 +2003,17 @@ let check_place_refines_place (env0: env) caller0 place0 (env1: env) caller1 pla
+   let placeProjection1 = place1.projection in
+   if List.length placeProjection0 <> List.length placeProjection1 then
+     failwith "The two place expressions have a different number of projection elements";
+-  List.iter2 check_place_element_refines_place_element placeProjection0 placeProjection1;
++  List.iter2 (fun elem0 elem1 ->
++    check_place_element_refines_place_element elem0 elem1;
++    match elem0, elem1 with
++      ArrayIndex index0, ArrayIndex index1 ->
++        let path0 = {lv_caller=caller0; lv_name=index0.index_local.name} in
++        let path1 = {lv_caller=caller1; lv_name=index1.index_local.name} in
++        begin match List.assoc_opt path0 env0, List.assoc_opt path1 env1 with
++          Some (Value v0), Some (Value v1) when values_equal env0 env1 v0 v1 -> ()
++        | _ -> failwith "Array indices do not match"
++        end
++    | _ -> ()) placeProjection0 placeProjection1;
+   match placeLocalState0, placeLocalState1 with
+     Some (Address a1), Some (Address a2) ->
+       if not (values_equal env0 env1 a1 a2) then failwith "The addresses of the two places are not equal";
+@@ -2636,6 +2656,12 @@ let check_body_refines_body bodies0 bodies1 def_path body0 body1 =
+             let v, opnds0, opnds1 = consume_operand opnds0 opnds1 in
+             let v = fresh_symbol () in
+             cont env0 (v::opnds0) env1 (v::opnds1)
++        | ReadArrayElement ty0, ReadArrayElement ty1 ->
++            if decode_ty i_bb0#genv ty0 <> decode_ty i_bb1#genv ty1 then
++              error "ReadArrayElement: The element types do not match";
++            let _, opnds0, opnds1 = consume_operands 2 opnds0 opnds1 in
++            let v = fresh_symbol () in
++            cont env0 (v::opnds0) env1 (v::opnds1)
+         | BoxAsPtr, BoxAsPtr ->
+             let v, opnds0, opnds1 = consume_operand opnds0 opnds1 in
+             let v = fresh_symbol () in
+diff --git a/src/refinement_checker/stringifier.ml b/src/refinement_checker/stringifier.ml
+index 17b4917..fa103d7 100644
+--- a/src/refinement_checker/stringifier.ml
++++ b/src/refinement_checker/stringifier.ml
+@@ -26,6 +26,8 @@ let string_of_place {local; projection; local_is_mutable} =
+       iter (Printf.sprintf "box_as_NonNull(%s)" inner) rest
+     | Index::rest ->
+       iter (Printf.sprintf "%s[?]" inner) rest
++    | ArrayIndex {index_local}::rest ->
++      iter (Printf.sprintf "%s[%s]" inner index_local.name) rest
+     | ConstantIndex::rest ->
+       iter (Printf.sprintf "%s[constant ?]" inner) rest
+     | Subslice::rest ->
+diff --git a/src/rust_frontend/vf_mir/vf_mir.capnp b/src/rust_frontend/vf_mir/vf_mir.capnp
+index e31f8fb..6283a6e 100644
+--- a/src/rust_frontend/vf_mir/vf_mir.capnp
++++ b/src/rust_frontend/vf_mir/vf_mir.capnp
+@@ -451,6 +451,10 @@ struct PlaceElem {
+         name @1: Option(Symbol);
+         ty @2: Ty;
+     }
++    struct ArrayIndexData {
++        indexLocal @0: LocalDeclId;
++        elemTy @1: Ty;
++    }
+     union {
+         deref @0: Void;
+         field @1: FieldData;
+@@ -460,6 +464,7 @@ struct PlaceElem {
+         subslice @5: Void;
+         downcast @2: UInt32;
+         opaqueCast @6: Void;
++        arrayIndex @8: ArrayIndexData;
+     }
+ }
+ 
+diff --git a/src/rust_frontend/vf_mir_exporter/src/lib.rs b/src/rust_frontend/vf_mir_exporter/src/lib.rs
+index 8306e22..ef0ba83 100644
+--- a/src/rust_frontend/vf_mir_exporter/src/lib.rs
++++ b/src/rust_frontend/vf_mir_exporter/src/lib.rs
+@@ -2982,8 +2982,14 @@ use rustc_span::RemapPathScopeComponents;
+                      */
+                     PlaceKind::Other
+                 }
+-                mir::ProjectionElem::Index(_) => {
+-                    place_elm_cpn.set_index(());
++                mir::ProjectionElem::Index(index) => {
++                    if let ty::TyKind::Array(elem_ty, _) = ty.kind() {
++                        let mut data = place_elm_cpn.init_array_index();
++                        Self::encode_local_decl_id(*index, data.reborrow().init_index_local());
++                        Self::encode_ty(enc_ctx.tcx, enc_ctx, *elem_ty, data.init_elem_ty());
++                    } else {
++                        place_elm_cpn.set_index(());
++                    }
+                     PlaceKind::Other
+                 }
+                 mir::ProjectionElem::ConstantIndex{ .. } => {
+diff --git a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+index 7e36cfc..666b69e 100644
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -2039,10 +2039,11 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+     type place_element =
+       | Deref
+       | Field of string option * int
++      | ArrayIndex of string * Ast.type_expr
+       | Downcast of int
+       | BoxAsNonNull
+ 
+-    let decode_place_element (place_elm : PlaceElementRd.t) : place_element =
++    let decode_place_element loc (place_elm : PlaceElementRd.t) : place_element =
+       let open PlaceElementRd in
+       match get place_elm with
+       | Deref ->
+@@ -2062,7 +2063,17 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+                 Some (SymbolRd.name_get (VfMirRd.of_pointer name_cpn))
+           in
+           Field (name, Stdint.Uint32.to_int index)
++      | ArrayIndex data ->
++          if Option.is_some TranslatorArgs.rocq_writer.buf then
++            Ast.static_error loc "Array index projections are not yet supported in Rocq output" None;
++          let open ArrayIndexData in
++          let index = translate_local_decl_id (index_local_get data) in
++          begin match translate_ty (elem_ty_get data) loc with
++          | Ok elem_ty -> ArrayIndex (index, elem_ty.vf_ty)
++          | Error _ -> Ast.static_error loc "Unsupported array element type" None
++          end
+       | Downcast variant_index -> Downcast (Stdint.Uint32.to_int variant_index)
++      | _ -> Ast.static_error loc "Unsupported MIR place projection" None
+ 
+     let translate_projection (loc : Ast.loc) (elems : place_element list)
+         (e : Ast.expr) (e_is_mutable : bool) :
+@@ -2091,6 +2102,12 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+             let name = match name with Some name -> name | None -> string_of_int field_idx in
+             let e1, e1_is_mutable = iter elems in
+             (Ast.Select (loc, e1, name), e1_is_mutable)
++        | ArrayIndex (index, elem_ty) :: elems ->
++            let array, is_mutable = iter elems in
++            let base =
++              Ast.CastExpr (loc, Ast.PtrTypeExpr (loc, elem_ty), Ast.AddressOf (loc, array))
++            in
++            (Ast.ReadArray (loc, base, Ast.Var (loc, index)), is_mutable)
+         | Downcast _ :: _ -> failwith "Not yet supported: Downcast _::_"
+         | BoxAsNonNull :: _ -> Ast.EmpAsn loc, false (* Dummy result; never used *)
+       in
+@@ -2112,7 +2129,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+           Rocq_writer.rocq_print_small_list TranslatorArgs.rocq_writer @@ fun () ->
+             projection_cpn |> List.map @@ fun pe_cpn ->
+               Rocq_writer.rocq_print_small_list_element TranslatorArgs.rocq_writer @@ fun () ->
+-                decode_place_element pe_cpn
++                decode_place_element loc pe_cpn
+       in
+       Ok
+         (translate_projection loc (List.rev place_elems)
+diff --git a/tests/rust/purely_unsafe/fixed_array_index.rs b/tests/rust/purely_unsafe/fixed_array_index.rs
+new file mode 100644
+index 0000000..c9ac59a
+--- /dev/null
++++ b/tests/rust/purely_unsafe/fixed_array_index.rs
+@@ -0,0 +1,21 @@
++struct Node {
++    edges: [i32; 12],
++}
++
++unsafe fn set_edge(node: *mut Node, index: usize, child: i32)
++//@ req index < 12 &*& pointer_within_limits(&(*node).edges) == true &*& *(&(*node).edges as *i32 + index) |-> _;
++//@ ens *(&(*node).edges as *i32 + index) |-> child;
++//@ on_unwind_ens false;
++{
++    //@ assert index < 12;
++    unsafe { (*node).edges[index] = child };
++}
++
++unsafe fn first_edge(node: *const Node) -> i32
++//@ req pointer_within_limits(&(*node).edges) == true &*& *(&(*node).edges as *i32) |-> ?edge;
++//@ ens *(&(*node).edges as *i32) |-> edge &*& result == edge;
++//@ on_unwind_ens false;
++{
++    //@ assert 0 < 12;
++    unsafe { (*node).edges[0] }
++}
+diff --git a/tests/rust/purely_unsafe/fixed_array_index_bad.rs b/tests/rust/purely_unsafe/fixed_array_index_bad.rs
+new file mode 100644
+index 0000000..565a300
+--- /dev/null
++++ b/tests/rust/purely_unsafe/fixed_array_index_bad.rs
+@@ -0,0 +1,20 @@
++struct Node {
++    edges: [i32; 12],
++}
++
++unsafe fn set_edge(node: *mut Node, index: usize, child: i32)
++//@ req pointer_within_limits(&(*node).edges) == true &*& *(&(*node).edges as *i32 + index) |-> _;
++//@ ens *(&(*node).edges as *i32 + index) |-> child;
++//@ on_unwind_ens false;
++{
++    unsafe { (*node).edges[index] = child };
++}
++
++unsafe fn first_edge(node: *const Node) -> i32
++//@ req pointer_within_limits(&(*node).edges) == true &*& *(&(*node).edges as *i32) |-> ?edge;
++//@ ens *(&(*node).edges as *i32) |-> edge &*& result == edge;
++//@ on_unwind_ens false;
++{
++    //@ assert 0 < 12;
++    unsafe { (*node).edges[0] }
++}
+diff --git a/tests/rust/refinement_checker/array_index_orig.rs b/tests/rust/refinement_checker/array_index_orig.rs
+new file mode 100644
+index 0000000..a29ec13
+--- /dev/null
++++ b/tests/rust/refinement_checker/array_index_orig.rs
+@@ -0,0 +1,11 @@
++struct Node {
++    edges: [i32; 12],
++}
++
++unsafe fn set_edge(node: *mut Node, index: usize, child: i32) {
++    unsafe { (*node).edges[index] = child };
++}
++
++unsafe fn first_edge(node: *const Node) -> i32 {
++    unsafe { (*node).edges[0] }
++}
+diff --git a/tests/rust/refinement_checker/array_index_verified_bad.rs b/tests/rust/refinement_checker/array_index_verified_bad.rs
+new file mode 100644
+index 0000000..9e282c0
+--- /dev/null
++++ b/tests/rust/refinement_checker/array_index_verified_bad.rs
+@@ -0,0 +1,21 @@
++struct Node {
++    edges: [i32; 12],
++}
++
++unsafe fn set_edge(node: *mut Node, index: usize, child: i32)
++//@ req index < 12 &*& pointer_within_limits(&(*node).edges) == true &*& *(&(*node).edges as *i32 + index) |-> _;
++//@ ens *(&(*node).edges as *i32 + index) |-> child;
++//@ on_unwind_ens false;
++{
++    //@ assert index < 12;
++    unsafe { (*node).edges[index] = child };
++}
++
++unsafe fn first_edge(node: *const Node) -> i32
++//@ req pointer_within_limits(&(*node).edges) == true &*& *(&(*node).edges as *i32) |-> ?edge;
++//@ ens *(&(*node).edges as *i32) |-> edge &*& result == edge;
++//@ on_unwind_ens false;
++{
++    //@ assert 0 < 12;
++    unsafe { (*node).edges[1] }
++}
+diff --git a/tests/rust/refinement_checker/testsuite.mysh b/tests/rust/refinement_checker/testsuite.mysh
+index 56a5b63..d874e77 100644
+--- a/tests/rust/refinement_checker/testsuite.mysh
++++ b/tests/rust/refinement_checker/testsuite.mysh
+@@ -45,4 +45,6 @@ begin_parallel
+   refinement-checker raw-pointer_orig.rs raw-pointer_verified.rs
+   !refinement-checker raw-pointer_orig.rs raw-pointer_verified_bad_field.rs
+   !refinement-checker raw-pointer_orig.rs raw-pointer_verified_bad_kind.rs
++  refinement-checker array_index_orig.rs ../purely_unsafe/fixed_array_index.rs
++  !refinement-checker array_index_orig.rs array_index_verified_bad.rs
+ end_parallel
+diff --git a/tests/rust/testsuite.mysh b/tests/rust/testsuite.mysh
+index 0de6dbd..9697d51 100644
+--- a/tests/rust/testsuite.mysh
++++ b/tests/rust/testsuite.mysh
+@@ -36,6 +36,8 @@ cd purely_unsafe
+   verifast enum_discr.rs
+   verifast -ignore_unwind_paths leftpad.rs
+   verifast arrays.rs
++  verifast -skip_specless_fns fixed_array_index.rs
++  !verifast -skip_specless_fns fixed_array_index_bad.rs
+   verifast -skip_specless_fns box_projection.rs
+   verifast -allow_assume std_thread.rs
+   verifast -allow_should_fail -allow_dead_code nonmut_let_immut.rs

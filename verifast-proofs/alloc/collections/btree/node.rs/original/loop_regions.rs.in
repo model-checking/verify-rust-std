@@ -1,0 +1,53 @@
+
+const _: () = {
+    type LeafRef = NodeRef<marker::Mut<'static>, String, String, marker::Leaf>;
+    type InternalRef = NodeRef<marker::Mut<'static>, String, String, marker::Internal>;
+    assert!(!std::mem::needs_drop::<Handle<LeafRef, marker::Edge>>());
+    assert!(!std::mem::needs_drop::<Handle<InternalRef, marker::Edge>>());
+    assert!(!std::mem::needs_drop::<Handle<InternalRef, marker::KV>>());
+    assert!(!std::mem::needs_drop::<NodeRef<marker::Mut<'static>, String, String, marker::LeafOrInternal>>());
+    assert!(!std::mem::needs_drop::<BalancingContext<'static, String, String>>());
+};
+
+use super::borrow::DormantMutRef;
+
+unsafe fn finish_root_split<'tree, 'slot, K, V, A: AllocatorClone>(
+    split: SplitResult<'tree, K, V, marker::LeafOrInternal>,
+    inserted: Handle<NodeRef<marker::DormantMut, K, V, marker::Leaf>, marker::KV>,
+    root_slot: &'slot mut DormantMutRef<'tree, Option<Root<K, V>>>,
+    allocator: &'slot mut A,
+) -> Handle<NodeRef<marker::Mut<'tree>, K, V, marker::Leaf>, marker::KV>
+{
+    let root = unsafe { root_slot.reborrow().as_mut().unwrap() };
+    root.push_internal_level(allocator.clone()).push(split.kv.0, split.kv.1, split.right);
+    unsafe { inserted.awaken() }
+}
+
+impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+// SOURCE     unsafe fn correct_childrens_parent_links<R: Iterator<Item = usize>>(&mut self, range: R) {
+}
+
+impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+// SOURCE     unsafe fn correct_childrens_parent_links<R: Iterator<Item = usize>>(&mut self, range: R) {
+}
+
+impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+// SOURCE     fn correct_all_childrens_parent_links(&mut self) {
+}
+
+fn moved_node_metadata<BorrowType, K, V, Type>(
+    node: NodeRef<BorrowType, K, V, Type>,
+) -> (usize, NonNull<LeafNode<K, V>>) {
+    let moved = node;
+    (moved.height, moved.node)
+}
+
+impl<'a, K: 'a, V: 'a> BalancingContext<'a, K, V> {
+// SOURCE     pub(super) fn merge_tracking_child_edge<A: AllocatorClone>(
+}
+
+impl<'a, K: 'a, V: 'a> BalancingContext<'a, K, V> {
+// SOURCE     pub(super) fn steal_left(
+
+// SOURCE     pub(super) fn steal_right(
+}

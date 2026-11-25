@@ -1,0 +1,90 @@
+
+const _: () = {
+    type LeafRef = NodeRef<marker::Mut<'static>, String, String, marker::Leaf>;
+    type InternalRef = NodeRef<marker::Mut<'static>, String, String, marker::Internal>;
+    assert!(!std::mem::needs_drop::<Handle<LeafRef, marker::Edge>>());
+    assert!(!std::mem::needs_drop::<Handle<InternalRef, marker::Edge>>());
+    assert!(!std::mem::needs_drop::<Handle<InternalRef, marker::KV>>());
+    assert!(!std::mem::needs_drop::<NodeRef<marker::Mut<'static>, String, String, marker::LeafOrInternal>>());
+    assert!(!std::mem::needs_drop::<BalancingContext<'static, String, String>>());
+};
+
+use super::borrow::DormantMutRef;
+
+unsafe fn install_root_split__VeriFast_wrapper<'tree, K, V, A: AllocatorClone>(
+    root_slot: &mut DormantMutRef<'tree, Option<Root<K, V>>>,
+    allocator: &mut A,
+    _left: NonNull<LeafNode<K, V>>,
+    key: K,
+    value: V,
+    right: Root<K, V>,
+) {
+    let root = unsafe { root_slot.reborrow().as_mut().unwrap() };
+    root.push_internal_level(allocator.clone()).push(key, value, right);
+}
+
+// SOURCE unsafe fn finish_root_split<'tree, 'slot, K, V, A: AllocatorClone>(
+
+// SOURCE unsafe fn repair_one__VeriFast_wrapper<'a, 'b, K, V>(
+
+impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+// SOURCE     unsafe fn relink_range<'b>(&'b mut self, range: std::ops::Range<usize>)
+}
+
+impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+// SOURCE     unsafe fn relink_inclusive<'b>(&'b mut self, range: std::ops::RangeInclusive<usize>)
+}
+
+impl<'a, K, V> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
+// SOURCE     unsafe fn correct_all_childrens_parent_links<'b>(&'b mut self)
+}
+
+fn moved_node_metadata<BorrowType, K, V, Type>(
+    node: NodeRef<BorrowType, K, V, Type>,
+) -> (usize, NonNull<LeafNode<K, V>>) {
+    let moved = NodeRef::<BorrowType,K,V,Type> { height: node.height, node: node.node, _marker: PhantomData };
+    (moved.height, moved.node)
+}
+
+impl<'a, K: 'a, V: 'a> BalancingContext<'a, K, V> {
+    pub(super) fn compare_merge_tracking_child_edge<A: AllocatorClone>(
+        self,
+        track_edge_idx: LeftOrRight<usize>,
+        alloc: A,
+    ) -> Handle<NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal>, marker::Edge> {
+        let old_left_len = self.left_child.len();
+        let right_len = self.right_child.len();
+        assert!(match track_edge_idx {
+            LeftOrRight::Left(idx) => idx <= old_left_len,
+            LeftOrRight::Right(idx) => idx <= right_len,
+        });
+        let child = self.merge_tracking_child(alloc);
+        unsafe { finish_merge_tracking__VeriFast_wrapper(child, old_left_len, track_edge_idx) }
+    }
+}
+
+// SOURCE unsafe fn finish_merge_tracking__VeriFast_wrapper<'tree, K, V>(
+
+impl<'a, K: 'a, V: 'a> BalancingContext<'a, K, V> {
+    pub(super) fn compare_steal_left(
+        mut self,
+        track_right_edge_idx: usize,
+    ) -> Handle<NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal>, marker::Edge> {
+        self.bulk_steal_left(1);
+        // ignore-tidy-undocumented-unsafe
+        unsafe { finish_steal_left__VeriFast_wrapper(self.right_child, track_right_edge_idx) }
+    }
+
+    pub(super) fn compare_steal_right(
+        mut self,
+        track_left_edge_idx: usize,
+    ) -> Handle<NodeRef<marker::Mut<'a>, K, V, marker::LeafOrInternal>, marker::Edge> {
+        self.bulk_steal_right(1);
+        // ignore-tidy-undocumented-unsafe
+        unsafe { finish_steal_right__VeriFast_wrapper(self.left_child, track_left_edge_idx) }
+    }
+}
+
+// SOURCE unsafe fn finish_steal_left__VeriFast_wrapper<'tree, K, V>(
+
+// SOURCE unsafe fn finish_steal_right__VeriFast_wrapper<'tree, K, V>(

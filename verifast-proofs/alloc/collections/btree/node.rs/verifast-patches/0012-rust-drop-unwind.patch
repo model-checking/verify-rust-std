@@ -1,0 +1,241 @@
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -3032,21 +3032,45 @@
+                          Static ));
+                 ] )
+           in
++          let drop_expr =
++            Ast.CallExpr
++              ( loc,
++                "std::ptr::drop_in_place",
++                [],
++                [],
++                [ LitPat (AddressOf (loc, place)) ],
++                Static )
++          in
++          let drop_stmts, unwind_targets =
++            if TranslatorArgs.ignore_unwind_paths then
++              ([ Ast.ExprStmt drop_expr ] @ freeze_stmts, [])
++            else
++              let unwind_stmts, unwind_targets =
++                translate_unwind_action (unwind_action_get drop_data_cpn) loc
++              in
++              ( [
++                  Ast.SwitchStmt
++                    ( loc,
++                      drop_expr,
++                      [
++                        Ast.SwitchStmtClause
++                          ( loc,
++                            CallExpr
++                              ( loc, "returning", [], [],
++                                [ LitPat (Var (loc, "__drop_result")) ], Static ),
++                            freeze_stmts );
++                        Ast.SwitchStmtClause
++                          ( loc,
++                            CallExpr (loc, "unwinding", [], [], [], Static),
++                            freeze_stmts @ unwind_stmts );
++                      ] );
++                ],
++                unwind_targets )
++          in
+           Ok
+-            ( unfreeze_stmts
+-              @ [
+-                  Ast.ExprStmt
+-                    (CallExpr
+-                       ( loc,
+-                         "std::ptr::drop_in_place",
+-                         [],
+-                         [],
+-                         [ LitPat (AddressOf (loc, place)) ],
+-                         Static ));
+-                ]
+-              @ freeze_stmts,
++            ( unfreeze_stmts @ drop_stmts,
+               Mir.GotoTerminator (loc, target),
+-              [ target ] )
++              target :: unwind_targets )
+       | Assert assert_data_cpn ->
+           (* `Assert { cond, expected, target, unwind }`: continue at `target` if `cond == expected`,
+              otherwise panic (i.e. unwind). With -ignore_unwind_paths the panicking branch is
+diff --git a/tests/rust/purely_unsafe/drop_cleanup.rs b/tests/rust/purely_unsafe/drop_cleanup.rs
+new file mode 100644
+--- /dev/null
++++ b/tests/rust/purely_unsafe/drop_cleanup.rs
+@@ -0,0 +1,21 @@
++unsafe fn drop_with_cleanup<T, U>(value: T, pending: U)
++//@ req thread_token(?t) &*& type_interp::<T>() &*& type_interp::<U>() &*& <T>.own(t, value) &*& <U>.own(t, pending);
++//@ ens thread_token(t) &*& type_interp::<T>() &*& type_interp::<U>();
++//@ on_unwind_ens thread_token(t) &*& type_interp::<T>() &*& type_interp::<U>();
++{
++    let mut cleanup = pending;
++    //@ close_points_to(&mut cleanup);
++    let mut primary = value;
++    //@ close_points_to(&mut primary);
++}
++
++unsafe fn cannot_rule_out_unwind<T>(value: T)
++//@ req thread_token(?t) &*& type_interp::<T>() &*& <T>.own(t, value);
++//@ ens thread_token(t) &*& type_interp::<T>();
++//@ on_unwind_ens false; //~should_fail
++{
++    let mut primary = value;
++    //@ close_points_to(&mut primary);
++}
++
++fn main() {}
+--- a/tests/rust/testsuite.mysh
++++ b/tests/rust/testsuite.mysh
+@@ -44,6 +44,7 @@
+   verifast -skip_specless_fns -allow_dead_code -allow_should_fail borrowed_box_projection.rs
+   verifast -skip_specless_fns merge_fractions_before_borrow.rs
+   verifast -skip_specless_fns -allow_should_fail field_projection_addresses.rs
++  verifast -skip_specless_fns -allow_dead_code -allow_should_fail drop_cleanup.rs
+   verifast -allow_assume std_thread.rs
+   verifast -allow_should_fail -allow_dead_code nonmut_let_immut.rs
+   verifast struct_exprs.rs
+diff --git a/src/refinement_checker/main.ml b/src/refinement_checker/main.ml
+--- a/src/refinement_checker/main.ml
++++ b/src/refinement_checker/main.ml
+@@ -25,6 +25,9 @@
+         | "--ignore-directives" :: args ->
+           ignore_directives := true;
+           process_args args
++        | "--check-unwind" :: args ->
++          check_unwind := true;
++          process_args args
+         | "--verbose" :: value :: args ->
+             verbosity :=
+               begin match int_of_string_opt value with
+@@ -39,12 +42,13 @@
+     | [ original_path; verified_path ] -> (original_path, verified_path)
+     | _ ->
+         print_endline
+-          "Usage: refinement_checker [--ignore-directives] [--verbose N] [--rustc-args ARGS] [--] <original_path> \
++          "Usage: refinement_checker [--ignore-directives] [--check-unwind] [--verbose N] [--rustc-args ARGS] [--] <original_path> \
+            <verified_path>\n\n\
+            Checks that each behavior of each function in the original path is \
+            also exhibited by the corresponding function in the verified path\n\n
+            Options:\n\
+-               --ignore-directives     Ignore /*@~mut@*/ directives";
++               --ignore-directives     Ignore /*@~mut@*/ directives\n\
++               --check-unwind          Compare cleanup paths without call inlining";
+         exit 1
+   in
+   process_args (List.tl (Array.to_list Sys.argv))
+diff --git a/src/refinement_checker/refinement_checker.ml b/src/refinement_checker/refinement_checker.ml
+--- a/src/refinement_checker/refinement_checker.ml
++++ b/src/refinement_checker/refinement_checker.ml
+@@ -8,6 +8,7 @@
+ let verbosity_call = 1
+ let verbosity_basic_block = 2
+ let verbosity_stmt = 3
++let check_unwind = ref false
+ 
+ exception RefinementCheckFailure of string
+ 
+@@ -1768,6 +1769,7 @@
+       eval_operand operand fallback (fun v -> eval_operands operands fallback (fun vs -> cont (v::vs)))
+   in
+   let inline_call0 funcName generic_params substs call (body: body) =
++    if !check_unwind then error "Unwind comparison does not support inlining calls";
+     let {args; destination; target; unwind_action} = call in
+     let args = args |> List.map @@ fun arg ->
+       eval_operand arg (fun msg -> failwith (msg ^ " are not yet supported as arguments of inlined calls")) (fun v -> v)
+@@ -1859,6 +1861,24 @@
+           end
+       | Address _ -> failwith "The scenario where the result variable's address is taken is not yet supported for inlined calls"
+       end
++    | SwitchInt {discr=Copy {local; projection=[]}; values; targets} when !check_unwind && opnds = [] ->
++      (* A cleanup block may test a drop flag already assigned on this path. *)
++      let path = {lv_caller=i_bb#id.bb_caller; lv_name=local.name} in
++      begin match List.assoc_opt path env with
++        Some (Value (ScalarInt (BoolValue value))) ->
++          let cases, [], [otherwise] = Stringifier.zip_with_remainder values targets in
++          let flag = Stdint.Uint128.of_int (if value then 1 else 0) in
++          let target = match List.find_opt (fun (v, _) -> decode_uint128 v = flag) cases with
++            | Some (_, target) -> target
++            | None -> otherwise
++          in
++          let index = Stdint.Uint32.to_int target.index in
++          if index = i_bb#id.bb_index || List.mem index i_bb#predecessors then done_ ()
++          else
++            let target = i_bb#sibling index in
++            process_commands bodies env [] target 0 target#commands
++      | _ -> done_ ()
++      end
+     | Goto {index} when not (List.mem (Stdint.Uint32.to_int index) i_bb#predecessors) -> (* Non-looping jump *)
+       assert (opnds = []);
+       let i_bb = i_bb#sibling (Stdint.Uint32.to_int index) in
+@@ -2505,6 +2525,18 @@
+         if opnds1 <> [] then failwith "opnds1 <> [] at terminator";
+         let terminatorKind0 = terminator0.kind in
+         let terminatorKind1 = terminator1.kind in
++        let check_unwind_actions env0 env1 action0 action1 =
++          if !check_unwind then
++            match action0, action1 with
++            | Cleanup bb0, Cleanup bb1 ->
++              check_basic_block_refines_basic_block
++                env0 (i_bb0#sibling (Stdint.Uint32.to_int bb0.index))
++                env1 (i_bb1#sibling (Stdint.Uint32.to_int bb1.index))
++            | Continue, Continue | Terminate, Terminate | Unreachable, Unreachable -> ()
++            | _ ->
++              error ("Unwind actions do not match: " ^ Stringifier.string_of_unwind_action action0
++                     ^ " vs " ^ Stringifier.string_of_unwind_action action1)
++        in
+         match (terminatorKind0, terminatorKind1) with
+           (Goto bb_id0, Goto bb_id1) ->
+             let bb_idx0 = Stdint.Uint32.to_int @@ bb_id0.index in
+@@ -2537,7 +2569,8 @@
+             let retVal1 = List.assoc {lv_caller=None; lv_name=locals1.(0).id.name} env1 in
+             if retVal0 <> retVal1 then
+               error (Printf.sprintf "In function %s, at basic block %s in the original crate and basic block %s in the verified crate, the return values %s and %s are not equal" def_path i_bb0#to_string i_bb1#to_string (string_of_local_var_state retVal0) (string_of_local_var_state retVal1))
+-        | _, Unreachable -> ()
++        | Unreachable, Unreachable -> ()
++        | _, Unreachable when not !check_unwind -> ()
+         | (Call call0, Call call1) ->
+           let func0 = call0.func in
+           let func1 = call1.func in
+@@ -2547,6 +2580,7 @@
+           List.combine args0 args1 |> List.iteri (fun i (arg0, arg1) ->
+             check_operand_refines_operand (i + 1) i_bb0#genv env0 span0 caller0 arg0 i_bb1#genv env1 span1 caller1 arg1
+           );
++          check_unwind_actions env0 env1 call0.unwind_action call1.unwind_action;
+           let dest0 = call0.destination in
+           let dest1 = call1.destination in
+           begin match call0.target, call1.target with
+@@ -2569,18 +2603,22 @@
+               check_basic_block_refines_basic_block env0 (i_bb0#sibling dest0bbidx) env1 (i_bb1#sibling dest1bbidx)
+             end
+           end
+-          (* TODO: Check that unwindAction0 refines unwindAction1 *)
+         | Drop drop_data0, Drop drop_data1 ->
+           let env0, env1 =
+             match check_place_refines_place env0 caller0 drop_data0.place env1 caller1 drop_data1.place with
+               Local x0, Local x1 ->
+               if List.assoc x0 env0 <> List.assoc x1 env1 then error "The two drop terminators drop different values";
+               List.remove_assoc x0 env0, List.remove_assoc x1 env1
++            | LocalProjection x0, LocalProjection x1 ->
++              begin match List.assoc_opt x0 env0, List.assoc_opt x1 env1 with
++                Some (Value v0), Some (Value v1) when values_equal env0 env1 v0 v1 -> env0, env1
++              | _ -> error "The two drop terminators drop projections of different values"
++              end
+             | Nonlocal, Nonlocal -> env0, env1
+           in
+           let i_bb_target0 = i_bb0#sibling (Stdint.Uint32.to_int drop_data0.target.index) in
+           let i_bb_target1 = i_bb1#sibling (Stdint.Uint32.to_int drop_data1.target.index) in
+-          (* Todo: follow unwind path *)
++          check_unwind_actions env0 env1 drop_data0.unwind_action drop_data1.unwind_action;
+           check_basic_block_refines_basic_block env0 i_bb_target0 env1 i_bb_target1
+         | TailCall, TailCall -> error "TailCall not supported"
+         | Assert assert0, Assert assert1 ->
+@@ -2588,7 +2626,7 @@
+           if assert0.expected <> assert1.expected then error "The two assert terminators expect different values";
+           let i_bb_target0 = i_bb0#sibling (Stdint.Uint32.to_int assert0.target.index) in
+           let i_bb_target1 = i_bb1#sibling (Stdint.Uint32.to_int assert1.target.index) in
+-          (* Todo: follow unwind path *)
++          check_unwind_actions env0 env1 assert0.unwind_action assert1.unwind_action;
+           check_basic_block_refines_basic_block env0 i_bb_target0 env1 i_bb_target1
+         | Yield, Yield -> error "Yield not supported"
+         | CoroutineDrop, CoroutineDrop -> error "CoroutineDrop not supported"

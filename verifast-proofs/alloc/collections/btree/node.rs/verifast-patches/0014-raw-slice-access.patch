@@ -1,0 +1,85 @@
+--- a/bin/rust/aliasing.rsspec
++++ b/bin/rust/aliasing.rsspec
+@@ -137,3 +137,9 @@
+ //@ req true; // TODO
+ //@ ens result == x;
+ //@ on_unwind_ens false;
++
++// Array-to-slice raw unsizing attaches metadata without borrowing the array.
++fn unsize_raw_array_ptr<T, N>(array: *[T; N]) -> *[T];
++//@ req true;
++//@ ens strip_pointer_metadata(result as pointer) == array as pointer &*& result.len() == int_of_const(typeid(N));
++//@ on_unwind_ens false;
+--- a/bin/rust/std/lib.rsspec
++++ b/bin/rust/std/lib.rsspec
+@@ -492,6 +492,17 @@
+     
+     impl<T> MaybeUninit<T> {
+     
++        unsafe fn assume_init_ref<'a>(self: &'a MaybeUninit<T>) -> &'a T;
++        /*@
++        req [?f](*self |-> ?bits) &*& bits.inner() == some(?value) &*&
++            [?g]ref_initialized(self) &*& [?q]lifetime_token('a);
++        @*/
++        /*@
++        ens [f](*self |-> bits) &*& [g]ref_initialized(self) &*& [q]lifetime_token('a) &*&
++            [_]frac_borrow('a, ref_initialized_(result)) &*& result as pointer == self as pointer;
++        @*/
++        //@ on_unwind_ens false;
++
+         unsafe fn assume_init_mut<'a>(self: &'a mut MaybeUninit<T>) -> &'a mut T;
+         //@ req *self |-> ?bits &*& bits.inner() == some(?value);
+         //@ ens *result |-> value &*& ref_mut_end_token(result, self as *T) &*& ref_origin(result) == ref_origin(self as *T);
+@@ -628,6 +639,19 @@
+     //@ ens result as *T == data &*& result.len() == len;
+     //@ on_unwind_ens false;
+ 
++    // Access the original allocation by offset. No references or memory
++    // permissions are created by raw indexing.
++    unsafe fn slice_get_unchecked_usize<T>(self: *[T], index: usize) -> *T;
++    /*@
++    req 0 <= index &*& index < self.len() &*& strip_pointer_metadata(self as pointer).address != 0 &*&
++        object_pointer_within_limits(strip_pointer_metadata(self as pointer) as *u8, self.len() * std::mem::size_of::<T>()) == true &*&
++        strip_pointer_metadata(self as pointer).address % std::mem::align_of::<T>() == 0 &*&
++        self.len() * std::mem::size_of::<T>() <= isize::MAX &*&
++        [?f](*((strip_pointer_metadata(self as pointer) as *T) + index) |-?-> ?slot);
++    @*/
++    //@ ens result == (strip_pointer_metadata(self as pointer) as *T) + index &*& [f](*result |-?-> slot);
++    //@ on_unwind_ens false;
++
+     unsafe fn drop_in_place<T: ?Sized>(to_drop: *mut T);
+     //@ req thread_token(?t) &*& *to_drop |-> ?v &*& <T>.own(t, v);
+     //@ ens thread_token(t) &*& *to_drop |-> _;
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -2630,6 +2630,13 @@
+                 Ok
+                   ( tmp_rvalue_binders,
+                     FnCallResult (CastExpr (fn_loc, PtrTypeExpr (fn_loc, ManifestTypeExpr (fn_loc, Int (Unsigned, FixedWidthRank 0))), arg)) )
++            | "std::ptr::const_ptr::<impl *const [T]>::get_unchecked"
++            | "std::ptr::mut_ptr::<impl *mut [T]>::get_unchecked_mut" ->
++                begin match substs_cpn, substs with
++                | [_; { kind = Type { kind = UInt USize } }], [element; _] ->
++                    translate_regular_fn_call [element] "std::ptr::slice_get_unchecked_usize"
++                | _ -> translate_regular_fn_call substs fn_name
++                end
+             | "std::slice::<impl [T]>::get_unchecked" ->
+                 begin match substs_cpn, substs with
+                 | [_; { kind = Type { kind = UInt USize } }; _], [element; _; lifetime] ->
+@@ -3453,6 +3460,16 @@
+                   Static ))
+             in
+             Ok (`TrRvalueExpr (result_of_outcome loc e))
++          | { kind = PointerCoercion; ty = { kind = RawPtr { ty = { kind = Slice _ } } };
++              operand = (Copy {projection=[]} | Move {projection=[]}) } ->
++            (* An array's raw pointer coercion changes the metadata alone. *)
++            let expr =
++              match operand with
++              | `TrOperandCopy expr | `TrOperandMove (expr, _) -> expr
++              | _ -> Ast.static_error loc "Expected an array pointer operand for slice unsizing" None
++            in
++            let call = Ast.CallExpr (loc, "unsize_raw_array_ptr", [], [], [LitPat expr], Static) in
++            Ok (`TrRvalueExpr (result_of_outcome loc call))
+           | { kind = PointerCoercion; ty = { kind = Ref { mutability; ty = { kind = Slice _ } } } } ->
+             (* Array-to-slice coercion keeps the reference tag and adds the array length. *)
+             let expr =

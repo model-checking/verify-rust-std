@@ -1,0 +1,86 @@
+diff --git a/bin/rust/std/lib.rsspec b/bin/rust/std/lib.rsspec
+index 8b1cd59..3d87eb2 100644
+--- a/bin/rust/std/lib.rsspec
++++ b/bin/rust/std/lib.rsspec
+@@ -801,6 +801,19 @@ mod slice {
+     @*/
+     //@ on_unwind_ens false;
+ 
++    // RangeTo array indexing unsizes the array and checks 0..index.end.
++    fn array_index_mut_range_to<T, N, 'a>(array: &'a mut [T; N], index: std::ops::RangeTo<usize>) -> &'a mut [T];
++    /*@
++    req 0 <= index.end &*& index.end <= int_of_const(typeid(N)) &*&
++        (array as *T)[..index.end] |-> ?elements;
++    @*/
++    /*@
++    ens result.len() == index.end &*& (result as *T)[..index.end] |-> elements &*&
++        slice_ref_mut_end_token(result, array as *T, index.end) &*&
++        ref_origin(result as *T) == ref_origin(array as *T);
++    @*/
++    //@ on_unwind_ens false;
++
+     unsafe fn get_unchecked_mut_range_to<T, 'a>(self: &'a mut [T], index: std::ops::RangeTo<usize>) -> &'a mut [T];
+     //@ req 0 <= index.end &*& index.end <= self.len() &*& (self as *T)[..index.end] |-> ?elements;
+     /*@
+diff --git a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+index c52f73e..ff7a380 100644
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -2650,6 +2650,17 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+                     translate_regular_fn_call [element; lifetime] spec
+                 | _ -> translate_regular_fn_call substs fn_name
+                 end
++            | "std::ops::IndexMut::index_mut" ->
++                begin match substs_cpn, substs with
++                | [{ kind = Type { kind = Array { elem_ty; size } } };
++                   { kind = Type { kind = Adt { id = { name = "std::ops::RangeTo" };
++                       substs = [{ kind = Type { kind = UInt USize } }] } } }; _],
++                  [_; _; lifetime] ->
++                    let* element = translate_generic_arg { kind = Type elem_ty } call_loc in
++                    let* length = translate_generic_arg { kind = Const size } call_loc in
++                    translate_regular_fn_call [element; length; lifetime] "std::slice::array_index_mut_range_to"
++                | _ -> translate_regular_fn_call substs fn_name
++                end
+             | "std::array::<impl [T; N]>::as_mut_slice" ->
+                 translate_regular_fn_call substs "unsize_mut_array_ref"
+             | "std::slice::<impl [T]>::as_ptr" | "std::slice::<impl [T]>::as_mut_ptr" ->
+diff --git a/tests/rust/purely_unsafe/array_prefix_borrow.rs b/tests/rust/purely_unsafe/array_prefix_borrow.rs
+new file mode 100644
+index 0000000..b57d6bf
+--- /dev/null
++++ b/tests/rust/purely_unsafe/array_prefix_borrow.rs
+@@ -0,0 +1,22 @@
++unsafe fn prefix_probe<'a, T>(x: &'a mut [T; 11], end: usize)
++    //@ req 0 <= end &*& end <= 11 &*& (x as *T)[..11] |-> ?values;
++    //@ ens (x as *T)[..11] |-> values;
++    //@ on_unwind_ens false;
++{
++    //@ array_split(x as *T, end);
++    let prefix = &mut x[..end];
++    //@ assert prefix.len() == end;
++    //@ assert ref_origin(prefix as *T) == ref_origin(x as *T);
++    //@ end_slice_ref_mut(prefix);
++    //@ array_join(x as *T);
++}
++
++unsafe fn out_of_bounds(x: &mut [u8; 11], end: usize)
++    //@ req end == 12 &*& (x as *u8)[..12] |-> ?values;
++    //@ ens true;
++    //@ on_unwind_ens false;
++{
++    let _ = &mut x[..end]; //~should_fail
++}
++
++fn main() {}
+diff --git a/tests/rust/testsuite.mysh b/tests/rust/testsuite.mysh
+index 5e4d3fd..e92cdb3 100644
+--- a/tests/rust/testsuite.mysh
++++ b/tests/rust/testsuite.mysh
+@@ -36,6 +36,7 @@ cd purely_unsafe
+   verifast enum_discr.rs
+   verifast -ignore_unwind_paths leftpad.rs
+   verifast arrays.rs
++  verifast -skip_specless_fns -allow_dead_code -allow_should_fail array_prefix_borrow.rs
+   verifast -allow_dead_code -skip_specless_fns mutable_struct_borrow.rs
+   verifast -skip_specless_fns fixed_array_index.rs
+   !verifast -skip_specless_fns fixed_array_index_bad.rs
