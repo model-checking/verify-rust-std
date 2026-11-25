@@ -739,10 +739,10 @@ impl<T> [T] {
     /// [`as_mut_ptr`]: slice::as_mut_ptr
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_slice_as_ptr", since = "1.32.0")]
-    #[rustc_never_returns_null_ptr]
-    #[rustc_as_ptr]
     #[inline(always)]
     #[must_use]
+    #[lint::as_ptr]
+    #[lint::never_returns_null_ptr]
     pub const fn as_ptr(&self) -> *const T {
         self as *const [T] as *const T
     }
@@ -770,8 +770,8 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_ptr_offset", since = "1.61.0")]
-    #[rustc_never_returns_null_ptr]
-    #[rustc_as_ptr]
+    #[lint::as_ptr]
+    #[lint::never_returns_null_ptr]
     #[inline(always)]
     #[must_use]
     #[rustc_no_writable]
@@ -2572,7 +2572,7 @@ impl<T> [T] {
     /// )));
     /// assert_eq!(s.split_once(|&x| x == 0), None);
     /// ```
-    #[stable(feature = "slice_split_once", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "slice_split_once", since = "1.101.0")]
     #[inline]
     pub fn split_once<F>(&self, pred: F) -> Option<(&[T], &[T])>
     where
@@ -2600,7 +2600,7 @@ impl<T> [T] {
     /// )));
     /// assert_eq!(s.rsplit_once(|&x| x == 0), None);
     /// ```
-    #[stable(feature = "slice_split_once", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "slice_split_once", since = "1.101.0")]
     #[inline]
     pub fn rsplit_once<F>(&self, pred: F) -> Option<(&[T], &[T])>
     where
@@ -4379,6 +4379,12 @@ impl<T> [T] {
     #[rustc_const_stable(feature = "const_copy_from_slice", since = "1.87.0")]
     #[track_caller]
     #[cfg_attr(rapx, rapx::verify)]
+    // Equal lengths select the non-panicking path and make `ptr::copy_nonoverlapping`
+    // sound: both regions span `len` elements and cannot overlap (`&mut [T]` is
+    // exclusive). Element equality is per type below (`T: Copy`, no `PartialEq`).
+    #[requires(self.len() == src.len())]
+    #[ensures(|_| self.len() == src.len())]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub const fn copy_from_slice(&mut self, src: &[T])
     where
         T: Copy,
@@ -5452,6 +5458,32 @@ impl<T> [T] {
     /// assert_eq!(iter.next(), Some(Range { start: 4, end: 4 }));
     /// assert_eq!(iter.next(), Some(Range { start: 5, end: 6 }));
     /// ```
+    /// Returning `None` with a slice not aligned to the elements of the base array:
+    /// ```
+    /// use core::range::Range;
+    /// use core::slice::from_ref;
+    ///
+    /// let arr: &[[u8; 4]] = &[[0, 1, 2, 3], [4, 5, 6, 7]];
+    /// let flattened: &[u8] = arr.as_flattened();
+    ///
+    /// // This sub-slice is aligned with the first element of `arr`:
+    /// // &[[0, 1, 2, 3], [4, 5, 6, 7]]
+    /// // &[[0, 1, 2, 3]]
+    /// let aligned_elem: &[u8; 4] = flattened[0..4].try_into().unwrap();
+    /// let aligned_slice: &[[u8; 4]] = from_ref(aligned_elem);
+    ///
+    /// // `aligned_slice` is `&arr[0..1]`
+    /// assert_eq!(arr.subslice_range(aligned_slice), Some(Range { start: 0, end: 1 }));
+    ///
+    /// // This sub-slice is **not** aligned to the elements of `arr`, despite pointing inside it:
+    /// // &[[0, 1, 2, 3], [4, 5, 6, 7]]
+    /// //    &[[1, 2, 3,   4]]
+    /// let misaligned_elem: &[u8; 4] = flattened[1..5].try_into().unwrap();
+    /// let misaligned_slice: &[[u8; 4]] = from_ref(misaligned_elem);
+    ///
+    /// // `misaligned_slice` has no corresponding slice of `arr`
+    /// assert_eq!(arr.subslice_range(misaligned_slice), None);
+    /// ```
     #[must_use]
     #[stable(feature = "substr_range", since = "1.98.0")]
     pub fn subslice_range(&self, subslice: &[T]) -> Option<core::range::Range<usize>> {
@@ -5791,7 +5823,7 @@ const impl<T> Default for &mut [T] {
     }
 }
 
-#[unstable(feature = "slice_pattern", reason = "stopgap trait for slice patterns", issue = "56345")]
+#[unstable(feature = "slice_pattern", issue = "none", reason = "stopgap trait for slice patterns")]
 /// Patterns in slices - currently, only used by `strip_prefix` and `strip_suffix`.  At a future
 /// point, we hope to generalise `core::str::Pattern` (which at the time of writing is limited to
 /// `str`) to slices, and then this trait will be replaced or abolished.
@@ -6064,4 +6096,44 @@ mod verify {
         let mut a: [u8; 100] = kani::any();
         a.reverse();
     }
+
+    // -------------------------------------------------------------------------
+    // copy_from_slice: safety harnesses use a nondeterministic `len <= N`; value
+    // harnesses assert equality at one nondeterministic index over fixed `N`
+    // (the `check_copy_untyped` idiom in `intrinsics`). Fixed length is required:
+    // a symbolic index after a symbolic-length copy exceeds the memcpy model.
+    macro_rules! check_copy_from_slice_for {
+        ($safety:ident, $value:ident, $ty:ty) => {
+            #[kani::proof_for_contract(<[$ty]>::copy_from_slice)]
+            fn $safety() {
+                const N: usize = 32;
+                let src_arr: [$ty; N] = kani::any();
+                let mut dst_arr: [$ty; N] = kani::any();
+                let len = kani::any_where(|l: &usize| *l <= N);
+                let src = &src_arr[..len];
+                let dst = &mut dst_arr[..len];
+                kani::cover(len > 0, "copy_from_slice copies a non-empty slice");
+                dst.copy_from_slice(src);
+            }
+
+            #[kani::proof_for_contract(<[$ty]>::copy_from_slice)]
+            fn $value() {
+                const N: usize = 32;
+                let src_arr: [$ty; N] = kani::any();
+                let mut dst_arr: [$ty; N] = kani::any();
+                let src = &src_arr[..];
+                let dst = &mut dst_arr[..];
+                kani::cover(N > 0, "copy_from_slice copies a non-empty slice");
+                dst.copy_from_slice(src);
+                let i = kani::any_where(|i: &usize| *i < N);
+                assert!(dst[i] == src[i], "copy_from_slice preserves elements");
+            }
+        };
+    }
+
+    check_copy_from_slice_for!(check_copy_from_slice_u8, check_copy_from_slice_value_u8, u8);
+    check_copy_from_slice_for!(check_copy_from_slice_u16, check_copy_from_slice_value_u16, u16);
+    check_copy_from_slice_for!(check_copy_from_slice_u32, check_copy_from_slice_value_u32, u32);
+    check_copy_from_slice_for!(check_copy_from_slice_u64, check_copy_from_slice_value_u64, u64);
+    check_copy_from_slice_for!(check_copy_from_slice_char, check_copy_from_slice_value_char, char);
 }
