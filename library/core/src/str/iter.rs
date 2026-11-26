@@ -59,18 +59,46 @@ impl<'a> Iterator for Chars<'a> {
             let mut chunks = self.iter.as_slice().as_chunks::<CHUNK_SIZE>().0.iter();
             let mut bytes_skipped: usize = 0;
 
+            // Ch22 unbounded: equality-anchor loop contract. Invariant reads are raw-field
+            // accessors and usize ghosts ONLY — `as_slice()`/`len()` inside an invariant
+            // compute end−ptr under havoc and do not discharge at the pinned Kani commit.
+            // `g_chunks_total` is a PRE-loop concrete read (ordinary code, no havoc), so the
+            // post-loop stub obligation `bytes_skipped <= self.iter.len()` follows by usize
+            // arithmetic: bytes_skipped == 32·ci ∧ ci ≤ ⌊len/32⌋. The anchor re-establishes the
+            // havocked cursor so `chunks.next()`'s read stays valid. Inner fold -> loop-free
+            // model (kani#4893). Explicit minimal write-set. `cfg(not(kani))` path behavior-identical.
+            #[cfg(kani)]
+            let g_chunks_total = chunks.len();
+            #[cfg(kani)]
+            let mut ci: usize = 0;
+            #[cfg_attr(kani, kani::loop_invariant(
+                ci <= g_chunks_total
+                && bytes_skipped == CHUNK_SIZE * ci
+                && chunks.kani_raw_end() == on_entry(chunks.kani_raw_end())
+                && chunks.kani_raw_cursor() == on_entry(chunks.kani_raw_cursor()).wrapping_add(ci)
+            ))]
+            #[cfg_attr(kani, kani::loop_modifies(&remainder, &bytes_skipped, &chunks, &ci))]
             while remainder > CHUNK_SIZE
                 && let Some(chunk) = chunks.next()
             {
                 bytes_skipped += CHUNK_SIZE;
-
-                let mut start_bytes = [false; CHUNK_SIZE];
-
-                for i in 0..CHUNK_SIZE {
-                    start_bytes[i] = !super::validations::utf8_is_cont_byte(chunk[i]);
+                #[cfg(kani)]
+                {
+                    ci += 1;
                 }
 
-                remainder -= start_bytes.into_iter().map(|i| i as u8).sum::<u8>() as usize;
+                #[cfg(kani)]
+                let starts = starts_model(chunk);
+                #[cfg(not(kani))]
+                let starts = {
+                    let mut start_bytes = [false; CHUNK_SIZE];
+                    for i in 0..CHUNK_SIZE {
+                        start_bytes[i] = !super::validations::utf8_is_cont_byte(chunk[i]);
+                    }
+                    start_bytes.into_iter().map(|i| i as u8).sum::<u8>() as usize
+                };
+
+                remainder -= starts;
             }
 
             // SAFETY: The amount of bytes exists since we just iterated over them,
@@ -78,6 +106,20 @@ impl<'a> Iterator for Chars<'a> {
             unsafe { self.iter.advance_by(bytes_skipped).unwrap_unchecked() };
 
             // skip trailing continuation bytes
+            // Ch22 unbounded: without a contract CBMC unrolls this loop symbolically — the
+            // data-dependent `break` never stops the (syntactic) unwinder. Contract: equality
+            // anchor on self.iter (advance_by(1) per iteration ⇒ cursor == entry + ti), bound
+            // by a pre-loop concrete length read. Accessor reads only.
+            #[cfg(kani)]
+            let g_tr_len = self.iter.len();
+            #[cfg(kani)]
+            let mut ti: usize = 0;
+            #[cfg_attr(kani, kani::loop_invariant(
+                ti <= g_tr_len
+                && self.iter.kani_raw_end() == on_entry(self.iter.kani_raw_end())
+                && self.iter.kani_raw_cursor() == on_entry(self.iter.kani_raw_cursor()).wrapping_add(ti)
+            ))]
+            #[cfg_attr(kani, kani::loop_modifies(&self.iter, &ti))]
             while self.iter.len() > 0 {
                 let b = self.iter.as_slice()[0];
                 if !super::validations::utf8_is_cont_byte(b) {
@@ -85,16 +127,49 @@ impl<'a> Iterator for Chars<'a> {
                 }
                 // SAFETY: We just peeked at the byte, therefore it exists
                 unsafe { self.iter.advance_by(1).unwrap_unchecked() };
+                #[cfg(kani)]
+                {
+                    ti += 1;
+                }
             }
         }
 
+        // Ch22 unbounded: equality anchor with a byte-accurate ghost (`si` advances by `slurp`,
+        // so the invariant is inductive for every content family, multi-byte included). Bound by
+        // a pre-loop concrete length read; accessor reads only. The stubbed
+        // `advance_by(slurp).unwrap_unchecked()` obligation (slurp <= remaining) is advance_by's
+        // real soundness condition under assumption 4 (valid UTF-8 contains its continuation
+        // bytes).
+        #[cfg(kani)]
+        let g_sl_len = self.iter.len();
+        #[cfg(kani)]
+        let mut si: usize = 0;
+        #[cfg_attr(kani, kani::loop_invariant(
+            remainder <= on_entry(remainder)
+            && si <= g_sl_len
+            && self.iter.kani_raw_end() == on_entry(self.iter.kani_raw_end())
+            && self.iter.kani_raw_cursor() == on_entry(self.iter.kani_raw_cursor()).wrapping_add(si)
+        ))]
+        #[cfg_attr(kani, kani::loop_modifies(&remainder, &self.iter, &si))]
         while (remainder > 0) && (self.iter.len() > 0) {
             remainder -= 1;
             let b = self.iter.as_slice()[0];
             let slurp = super::validations::utf8_char_width(b);
+            // Assumption 4 (Ch22 spec): the bytes are valid UTF-8, so a char-start byte's
+            // continuation bytes are present — exactly the SAFETY condition below. Stated
+            // explicitly because the loop contract's havoc abstracts the byte content the
+            // real code derives this from. Verification-only.
+            #[cfg(kani)]
+            {
+                crate::kani::assume(slurp <= self.iter.len());
+            }
             // SAFETY: utf8 validity requires that the string must contain
             // the continuation bytes (if any)
             unsafe { self.iter.advance_by(slurp).unwrap_unchecked() };
+            #[cfg(kani)]
+            {
+                si += slurp;
+            }
         }
 
         NonZero::new(remainder).map_or(Ok(()), Err)
@@ -1663,3 +1738,132 @@ macro_rules! escape_types_impls {
 }
 
 escape_types_impls!(EscapeDebug, EscapeDefault, EscapeUnicode);
+
+// ==========================================================================================
+// Loop-free model of `Chars::advance_by`'s inner 32-byte char-start fold, and its
+// equivalence proof. Replacing the inner `for 0..32 { ... }.sum()` fold with this
+// branch-free model removes the loop nested inside the chunk-loop contract, dissolving the
+// nested-loop-contract wall (kani#4893). `#[cfg(kani)]`, verification-only.
+// ==========================================================================================
+
+// 32 independent byte classifications, NO backedge. Must equal the real fold — proven by
+// `check_fold_model_eq`; a wrong model is caught by `check_fold_model_eq_broken`.
+#[cfg(kani)]
+pub(super) fn starts_model(chunk: &[u8; 32]) -> usize {
+    let mut s = 0usize;
+    macro_rules! bit {
+        ($i:expr) => {
+            s += (!super::validations::utf8_is_cont_byte(chunk[$i])) as usize;
+        };
+    }
+    bit!(0);
+    bit!(1);
+    bit!(2);
+    bit!(3);
+    bit!(4);
+    bit!(5);
+    bit!(6);
+    bit!(7);
+    bit!(8);
+    bit!(9);
+    bit!(10);
+    bit!(11);
+    bit!(12);
+    bit!(13);
+    bit!(14);
+    bit!(15);
+    bit!(16);
+    bit!(17);
+    bit!(18);
+    bit!(19);
+    bit!(20);
+    bit!(21);
+    bit!(22);
+    bit!(23);
+    bit!(24);
+    bit!(25);
+    bit!(26);
+    bit!(27);
+    bit!(28);
+    bit!(29);
+    bit!(30);
+    bit!(31);
+    s
+}
+
+#[cfg(kani)]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    // The loop-free model equals the REAL fold over an arbitrary chunk. unwind(33) fully
+    // unrolls the fixed `for 0..32` + `.sum()` (a fixed size, NOT an input bound).
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn check_fold_model_eq() {
+        let chunk: [u8; 32] = kani::any();
+        let model = starts_model(&chunk);
+        let mut start_bytes = [false; 32];
+        for i in 0..32 {
+            start_bytes[i] = !super::super::validations::utf8_is_cont_byte(chunk[i]);
+        }
+        let real = start_bytes.into_iter().map(|i| i as u8).sum::<u8>() as usize;
+        assert!(model == real, "loop-free fold model equals the real .sum() fold");
+    }
+
+    // Adequacy twin: a model that miscounts byte 0 (drops the `!`) differs from the real
+    // fold, so the equality assert MUST PANIC (`should_panic` makes that the pass
+    // condition) — guards the equivalence check from being trivially true.
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(33)]
+    fn check_fold_model_eq_broken() {
+        let chunk: [u8; 32] = kani::any();
+        let mut s = 0usize;
+        // BROKEN on purpose: byte 0 misses the negation.
+        s += super::super::validations::utf8_is_cont_byte(chunk[0]) as usize;
+        macro_rules! bit {
+            ($i:expr) => {
+                s += (!super::super::validations::utf8_is_cont_byte(chunk[$i])) as usize;
+            };
+        }
+        bit!(1);
+        bit!(2);
+        bit!(3);
+        bit!(4);
+        bit!(5);
+        bit!(6);
+        bit!(7);
+        bit!(8);
+        bit!(9);
+        bit!(10);
+        bit!(11);
+        bit!(12);
+        bit!(13);
+        bit!(14);
+        bit!(15);
+        bit!(16);
+        bit!(17);
+        bit!(18);
+        bit!(19);
+        bit!(20);
+        bit!(21);
+        bit!(22);
+        bit!(23);
+        bit!(24);
+        bit!(25);
+        bit!(26);
+        bit!(27);
+        bit!(28);
+        bit!(29);
+        bit!(30);
+        bit!(31);
+        let model_broken = s;
+        let mut start_bytes = [false; 32];
+        for i in 0..32 {
+            start_bytes[i] = !super::super::validations::utf8_is_cont_byte(chunk[i]);
+        }
+        let real = start_bytes.into_iter().map(|i| i as u8).sum::<u8>() as usize;
+        assert!(model_broken == real, "the broken model must not equal the real fold");
+    }
+}
