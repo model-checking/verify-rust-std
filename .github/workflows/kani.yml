@@ -233,11 +233,13 @@ jobs:
             --exclude-pattern ::precondition_check \
             --harness-timeout 10m \
             --default-unwind 1000 \
-            --jobs=3 --output-format=terse | tee autoharness-verification.log
+            --jobs=3 --output-format=terse | tee autoharness-verification.log || status=$?
+          # Keep the log when a harness fails, so that it is uploaded too.
           gzip autoharness-verification.log
+          exit ${status:-0}
 
       - name: Upload Autoharness Verification Log
-        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness
+        if: ${{ !cancelled() && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness) }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-autoharness-verification.log.gz
@@ -445,3 +447,11 @@ jobs:
           echo "## Crate std, unsafe functions" >> "$GITHUB_STEP_SUMMARY"
           cat std_unsafe_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
           popd
+
+      # For scripts that compare two runs or list the functions without a harness.
+      - name: Upload analyzer output
+        uses: actions/upload-artifact@v4
+        with:
+          name: autoharness-coverage
+          path: scripts/autoharness_analyzer/*_autoharness_data.json
+          if-no-files-found: error
