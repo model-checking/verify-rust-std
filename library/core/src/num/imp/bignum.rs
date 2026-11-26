@@ -336,6 +336,16 @@ macro_rules! define_bignum {
             }
         }
 
+        /// Any bit pattern, including ones no operation produces (e.g. `size > n`), so that
+        /// proofs using it do not depend on the invariants of the representation. The operations
+        /// are safe code and have to cope with (i.e., at worst panic on) every value.
+        #[cfg(kani)]
+        impl crate::kani::Arbitrary for $name {
+            fn any() -> Self {
+                $name { size: crate::kani::any(), base: crate::kani::any() }
+            }
+        }
+
         impl crate::cmp::PartialEq for $name {
             fn eq(&self, other: &$name) -> bool {
                 self.base[..] == other.base[..]

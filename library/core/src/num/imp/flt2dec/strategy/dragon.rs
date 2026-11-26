@@ -280,6 +280,8 @@ pub fn format_shortest<'a>(
         // if rounding up changes the length, the exponent should also change.
         // it seems that this condition is very hard to satisfy (possibly impossible),
         // but we are just being safe and consistent here.
+        #[cfg(kani)]
+        flt2dec::ghost::assert_written(buf, i);
         // SAFETY: we initialized that memory above.
         if let Some(c) = round_up(unsafe { buf[..i].assume_init_mut() }) {
             buf[i] = MaybeUninit::new(c);
@@ -288,6 +290,8 @@ pub fn format_shortest<'a>(
         }
     }
 
+    #[cfg(kani)]
+    flt2dec::ghost::assert_written(buf, i);
     // SAFETY: we initialized that memory above.
     (unsafe { buf[..i].assume_init_ref() }, k)
 }
@@ -366,6 +370,8 @@ pub fn format_exact<'a>(
                 for c in &mut buf[i..len] {
                     *c = MaybeUninit::new(b'0');
                 }
+                #[cfg(kani)]
+                flt2dec::ghost::assert_written(buf, len);
                 // SAFETY: we initialized that memory above.
                 return (unsafe { buf[..len].assume_init_ref() }, k);
             }
@@ -398,6 +404,8 @@ pub fn format_exact<'a>(
     // if the following digits are exactly 5000..., check the prior digit and try to
     // round to even (i.e., avoid rounding up when the prior digit is even).
     let order = mant.cmp(scale.mul_small(5));
+    #[cfg(kani)]
+    flt2dec::ghost::assert_written(buf, len);
     if order == Ordering::Greater
         || (order == Ordering::Equal
             // SAFETY: `buf[len-1]` is initialized.
@@ -405,6 +413,8 @@ pub fn format_exact<'a>(
     {
         // if rounding up changes the length, the exponent should also change.
         // but we've been requested a fixed number of digits, so do not alter the buffer...
+        #[cfg(kani)]
+        flt2dec::ghost::assert_written(buf, len);
         // SAFETY: we initialized that memory above.
         if let Some(c) = round_up(unsafe { buf[..len].assume_init_mut() }) {
             // ...unless we've been requested the fixed precision instead.
@@ -418,6 +428,128 @@ pub fn format_exact<'a>(
         }
     }
 
+    #[cfg(kani)]
+    flt2dec::ghost::assert_written(buf, len);
     // SAFETY: we initialized that memory above.
     (unsafe { buf[..len].assume_init_ref() }, k)
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub(crate) mod verify {
+    use flt2dec::ghost;
+
+    use super::*;
+    use crate::kani;
+    // `kani::stub` does not look through the `Big` type alias. Kani only targets 64-bit
+    // platforms, where `Big` is `Big64x20`.
+    use crate::num::imp::bignum::Big64x20;
+
+    /// Capacity of the digit buffers; the length actually passed is symbolic, up to this. The
+    /// digit loop of `format_shortest` is unwound, because it writes to a temporary
+    /// (`mant.clone().add(&plus)`) that a `loop_modifies` clause cannot name. The callers of the
+    /// shortest mode pass `MAX_SIG_DIGITS` (17) bytes.
+    const BUF_CAP: usize = 32;
+    /// `format_exact` gets a smaller one: its digit loop contains a second loop over the rest of
+    /// the buffer, and Kani's loop contracts cannot describe either of them (the outer one returns
+    /// from inside using the loop variable, the inner one iterates over `&mut` elements), so both
+    /// are unwound and the cost is quadratic in this bound.
+    ///
+    /// TODO: raise this once Kani has https://github.com/model-checking/kani/pull/5071, which
+    /// lets the outer loop carry a contract and leaves only the inner one unwound. Raising it to
+    /// the 1024 used for the formatting functions also needs contracts for loops over `&mut`
+    /// elements.
+    pub(crate) const EXACT_BUF_CAP: usize = 17;
+
+    // Models of the bignum operations the two functions use. `Big` is implemented entirely in
+    // safe code, and an operation can only touch the bignum it is called on, so "the receiver ends
+    // up holding an arbitrary bignum" covers everything the real operation can do short of
+    // panicking. Nothing about the values is needed for memory safety, and with the real
+    // multi-limb arithmetic in place the verification conditions do not fit in memory.
+
+    pub(crate) fn any_mul_small(x: &mut Big, _: Digit) -> &mut Big {
+        *x = kani::any();
+        x
+    }
+
+    pub(crate) fn any_mul_pow2(x: &mut Big, _: usize) -> &mut Big {
+        *x = kani::any();
+        x
+    }
+
+    pub(crate) fn any_mul_digits<'a>(x: &'a mut Big, _: &[Digit]) -> &'a mut Big {
+        *x = kani::any();
+        x
+    }
+
+    pub(crate) fn any_add<'a>(x: &'a mut Big, _: &Big) -> &'a mut Big {
+        *x = kani::any();
+        x
+    }
+
+    pub(crate) fn any_sub<'a>(x: &'a mut Big, _: &Big) -> &'a mut Big {
+        *x = kani::any();
+        x
+    }
+
+    pub(crate) fn any_div_rem_small(x: &mut Big, _: Digit) -> (&mut Big, Digit) {
+        *x = kani::any();
+        (x, kani::any())
+    }
+
+    pub(crate) fn any_cmp(_: &Big, _: &Big) -> Ordering {
+        if kani::any() {
+            Ordering::Less
+        } else if kani::any() {
+            Ordering::Equal
+        } else {
+            Ordering::Greater
+        }
+    }
+
+    pub(crate) fn any_is_zero(_: &Big) -> bool {
+        kani::any()
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(34)]
+    #[kani::stub(Big64x20::mul_small, any_mul_small)]
+    #[kani::stub(Big64x20::mul_pow2, any_mul_pow2)]
+    #[kani::stub(Big64x20::mul_digits, any_mul_digits)]
+    #[kani::stub(Big64x20::add, any_add)]
+    #[kani::stub(Big64x20::sub, any_sub)]
+    #[kani::stub(Big64x20::div_rem_small, any_div_rem_small)]
+    #[kani::stub(<Big64x20 as crate::cmp::Ord>::cmp, any_cmp)]
+    #[kani::stub(Big64x20::is_zero, any_is_zero)]
+    #[kani::stub(flt2dec::round_up, flt2dec::verify::any_round_up)]
+    fn check_format_shortest() {
+        let d = flt2dec::verify::any_decoded();
+        let mut buf = ghost::any_buf::<{ BUF_CAP }>();
+        let len: usize = kani::any();
+        kani::assume(len <= BUF_CAP);
+        ghost::pick_witness();
+        let _ = format_shortest(&d, &mut buf[..len]);
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(19)]
+    #[kani::stub(Big64x20::mul_small, any_mul_small)]
+    #[kani::stub(Big64x20::mul_pow2, any_mul_pow2)]
+    #[kani::stub(Big64x20::mul_digits, any_mul_digits)]
+    #[kani::stub(Big64x20::add, any_add)]
+    #[kani::stub(Big64x20::sub, any_sub)]
+    #[kani::stub(Big64x20::div_rem_small, any_div_rem_small)]
+    #[kani::stub(<Big64x20 as crate::cmp::Ord>::cmp, any_cmp)]
+    #[kani::stub(Big64x20::is_zero, any_is_zero)]
+    #[kani::stub(flt2dec::round_up, flt2dec::verify::any_round_up)]
+    fn check_format_exact() {
+        let d = flt2dec::verify::any_decoded();
+        let mut buf = ghost::any_buf::<{ EXACT_BUF_CAP }>();
+        let len: usize = kani::any();
+        kani::assume(len <= EXACT_BUF_CAP);
+        ghost::pick_witness();
+        let _ = format_exact(&d, &mut buf[..len], kani::any());
+    }
 }
