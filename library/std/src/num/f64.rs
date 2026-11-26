@@ -10,7 +10,6 @@
 //! defined directly on the `f64` type.
 
 #![stable(feature = "rust1", since = "1.0.0")]
-#![allow(missing_docs)]
 
 #[stable(feature = "rust1", since = "1.0.0")]
 #[allow(deprecated, clippy::legacy_numeric_constants)]
@@ -359,7 +358,7 @@ impl f64 {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn powf(self, n: f64) -> f64 {
-        intrinsics::powf64(self, n)
+        intrinsics::powf(self, n)
     }
 
     /// Returns the square root of a number.

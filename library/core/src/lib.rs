@@ -88,7 +88,7 @@
 #![feature(asm_experimental_arch)]
 #![feature(byte_str_internals)]
 #![feature(cfg_target_has_reliable_f16_f128)]
-#![feature(const_carrying_mul_add)]
+#![feature(cfg_target_has_reliable_f16b)]
 #![feature(const_cmp)]
 #![feature(const_destruct)]
 #![feature(const_eval_select)]
@@ -99,7 +99,7 @@
 #![feature(io_const_error)]
 #![feature(offset_of_enum)]
 #![feature(panic_internals)]
-#![feature(pattern_type_macro)]
+#![feature(pattern_types)]
 #![feature(ub_checks)]
 // tidy-alphabetical-end
 //
@@ -129,6 +129,7 @@
 #![feature(f128)]
 #![feature(field_projections)]
 #![feature(final_associated_functions)]
+#![feature(forced_keywords)]
 #![feature(freeze_impls)]
 #![feature(fundamental)]
 #![feature(impl_restriction)]
@@ -141,13 +142,17 @@
 #![feature(macro_metavar_expr_concat)]
 #![feature(marker_trait_attr)]
 #![feature(min_specialization)]
+#![feature(move_trait)]
 #![feature(multiple_supertrait_upcastable)]
 #![feature(must_not_suspend)]
 #![feature(negative_impls)]
 #![feature(no_core)]
-#![feature(pattern_types)]
 #![feature(pin_macro_internals)]
 #![feature(prelude_import)]
+#![feature(register_tool)]
+// Flux injects `#![feature(register_tool)]` itself, which core now also enables (for
+// `#![register_tool(lint)]`); allow the duplicate under Flux only.
+#![cfg_attr(flux, allow(duplicate_features))]
 #![feature(repr_simd)]
 #![feature(rustc_attrs)]
 #![feature(rustdoc_internals)]
@@ -184,6 +189,10 @@
 #![feature(s390x_target_feature)]
 #![feature(wasm_target_feature)]
 #![feature(x86_amx_intrinsics)]
+// tidy-alphabetical-end
+
+// tidy-alphabetical-start
+#![register_tool(lint)]
 // tidy-alphabetical-end
 
 // tidy-alphabetical-start
@@ -252,6 +261,9 @@ pub use legacy_int_modules::{i8, i16, i32, i64, isize, u8, u16, u32, u64, usize}
 #[allow(deprecated, clippy::legacy_numeric_constants)]
 pub use legacy_int_modules::{i128, u128};
 
+#[macro_use]
+pub mod num;
+
 #[path = "num/f128.rs"]
 pub mod f128;
 #[path = "num/f16.rs"]
@@ -260,9 +272,6 @@ pub mod f16;
 pub mod f32;
 #[path = "num/f64.rs"]
 pub mod f64;
-
-#[macro_use]
-pub mod num;
 
 /* Core modules for ownership management */
 
@@ -310,7 +319,7 @@ pub mod option;
 pub mod os;
 pub mod panic;
 pub mod panicking;
-#[unstable(feature = "pattern_type_macro", issue = "123646")]
+#[unstable(feature = "pattern_types", issue = "123646")]
 pub mod pat;
 pub mod pin;
 #[unstable(feature = "abort_immediate", issue = "154601")]
@@ -339,7 +348,6 @@ pub mod future;
 pub mod task;
 
 /* Heap memory allocator trait */
-#[allow(missing_docs)]
 pub mod alloc;
 
 // note: does not need to be public
@@ -347,7 +355,7 @@ mod bool;
 mod escape;
 mod tuple;
 mod unit;
-#[unstable(feature = "view_type_macro", issue = "155938")]
+#[unstable(feature = "view_types", issue = "155938")]
 pub mod view;
 
 #[stable(feature = "core_primitive", since = "1.43.0")]

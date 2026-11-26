@@ -1,6 +1,7 @@
 // tidy-alphabetical-start
 #![cfg_attr(not(panic = "abort"), feature(reentrant_lock))]
 #![cfg_attr(target_has_atomic = "128", feature(integer_atomics))]
+#![feature(abort_immediate)]
 #![feature(array_ptr_get)]
 #![feature(array_try_from_fn)]
 #![feature(array_try_map)]
@@ -10,11 +11,13 @@
 #![feature(async_iterator)]
 #![feature(atomic_volatile)]
 #![feature(borrowed_buf_init)]
+#![feature(breakpoint)]
 #![feature(byte_str)]
 #![feature(casefold)]
 #![feature(cfg_overflow_checks)]
 #![feature(cfg_target_has_reliable_f16_f128)]
 #![feature(char_internals)]
+#![feature(char_is_xid)]
 #![feature(clamp_magnitude)]
 #![feature(clamp_to)]
 #![feature(clone_to_uninit)]
@@ -34,6 +37,7 @@
 #![feature(const_eval_select)]
 #![feature(const_index)]
 #![feature(const_iter)]
+#![feature(const_nonzero_strict_ops)]
 #![feature(const_ops)]
 #![feature(const_option_ops)]
 #![feature(const_ref_cell)]
@@ -50,6 +54,7 @@
 #![feature(dec2flt)]
 #![feature(duration_constants)]
 #![feature(duration_constructors)]
+#![feature(duration_display_seconds)]
 #![feature(exact_div)]
 #![feature(exact_size_is_empty)]
 #![feature(extend_one)]
@@ -66,9 +71,9 @@
 #![feature(freeze)]
 #![feature(future_join)]
 #![feature(generic_assert_internals)]
+#![feature(get_set_bit)]
 #![feature(hasher_prefixfree_extras)]
 #![feature(hashmap_internals)]
-#![feature(int_from_ascii)]
 #![feature(int_roundings)]
 #![feature(integer_casts)]
 #![feature(io_slice_as_bytes)]
@@ -91,6 +96,7 @@
 #![feature(min_specialization)]
 #![feature(next_index)]
 #![feature(non_exhaustive_omitted_patterns_lint)]
+#![feature(nonzero_strict_ops)]
 #![feature(num_internals)]
 #![feature(numfmt)]
 #![feature(one_sided_range)]
@@ -100,6 +106,7 @@
 #![feature(portable_simd)]
 #![feature(ptr_metadata)]
 #![feature(raw_os_error_ty)]
+#![feature(register_tool)]
 #![feature(rustc_attrs)]
 #![feature(signed_bigint_helpers)]
 #![feature(slice_from_ptr_range)]
@@ -133,6 +140,7 @@
 #![allow(internal_features)]
 #![deny(implicit_provenance_casts)]
 #![deny(unsafe_op_in_unsafe_fn)]
+#![register_tool(reflective_tool(reflect))] // to allow testing of attribute reflection in `mem/type_info.rs`
 
 /// Version of `assert_matches` that ignores fancy runtime printing in const context and uses structural equality.
 macro_rules! assert_eq_const_safe {
@@ -199,7 +207,6 @@ mod macros;
 mod manually_drop;
 mod mem;
 mod net;
-mod nonzero;
 mod num;
 mod ops;
 mod option;
@@ -207,6 +214,7 @@ mod panic;
 mod pattern;
 mod pin;
 mod pin_macro;
+mod process;
 mod ptr;
 mod result;
 mod simd;

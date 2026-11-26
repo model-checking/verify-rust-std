@@ -75,7 +75,7 @@ pub fn current_dir() -> io::Result<PathBuf> {
 /// assert!(env::set_current_dir(&root).is_ok());
 /// println!("Successfully changed working directory to {}!", root.display());
 /// ```
-#[doc(alias = "chdir", alias = "SetCurrentDirectory", alias = "SetCurrentDirectoryW")]
+#[doc(alias = "cd", alias = "chdir", alias = "SetCurrentDirectory", alias = "SetCurrentDirectoryW")]
 #[stable(feature = "env", since = "1.0.0")]
 pub fn set_current_dir<P: AsRef<Path>>(path: P) -> io::Result<()> {
     paths_imp::chdir(path.as_ref())
@@ -132,6 +132,7 @@ impl !Sync for VarsOs {}
 /// [`env::vars_os()`]: vars_os
 #[must_use]
 #[stable(feature = "env", since = "1.0.0")]
+#[cfg_attr(not(test), rustc_diagnostic_item = "env_vars")]
 pub fn vars() -> Vars {
     Vars { inner: vars_os() }
 }
@@ -157,6 +158,7 @@ pub fn vars() -> Vars {
 /// ```
 #[must_use]
 #[stable(feature = "env", since = "1.0.0")]
+#[cfg_attr(not(test), rustc_diagnostic_item = "env_vars_os")]
 pub fn vars_os() -> VarsOs {
     VarsOs { inner: env_imp::env() }
 }

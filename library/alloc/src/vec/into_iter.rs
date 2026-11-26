@@ -50,7 +50,7 @@ macro non_null {
 #[rustc_insignificant_dtor]
 pub struct IntoIter<
     T,
-    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A: Allocator = Global,
+    #[stable(feature = "vec_into_iter_allocator", since = "1.101.0")] A: Allocator = Global,
 > {
     pub(super) buf: NonNull<T>,
     pub(super) phantom: PhantomData<T>,
@@ -116,7 +116,7 @@ impl<T, A: Allocator> IntoIter<T, A> {
     }
 
     /// Returns a reference to the underlying allocator.
-    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")]
+    #[stable(feature = "vec_into_iter_allocator", since = "1.101.0")]
     #[inline]
     pub fn allocator(&self) -> &A {
         &self.alloc
@@ -368,6 +368,7 @@ impl<T, A: Allocator> Iterator for IntoIter<T, A> {
         }
     }
 
+    #[inline]
     fn fold<B, F>(mut self, mut accum: B, mut f: F) -> B
     where
         F: FnMut(B, Self::Item) -> B,
@@ -400,6 +401,7 @@ impl<T, A: Allocator> Iterator for IntoIter<T, A> {
         accum
     }
 
+    #[inline]
     fn try_fold<B, F, R>(&mut self, mut accum: B, mut f: F) -> R
     where
         Self: Sized,

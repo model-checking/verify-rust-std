@@ -24,6 +24,18 @@
 //! waits until the process terminates, while [`spawn`] will return a [`Child`]
 //! that represents the spawned child process.
 //!
+//! Spawning a command may return an error if:
+//! - The command does not exist, or is not in the platform-specific PATH search list.
+//! - A platform-specific limit on memory, number of processes, or number of threads is reached.
+//! - The current process doesn't have enough permissions to spawn the command.
+//! - A dynamic library required by the command could not be found.
+//!
+//! This list is not exhaustive. Other errors may occur depending on the platform.
+//!
+//! Note that the function will error only while attempting to spawn the child. If the child is
+//! successfully spawned, any error that happens afterwards will be reported through
+//! its [`ExitStatus`].
+//!
 //! # Handling I/O
 //!
 //! The [`stdout`], [`stdin`], and [`stderr`] of a child process can be
@@ -161,6 +173,8 @@
     ))
 ))]
 mod tests;
+
+use core::intrinsics;
 
 use crate::ffi::OsStr;
 use crate::io::prelude::*;
@@ -1174,10 +1188,7 @@ impl Command {
     /// ```
     #[stable(feature = "process", since = "1.0.0")]
     pub fn status(&mut self) -> io::Result<ExitStatus> {
-        self.inner
-            .spawn(imp::Stdio::Inherit, true)
-            .map(Child::from_inner)
-            .and_then(|mut p| p.wait())
+        imp::status(&mut self.inner).map(ExitStatus)
     }
 
     /// Returns the path to the program that was given to [`Command::new`].
@@ -1339,8 +1350,8 @@ impl Command {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl fmt::Debug for Command {
     /// Format the program and arguments of a Command for display. Any
-    /// non-utf8 data is lossily converted using the utf8 replacement
-    /// character.
+    /// non-utf8 data is either escaped or lossily converted using the
+    /// [utf8 replacement character].
     ///
     /// The default format approximates a shell invocation of the program along with its
     /// arguments. It does not include most of the other command properties. The output is not guaranteed to work
@@ -1350,6 +1361,7 @@ impl fmt::Debug for Command {
     /// Note that the debug implementation is platform-specific.
     ///
     /// [the alternate syntax]: fmt#sign0
+    /// [utf8 replacement character]: char::REPLACEMENT_CHARACTER
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.inner.fmt(f)
     }
@@ -2632,16 +2644,23 @@ pub fn exit(code: i32) -> ! {
 ///
 /// [panic hook]: crate::panic::set_hook
 #[stable(feature = "process_abort", since = "1.17.0")]
+#[rustc_const_unstable(feature = "const_abort", issue = "166193")]
 #[cold]
 #[cfg_attr(not(test), rustc_diagnostic_item = "process_abort")]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
-pub fn abort() -> ! {
-    crate::sys::abort_internal();
+pub const fn abort() -> ! {
+    // Some code uses `abort` as a non-unwinding alternative to `panic`. That
+    // should work in const, but `sys` code invokes native host functions. So we
+    // invoke `intrinsics::crash` instead to safely hard-abort execution.
+    intrinsics::const_eval_select((), crash, crate::sys::abort_internal)
 }
 
 #[doc(inline)]
 #[unstable(feature = "abort_immediate", issue = "154601")]
-pub use core::process::abort_immediate;
+pub use core::process::crash;
+#[doc(inline)]
+#[unstable(feature = "breakpoint", issue = "133724")]
+pub use core::process::resumable_breakpoint;
 
 /// Returns the OS-assigned process identifier associated with this process.
 ///
