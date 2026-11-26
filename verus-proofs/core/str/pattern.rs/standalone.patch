@@ -1,0 +1,54 @@
+--- a/pattern.rs
++++ b/pattern.rs
+@@ -426,11 +426,11 @@
+         //    starts at the end and only decreases
+         let slice = unsafe { self.haystack.get_unchecked(old_finger..self.finger_back) };
+         let mut iter = slice.chars();
+-        let old_len = iter.iter.len();
++        let old_len = iter.as_str().len();
+         if let Some(ch) = iter.next() {
+             // add byte offset of current character
+             // without re-encoding as utf-8
+-            self.finger += old_len - iter.iter.len();
++            self.finger += old_len - iter.as_str().len();
+             if ch == self.needle {
+                 SearchStep::Match(old_finger, self.finger)
+             } else {
+@@ -493,11 +493,11 @@
+         // SAFETY: see the comment for next() above
+         let slice = unsafe { self.haystack.get_unchecked(self.finger..old_finger) };
+         let mut iter = slice.chars();
+-        let old_len = iter.iter.len();
++        let old_len = iter.as_str().len();
+         if let Some(ch) = iter.next_back() {
+             // subtract byte offset of current character
+             // without re-encoding as utf-8
+-            self.finger_back -= old_len - iter.iter.len();
++            self.finger_back -= old_len - iter.as_str().len();
+             if ch == self.needle {
+                 SearchStep::Match(self.finger_back, old_finger)
+             } else {
+@@ -702,9 +702,9 @@
+         let s = &mut self.char_indices;
+         // Compare lengths of the internal byte slice iterator
+         // to find length of current char
+-        let pre_len = s.iter.iter.len();
++        let pre_len = s.as_str().len();
+         if let Some((i, c)) = s.next() {
+-            let len = s.iter.iter.len();
++            let len = s.as_str().len();
+             let char_len = pre_len - len;
+             if self.char_eq.matches(c) {
+                 return SearchStep::Match(i, i + char_len);
+@@ -722,9 +722,9 @@
+         let s = &mut self.char_indices;
+         // Compare lengths of the internal byte slice iterator
+         // to find length of current char
+-        let pre_len = s.iter.iter.len();
++        let pre_len = s.as_str().len();
+         if let Some((i, c)) = s.next_back() {
+-            let len = s.iter.iter.len();
++            let len = s.as_str().len();
+             let char_len = pre_len - len;
+             if self.char_eq.matches(c) {
+                 return SearchStep::Match(i, i + char_len);
