@@ -18,3 +18,14 @@ cd alloc
     cd ..
   cd ..
 cd ..
+cd core
+  cd slice
+    cd sort
+      cd shared
+        cd smallsort.rs
+          bash verify.sh
+        cd ..
+      cd ..
+    cd ..
+  cd ..
+cd ..
