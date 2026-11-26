@@ -3,7 +3,7 @@ use anyhow::Result;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs::File,
-    io::Write,
+    io::{BufWriter, Write},
     path::Path,
 };
 
@@ -280,5 +280,92 @@ pub fn compute_metrics(
 
     println!("Wrote results to {}", out_path.to_string_lossy());
 
+    if !unsafe_fns_only {
+        let json_path = format!("{crate_name}_autoharness_data.json");
+        serde_json::to_writer(
+            BufWriter::new(File::create(&json_path)?),
+            &json_data(autoharness_md, fn_to_row_data),
+        )?;
+        println!("Wrote results to {json_path}");
+    }
+
     Ok(())
+}
+
+/// The functions the tables count, one by one, for scripts that compare two runs or list what
+/// is left to do. `chosen` pairs each function that got a harness with its safety class.
+/// `skipped` maps each other function to the reason (spelled as in the tables), its safety
+/// class if the scanner reported it, and the argument types the reason names.
+fn json_data(
+    autoharness_md: &AutoHarnessMetadata,
+    fn_to_row_data: &HashMap<String, ScanFnsRow>,
+) -> serde_json::Value {
+    let safety = |fn_name: &String| {
+        let record = fn_to_row_data.get(fn_name)?;
+        Some(if record.is_unsafe {
+            "unsafe"
+        } else if record.has_unsafe_ops {
+            "safe abstraction"
+        } else {
+            "safe"
+        })
+    };
+    // Like the overview table, leave out functions the scanner did not report.
+    let chosen: Vec<(&str, &str)> = autoharness_md
+        .chosen
+        .iter()
+        .filter_map(|fn_name| Some((fn_name.as_str(), safety(fn_name)?)))
+        .collect();
+    let skipped: BTreeMap<&str, serde_json::Value> = autoharness_md
+        .skipped
+        .iter()
+        .map(|(fn_name, reason)| {
+            let types: Vec<&str> = missing_arbitrary_args(reason)
+                .or(bounded_arguments_args(reason))
+                .map(|args| args.iter().map(|(_, ty)| ty.as_str()).collect())
+                .unwrap_or_default();
+            let entry = serde_json::json!({
+                "reason": reason.to_string(), "safety": safety(fn_name), "types": types,
+            });
+            (fn_name.as_str(), entry)
+        })
+        .collect();
+    serde_json::json!({ "chosen": chosen, "skipped": skipped })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_data_lists_each_function() {
+        let autoharness_md: AutoHarnessMetadata = serde_json::from_str(
+            r#"{"chosen": ["f", "g", "not_scanned"],
+                "skipped": {"h": {"MissingArbitraryImpl": [["x", "&mut i32"]]}, "k": "KaniImpl"}}"#,
+        )
+        .unwrap();
+        let row = |name: &str, is_unsafe: bool| {
+            let row: ScanFnsRow = serde_json::from_value(serde_json::json!({
+                "name": name, "is_unsafe": is_unsafe, "has_unsafe_ops": is_unsafe,
+                "has_unsupported_input": false, "has_loop_or_iterator": false,
+            }))
+            .unwrap();
+            (name.to_string(), row)
+        };
+        let fn_to_row_data = HashMap::from([row("f", false), row("g", true), row("k", true)]);
+        assert_eq!(
+            json_data(&autoharness_md, &fn_to_row_data),
+            serde_json::json!({
+                "chosen": [["f", "safe"], ["g", "unsafe"]],
+                "skipped": {
+                    "h": {
+                        "reason": "Missing Arbitrary implementation for argument(s)",
+                        "safety": null,
+                        "types": ["&mut i32"],
+                    },
+                    "k": {"reason": "Kani implementation", "safety": "unsafe", "types": []},
+                },
+            })
+        );
+    }
 }

@@ -233,11 +233,13 @@ jobs:
             --exclude-pattern ::precondition_check \
             --harness-timeout 10m \
             --default-unwind 1000 \
-            --jobs=3 --output-format=terse | tee autoharness-verification.log
+            --jobs=3 --output-format=terse | tee autoharness-verification.log || status=$?
+          # Keep the log when a harness fails, so that it is uploaded too.
           gzip autoharness-verification.log
+          exit ${status:-0}
 
       - name: Upload Autoharness Verification Log
-        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness
+        if: ${{ !cancelled() && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness) }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-autoharness-verification.log.gz
@@ -319,8 +321,13 @@ jobs:
 
   run-log-analysis:
     name: Build JSON from logs
-    if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness
-    needs: [run_kani_metrics, kani_autoharness]
+    # Also after a failed harness, so that the summary can say which one failed.
+    if: ${{ !cancelled() && needs.run_kani_metrics.result == 'success' && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || inputs.autoharness) }}
+    needs: [run_kani_metrics, kani_autoharness, run-autoharness-analyzer]
+    # `gh run list` and `gh run download` below read other runs of this repository.
+    permissions:
+      actions: read
+      contents: read
     runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       matrix:
@@ -369,6 +376,62 @@ jobs:
           name: ${{ matrix.os }}-results.json
           path: results.json
           if-no-files-found: error
+
+      - name: Download analyzer output
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: autoharness-coverage
+          path: coverage
+
+      # Compare with the last successful run on main that has results: the last merge queue run,
+      # else the last manual run on main. Without one, the summary shows this run alone.
+      - name: Download results of main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          base_run=$(gh run list --workflow kani.yml --event merge_group --status success --limit 1 \
+            --json databaseId --jq '.[0].databaseId // empty') || true
+          if [ -z "$base_run" ]; then
+            base_run=$(gh run list --workflow kani.yml --event workflow_dispatch --branch main --status success --limit 1 \
+              --json databaseId --jq '.[0].databaseId // empty') || true
+          fi
+          if [ -n "$base_run" ] && gh run download "$base_run" --name ${{ matrix.os }}-results.json --dir base; then
+            echo "BASE_RUN=$base_run" >> "$GITHUB_ENV"
+            # Date and commit of that run, so that readers see what "main" was.
+            gh run view "$base_run" --json createdAt,headSha \
+              --jq '"BASE_STAMP=\(.createdAt | fromdate | strftime("%b %d, %Y")) · \(.headSha[:7])"' >> "$GITHUB_ENV" || true
+            # A run from before the analyzer uploaded its output has none.
+            if gh run download "$base_run" --name autoharness-coverage --dir base-coverage; then
+              echo "BASE_COVERAGE=base-coverage" >> "$GITHUB_ENV"
+            fi
+          else
+            echo "No results of main found; the summary will not show changes."
+          fi
+
+      # The same text goes to the job summary here and, uploaded, to the pull request comment
+      # that kani-autoharness-comment.yml posts. A failure here must not fail the run.
+      - name: Add autoharness results to job summary
+        env:
+          RUNS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs
+        run: |
+          {
+            python3 scripts/kani-std-analysis/autoharness_report.py comment coverage results.json \
+              ${BASE_COVERAGE:+--base-coverage "$BASE_COVERAGE"} ${BASE_RUN:+--base-results base/results.json} \
+              ${BASE_STAMP:+--base-stamp "$BASE_STAMP"} \
+              || echo "Could not summarize the autoharness results."
+            echo
+            echo "Results of [run ${{ github.run_id }}]($RUNS_URL/${{ github.run_id }}) on ${{ matrix.os }} for commit ${{ github.event.pull_request.head.sha || github.sha }}${BASE_RUN:+, compared with [run $BASE_RUN on main]($RUNS_URL/$BASE_RUN)}."
+          } > summary.md
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-summary.md
+          path: summary.md
+          retention-days: 3
 
   run-kani-list:
     name: Kani List
@@ -445,3 +508,11 @@ jobs:
           echo "## Crate std, unsafe functions" >> "$GITHUB_STEP_SUMMARY"
           cat std_unsafe_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
           popd
+
+      # For the summary of run-log-analysis, and for later runs to compare with.
+      - name: Upload analyzer output
+        uses: actions/upload-artifact@v4
+        with:
+          name: autoharness-coverage
+          path: scripts/autoharness_analyzer/*_autoharness_data.json
+          if-no-files-found: error
