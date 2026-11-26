@@ -1,0 +1,16 @@
+--- a/iter/traits/iterator.rs
++++ b/iter/traits/iterator.rs
+@@ -2093,6 +2093,13 @@
+         // so this will help catch such things in debug-assertions-std runners,
+         // even if users won't actually ever see it.
+         if cfg!(debug_assertions) {
++            struct OnUnwind;
++            impl Drop for OnUnwind {
++                fn drop(&mut self) {
++                    crate::hint::black_box(());
++                }
++            }
++            let _guard = OnUnwind;
+             let hint = self.size_hint();
+             assert!(hint.1.is_none_or(|high| high >= hint.0), "Malformed size_hint {hint:?}");
+         }

@@ -1,0 +1,812 @@
+--- a/src/refinement_checker/refinement_checker.ml
++++ b/src/refinement_checker/refinement_checker.ml
+@@ -546,6 +546,8 @@
+               initializes_only_field_from_argument=false;
+               calls_mutable_field_with_unit=false;
+               calls_resolved_mutable_closure=false;
++              imported_bodies=[];
++              imported_callee=Stdint.Uint32.zero;
+               returns_byte_slice_as_str=false;
+               returns_mutable_byte_slice_as_str=false;
+               casts_boxed_utf8=false;
+@@ -569,6 +571,7 @@
+               };
+               target={index=Stdint.Uint32.of_int 2};
+               unwind_action=Cleanup {index=Stdint.Uint32.of_int 4};
++              no_drop_glue=false;
+               value_ty={kind=Param "A"};
+             };
+             source_info={span}
+@@ -594,6 +597,7 @@
+               };
+               target={index=Stdint.Uint32.of_int 4};
+               unwind_action=Terminate;
++              no_drop_glue=false;
+               value_ty={kind=Param "A"};
+             };
+             source_info={span}
+@@ -899,6 +903,8 @@
+             initializes_only_field_from_argument=false;
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
++            imported_bodies=[];
++            imported_callee=Stdint.Uint32.zero;
+             returns_byte_slice_as_str=false;
+             returns_mutable_byte_slice_as_str=false;
+             casts_boxed_utf8=false;
+@@ -1147,6 +1153,8 @@
+             initializes_only_field_from_argument=false;
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
++            imported_bodies=[];
++            imported_callee=Stdint.Uint32.zero;
+             returns_byte_slice_as_str=false;
+             returns_mutable_byte_slice_as_str=false;
+             casts_boxed_utf8=false;
+@@ -1375,6 +1383,8 @@
+             initializes_only_field_from_argument=false;
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
++            imported_bodies=[];
++            imported_callee=Stdint.Uint32.zero;
+             returns_byte_slice_as_str=false;
+             returns_mutable_byte_slice_as_str=false;
+             casts_boxed_utf8=false;
+@@ -1548,6 +1558,8 @@
+             initializes_only_field_from_argument=false;
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
++            imported_bodies=[];
++            imported_callee=Stdint.Uint32.zero;
+             returns_byte_slice_as_str=false;
+             returns_mutable_byte_slice_as_str=false;
+             casts_boxed_utf8=false;
+--- a/src/rust_frontend/vf_mir/vf_mir.capnp
++++ b/src/rust_frontend/vf_mir/vf_mir.capnp
+@@ -774,11 +774,13 @@
+         initializesOnlyFieldFromArgument @7: Bool; # Certified from the actual external MIR body.
+         callsMutableFieldWithUnit @8: Bool; # Verified shape of FromFn::next.
+         callsResolvedMutableClosure @9: Bool; # Rustc resolved the callback to the field's FnMut closure body.
+-        returnsByteSliceAsStr @10: Bool; # Certified to be only a wide-pointer conversion.
+-        returnsMutableByteSliceAsStr @11: Bool;
+-        castsBoxedUtf8 @12: Bool; # Checked round trip through equal-layout owning pointers.
+-        delegatesStringRangeIndex @13: Bool; # Checked call of the concrete, forwarding String Index impl.
+-        localCollect @14: LocalCollect;
++        importedBodies @10: List(ExternalMirBody);
++        importedCallee @11: UInt32; # 1-based index into the enclosing call's importedBodies. Zero means absent.
++        returnsByteSliceAsStr @12: Bool; # Certified to be only a wide-pointer conversion.
++        returnsMutableByteSliceAsStr @13: Bool;
++        castsBoxedUtf8 @14: Bool; # Checked round trip through equal-layout owning pointers.
++        delegatesStringRangeIndex @15: Bool; # Checked call of the concrete, forwarding String Index impl.
++        localCollect @16: LocalCollect;
+     }
+ 
+     # A checked Iterator::collect forwarding call, without importing MIR.
+@@ -788,11 +790,22 @@
+         forwardingError @2: Text; # Empty on successful validation.
+     }
+ 
++    # Rustc's existing MIR for a resolved external instance, with type
++    # arguments instantiated in the original caller's environment.
++    struct ExternalMirBody {
++        defPath @0: Text;
++        argumentCount @1: UInt32;
++        localDecls @2: List(LocalDecl);
++        basicBlocks @3: List(BasicBlock);
++        normalLocals @4: List(LocalDeclId); # Locals used by some non-cleanup MIR block.
++    }
++
+     struct DropData {
+         place @0: Place;
+         target @1: BasicBlockId;
+         unwindAction @2: UnwindAction;
+-        valueTy @3: Ty;
++        noDropGlue @3: Bool; # A compiler-instantiated type for which needs_drop is false.
++        valueTy @4: Ty;
+     }
+ 
+     struct AssertData {
+--- a/src/rust_frontend/vf_mir_exporter/src/lib.rs
++++ b/src/rust_frontend/vf_mir_exporter/src/lib.rs
+@@ -185,7 +185,7 @@
+                 // permission annotation for an owned stack slot.
+                 ghost_ranges.retain(|annot| !matches!(annot.kind,
+                     preprocessor::GhostRangeKind::Mut | preprocessor::GhostRangeKind::ByteSliceView
+-                   ));
++                    | preprocessor::GhostRangeKind::VecCollectProof));
+             }
+             self.source_files.lock().unwrap().push(SourceFile {
+                 path: path.into(),
+@@ -638,12 +638,17 @@
+         Adt,
+         Other,
+     }
++    struct ImportedCallees<'tcx> {
++        typing_env: ty::TypingEnv<'tcx>,
++        indices: HashMap<ty::Instance<'tcx>, u32>,
++    }
+     struct EncCtx<'tcx, 'a> {
+         req_adts: Vec<ty::AdtDef<'tcx>>,
+         tcx: TyCtxt<'tcx>,
+         mode: EncKind<'tcx, 'a>,
+         annots: LinkedList<Box<GhostRange>>,
+         mut_annots: Vec<rustc_span::BytePos>,
++        imported_callees: Option<&'a ImportedCallees<'tcx>>,
+         checked_string_range_index: Option<rustc_hir::def_id::DefId>,
+         local_bodies: Option<&'a [(mir::Body<'tcx>, Span)]>,
+     }
+@@ -661,6 +666,7 @@
+                 mode,
+                 annots,
+                 mut_annots,
++                imported_callees: None,
+                 checked_string_range_index: None,
+                 local_bodies: None,
+             }
+@@ -2619,6 +2625,9 @@
+                     Self::encode_unwind_action(unwind, drop_data_cpn.reborrow().init_unwind_action());
+                     let ty = place.ty(&enc_ctx.body().local_decls, tcx).ty;
+                     Self::encode_ty(tcx, enc_ctx, ty, drop_data_cpn.reborrow().init_value_ty());
++                    if let Some(imports) = enc_ctx.imported_callees {
++                        drop_data_cpn.set_no_drop_glue(!ty.needs_drop(tcx, imports.typing_env));
++                    }
+                 }
+                 mir::TerminatorKind::TailCall { .. } => terminator_kind_cpn.set_tail_call(()),
+                 mir::TerminatorKind::Assert {
+@@ -3376,6 +3385,214 @@
+             }
+         }
+ 
++        fn collect_iterator_instances(
++            tcx: TyCtxt<'tcx>,
++            typing_env: ty::TypingEnv<'tcx>,
++            method: rustc_hir::def_id::DefId,
++            args: ty::GenericArgsRef<'tcx>,
++        ) -> Option<Vec<ty::Instance<'tcx>>> {
++            let root = ty::Instance::try_resolve(tcx, typing_env, method, args).ok()??;
++            let mut pending = vec![root];
++            let mut seen = std::collections::HashSet::new();
++            let mut bodies = Vec::new();
++            while let Some(instance) = pending.pop() {
++                if !seen.insert(instance) {
++                    continue;
++                }
++                if !matches!(instance.def, ty::InstanceKind::Item(_)) || !tcx.is_mir_available(instance.def_id()) {
++                    return None;
++                }
++                bodies.push(instance);
++                let body = tcx.instance_mir(instance.def);
++                for block in body.basic_blocks.iter().filter(|block| !block.is_cleanup) {
++                    let mir::TerminatorKind::Call { func, .. } = &block.terminator().kind else { continue };
++                    let ty::FnDef(method, _) = *func.ty(body, tcx).kind() else { continue };
++                    if !matches!(tcx.def_path_str(method).as_str(),
++                        "core::iter::FromIterator::from_iter"
++                        | "core::iter::IntoIterator::into_iter"
++                        | "core::iter::Iterator::next"
++                        | "core::iter::Iterator::size_hint"
++                        | "core::option::Option::<T>::is_none_or"
++                        | "std::vec::spec_from_iter::SpecFromIter::from_iter"
++                        | "std::vec::spec_from_iter_nested::SpecFromIterNested::from_iter"
++                        | "std::vec::spec_extend::SpecExtend::spec_extend"
++                        | "std::vec::Vec::<T, A>::extend_desugared")
++                    {
++                        continue;
++                    }
++                    let callee = instance.try_instantiate_mir_and_normalize_erasing_regions(
++                        tcx, typing_env, ty::EarlyBinder::bind(tcx, func.ty(body, tcx)),
++                    ).ok()?;
++                    let ty::FnDef(method, args) = *callee.kind() else { return None };
++                    pending.push(Self::resolve_imported_callee(tcx, typing_env, method, args.no_bound_vars()?)?);
++                }
++            }
++            Some(bodies)
++        }
++
++        fn resolve_imported_callee(
++            tcx: TyCtxt<'tcx>,
++            typing_env: ty::TypingEnv<'tcx>,
++            method: rustc_hir::def_id::DefId,
++            args: ty::GenericArgsRef<'tcx>,
++        ) -> Option<ty::Instance<'tcx>> {
++            ty::Instance::try_resolve(tcx, typing_env, method, args).ok().flatten()
++                .or_else(|| Self::resolve_vec_specialization(tcx, typing_env, method, args))
++        }
++
++        fn resolve_vec_specialization(
++            tcx: TyCtxt<'tcx>,
++            typing_env: ty::TypingEnv<'tcx>,
++            method: rustc_hir::def_id::DefId,
++            arguments: ty::GenericArgsRef<'tcx>,
++        ) -> Option<ty::Instance<'tcx>> {
++            let method_name = tcx.def_path_str(method);
++            if arguments.len() != 3 || !matches!(method_name.as_str(),
++                "std::vec::spec_from_iter::SpecFromIter::from_iter"
++                | "std::vec::spec_from_iter_nested::SpecFromIterNested::from_iter"
++                | "std::vec::spec_extend::SpecExtend::spec_extend")
++            {
++                return None;
++            }
++            let trait_id = tcx.trait_of_assoc(method)?;
++            let may_unify = ty::fast_reject::DeepRejectCtxt::relate_infer_infer(tcx);
++            let mut possible = Vec::new();
++            for implementation in tcx.all_impls(trait_id) {
++                let header = tcx.impl_trait_ref(implementation).instantiate_identity().skip_normalization();
++                if !may_unify.args_may_unify(arguments, header.args) {
++                    continue;
++                }
++                let clauses = tcx.clauses_of(implementation).clauses;
++                let impossible = clauses.iter().any(|&(clause, _)| {
++                    let ty::ClauseKind::Trait(bound) = clause.kind().skip_binder() else { return false };
++                    let self_ty = bound.self_ty();
++                    if bound.polarity != ty::ClausePolarity::Positive || !matches!(self_ty.kind(), ty::Param(_)) {
++                        return false;
++                    }
++                    header.args.iter().zip(arguments.iter()).any(|(parameter, actual)| {
++                        parameter.as_type() == Some(self_ty)
++                            && actual.as_type().is_some_and(|actual| {
++                                !Self::iterator_marker_may_apply(tcx, bound.def_id(), actual, 3)
++                            })
++                    })
++                });
++                if !impossible {
++                    possible.push(implementation);
++                }
++            }
++            let [only] = &possible[..] else { return None };
++
++            // rustc normally withholds a specializable leaf for polymorphic
++            // inputs. Read the same candidate's MIR
++            // using compiler-provided impl substitutions, after the extra
++            // inventory found no competing impl with a possible receiver.
++            let trait_ref = ty::TraitRef::from_assoc(tcx, trait_id, arguments);
++            let rustc_middle::traits::ImplSource::UserDefined(candidate) =
++                tcx.codegen_select_candidate(typing_env.as_query_input(trait_ref)).ok()?
++            else { return None };
++            if candidate.impl_def_id != *only || !tcx.generics_of(method).own_params.is_empty() {
++                return None;
++            }
++            let ancestors = tcx.trait_def(trait_id).ancestors(tcx, *only).ok()?;
++            let leaf = ancestors.leaf_def(tcx, method)?;
++            let target = leaf.item.def_id;
++            if tcx.parent(target) != *only || !tcx.is_mir_available(target) {
++                return None;
++            }
++            let args = tcx.erase_and_anonymize_regions(candidate.args);
++            tcx.check_args_compatible(target, args).then(|| ty::Instance::new_raw(target, args))
++        }
++
++        fn iterator_marker_may_apply(
++            tcx: TyCtxt<'tcx>,
++            trait_id: rustc_hir::def_id::DefId,
++            receiver: ty::Ty<'tcx>,
++            depth: usize,
++        ) -> bool {
++            // These ordinary iterator traits have no built-in implementations.
++            // An unknown trait or receiver, including recursion beyond the
++            // analysis depth, stays possible and cannot exclude a candidate.
++            let name = tcx.def_path_str(trait_id);
++            if depth == 0 || !matches!(receiver.kind(), ty::Adt(_, _))
++                || !["::TrustedLen", "::InPlaceCollect", "::InPlaceIterable", "::SourceIter"]
++                    .iter().any(|suffix| name.ends_with(suffix))
++            {
++                return true;
++            }
++            let mut possible = false;
++            tcx.for_each_relevant_impl(trait_id, receiver, |implementation| {
++                let header = tcx.impl_trait_ref(implementation).instantiate_identity().skip_normalization();
++                let self_ty = header.self_ty();
++                let may_unify = ty::fast_reject::DeepRejectCtxt::relate_infer_infer(tcx);
++                if !may_unify.types_may_unify(receiver, self_ty) {
++                    return;
++                }
++                let impossible = matches!(self_ty.kind(), ty::Param(_))
++                    && tcx.clauses_of(implementation).clauses.iter().any(|&(clause, _)| {
++                        let ty::ClauseKind::Trait(bound) = clause.kind().skip_binder() else { return false };
++                        bound.polarity == ty::ClausePolarity::Positive && bound.self_ty() == self_ty
++                            && !Self::iterator_marker_may_apply(tcx, bound.def_id(), receiver, depth - 1)
++                    });
++                possible |= !impossible;
++            });
++            possible
++        }
++
++        fn import_collect_bodies(
++            tcx: TyCtxt<'tcx>,
++            enc_ctx: &mut EncCtx<'tcx, 'a>,
++            typing_env: ty::TypingEnv<'tcx>,
++            mut path: Vec<ty::Instance<'tcx>>,
++            mut call: fn_call_data_cpn::Builder<'_>,
++        ) -> Option<usize> {
++            let mut seen = std::collections::HashSet::new();
++            path.retain(|instance| seen.insert(*instance));
++            let bodies = path.iter().map(|instance| {
++                instance.try_instantiate_mir_and_normalize_erasing_regions(
++                    tcx, typing_env, ty::EarlyBinder::bind(tcx, tcx.instance_mir(instance.def).clone()),
++                ).ok()
++            }).collect::<Option<Vec<_>>>()?;
++            let mut indices = HashMap::new();
++            for (index, instance) in path.into_iter().enumerate() {
++                indices.insert(instance, (index + 1).try_into().ok()?);
++            }
++            let callees = ImportedCallees { typing_env, indices };
++            call.set_imported_callee(1);
++            let mut records = call.reborrow().init_imported_bodies(bodies.len().try_into().ok()?);
++            for (i, body) in bodies.iter().enumerate() {
++                let mut record = records.reborrow().get(i.try_into().ok()?);
++                record.set_def_path(&tcx.def_path_str(body.source.def_id()));
++                record.set_argument_count(body.arg_count.try_into().ok()?);
++                struct NormalLocals(std::collections::BTreeSet<mir::Local>);
++                impl<'tcx> mir::visit::Visitor<'tcx> for NormalLocals {
++                    fn visit_local(&mut self, local: mir::Local, _: mir::visit::PlaceContext, _: mir::Location) {
++                        self.0.insert(local);
++                    }
++                }
++                let mut uses = NormalLocals(Default::default());
++                for (index, block) in body.basic_blocks.iter_enumerated() {
++                    if !block.is_cleanup {
++                        mir::visit::Visitor::visit_basic_block_data(&mut uses, index, block);
++                    }
++                }
++                record.fill_normal_locals(uses.0.into_iter(), |local_cpn, local| {
++                    Self::encode_local_decl_id(local, local_cpn);
++                });
++                let mut context = EncCtx::new(tcx, EncKind::Body(body), LinkedList::new(), Vec::new());
++                context.imported_callees = Some(&callees);
++                record.fill_local_decls(body.local_decls().iter_enumerated(), |builder, (index, local)| {
++                    Self::encode_local_decl(tcx, &mut context, index, local, builder);
++                });
++                record.fill_basic_blocks(body.basic_blocks.iter_enumerated(), |builder, (index, block)| {
++                    Self::encode_basic_block(tcx, &mut context, index, block, builder);
++                });
++                for adt in context.get_req_adts() {
++                    enc_ctx.add_req_adt(*adt);
++                }
++            }
++            Some(bodies.len())
++        }
++
+         fn encode_fn_call_data(
+             tcx: TyCtxt<'tcx>,
+             enc_ctx: &mut EncCtx<'tcx, 'a>,
+@@ -3391,7 +3608,7 @@
+             let func_cpn = fn_call_data_cpn.reborrow().init_func();
+             let func_span_opt = Self::encode_operand(tcx, enc_ctx, func, func_cpn);
+             let annotations: Vec<_> = enc_ctx.annots.extract_if(|annot| {
+-                matches!(annot.kind, GhostRangeKind::GenericArgs | GhostRangeKind::ByteSliceView)
++                matches!(annot.kind, GhostRangeKind::GenericArgs | GhostRangeKind::ByteSliceView | GhostRangeKind::VecCollectProof)
+                     && func_span_opt.is_some_and(|span| span.hi() == annot.span().unwrap().lo())
+             }).collect();
+             let annotation = match annotations.as_slice() {
+@@ -3401,12 +3618,20 @@
+             };
+             let marker = annotation.map(|annotation| annotation.kind);
+             let fn_def = func.ty(enc_ctx.body(), tcx);
+-            if matches!(marker, Some(GhostRangeKind::ByteSliceView))
++            if matches!(marker, Some(GhostRangeKind::ByteSliceView | GhostRangeKind::VecCollectProof))
+                 && !matches!(fn_def.kind(), ty::FnDef(..))
+             {
+                 tcx.dcx().span_fatal(*fn_span, "This proof annotation requires a statically known function");
+             }
+             if let ty::FnDef(def_id, substitutions) = *fn_def.kind() {
++                if let Some(imports) = enc_ctx.imported_callees {
++                    if let Some(args) = substitutions.no_bound_vars() {
++                        let callee = Self::resolve_imported_callee(tcx, imports.typing_env, def_id, args);
++                        if let Some(index) = callee.and_then(|callee| imports.indices.get(&callee)) {
++                            fn_call_data_cpn.set_imported_callee(*index);
++                        }
++                    }
++                }
+                 fn_call_data_cpn.set_initializes_only_field_from_argument(
+                     args.len() == 1 && target.is_some() && Self::reads_from_fn_constructor(tcx, def_id),
+                 );
+@@ -3462,6 +3687,18 @@
+                         }
+                     }
+                 }
++                if marker == Some(GhostRangeKind::VecCollectProof) {
++                    let typing_env = enc_ctx.body().typing_env(tcx);
++                    let bodies = substitutions.no_bound_vars().filter(|_| args.len() == 1 && target.is_some()
++                        && tcx.def_path_str(def_id) == "core::iter::Iterator::collect")
++                        .and_then(|args| Self::collect_iterator_instances(tcx, typing_env, def_id, args));
++                    let Some(bodies) = bodies else {
++                        tcx.dcx().span_fatal(*fn_span, "Could not resolve the annotated Vec collection graph");
++                    };
++                    if Self::import_collect_bodies(tcx, enc_ctx, typing_env, bodies, fn_call_data_cpn.reborrow()).is_none() {
++                        tcx.dcx().span_fatal(*fn_span, "Could not instantiate the annotated Vec collection graph");
++                    }
++                }
+             }
+             // Encoding args
+             fn_call_data_cpn.fill_args(args, |arg_cpn, arg| {
+@@ -3487,6 +3724,7 @@
+ 
+             if let Some(annotation) = annotation.filter(|annotation| {
+                 annotation.kind == GhostRangeKind::GenericArgs
++                    || annotation.kind == GhostRangeKind::VecCollectProof && annotation.contents().contains("::")
+             }) {
+                 let annot_opt_cpn = fn_call_data_cpn.reborrow().init_ghost_generic_arg_list();
+                 Self::encode_annotation(tcx, annotation, annot_opt_cpn.init_something());
+--- a/src/rust_frontend/vf_mir_exporter/src/preprocessor.rs
++++ b/src/rust_frontend/vf_mir_exporter/src/preprocessor.rs
+@@ -68,6 +68,7 @@
+     Mut,
+     ClosureContract,
+     ByteSliceView,
++    VecCollectProof,
+ }
+ 
+ #[derive(Debug)]
+@@ -555,6 +556,14 @@
+                                             GhostRangeKind::Mut
+                                     } else if ghost_range.contents == "/*@~byte_slice_view@*/" {
+                                         GhostRangeKind::ByteSliceView
++                                    } else if ghost_range.contents == "/*@~verify_vec_collect@*/"
++                                        || ghost_range.contents.starts_with("/*@~verify_vec_collect::")
++                                    {
++                                        if ghost_range.contents.starts_with("/*@~verify_vec_collect::") {
++                                            let marker = "~verify_vec_collect";
++                                            ghost_range.contents.replace_range(3..3 + marker.len(), &" ".repeat(marker.len()));
++                                        }
++                                        GhostRangeKind::VecCollectProof
+                                     } else if ghost_range.contents.strip_prefix("/*@~contract")
+                                         .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+                                     {
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -346,6 +346,7 @@
+   let checked_local_function_bodies = Hashtbl.create 16
+   let verified_stateless_closures = Hashtbl.create 16
+   let verified_capturing_closures = Hashtbl.create 16
++  let imported_closure_layouts = Hashtbl.create 2
+   let closure_environment_types = Hashtbl.create 16
+ 
+   let function_item_name id =
+@@ -2017,7 +2018,7 @@
+     if Hashtbl.mem verified_stateless_closures id then
+       let vf_ty = stateless_closure_type id loc in
+       Ok { Mir.vf_ty; interp = RustBelt.emp_ty_interp loc }
+-    else if Hashtbl.mem verified_capturing_closures id then
++    else if Hashtbl.mem verified_capturing_closures id || Hashtbl.mem imported_closure_layouts id then
+       match closure_captures substs with
+       | Some (parents, captures) ->
+         let* parent_args = ListAux.try_map (fun arg -> translate_generic_arg arg loc) parents in
+@@ -2124,6 +2125,8 @@
+     val ghost_stmts : Ast.stmt list
+     val body_imp_loc : Ast.loc
+     val body_tr_defs_ctx : body_tr_defs_ctx
++    val imported_closure_targs : Ast.loc -> Ast.type_expr list
++    val imported_callee : FnCallDataRd.t -> Ast.loc -> (string * Ast.type_expr list) option
+     val unwind_proof : string -> Ast.stmt list
+     val call_unwind_proof : Ast.loc -> Ast.stmt list
+   end) =
+@@ -2953,7 +2956,8 @@
+         let* dst, dst_is_mutable = translate_place (destination_get fn_call_data_cpn) loc in
+         let* direct_targs =
+           match direct_target, OptionRd.get (ghost_generic_arg_list_get fn_call_data_cpn) with
+-          | _, Nothing -> Ok []
++          | Some _, Nothing -> Ok (Args.imported_closure_targs loc)
++          | None, Nothing -> Ok []
+           | Some _, Something ptr ->
+               translate_ghost_generic_arg_list (VfMirRd.of_pointer ptr)
+           | None, Something _ ->
+@@ -3068,12 +3072,23 @@
+         ghost_generic_arg_list_get fn_call_data_cpn
+       in
+       let* fn_call_tmp_rval_ctx, fn_call_rexpr =
+-        let checked_spec =
+-          if casts_boxed_utf8_get fn_call_data_cpn then Some "std::str::cast_utf8_box"
+-          else if delegates_string_range_index_get fn_call_data_cpn then Some "std::ops::Index::index_string_suffix"
+-          else None
+-        in
+-        translate_fn_call_rexpr ~checked_spec func_cpn args_cpn loc fn_loc ghost_generic_arg_list_opt_cpn
++        match Args.imported_callee fn_call_data_cpn fn_loc with
++        | None ->
++            let checked_spec =
++              if casts_boxed_utf8_get fn_call_data_cpn then Some "std::str::cast_utf8_box"
++              else if delegates_string_range_index_get fn_call_data_cpn then Some "std::ops::Index::index_string_suffix"
++              else None
++            in
++            translate_fn_call_rexpr ~checked_spec func_cpn args_cpn loc fn_loc ghost_generic_arg_list_opt_cpn
++        | Some (name, targs) ->
++            let* targs =
++              match OptionRd.get ghost_generic_arg_list_opt_cpn with
++              | Nothing -> Ok targs
++              | Something ptr -> translate_ghost_generic_arg_list (VfMirRd.of_pointer ptr)
++            in
++            let* binders, args = translate_operands_core true (List.map (fun arg -> arg, fn_loc) args_cpn) in
++            let arguments = List.map (fun arg -> Ast.LitPat arg) args in
++            Ok (binders, FnCallOutcome (Ast.CallExpr (fn_loc, name, targs, [], arguments, Ast.Static)))
+       in
+       let unwind_stmts, unwind_targets =
+         if TranslatorArgs.ignore_unwind_paths then ([], [])
+@@ -3335,7 +3350,13 @@
+             let call name targs =
+               Ast.ExprStmt (CallExpr (loc, name, targs, [], [LitPat (AddressOf (loc, place))], Static))
+             in
+-            let generic = "std::ptr::drop_in_place" in
++            if no_drop_glue_get drop_data_cpn then
++              (* A compiler-instantiated Drop with no glue still ends the value's
++                 lifetime. Check the initialized slot, then forget its value. *)
++              Ok ([ Ast.PureStmt (loc, call "open_points_to" []);
++                    Ast.PureStmt (loc, call "close_points_to_" []) ] @ freeze_stmts, [])
++            else
++              let generic = "std::ptr::drop_in_place" in
+               let ty = D.decode_ty (value_ty_get drop_data_cpn) in
+               let name, args = Args.body_tr_defs_ctx.fn_specializer generic [{kind = Type ty}] in
+               let* targs =
+@@ -5439,6 +5460,12 @@
+               [],
+               Static )))
+ 
++  let imported_vec_collect_path = "core::iter::Iterator::collect"
++  let imported_vec_collect_name = "VfImported$collect"
++
++  let qualify_name module_path name =
++    if module_path = "" then name else module_path ^ "::" ^ name
++
+   let translate_body (body_tr_defs_ctx : body_tr_defs_ctx) (body_cpn : BodyRd.t)
+       =
+     let open BodyRd in
+@@ -5500,12 +5527,21 @@
+       let ghost_stmts = ghost_stmts
+       let body_imp_loc = imp_loc
+       let body_tr_defs_ctx = body_tr_defs_ctx
++      let imported_closure_targs _ = []
+       let unwind_proof _ = []
+       let call_unwind_proof call_loc =
+         let _, call_end = Ast.lexed_loc call_loc in
+         let matching, rest = List.partition (fun (start, _) -> start = call_end) !unwind_annotations in
+         unwind_annotations := rest;
+         List.map snd matching
++      let imported_callee call loc =
++        match FnCallDataRd.imported_bodies_get_list call with
++        | body :: _ when FnCallDataRd.imported_callee_get call = Stdint.Uint32.of_int 1 &&
++            TerminatorKindRd.ExternalMirBody.def_path_get body = imported_vec_collect_path ->
++            if Sys.getenv_opt "VF_VEC_COLLECT_PROOF" = None then
++              Ast.static_error loc "The annotated Vec collect requires a MIR proof file" None;
++            Some (qualify_name (module_def_path_get body_cpn) imported_vec_collect_name, [])
++        | _ -> None
+     end) in
+     let vdis_cpn = var_debug_info_get_list body_cpn in
+     (* Since var id translation map is empty var debug info contains the plain Mir ids *)
+@@ -5888,6 +5924,217 @@
+             ({ id = loc; info = env_map } : VF0.debug_info_rust_fe) )
+     | DefKind.AssocFn -> failwith "Todo: MIR Body kind AssocFn"
+     | _ -> Error (`TrBodyFatal "Unknown MIR Body kind")
++
++  let read_imported_proof_sections path =
++    let input = open_in path in
++    let sections = Fun.protect ~finally:(fun () -> close_in input) @@ fun () ->
++      let rec read n name start contents sections =
++        let save () =
++          match name with
++          | Some name -> (name, ((path, start, 1), String.concat "\n" (List.rev contents))) :: sections
++          | None -> sections
++        in
++        match input_line input with
++        | exception End_of_file -> List.rev (save ())
++        | line when String.starts_with ~prefix:"[" line && String.ends_with ~suffix:"]" line ->
++            read (n + 1) (Some (String.sub line 1 (String.length line - 2))) n [] (save ())
++        | line ->
++            if name = None && String.trim line <> "" then
++              Ast.static_error (Ast.Lexed ((path, n, 1), (path, n, 1)))
++                "Expected an imported MIR proof section" None;
++            read (n + 1) name start (line :: contents) sections
++      in
++      read 1 None 1 [] []
++    in
++    sections |> List.map (fun (name, (start, text)) -> name, (start, "/*@\n" ^ text ^ "\n@*/"))
++
++  let translate_imported_vec_proofs body_tr_defs_ctx path bodies_cpn =
++    let open TerminatorKindRd.ExternalMirBody in
++    let graphs = bodies_cpn |> List.concat_map (fun body ->
++      BodyRd.basic_blocks_get_list body |> List.filter_map (fun block ->
++        let terminator = BasicBlockRd.terminator_get block in
++        match TerminatorKindRd.get (TerminatorRd.kind_get terminator) with
++        | TerminatorKindRd.Call call ->
++            begin match FnCallDataRd.imported_bodies_get_list call with
++            | [] -> None
++            | graph -> Some (BodyRd.module_def_path_get body, graph)
++            end
++        | _ -> None)) in
++    let module_path, imported_bodies = match graphs with
++      | [graph] -> graph
++      | _ -> failwith "Expected exactly one compiler-resolved Vec collection graph"
++    in
++    let select name =
++      let matching = imported_bodies |> List.mapi (fun i body -> i + 1, body)
++        |> List.filter (fun (_, body) -> def_path_get body = name) in
++      match matching with
++      | [entry] -> entry
++      | _ -> failwith ("Expected one compiler-resolved MIR body for " ^ name)
++    in
++    let default_from_iter = "<std::vec::Vec<T> as std::vec::spec_from_iter::SpecFromIter<T, I>>::from_iter" in
++    let () = ignore (select default_from_iter) in
++    let extend = [
++      "core::iter::Iterator::size_hint", "size_hint ", "size_hint ", "VfImported$size_hint", ["iterator"];
++      "std::vec::Vec::<T, A>::extend_desugared", "", "", "VfImported$vec_extend", ["vector"; "iterator"];
++    ] in
++    let initialize = [
++      "<std::vec::Vec<T, A> as std::vec::spec_extend::SpecExtend<T, I>>::spec_extend",
++        "spec_extend ", "", "VfImported$spec_extend", ["vector"; "iterator"];
++      "<std::vec::Vec<T> as std::vec::spec_from_iter_nested::SpecFromIterNested<T, I>>::from_iter",
++        "first ", "collection ", "VfImported$first_then_extend", ["iterator"];
++    ] in
++    let forwarding = [
++      "<I as core::iter::IntoIterator>::into_iter", "identity ", "identity ",
++        "VfImported$into_iter", ["iterator"];
++      default_from_iter,
++        "spec_from ", "collection ", "VfImported$spec_from", ["iterator"];
++      "<std::vec::Vec<T> as core::iter::FromIterator<T>>::from_iter",
++        "vec_from ", "collection ", "VfImported$vec_from", ["iterator"];
++      imported_vec_collect_path, "collect ", "collection ", imported_vec_collect_name, ["iterator"];
++    ] in
++    let guard_path = "core::option::Option::<T>::is_none_or" in
++    let forwarding =
++      if not (List.exists (fun body -> def_path_get body = guard_path) imported_bodies)
++      then forwarding
++      else
++        let _, guard_body = select guard_path in
++        let callback = match local_decls_get_list guard_body with
++          | _ :: _ :: callback :: _ -> D.decode_ty (LocalDeclRd.ty_get callback)
++          | _ -> failwith "Missing the debug assertion's callback type"
++        in
++        begin match callback.kind with
++        | Closure closure when Option.is_some (closure_captures closure.substs) ->
++            (* Declare the capture fields. The closure body remains unchecked
++               and a call to it must fail if it is reachable. *)
++            Hashtbl.replace imported_closure_layouts closure.def_id ()
++        | _ -> failwith "Expected the compiler's shared debug assertion capture"
++        end;
++        let forwarding = forwarding |> List.map (fun (path, prefix, contract, name, params) ->
++          (path, (if path = imported_vec_collect_path then "collect_debug " else prefix), contract, name, params)) in
++        (guard_path, "guard ", "guard ", "VfImported$debug_guard", ["upper"; "callback"]) :: forwarding
++    in
++    let entries = extend @ initialize @ forwarding |> List.map (fun (path, prefix, contract_prefix, name, params) ->
++      let index, body = select path in
++      index, (prefix, contract_prefix, name, params, body)) in
++    let start = (path, 1, 1) in
++    let loc = Ast.Lexed (start, start) in
++    let all_annotations = read_imported_proof_sections path in
++    let sections prefix = all_annotations |> List.filter_map (fun (name, annotation) ->
++      let at_top_level = name = "contract" ||
++        List.exists (fun prefix -> String.starts_with ~prefix name) ["block "; "terminator "; "unwind "] in
++      if (if prefix = "" then at_top_level else String.starts_with ~prefix name) then
++        Some (String.sub name (String.length prefix) (String.length name - String.length prefix), annotation)
++      else None) in
++    let translate (_, (prefix, contract_prefix, name, parameter_names, body)) =
++    let contract = VfMirAnnotParser.parse_func_contract loc
++      (List.find_all (fun (name, _) -> name = "contract") (sections contract_prefix) |> List.map snd) in
++    let annotations = sections prefix |> List.filter (fun (name, _) -> name <> "contract")
++      |> List.map (fun (name, annotation) -> name, VfMirAnnotParser.parse_control_flow_ghost_stmt annotation) in
++    let locs_cpn = local_decls_get_list body in
++    let argument_count = Stdint.Uint32.to_int (argument_count_get body) in
++    if List.length parameter_names <> argument_count then
++      failwith "Unexpected number of compiler-resolved parameters";
++    let names = locs_cpn |> List.mapi (fun index local ->
++      let raw = LocalDeclIdRd.name_get (LocalDeclRd.id_get local) in
++      let id = TrName.tag_internal raw in
++      let internal_name =
++        if index > 0 && index <= argument_count then List.nth parameter_names (index - 1)
++        else "mir" ^ raw in
++      {id; internal_name}) in
++    let module External = TrBody (struct
++      let var_id_trs_map_ref = ref names
++      let ghost_stmts = []
++      let body_imp_loc = loc
++      let body_tr_defs_ctx = body_tr_defs_ctx
++      let call_unwind_proof _ = []
++      let unwind_proof id = List.filter_map (fun (name, annotation) ->
++        if name = "unwind " ^ id then Some annotation else None) annotations
++      let imported_closure_targs loc =
++        Ast.IdentTypeExpr (loc, None, "P") ::
++        List.map (vf_ty_arg_of_region loc)
++          ["'_VfVector"; "'_VfCapture_0"; "'_VfCapture_1"; "'_VfCapture_2"; "'_VfVector"]
++      let imported_callee call loc =
++        let index = Stdint.Uint32.to_int (FnCallDataRd.imported_callee_get call) in
++        match List.assoc_opt index entries with
++        | None -> None
++        | Some (_, _, name, _, _) ->
++            Some (qualify_name module_path name,
++              Ast.IdentTypeExpr (loc, None, "P") ::
++              List.map (vf_ty_arg_of_region loc)
++                ["'_VfCapture_0"; "'_VfCapture_1"; "'_VfCapture_2"; "'_VfVector"])
++    end) in
++    let* locals = ListAux.try_map External.translate_local_decl locs_cpn in
++    let ret :: locals = locals in
++    let _, temps = Util.take_drop argument_count locals in
++    let normal_locals = normal_locals_get_list body |> List.map LocalDeclIdRd.name_get in
++    let temps =
++      if Args.ignore_unwind_paths then
++        List.filteri (fun i _ -> List.mem ("_" ^ string_of_int (i + argument_count + 1)) normal_locals) temps
++      else temps in
++    let params, _ = Util.take_drop argument_count (List.combine locals (List.tl locs_cpn)) in
++    let extra_lifetimes = ref [] in
++    let rec name_regions (ty : D.ty) : D.ty =
++      let kind : D.ty_kind = match ty.kind with
++      | Ref r when r.region.id = "'<erased>" ->
++          let id = "'_VfVector" in
++          extra_lifetimes := id :: !extra_lifetimes;
++          Ref {r with region = {id}; ty = name_regions r.ty}
++      | Adt a ->
++          let substs = List.map name_arg a.substs in
++          Adt {a with substs}
++      | Tuple fields -> Tuple (List.map name_regions fields)
++      | Closure c when Hashtbl.mem imported_closure_layouts c.def_id ->
++          (* The compiler's debug predicate has a shared borrow of the
++             lower-bound usize and may carry the original iterator in its
++             type parameters. It owns no iterator value. *)
++          Closure {c with substs = List.map name_arg c.substs}
++      | Closure c ->
++          let substs, names = name_erased_capture_lifetimes c.substs in
++          extra_lifetimes := names @ !extra_lifetimes;
++          Closure {c with substs}
++      | kind -> kind
++      in
++      {kind}
++    and name_arg (arg : D.generic_arg) : D.generic_arg =
++      match arg.kind with
++      | Type ty -> { kind = Type (name_regions ty) }
++      | _ -> arg
++    in
++    let* params = params |> ListAux.try_map (fun ((local : Mir.local_decl), cpn) ->
++      let* ty = translate_decoded_ty (name_regions (D.decode_ty (LocalDeclRd.ty_get cpn))) local.loc in
++      Ok (ty.vf_ty, local.id)) in
++    let* blocks = ListAux.try_filter_map (External.translate_basic_block ret.id) (basic_blocks_get_list body) in
++    let annotations_for kind id =
++      List.filter_map (fun (name, statement) ->
++        if name = kind ^ " " ^ id then Some statement else None) annotations
++    in
++    let block_ids = List.map (fun (bb : Mir.basic_block) -> bb.id) blocks in
++    List.iter (fun (name, statement) ->
++      if not (List.exists (fun id -> name = "block " ^ id || name = "terminator " ^ id || name = "unwind " ^ id) block_ids) then
++        Ast.static_error (Ast.stmt_loc statement) "No imported normal MIR block has this index" None) annotations;
++    List.iter (fun (bb : Mir.basic_block) ->
++      bb.statements <- annotations_for "block" bb.id @ bb.statements @ annotations_for "terminator" bb.id) blocks;
++    let blocks = External.find_blocks blocks in
++    let statements = External.translate_basic_blocks_to_stmts blocks [] in
++    let declarations = List.map (External.translate_to_vf_local_decl loc) (ret :: temps) in
++    let (nonghost, (fn_type, safety_proof), spec, terminates), assume_correct = contract in
++    if assume_correct || Option.is_none spec then
++      Ast.static_error loc "An imported MIR proof must supply a checked contract" None;
++    let* ret_ty = translate_decoded_ty
++      (name_regions (D.decode_ty (LocalDeclRd.ty_get (List.hd locs_cpn)))) ret.loc in
++    let tparams = ("P", {Ast.sized = true}) :: Ast.unbounded_tparams
++      (List.sort_uniq String.compare ("'_VfVector" :: !extra_lifetimes)) in
++    let spec =
++      if Args.ignore_unwind_paths then Option.map Rust_parser.result_spec_of_outcome_spec spec
++      else spec in
++    let ret_ty =
++      if Args.ignore_unwind_paths then ret_ty.vf_ty
++      else Ast.ConstructedTypeExpr (loc, "fn_outcome", [ret_ty.vf_ty]) in
++    Ok ((module_path, name),
++      Ast.Func (loc, Ast.Regular, tparams, Some ret_ty, name, params, nonghost,
++        (fn_type, safety_proof), spec, terminates, Some (declarations @ statements, loc), false, []))
++    in
++    ListAux.try_map translate entries
+ 
+   let translate_visibility (vis : D.visibility) =
+     match vis with
+@@ -8586,6 +8833,7 @@
+     Hashtbl.clear checked_local_function_bodies;
+     Hashtbl.clear verified_stateless_closures;
+     Hashtbl.clear verified_capturing_closures;
++    Hashtbl.clear imported_closure_layouts;
+     Hashtbl.clear closure_environment_types;
+     let job _ =
+       Rocq_writer.rocq_print Args.rocq_writer "From VeriFast Require Export VfMir.\n\n";
+@@ -8836,6 +9084,14 @@
+       Rocq_writer.rocq_print Args.rocq_writer ".\n";
+       let body_sig_opts, body_decls, debug_infos =
+         ListAux.split3 bodies_tr_res
++      in
++      let* body_decls =
++        match Sys.getenv_opt "VF_VEC_COLLECT_PROOF" with
++        | None -> Ok body_decls
++        | Some path ->
++            let* proofs = Rocq_writer.rocq_suppress_output Args.rocq_writer @@ fun () ->
++              translate_imported_vec_proofs body_tr_defs_ctx path bodies_cpn in
++            Ok (proofs @ body_decls)
+       in
+       let body_sigs = List.filter_map Fun.id body_sig_opts in
+       (* `vfide` relies on the similarity of the order of function declarations

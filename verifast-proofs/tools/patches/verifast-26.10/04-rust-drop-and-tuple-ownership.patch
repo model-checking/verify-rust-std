@@ -1,0 +1,97 @@
+--- a/src/refinement_checker/refinement_checker.ml
++++ b/src/refinement_checker/refinement_checker.ml
+@@ -564,6 +564,7 @@
+               };
+               target={index=Stdint.Uint32.of_int 2};
+               unwind_action=Cleanup {index=Stdint.Uint32.of_int 4};
++              value_ty={kind=Param "A"};
+             };
+             source_info={span}
+           };
+@@ -588,6 +589,7 @@
+               };
+               target={index=Stdint.Uint32.of_int 4};
+               unwind_action=Terminate;
++              value_ty={kind=Param "A"};
+             };
+             source_info={span}
+           };
+--- a/src/rust_frontend/vf_mir/vf_mir.capnp
++++ b/src/rust_frontend/vf_mir/vf_mir.capnp
+@@ -780,6 +780,7 @@
+         place @0: Place;
+         target @1: BasicBlockId;
+         unwindAction @2: UnwindAction;
++        valueTy @3: Ty;
+     }
+ 
+     struct AssertData {
+--- a/src/rust_frontend/vf_mir_exporter/src/lib.rs
++++ b/src/rust_frontend/vf_mir_exporter/src/lib.rs
+@@ -2605,6 +2605,8 @@
+                     Self::encode_place(enc_ctx, place, drop_data_cpn.reborrow().init_place());
+                     Self::encode_basic_block_id(*target, drop_data_cpn.reborrow().init_target());
+                     Self::encode_unwind_action(unwind, drop_data_cpn.reborrow().init_unwind_action());
++                    let ty = place.ty(&enc_ctx.body().local_decls, tcx).ty;
++                    Self::encode_ty(tcx, enc_ctx, ty, drop_data_cpn.reborrow().init_value_ty());
+                 }
+                 mir::TerminatorKind::TailCall { .. } => terminator_kind_cpn.set_tail_call(()),
+                 mir::TerminatorKind::Assert {
+--- a/src/rust_frontend/vf_mir_translator/rust_parser.ml
++++ b/src/rust_frontend/vf_mir_translator/rust_parser.ml
+@@ -1155,6 +1155,11 @@
+   let func_tparams = tparams_with_default_bounds_exprs tparams in
+   let own_decl =
+     match sn, targs with
++    | "std_tuple_1_", [element] ->
++        let parameters = [IdentTypeExpr (l, None, "thread_id_t"), "t"; structTypeExpr, "v"] in
++        let element_own = ExprCallExpr (l, TypePredExpr (l, element, "own"),
++          [LitPat (Var (l, "t")); LitPat (Select (l, Var (l, "v"), "0"))]) in
++        PredCtorDecl (l, sn ^ "_own", tparams, [], parameters, None, element_own)
+     | "std_tuple_2_", [first; second] ->
+         let thread = Var (l, "t") and value = Var (l, "v") in
+         let field_own ty name =
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -3214,11 +3214,23 @@
+                          Static ));
+                 ] )
+           in
+-          let drop_stmts =
+-            let call name =
+-              Ast.ExprStmt (CallExpr (loc, name, [], [], [LitPat (AddressOf (loc, place))], Static))
++          let* drop_stmts =
++            let call name targs =
++              Ast.ExprStmt (CallExpr (loc, name, targs, [], [LitPat (AddressOf (loc, place))], Static))
+             in
+-            [call "std::ptr::drop_in_place"]
++            let generic = "std::ptr::drop_in_place" in
++              let ty = D.decode_ty (value_ty_get drop_data_cpn) in
++              let name, args = Args.body_tr_defs_ctx.fn_specializer generic [{kind = Type ty}] in
++              let* targs =
++                if name = generic then Ok [] else
++                args |> ListAux.try_map (fun arg ->
++                  let* arg = translate_generic_arg arg loc in
++                  Ok (match arg with
++                  | Mir.GenArgType ty -> ty.vf_ty
++                  | Mir.GenArgLifetime _ -> Ast.InferredTypeExpr loc
++                  | Mir.GenArgConst c -> c))
++              in
++              Ok [call name targs]
+           in
+           Ok
+             ( unfreeze_stmts @ drop_stmts @ freeze_stmts,
+--- a/src/verifast1.ml
++++ b/src/verifast1.ml
+@@ -6355,8 +6355,9 @@
+   let try_get_pred_symb_from_map p m = try_assoc p m |> option_map @@ fun (_, (_, _, _, _, symb, _, _)) -> symb
+   
+   let () =
+-    if Vfbindings.get Vfparam_ignore_unwind_paths vfbindings then
+-      ctxt#assert_term (mk_app (get_pure_func_symb "ignore_unwind_paths") [])
++    if is_rust then
++      let mode = mk_app (get_pure_func_symb "ignore_unwind_paths") [] in
++      ctxt#assert_term (if Vfbindings.get Vfparam_ignore_unwind_paths vfbindings then mode else ctxt#mk_not mode)
+ 
+   let lazy_value f =
+     let cell = ref None in

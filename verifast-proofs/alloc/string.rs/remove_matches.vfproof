@@ -1,0 +1,259 @@
+[size_hint contract]
+req true;
+[size_hint contract]
+ens result.0 == 0 &*& result.1 == std::option::Option::None;
+[size_hint contract]
+on_unwind_ens false;
+[contract]
+req thread_token(?t) &*& *vector |-> ?initial_vec &*&
+    std::vec::Vec(initial_vec, ?initial_capacity, ?initial_elements) &*&
+    foreach(initial_elements, own::<(usize, usize)>(t)) &*&
+    exists(RemoveMatchesContext(?searcher_lft, ?haystack, ?bytes, ?cursor)) &*&
+    [?qs]lifetime_token(searcher_lft) &*&
+    *(iterator.0).1 |-> ?initial_front &*& usize_own(t, initial_front) &*&
+    std::str::pattern::SearcherBorrow::< <P as std::str::pattern::Pattern<'_VfCapture_0>>::Searcher>
+        (searcher_lft, t, (iterator.0).0,
+            std::str::pattern::PositionedSearcher(haystack, bytes, cursor, initial_front)) &*&
+    std::str::pattern::front_agrees(
+        std::str::pattern::PositionedSearcher(haystack, bytes, cursor, initial_front), initial_front) == true &*&
+    ordered_rejection_prefix(bytes, 0, initial_front, initial_elements) == true;
+[contract]
+ens thread_token(t) &*& *vector |-> ?final_vec &*&
+    std::vec::Vec(final_vec, ?final_capacity, ?final_elements) &*&
+    foreach(final_elements, own::<(usize, usize)>(t)) &*&
+    [qs]lifetime_token(searcher_lft) &*&
+    *(iterator.0).1 |-> ?final_front &*& usize_own(t, final_front) &*&
+    std::str::pattern::SearcherBorrow::< <P as std::str::pattern::Pattern<'_VfCapture_0>>::Searcher>
+        (searcher_lft, t, (iterator.0).0,
+            std::str::pattern::PositionedSearcher(haystack, bytes, cursor, final_front)) &*&
+    std::str::pattern::front_agrees(
+        std::str::pattern::PositionedSearcher(haystack, bytes, cursor, final_front), final_front) == true &*&
+    ordered_rejection_prefix(bytes, 0, final_front, final_elements) == true;
+[contract]
+on_unwind_ens thread_token(t) &*& *vector |-> ?final_vec &*&
+    std::vec::Vec(final_vec, ?final_capacity, ?final_elements) &*&
+    foreach(final_elements, own::<(usize, usize)>(t)) &*& [qs]lifetime_token(searcher_lft) &*&
+    *(iterator.0).1 |-> ?final_front &*& usize_own(t, final_front) &*&
+    std::str::pattern::SearcherBorrow::< <P as std::str::pattern::Pattern<'_VfCapture_0>>::Searcher>
+        (searcher_lft, t, (iterator.0).0,
+            std::str::pattern::PositionedSearcher(haystack, bytes, cursor, final_front));
+[block 0]
+assert *&iterator |-> ?stored_iterator;
+[block 1]
+inv thread_token(t) &*& *vector |-> ?current_vec &*&
+    std::vec::Vec(current_vec, ?capacity, ?elements) &*&
+    foreach(elements, own::<(usize, usize)>(t)) &*&
+    *&iterator |-> stored_iterator &*&
+    [1/2]struct_std_tuple_2__padding::<usize, usize>(&mir_6) &*&
+    [1/2]mir_6.0 |-?-> _ &*& [1/2]mir_6.1 |-?-> _ &*&
+    struct_std_tuple_2__padding::<usize, std::option::Option<usize>>(&mir_13) &*&
+    mir_13.0 |-?-> _ &*& mir_13.1 |-?-> _ &*&
+    struct_std_tuple_2__padding::<usize, usize>(&mir_20) &*&
+    mir_20.0 |-?-> _ &*& mir_20.1 |-?-> _ &*&
+    struct_std_tuple_2__padding::<usize, bool>(&mir_23) &*&
+    mir_23.0 |-?-> _ &*& mir_23.1 |-?-> _ &*&
+    [qs]lifetime_token(searcher_lft) &*&
+    *(stored_iterator.0).1 |-> ?front &*& usize_own(t, front) &*&
+    std::str::pattern::SearcherBorrow::< <P as std::str::pattern::Pattern<'_VfCapture_0>>::Searcher>
+        (searcher_lft, t, (stored_iterator.0).0,
+            std::str::pattern::PositionedSearcher(haystack, bytes, cursor, front)) &*&
+    std::str::pattern::front_agrees(
+        std::str::pattern::PositionedSearcher(haystack, bytes, cursor, front), front) == true &*&
+    ordered_rejection_prefix(bytes, 0, front, elements) == true;
+[terminator 1]
+open_points_to(mir_4);
+[terminator 1]
+close exists(std::str::pattern::PositionedSearcher(haystack, bytes, cursor, front));
+[unwind 1]
+close_points_to(mir_4);
+[block 2]
+close_points_to(mir_4);
+[block 3]
+assert mir_3 == std::option::Option::Some(?element);
+[block 3]
+open <std::option::Option<(usize, usize)>>.own(t, mir_3);
+[block 3]
+assert *(stored_iterator.0).1 |-> ?next_front;
+[block 3]
+record_next_rejection(bytes, haystack, cursor, front, elements, element, next_front);
+[block 3]
+let len_ref = precreate_ref(vector);
+[block 3]
+std::vec::init_ref_Vec(len_ref);
+[block 4]
+std::vec::end_ref_Vec(len_ref);
+[block 4]
+let capacity_ref = precreate_ref(vector);
+[block 4]
+std::vec::init_ref_Vec(capacity_ref);
+[block 5]
+std::vec::end_ref_Vec(capacity_ref);
+[block 6]
+let hint_ref = precreate_ref(&iterator);
+[block 6]
+init_ref_readonly(hint_ref, 1/2);
+[block 7]
+end_ref_readonly(hint_ref);
+[unwind 8]
+leak <(usize, usize)>.own(t, _);
+[block 9]
+assert *vector |-> ?grown &*& std::vec::Vec(grown, ?grown_capacity, elements);
+[block 9]
+assert mir_7 == length(elements) &*& mir_7 < grown_capacity;
+[block 9]
+let buffer = std::vec::Vec_separate_spare(grown);
+[block 11]
+assert mir_18 == buffer + length(elements);
+[block 11]
+open array_(mir_18, grown_capacity - length(elements), _);
+[block 11]
+open_points_to_(mir_18);
+[block 12]
+close_points_to(mir_18);
+[block 12]
+assert *mir_18 |-> element;
+[block 12]
+close array(mir_18 + 1, 0, nil);
+[block 12]
+close array(mir_18, 1, [element]);
+[block 12]
+if length(elements) == 0 { open array(buffer, 0, elements); } else { array_join(buffer); }
+[block 14]
+assert *vector |-> ?updated;
+[block 14]
+std::vec::Vec_unseparate_spare(updated);
+[block 14]
+close own::<(usize, usize)>(t)(element);
+[block 14]
+close foreach::<(usize, usize)>(nil, own::<(usize, usize)>(t));
+[block 14]
+close foreach::<(usize, usize)>([element], own::<(usize, usize)>(t));
+[block 14]
+foreach_append(elements, [element]);
+[block 15]
+open <std::option::Option<(usize, usize)>>.own(t, mir_3);
+[collection contract]
+req thread_token(?t) &*& exists(RemoveMatchesContext(?searcher_lft, ?haystack, ?bytes, ?cursor)) &*&
+    [?qs]lifetime_token(searcher_lft) &*&
+    *(iterator.0).1 |-> ?initial_front &*& usize_own(t, initial_front) &*&
+    std::str::pattern::SearcherBorrow::< <P as std::str::pattern::Pattern<'_VfCapture_0>>::Searcher>
+        (searcher_lft, t, (iterator.0).0,
+            std::str::pattern::PositionedSearcher(haystack, bytes, cursor, initial_front)) &*&
+    std::str::pattern::front_agrees(
+        std::str::pattern::PositionedSearcher(haystack, bytes, cursor, initial_front), initial_front) == true;
+[collection contract]
+ens thread_token(t) &*& std::vec::Vec(result, ?final_capacity, ?final_elements) &*&
+    foreach(final_elements, own::<(usize, usize)>(t)) &*& [qs]lifetime_token(searcher_lft) &*&
+    *(iterator.0).1 |-> ?final_front &*& usize_own(t, final_front) &*&
+    std::str::pattern::SearcherBorrow::< <P as std::str::pattern::Pattern<'_VfCapture_0>>::Searcher>
+        (searcher_lft, t, (iterator.0).0,
+            std::str::pattern::PositionedSearcher(haystack, bytes, cursor, final_front)) &*&
+    std::str::pattern::front_agrees(
+        std::str::pattern::PositionedSearcher(haystack, bytes, cursor, final_front), final_front) == true &*&
+    ordered_rejection_prefix(bytes, 0, final_front, final_elements) == true;
+[collection contract]
+on_unwind_ens thread_token(t) &*& [qs]lifetime_token(searcher_lft) &*&
+    *(iterator.0).1 |-> ?final_front &*& usize_own(t, final_front) &*&
+    std::str::pattern::SearcherBorrow::< <P as std::str::pattern::Pattern<'_VfCapture_0>>::Searcher>
+        (searcher_lft, t, (iterator.0).0,
+            std::str::pattern::PositionedSearcher(haystack, bytes, cursor, final_front));
+[spec_extend terminator 0]
+close exists(RemoveMatchesContext(searcher_lft, haystack, bytes, cursor));
+[first block 0]
+assert *&iterator |-> ?original_iterator;
+[first terminator 0]
+open_points_to(mir_4);
+[first terminator 0]
+close exists(std::str::pattern::PositionedSearcher(haystack, bytes, cursor, initial_front));
+[first unwind 0]
+close_points_to(mir_4);
+[first block 1]
+close_points_to(mir_4);
+[first block 3]
+assert mir_3 == std::option::Option::Some(?element);
+[first block 3]
+open <std::option::Option<(usize, usize)>>.own(t, mir_3);
+[first block 3]
+assert *(original_iterator.0).1 |-> ?next_front;
+[first block 3]
+record_next_rejection(bytes, haystack, cursor, initial_front, nil, element, next_front);
+[first block 3]
+let first_hint = precreate_ref(&iterator);
+[first block 3]
+init_ref_readonly(first_hint, 1/2);
+[first block 4]
+open <std::option::Option<(usize, usize)>>.own(t, mir_3);
+[first block 4]
+close foreach::<(usize, usize)>(nil, own::<(usize, usize)>(t));
+[first block 5]
+end_ref_readonly(first_hint);
+[first block 7]
+assert 1 <= mir_10;
+[first unwind 7]
+leak <(usize, usize)>.own(t, _);
+[first block 8]
+assert *&mir_12 |-> ?initial &*& std::vec::Vec(initial, ?capacity, nil);
+[first block 8]
+let buffer = std::vec::Vec_separate_spare(initial);
+[first block 9]
+open array(buffer, 0, nil);
+[first block 9]
+open array_(buffer, capacity, _);
+[first block 9]
+open_points_to_(buffer);
+[first block 10]
+close_points_to(buffer);
+[first block 10]
+assert *buffer |-> element;
+[first block 10]
+close array(buffer + 1, 0, nil);
+[first block 10]
+close array(buffer, 1, [element]);
+[first block 11]
+assert *&mir_12 |-> ?first_element_vector;
+[first block 11]
+std::vec::Vec_unseparate_spare(first_element_vector);
+[first block 11]
+close own::<(usize, usize)>(t)(element);
+[first block 11]
+close foreach::<(usize, usize)>(nil, own::<(usize, usize)>(t));
+[first block 11]
+close foreach::<(usize, usize)>([element], own::<(usize, usize)>(t));
+[first block 11]
+open_points_to(&iterator);
+[first terminator 11]
+close exists(RemoveMatchesContext(searcher_lft, haystack, bytes, cursor));
+[first unwind 11]
+close_points_to_(&iterator);
+[first unwind 11]
+assert *&mir_2 |-> ?pending_vec;
+[first unwind 11]
+std::vec::Vec_to_own(pending_vec);
+[first block 12]
+close_points_to_(&iterator);
+[identity contract]
+req true;
+[identity contract]
+ens result == iterator;
+[identity contract]
+on_unwind_ens false;
+[spec_from terminator 0]
+close exists(RemoveMatchesContext(searcher_lft, haystack, bytes, cursor));
+[vec_from terminator 1]
+close exists(RemoveMatchesContext(searcher_lft, haystack, bytes, cursor));
+[collect terminator 0]
+close exists(RemoveMatchesContext(searcher_lft, haystack, bytes, cursor));
+[guard contract]
+req upper == std::option::Option::None;
+[guard contract]
+ens result == true;
+[guard contract]
+on_unwind_ens false;
+[collect_debug block 6]
+open_points_to(&iterator);
+[collect_debug terminator 6]
+close exists(RemoveMatchesContext(searcher_lft, haystack, bytes, cursor));
+[collect_debug unwind 6]
+close_points_to_(&iterator);
+[collect_debug block 7]
+close_points_to_(&iterator);

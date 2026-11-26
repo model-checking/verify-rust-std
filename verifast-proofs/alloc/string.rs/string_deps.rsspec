@@ -1,0 +1,838 @@
+// External standard library specifications for verifying `library/alloc/src/string.rs`
+// with VeriFast 26.10. See README.md for the sources and call-site assumptions.
+
+/*@
+type_pred_def <char>.own = char_own;
+@*/
+
+mod fmt {
+    mod rt {
+        struct Argument<'a>;
+    }
+}
+
+mod num {
+    impl usize {
+        fn saturating_add(self: usize, other: usize) -> usize;
+        //@ req true;
+        //@ ens result == (if self + other <= usize::MAX { self + other } else { usize::MAX });
+        //@ on_unwind_ens false;
+    }
+}
+
+mod ops {
+
+    struct RangeTo<Idx> {
+        end: Idx,
+    }
+
+    struct RangeFrom<Idx> {
+        start: Idx,
+    }
+
+    trait RangeBounds<T> {}
+
+}
+
+mod slice {
+
+    // A by-reference binding in a shared byte slice pattern borrows one element.
+    fn borrow_constant_u8<'a>(source: &'a [u8], index: usize, min_length: usize) -> &'a u8;
+    /*@
+    req thread_token(?t) &*& [_](<[u8]>.share(?k, t, source)) &*& [?q]lifetime_token(k) &*&
+        index < min_length &*& min_length <= source.len();
+    @*/
+    /*@
+    ens thread_token(t) &*& [q]lifetime_token(k) &*& [_](<u8>.share(k, t, result)) &*&
+        result as *u8 as usize == (source as *u8 + index) as usize;
+    @*/
+    //@ on_unwind_ens false;
+
+    impl<T> [T] {
+
+        fn as_chunks<N, 'a>(self: &'a [T]) -> (&'a [[T; N]], &'a [T]);
+        /*@
+        req thread_token(?t) &*& [_](<[T]>.share(?k, t, self)) &*& [?q]lifetime_token(k);
+        @*/
+        /*@
+        ens thread_token(t) &*& [q]lifetime_token(k) &*&
+            [_](<[[T; N]]>.share(k, t, result.0)) &*& [_](<[T]>.share(k, t, result.1)) &*&
+            result.0 as *T == self as *T &*& result.1.len() <= self.len() &*&
+            result.1 as *T == self as *T + (self.len() - result.1.len()) &*&
+            result.0.len() * std::mem::size_of::<[T; N]>() == (self.len() - result.1.len()) * std::mem::size_of::<T>();
+        @*/
+        //@ on_unwind_ens thread_token(t) &*& [q]lifetime_token(k);
+
+        unsafe fn align_to<U, 'a>(self: &'a [T]) -> (&'a [T], &'a [U], &'a [T]);
+        /*@
+        req thread_token(?t) &*& [_](<[T]>.share(?k, t, self)) &*& [?q]lifetime_token(k) &*&
+            typeid(T) == typeid(u8) &*& typeid(U) == typeid(u16);
+        @*/
+        /*@
+        ens thread_token(t) &*& [q]lifetime_token(k) &*&
+            [_](<[T]>.share(k, t, result.0)) &*& [_](<[U]>.share(k, t, result.1)) &*& [_](<[T]>.share(k, t, result.2)) &*&
+            result.0 as *T == self as *T &*&
+            result.0.len() + result.1.len() * 2 + result.2.len() == self.len();
+        @*/
+        //@ on_unwind_ens false;
+
+        fn iter<'a>(self: &'a [T]) -> Iter<'a, T>;
+        //@ req thread_token(?t) &*& [_](<[T]>.share(?k, t, self)) &*& [?q]lifetime_token(k);
+        //@ ens thread_token(t) &*& [q]lifetime_token(k) &*& <Iter<'a, T>>.own(t, result);
+        //@ on_unwind_ens false;
+
+        fn is_empty<'a>(self: &'a [T]) -> bool;
+        //@ req thread_token(?t) &*& [_](<[T]>.share(?k, t, self)) &*& [?q]lifetime_token(k);
+        //@ ens thread_token(t) &*& [q]lifetime_token(k) &*& result == (self.len() == 0);
+        //@ on_unwind_ens false;
+
+    }
+
+    // `core::slice::range(range, ..len)` validates and normalizes `range` to `start..end`
+    // with `0 <= start <= end <= len` (panicking otherwise).
+    fn range<R>(range: R, bounds: std::ops::RangeTo<usize>) -> std::ops::Range<usize>;
+    //@ req thread_token(?t) &*& <R>.own(t, range);
+    //@ ens thread_token(t) &*& 0 <= result.start &*& result.start <= result.end &*& result.end <= bounds.end;
+    //@ on_unwind_ens thread_token(t);
+
+}
+
+mod str {
+
+    // Linked only after the exporter checks the actual from_boxed_utf8_unchecked body.
+    unsafe fn cast_utf8_box(v: std::boxed::Box<[u8], std::alloc::Global>)
+        -> std::boxed::Box<str, std::alloc::Global>;
+    /*@
+    req thread_token(?t) &*& std::boxed::Box_in::<[u8], std::alloc::Global>(t, v, _, ?contents) &*&
+        is_valid_utf8(slice_elems(contents)) == true;
+    @*/
+    //@ ens thread_token(t) &*& <std::boxed::Box<str, std::alloc::Global>>.own(t, result);
+    //@ on_unwind_ens false;
+
+    mod pattern {
+        /*@
+        // The end of the last match returned by this searcher. Its haystack
+        // comes from the same shared byte loan used by Pattern::into_searcher.
+        pred SearcherPosition<S>(t: thread_id_t, state: S; haystack: *str,
+            bytes: list<u8>, last: usize);
+
+        pred_ctor SearcherCursorContent<S>(t: thread_id_t, p: *S, haystack: *str,
+            bytes: list<u8>, cursor: i32)() =
+            *p |-> ?state &*& <S>.own(t, state) &*&
+            [1/2]ghost_cell::<usize>(cursor, ?last) &*&
+            SearcherPosition::<S>(t, state, haystack, bytes, last);
+
+        inductive SearcherLoan = OrdinarySearcher
+            | PositionedSearcher(*str, list<u8>, i32, usize);
+
+        pred SearcherBorrow<S>(k: lifetime_t, t: thread_id_t, p: *S, loan: SearcherLoan) =
+            match loan {
+                OrdinarySearcher => full_borrow(k, (<S>.full_borrow_content)(t, p)),
+                PositionedSearcher(haystack, bytes, cursor, last) =>
+                    full_borrow(k, SearcherCursorContent::<S>(t, p, haystack, bytes, cursor)) &*&
+                    [1/2]ghost_cell::<usize>(cursor, last)
+            };
+
+        fix after_match(loan: SearcherLoan, end: usize) -> SearcherLoan {
+            match loan {
+                OrdinarySearcher => OrdinarySearcher,
+                PositionedSearcher(haystack, bytes, cursor, last) =>
+                    PositionedSearcher(haystack, bytes, cursor, end)
+            }
+        }
+
+        fix next_match_range(loan: SearcherLoan, start: usize, end: usize) -> bool {
+            match loan {
+                OrdinarySearcher => true,
+                PositionedSearcher(haystack, bytes, cursor, last) =>
+                    last <= start && start <= end && end <= length(bytes) &&
+                    is_char_boundary(bytes, start) && is_char_boundary(bytes, end)
+            }
+        }
+
+        fix front_agrees(loan: SearcherLoan, front: usize) -> bool {
+            match loan {
+                OrdinarySearcher => true,
+                PositionedSearcher(haystack, bytes, cursor, last) =>
+                    front == last && last <= length(bytes) && is_char_boundary(bytes, last)
+            }
+        }
+
+        lem next_match_advances_front(loan: SearcherLoan, start: usize, end: usize)
+            req next_match_range(loan, start, end) == true;
+            ens front_agrees(after_match(loan, end), end) == true;
+        {
+            match loan {
+                OrdinarySearcher => {}
+                PositionedSearcher(source, bytes, cursor, last) => {}
+            }
+        }
+        @*/
+
+        mod Pattern {
+            // Rustc exports this GAT projection with the haystack lifetime
+            // and the input pattern type. This symbol identifies the type only.
+            //@ fix Searcher_typeid(haystack_lifetime: *_, pattern_type: *_) -> *_;
+
+            fn into_searcher<P, 'h>(self: P, haystack: &'h str) -> <P as std::str::pattern::Pattern<'h>>::Searcher;
+            /*@
+            req thread_token(?t) &*& <P>.own(t, self) &*& [?q]lifetime_token('h) &*&
+                str_share('h, t, haystack) &*& exists(?bytes) &*&
+                [_]frac_borrow('h, mk_array::<u8>(haystack as *u8, haystack.len(), bytes));
+            @*/
+            /*@
+            ens thread_token(t) &*& [q]lifetime_token('h) &*& str_share('h, t, haystack) &*&
+                < <P as std::str::pattern::Pattern<'h>>::Searcher>.own(t, result) &*&
+                std::str::pattern::SearcherPosition::< <P as std::str::pattern::Pattern<'h>>::Searcher>
+                    (t, result, haystack, bytes, 0);
+            @*/
+            //@ on_unwind_ens thread_token(t) &*& [q]lifetime_token('h) &*& str_share('h, t, haystack);
+        }
+
+        trait Searcher<'haystack> {
+            // Both variants retain the exclusive borrow. The positioned loan
+            // also stores the documented watermark of successful matches.
+            fn next_match<'call>(self: &'call mut Self) -> std::option::Option<(usize, usize)>;
+            /*@
+            req thread_token(?t) &*& exists(?loan) &*&
+                std::str::pattern::SearcherBorrow::<Self>(?k, t, self, loan) &*& [?q]lifetime_token(k);
+            @*/
+            /*@
+            ens thread_token(t) &*& [q]lifetime_token(k) &*&
+                <std::option::Option<(usize, usize)>>.own(t, result) &*&
+                match result {
+                    Option::None => std::str::pattern::SearcherBorrow::<Self>(k, t, self, loan),
+                    Option::Some(pair) =>
+                        std::str::pattern::SearcherBorrow::<Self>(k, t, self,
+                            std::str::pattern::after_match(loan, pair.1)) &*&
+                        std::str::pattern::next_match_range(loan, pair.0, pair.1) == true
+                };
+            @*/
+            //@ on_unwind_ens thread_token(t) &*& [q]lifetime_token(k) &*& std::str::pattern::SearcherBorrow::<Self>(k, t, self, loan);
+        }
+    }
+
+    struct Bytes<'a>;
+
+    /*@
+    fix Bytes::as_str<'a>(b: Bytes<'a>) -> *str;
+    fix bytes_iter_str<I>(iter: I) -> *str;
+    fix is_str_bytes_iter<I>() -> bool;
+
+    lem_auto(bytes_iter_str::<std::str::Bytes<'a>>(b)) bytes_iter_str_Bytes<'a>(b: std::str::Bytes<'a>);
+        req true;
+        ens bytes_iter_str::<std::str::Bytes<'a>>(b) == b.as_str();
+
+    lem_auto(is_str_bytes_iter::<std::str::Bytes<'a>>()) is_str_bytes_iter_Bytes<'a>();
+        req true;
+        ens is_str_bytes_iter::<std::str::Bytes<'a>>() == true;
+
+    lem Chars_as_str_upcast<'a0, 'a1>(c: std::str::Chars<'a0>);
+        req true;
+        ens upcast::<std::str::Chars<'a0>, std::str::Chars<'a1>>(c).as_str() == c.as_str();
+
+    // Lifetimes are erased in MIR; `Chars::as_str` depends only on the `Chars` value, not its lifetime argument.
+    lem Chars_as_str_lft<'a0, 'a1>(c: std::str::Chars<'a0>);
+        req true;
+        ens std::str::Chars::as_str::<'a1>(c) == std::str::Chars::as_str::<'a0>(c);
+
+    // Lifetimes are erased in MIR; `Chars<'a0>` and `Chars<'a1>` have identical memory representation.
+    lem points_to_Chars_lft<'a0, 'a1>(p: *std::str::Chars<'a0>);
+        req [?f](*p |-> ?c);
+        ens [f](*(p as *std::str::Chars<'a1>) |-> c) &*&
+            std::str::Chars::as_str::<'a1>(c) == std::str::Chars::as_str::<'a0>(c);
+
+    lem usize_upcast(n: usize);
+        req true;
+        ens upcast::<usize, usize>(n) == n;
+
+    @*/
+
+    impl str {
+
+        // `str::is_char_boundary(index)` returns true iff `index` is a UTF-8 char boundary
+        // (0, len, or a non-continuation byte).
+        fn is_char_boundary<'a>(self: &'a str, index: usize) -> bool;
+        //@ req [?f](self as *u8)[..self.len()] |-> ?bs;
+        //@ ens [f](self as *u8)[..self.len()] |-> bs &*& result == is_char_boundary(bs, index);
+        //@ on_unwind_ens false;
+
+        // `str::bytes` returns a byte iterator over the slice's bytes.
+        fn bytes<'a>(self: &'a str) -> std::str::Bytes<'a>;
+        //@ req true;
+        //@ ens result.as_str() == self;
+        //@ on_unwind_ens false;
+
+    }
+
+    impl<'a> std::iter::DoubleEndedIterator for std::str::Chars<'a> {
+
+        // Decodes the last UTF-8 sequence of the remaining bytes (documented std contract
+        // of `Chars::next_back` / `next_code_point_reverse`).
+        fn next_back<'b>(self: &'b mut std::str::Chars<'a>) -> std::option::Option<char>;
+        //@ req *self |-> ?chars0 &*& [?f](chars0.as_str() as *u8)[..chars0.as_str().len()] |-> ?bs &*& is_valid_utf8(bs) == true;
+        /*@
+        ens [f](chars0.as_str() as *u8)[..chars0.as_str().len()] |-> bs &*& *self |-> ?chars1 &*&
+            match result {
+                Option::None => bs == [] &*& chars1.as_str() == chars0.as_str(),
+                Option::Some(c) =>
+                    bs != [] &*&
+                    is_unicode_scalar_value(c) == true &*&
+                    1 <= char_len_utf8(c) &*& char_len_utf8(c) <= length(bs) &*&
+                    drop(length(bs) - char_len_utf8(c), bs) == char_utf8(c) &*&
+                    is_valid_utf8(take(length(bs) - char_len_utf8(c), bs)) == true &*&
+                    chars1.as_str() as *u8 == chars0.as_str() as *u8 &*&
+                    chars1.as_str().len() == chars0.as_str().len() - char_len_utf8(c)
+            };
+        @*/
+        //@ on_unwind_ens false;
+
+    }
+
+}
+
+mod iter {
+
+    struct FromFn<F>(F)
+
+    struct Once<T>;
+    struct Chain<A, B> {
+        a: std::option::Option<A>,
+        b: std::option::Option<B>,
+    }
+
+    /*@
+    // The remaining initialized elements of Vec's owning iterator and
+    // the optional element held by Once. These states carry their ownership.
+    pred VecRejectionIter<T>(t: thread_id_t,
+        iter: std::vec::IntoIter<T, std::alloc::Global>; remaining: list<T>);
+    pred OnceRejectionIter<T>(t: thread_id_t, iter: Once<T>; pending: std::option::Option<T>);
+
+    pred OptionalVecRejections<T>(t: thread_id_t,
+        iter: std::option::Option<std::vec::IntoIter<T, std::alloc::Global>>; remaining: list<T>) =
+        match iter {
+            Option::None => remaining == nil,
+            Option::Some(a) => VecRejectionIter(t, a, remaining)
+        };
+
+    pred OptionalOnceRejections<T>(t: thread_id_t,
+        iter: std::option::Option<Once<T>>; remaining: list<T>) =
+        match iter {
+            Option::None => remaining == nil,
+            Option::Some(b) => OnceRejectionIter(t, b, ?pending) &*&
+                remaining == match pending { Option::None => nil, Option::Some(pair) => cons(pair, nil) }
+        };
+
+    pred RejectionChain<T>(t: thread_id_t,
+        iter: Chain<std::vec::IntoIter<T, std::alloc::Global>, Once<T>>; remaining: list<T>) =
+        OptionalVecRejections(t, iter.a, ?left) &*& OptionalOnceRejections(t, iter.b, ?right) &*&
+        remaining == append(left, right);
+
+    @*/
+
+    fn once<T>(value: T) -> std::iter::Once<T>;
+    //@ req thread_token(?t) &*& <T>.own(t, value);
+    //@ ens thread_token(t) &*& std::iter::OnceRejectionIter(t, result, std::option::Option::Some(value));
+    //@ on_unwind_ens false;
+
+    mod IntoIterator {
+        specialize<T> std::iter::IntoIterator::into_iter<std::vec::Vec<T, std::alloc::Global>> as into_iter_owned_vec;
+        fn into_iter_owned_vec<T>(self: std::vec::Vec<T, std::alloc::Global>)
+            -> std::vec::IntoIter<T, std::alloc::Global>;
+        /*@
+        req thread_token(?t) &*& std::vec::Vec(self, _, ?elems) &*& foreach(elems, own::<T>(t));
+        @*/
+        //@ ens thread_token(t) &*& std::iter::VecRejectionIter(t, result, elems);
+        //@ on_unwind_ens false;
+
+        specialize<T> std::iter::IntoIterator::into_iter<std::iter::Chain<std::vec::IntoIter<T, std::alloc::Global>, std::iter::Once<T>>> as into_iter_forward_chain;
+        fn into_iter_forward_chain<T>(self: std::iter::Chain<std::vec::IntoIter<T, std::alloc::Global>, std::iter::Once<T>>)
+            -> std::iter::Chain<std::vec::IntoIter<T, std::alloc::Global>, std::iter::Once<T>>;
+        //@ req true;
+        //@ ens result == self;
+        //@ on_unwind_ens false;
+    }
+
+    mod Iterator {
+        specialize<T> std::iter::Iterator::chain<std::vec::IntoIter<T, std::alloc::Global>, std::iter::Once<T>> as chain_owned_vec_and_once;
+        fn chain_owned_vec_and_once<T>(self: std::vec::IntoIter<T, std::alloc::Global>, other: std::iter::Once<T>)
+            -> std::iter::Chain<std::vec::IntoIter<T, std::alloc::Global>, std::iter::Once<T>>;
+        /*@
+        req thread_token(?t) &*& std::iter::VecRejectionIter(t, self, ?elems) &*&
+            std::iter::OnceRejectionIter(t, other, std::option::Option::Some(?last));
+        @*/
+        /*@
+        ens thread_token(t) &*& std::iter::RejectionChain(t, result, append(elems, [last]));
+        @*/
+        //@ on_unwind_ens false;
+
+        specialize<T, 'a> std::iter::Iterator::next<std::iter::Chain<std::vec::IntoIter<T, std::alloc::Global>, std::iter::Once<T>>, 'a> as next_forward_chain;
+        fn next_forward_chain<T, 'a>(self: &'a mut std::iter::Chain<std::vec::IntoIter<T, std::alloc::Global>, std::iter::Once<T>>)
+            -> std::option::Option<T>;
+        //@ req thread_token(?t) &*& *self |-> ?value &*& std::iter::RejectionChain(t, value, ?rest);
+        /*@
+        ens thread_token(t) &*& *self |-> ?next &*&
+            match rest {
+                nil => result == std::option::Option::None &*& std::iter::RejectionChain(t, next, nil),
+                cons(element, tail) => result == std::option::Option::Some(element) &*&
+                    <T>.own(t, element) &*& std::iter::RejectionChain(t, next, tail)
+            };
+        @*/
+        //@ on_unwind_ens false;
+    }
+
+    trait IntoIterator {
+        type Item;
+        type IntoIter;
+
+        fn into_iter(self: Self) -> <Self as std::iter::IntoIterator>::IntoIter;
+        //@ req thread_token(?t) &*& <Self>.own(t, self);
+        //@ ens thread_token(t) &*& < <Self as std::iter::IntoIterator>::IntoIter>.own(t, result);
+        //@ on_unwind_ens thread_token(t);
+    }
+
+    mod Iterator {
+        fn size_hint<I, 'a>(self: &'a I) -> (usize, std::option::Option<usize>);
+        /*@
+        req thread_token(?t) &*& ref_readonly_end_token(self, ?origin, ?f) &*&
+            ref_initialized(self) &*& [f](*self |-> ?iterator) &*& [f](*origin |-> iterator) &*&
+            f == 1/2 &*& <I>.own(t, iterator);
+        @*/
+        //@ ens thread_token(t) &*& *origin |-> ?updated &*& <I>.own(t, updated);
+        //@ on_unwind_ens thread_token(t) &*& *origin |-> ?updated &*& <I>.own(t, updated);
+
+        fn for_each<I, F>(self: I, f: F);
+        //@ req thread_token(?t) &*& <I>.own(t, self) &*& <F>.own(t, f);
+        //@ ens thread_token(t);
+        //@ on_unwind_ens thread_token(t);
+    }
+
+    struct Copied<I>;
+    struct Cloned<I>;
+    struct Map<I, F>;
+    struct Rev<I>;
+
+    /*@
+    fix Rev::inner<I>(r: Rev<I>) -> I;
+
+    @*/
+
+    mod Iterator {
+
+        fn copied<I, 'a, T>(self: I) -> std::iter::Copied<I>;
+        //@ req thread_token(?t) &*& <I>.own(t, self);
+        //@ ens thread_token(t) &*& <std::iter::Copied<I>>.own(t, result);
+        //@ on_unwind_ens false;
+
+        fn cloned<I, 'a, T>(self: I) -> std::iter::Cloned<I>;
+        //@ req thread_token(?t) &*& <I>.own(t, self);
+        //@ ens thread_token(t) &*& <std::iter::Cloned<I>>.own(t, result);
+        //@ on_unwind_ens false;
+
+        fn map<I, B, F>(self: I, f: F) -> std::iter::Map<I, F>;
+        //@ req thread_token(?t) &*& <I>.own(t, self) &*& <F>.own(t, f);
+        //@ ens thread_token(t) &*& <std::iter::Map<I, F>>.own(t, result);
+        //@ on_unwind_ens false;
+
+        fn rev<I>(self: I) -> std::iter::Rev<I>;
+        //@ req true;
+        //@ ens result.inner() == self;
+        //@ on_unwind_ens false;
+
+    }
+
+    trait DoubleEndedIterator {
+
+        fn next_back<'a>(self: &'a mut Self) -> std::option::Option< <Self as std::iter::Iterator>::Item>;
+        //@ req thread_token(?t) &*& *self |-> ?self0 &*& <Self>.own(t, self0);
+        //@ ens thread_token(t) &*& *self |-> ?self1 &*& <Self>.own(t, self1) &*& <std::option::Option< <Self as std::iter::Iterator>::Item>>.own(t, result);
+        //@ on_unwind_ens thread_token(t) &*& *self |-> ?self1 &*& <Self>.own(t, self1);
+
+    }
+
+    trait ExactSizeIterator {
+
+        fn len<'a>(self: &'a Self) -> usize;
+        //@ req [?f](*self |-> ?self0);
+        //@ ens [f](*self |-> self0);
+        //@ on_unwind_ens false;
+
+    }
+
+    impl std::iter::ExactSizeIterator for std::ops::Range<usize> {
+
+        fn len<'a>(self: &'a std::ops::Range<usize>) -> usize;
+        //@ req [?f](*self |-> ?r) &*& r.start <= r.end;
+        //@ ens [f](*self |-> r) &*& result == r.end - r.start;
+        //@ on_unwind_ens false;
+
+    }
+
+    impl<'a> std::iter::Iterator for std::iter::Rev<std::str::Chars<'a>> {
+
+        fn next<'b>(self: &'b mut std::iter::Rev<std::str::Chars<'a>>) -> std::option::Option<char>;
+        //@ req *self |-> ?rev0 &*& [?f](rev0.inner().as_str() as *u8)[..rev0.inner().as_str().len()] |-> ?bs &*& is_valid_utf8(bs) == true;
+        /*@
+        ens [f](rev0.inner().as_str() as *u8)[..rev0.inner().as_str().len()] |-> bs &*& *self |-> ?rev1 &*&
+            match result {
+                Option::None => bs == [] &*& rev1.inner().as_str() == rev0.inner().as_str(),
+                Option::Some(c) =>
+                    bs != [] &*&
+                    is_unicode_scalar_value(c) == true &*&
+                    1 <= char_len_utf8(c) &*& char_len_utf8(c) <= length(bs) &*&
+                    drop(length(bs) - char_len_utf8(c), bs) == char_utf8(c) &*&
+                    is_valid_utf8(take(length(bs) - char_len_utf8(c), bs)) == true &*&
+                    rev1.inner().as_str() as *u8 == rev0.inner().as_str() as *u8 &*&
+                    rev1.inner().as_str().len() == rev0.inner().as_str().len() - char_len_utf8(c)
+            };
+        @*/
+        //@ on_unwind_ens false;
+
+    }
+
+}
+
+mod char {
+
+    struct DecodeUtf16<I>;
+    struct DecodeUtf16Error {
+        code: u16,
+    }
+
+    /*@
+    pred_fam_inst DecodeUtf16Error_own()(t: thread_id_t, error: DecodeUtf16Error) =
+        0xd800 <= error.code &*& error.code < 0xe000;
+
+    lem char_utf8_valid_for_scalar(c: char);
+        req is_unicode_scalar_value(c) == true;
+        ens is_valid_utf8(char_utf8(c)) == true;
+    @*/
+
+    mod methods {
+        impl char {
+            fn decode_utf16<I>(iter: I) -> std::char::DecodeUtf16<I>;
+            //@ req thread_token(?t) &*& <I>.own(t, iter);
+            //@ ens thread_token(t) &*& <std::char::DecodeUtf16<I>>.own(t, result);
+            //@ on_unwind_ens false;
+        }
+    }
+
+    impl<I> std::iter::IntoIterator for std::char::DecodeUtf16<I> {
+        fn into_iter(self: std::char::DecodeUtf16<I>) -> std::char::DecodeUtf16<I>;
+        //@ req true;
+        //@ ens result == self;
+        //@ on_unwind_ens false;
+    }
+
+    impl<I> std::iter::Iterator for std::char::DecodeUtf16<I> {
+        fn next<'a>(self: &'a mut std::char::DecodeUtf16<I>) -> std::option::Option<std::result::Result<char, std::char::DecodeUtf16Error>>;
+        //@ req thread_token(?t) &*& *self |-> ?d0 &*& <std::char::DecodeUtf16<I>>.own(t, d0);
+        /*@
+        ens thread_token(t) &*& *self |-> ?d1 &*& <std::char::DecodeUtf16<I>>.own(t, d1) &*&
+            match result {
+                Option::None => true,
+                Option::Some(unit) => <std::result::Result<char, std::char::DecodeUtf16Error>>.own(t, unit)
+            };
+        @*/
+        //@ on_unwind_ens thread_token(t) &*& *self |-> ?d1 &*& <std::char::DecodeUtf16<I>>.own(t, d1);
+    }
+
+    // This model covers scalar values, the only inputs at the String call sites.
+    unsafe fn encode_utf8_raw_unchecked(code: u32, dst: *mut u8);
+    //@ req is_unicode_scalar_value(code as char) == true &*& dst[..char_len_utf8(code as char)] |-> _;
+    /*@
+    ens dst[..char_len_utf8(code as char)] |-> char_utf8(code as char) &*&
+        is_valid_utf8(char_utf8(code as char)) == true;
+    @*/
+    //@ on_unwind_ens false;
+
+}
+
+mod vec {
+
+    struct IntoIter<T, A>;
+
+    struct Drain<'a, T, A>;
+
+    struct Splice<'a, I, A>;
+
+    /*@
+    // Precise view of a `Vec` minus its initialized elements `buffer[..len]`
+    // (combining `Vec_minus_buffer` and uninitialized spare capacity `buffer[len..capacity]`).
+    // `Vec_buf(self)` is the pure buffer pointer stored inside the `Vec` value.
+    fix Vec_buf<T, A>(self: Vec<T, A>) -> *T;
+
+    pred Vec_minus_elems<T, A>(self: Vec<T, A>, capacity: usize, len: usize, buffer: *T;);
+
+    lem Vec_separate_elems<T, A>(self: Vec<T, A>) -> *T;
+        req [?f]Vec::<T, A>(self, ?capacity, ?elems);
+        ens [f]Vec_minus_elems::<T, A>(self, capacity, length(elems), result) &*&
+            [f]result[..length(elems)] |-> elems &*&
+            result == Vec_buf(self);
+
+    lem Vec_unseparate_elems<T, A>(self: Vec<T, A>);
+        req [?f]Vec_minus_elems::<T, A>(self, ?capacity, ?len, ?buffer) &*&
+            [f]buffer[..len] |-> ?elems;
+        ens [f]Vec::<T, A>(self, capacity, elems) &*&
+            buffer == Vec_buf(self);
+
+    lem Vec_u8_to_own(t: thread_id_t, self: Vec<u8, std::alloc::Global>);
+        req Vec::<u8, std::alloc::Global>(self, ?capacity, ?elems);
+        ens <Vec<u8, std::alloc::Global>>.own(t, self);
+
+    lem Vec_minus_buffer_merge<T, A>(self: Vec<T, A>);
+        req [?f1]Vec_minus_buffer::<T, A>(self, ?cap, ?len, ?buf) &*& [?f2]Vec_minus_buffer::<T, A>(self, cap, len, buf);
+        ens [f1 + f2]Vec_minus_buffer::<T, A>(self, cap, len, buf);
+
+    // For a non-zero-sized element type, separate the initialized elements
+    // and the writable storage above the length without making it readable.
+    lem Vec_separate_spare<T, A>(self: Vec<T, A>) -> *T;
+        req Vec::<T, A>(self, ?capacity, ?elems) &*& std::mem::size_of::<T>() > 0;
+        ens Vec_minus_buffer::<T, A>(self, capacity, length(elems), result) &*&
+            result[..length(elems)] |-> elems &*& array_(result + length(elems), capacity - length(elems), _);
+
+    lem Vec_unseparate_spare<T, A>(self: Vec<T, A>);
+        req Vec_minus_buffer::<T, A>(self, ?capacity, ?len, ?buffer) &*&
+            buffer[..len] |-> ?elems &*& array_(buffer + len, capacity - len, _) &*& std::mem::size_of::<T>() > 0;
+        ens Vec::<T, A>(self, capacity, elems);
+
+    // Each exclusive handle holds the vector until its iterator is destroyed.
+    // The splice handle also holds the byte loan used by the replacement iterator.
+    pred vec_byte_drain_handle<'a, T, A>(drain: Drain<'a, T, A>;
+        vec_ptr: *Vec<T, A>, post_elems: list<T>);
+
+    pred vec_byte_splice_handle<'a, I, T, A>(splice: Splice<'a, I, A>;
+        vec_ptr: *Vec<T, A>, post_elems: list<T>, rep_ptr: *u8, rep_len: usize,
+        rep_frac: real, rep_bytes: list<u8>);
+
+    fix cast_u8_list<T>(xs: list<u8>) -> list<T>;
+
+    lem_auto(cast_u8_list::<u8>(xs)) cast_u8_list_u8(xs: list<u8>);
+        req true;
+        ens cast_u8_list::<u8>(xs) == xs;
+    @*/
+
+    impl<T> Vec<T> {
+
+        fn with_capacity(capacity: usize) -> Vec<T, std::alloc::Global>;
+        //@ req true;
+        //@ ens Vec(result, ?cap, []) &*& capacity <= cap;
+        //@ on_unwind_ens true;
+
+    }
+
+    impl<T, A> Vec<T, A> {
+
+        fn capacity<'a>(self: &'a Vec<T, A>) -> usize;
+        //@ req [?f](*self |-> ?v) &*& [?fv]Vec::<T, A>(v, ?cap, ?elems) &*& std::mem::size_of::<T>() > 0;
+        //@ ens [f](*self |-> v) &*& [fv]Vec::<T, A>(v, cap, elems) &*& result == cap;
+        //@ on_unwind_ens false;
+
+        fn as_slice<'a>(self: &'a Vec<T, A>) -> &'a [T];
+        //@ req [?f](*self |-> ?v) &*& [?fv]Vec_minus_elems::<T, A>(v, ?cap, ?len, ?buf);
+        //@ ens [f](*self |-> v) &*& [fv]Vec_minus_elems::<T, A>(v, cap, len, buf) &*& result as *T == buf &*& result.len() == len;
+        //@ on_unwind_ens false;
+
+        fn into_boxed_slice(self: Vec<T, A>) -> std::boxed::Box<[T], A>;
+        /*@
+        req thread_token(?t) &*& Vec::<T, A>(self, _, ?elems) &*&
+            typeid(T) == typeid(u8) &*& typeid(A) == typeid(std::alloc::Global);
+        @*/
+        //@ ens thread_token(t) &*& std::boxed::Box_in::<[T], A>(t, result, _, slice_of_elems(elems));
+        //@ on_unwind_ens thread_token(t);
+
+        fn as_mut_slice<'a>(self: &'a mut Vec<T, A>) -> &'a mut [T];
+        //@ req (*self |-> ?v) &*& Vec_minus_elems::<T, A>(v, ?cap, ?len, ?buf);
+        //@ ens (*self |-> v) &*& Vec_minus_elems::<T, A>(v, cap, len, buf) &*& result as *T == buf &*& result.len() == len;
+        //@ on_unwind_ens false;
+
+        fn extend_from_slice<'a, 'b>(self: &'a mut Vec<T, A>, other: &'b [T]);
+        //@ req *self |-> ?v0 &*& Vec::<T, A>(v0, _, ?elems) &*& [?f](other as *T)[..other.len()] |-> ?other_elems &*& typeid(T) == typeid(u8) &*& typeid(A) == typeid(std::alloc::Global);
+        //@ ens *self |-> ?v1 &*& Vec::<T, A>(v1, _, append(elems, other_elems)) &*& [f](other as *T)[..other.len()] |-> other_elems;
+        //@ on_unwind_ens *self |-> ?v1 &*& Vec::<T, A>(v1, _, elems) &*& [f](other as *T)[..other.len()] |-> other_elems;
+
+        // `Vec::split_off(at)`: panics if `at > len`; otherwise splits into `[0..at)` and `[at..len)`.
+        fn split_off<'a>(self: &'a mut Vec<T, A>, at: usize) -> Vec<T, A>;
+        //@ req *self |-> ?v0 &*& Vec::<T, A>(v0, ?cap, ?elems) &*& 0 <= at &*& at <= length(elems);
+        //@ ens *self |-> ?v1 &*& Vec::<T, A>(v1, cap, take(at, elems)) &*& Vec::<T, A>(result, _, drop(at, elems));
+        //@ on_unwind_ens *self |-> ?v1 &*& Vec::<T, A>(v1, cap, elems);
+
+        fn leak<'a>(self: Vec<T, A>) -> &'a mut [T];
+        //@ req Vec::<T, A>(self, _, ?elems);
+        //@ ens (result as *T)[..result.len()] |-> elems &*& result.len() == length(elems);
+        //@ on_unwind_ens false;
+
+        // The byte-drain destructor restores the vector and moves its tail.
+        fn drain<R, 'a>(self: &'a mut Vec<T, A>, range: R) -> Drain<'a, T, A>;
+        /*@
+        req thread_token(?t) &*& *self |-> ?v0 &*& Vec::<T, A>(v0, ?cap, ?elems) &*&
+            typeid(T) == typeid(u8) &*& typeid(A) == typeid(std::alloc::Global) &*&
+            typeid(R) == typeid(std::ops::Range<usize>) &*&
+            std::str::str_slice_index_range::<R>(range) == pair(?start, ?end) &*&
+            0 <= start &*& start <= end &*& end <= length(elems);
+        @*/
+        /*@
+        ens thread_token(t) &*& <Drain<'a, T, A>>.own(t, result) &*&
+            vec_byte_drain_handle(result, self, append(take(start, elems), drop(end, elems)));
+        @*/
+        //@ on_unwind_ens false;
+
+        // The reserved byte splice reads the replacement before returning either loan.
+        fn splice<R, I, 'a>(self: &'a mut Vec<T, A>, range: R, replace_with: I) -> Splice<'a, I, A>;
+        /*@
+        req thread_token(?t) &*& *self |-> ?v0 &*& Vec::<T, A>(v0, ?cap, ?elems) &*&
+            typeid(T) == typeid(u8) &*& typeid(A) == typeid(std::alloc::Global) &*&
+            typeid(R) == typeid(std::ops::Range<usize>) &*&
+            std::str::str_slice_index_range::<R>(range) == pair(?start, ?end) &*&
+            0 <= start &*& start <= end &*& end <= length(elems) &*&
+            std::str::is_str_bytes_iter::<I>() == true &*&
+            [?fs](std::str::bytes_iter_str::<I>(replace_with) as *u8)[..std::str::bytes_iter_str::<I>(replace_with).len()] |-> ?rep_bs &*&
+            length(elems) - (end - start) + length(rep_bs) <= cap;
+        @*/
+        /*@
+        ens thread_token(t) &*& <Splice<'a, I, A>>.own(t, result) &*&
+            vec_byte_splice_handle::<'a, I, T, A>(result, self,
+                append(take(start, elems), append(cast_u8_list::<T>(rep_bs), drop(end, elems))),
+                std::str::bytes_iter_str::<I>(replace_with) as *u8,
+                std::str::bytes_iter_str::<I>(replace_with).len(), fs, rep_bs);
+        @*/
+        //@ on_unwind_ens false;
+
+    }
+
+}
+
+mod ptr {
+    specialize<T> std::ptr::drop_in_place<std::iter::Chain<std::vec::IntoIter<T, std::alloc::Global>,
+        std::iter::Once<T>>> as drop_rejection_chain;
+    unsafe fn drop_rejection_chain<T>(ptr: *mut std::iter::Chain<std::vec::IntoIter<T,
+        std::alloc::Global>, std::iter::Once<T>>);
+    /*@
+    req thread_token(?t) &*& *ptr |-> ?iter &*&
+        std::iter::RejectionChain(t, iter, ?remaining) &*& typeid(T) == typeid((usize, usize));
+    @*/
+    //@ ens thread_token(t) &*& *ptr |-?-> _;
+    //@ on_unwind_ens false;
+
+    specialize<'a> std::ptr::drop_in_place<std::vec::Drain<'a, u8, std::alloc::Global>> as drop_vec_byte_drain;
+    unsafe fn drop_vec_byte_drain<'a>(ptr: *mut std::vec::Drain<'a, u8, std::alloc::Global>);
+    /*@
+    req thread_token(?t) &*& *ptr |-> ?d &*& <std::vec::Drain<'a, u8, std::alloc::Global>>.own(t, d) &*&
+        std::vec::vec_byte_drain_handle(d, ?vec_ptr, ?post_elems);
+    @*/
+    //@ ens thread_token(t) &*& *ptr |-?-> _ &*& *vec_ptr |-> ?v &*& std::vec::Vec(v, _, post_elems);
+    //@ on_unwind_ens false;
+
+    specialize<'a, 'b> std::ptr::drop_in_place<std::vec::Splice<'a, std::str::Bytes<'b>, std::alloc::Global>> as drop_reserved_byte_splice;
+    unsafe fn drop_reserved_byte_splice<'a, 'b>(ptr: *mut std::vec::Splice<'a, std::str::Bytes<'b>, std::alloc::Global>);
+    /*@
+    req thread_token(?t) &*& *ptr |-> ?s &*&
+        <std::vec::Splice<'a, std::str::Bytes<'b>, std::alloc::Global>>.own(t, s) &*&
+        std::vec::vec_byte_splice_handle::<'a, std::str::Bytes<'b>, u8, std::alloc::Global>(
+            s, ?vec_ptr, ?post_elems, ?rep_ptr, ?rep_len, ?rep_frac, ?rep_bytes);
+    @*/
+    /*@
+    ens thread_token(t) &*& *ptr |-?-> _ &*& *vec_ptr |-> ?v &*& std::vec::Vec(v, _, post_elems) &*&
+        [rep_frac]rep_ptr[..rep_len] |-> rep_bytes;
+    @*/
+    //@ on_unwind_ens false;
+}
+
+// String crate-local specifications
+mod string {
+    trait FromCharIterSpec {
+        fn to_string_spec(self: Self) -> string::String;
+        //@ req thread_token(?t) &*& <Self>.own(t, self);
+        //@ ens thread_token(t) &*& <string::String>.own(t, result);
+        //@ on_unwind_ens thread_token(t);
+    }
+
+    trait SpecExtendChars {
+        fn spec_extend_into<'a>(self: Self, target: &'a mut string::String);
+        //@ req thread_token(?t) &*& *target |-> ?s0 &*& <string::String>.own(t, s0) &*& <Self>.own(t, self);
+        //@ ens thread_token(t) &*& *target |-> ?s1 &*& <string::String>.own(t, s1);
+        //@ on_unwind_ens thread_token(t) &*& *target |-> ?s1 &*& <string::String>.own(t, s1);
+    }
+}
+
+mod std {
+    mod ops {
+        mod Index {
+            // The compiler resolves this call to the checked String Index
+            // forwarding body, specialized to RangeFrom<usize>.
+            fn index_string_suffix<'a>(self: &'a string::String, i: std::ops::RangeFrom<usize>) -> &'a str;
+            /*@
+            req [?f](*self).vec |-> ?v &*& [?fv]std::vec::Vec_minus_elems(v, ?cap, ?len, ?buf) &*&
+                [?fb]buf[..len] |-> ?bytes &*& is_valid_utf8(bytes) == true;
+            @*/
+            /*@
+            ens [f](*self).vec |-> v &*& [fv]std::vec::Vec_minus_elems(v, cap, len, buf) &*&
+                [fb]buf[..i.start] |-> take(i.start, bytes) &*&
+                [fb](buf + i.start)[..len - i.start] |-> drop(i.start, bytes) &*&
+                i.start <= len &*& is_char_boundary(bytes, i.start) == true &*&
+                result as *u8 == buf + i.start &*& result.len() == len - i.start;
+            @*/
+            /*@
+            on_unwind_ens [f](*self).vec |-> v &*& [fv]std::vec::Vec_minus_elems(v, cap, len, buf) &*&
+                [fb]buf[..len] |-> bytes &*& is_char_boundary(bytes, i.start) == false;
+            @*/
+        }
+    }
+}
+
+specialize std::ops::Add::add<string::String, &'_ str> as "string::<string::String as core::ops::Add<&str>>::add";
+
+mod std {
+    mod result {
+        specialize "std::result::Result::<T, E>::unwrap_or"<char, std::char::DecodeUtf16Error> as unwrap_or_scalar;
+
+        fn unwrap_or_scalar(self: Result<char, std::char::DecodeUtf16Error>, default: char) -> char;
+        //@ req thread_token(?t) &*& <Result<char, std::char::DecodeUtf16Error>>.own(t, self) &*& is_unicode_scalar_value(default) == true;
+        /*@
+        ens thread_token(t) &*& char_own(t, result) &*&
+            match self {
+                Result::Ok(value) => result == value,
+                Result::Err(error) => result == default
+            };
+        @*/
+        //@ on_unwind_ens false;
+    }
+
+    mod iter {
+        // The checked debug prelude can update the owned iterator through
+        // size_hint or unwind before it forwards to FromIterator.
+        fn collect_forwarding_prelude<I>(iterator: I) -> I;
+        //@ req thread_token(?t) &*& <I>.own(t, iterator);
+        //@ ens thread_token(t) &*& <I>.own(t, result);
+        //@ on_unwind_ens thread_token(t);
+    }
+}
+
+mod std {
+    mod mem {
+        specialize<'a> std::mem::drop<string::String::retain::SetLenOnDrop<'a>> as drop_set_len_on_drop;
+
+        // The verified Drop method consumes the guard's retained-prefix
+        // invariant and restores its String. The guard's fields have trivial
+        // drop glue, so their cleanup does not change the restored buffer.
+        fn drop_set_len_on_drop<'a>(guard: string::String::retain::SetLenOnDrop<'a>);
+        //@ req thread_token(?t) &*& <string::String::retain::SetLenOnDrop<'a>>.own(t, guard);
+        //@ ens thread_token(t) &*& *(guard.s) |-> ?restored &*& <string::String>.own(t, restored);
+        //@ on_unwind_ens false;
+    }
+    mod ptr {
+        // Implicit cleanup calls the same verified Drop method as mem::drop.
+        // Rejoin the initialized bytes with the Vec header for that call.
+        // The reference and integer fields have no further drop glue.
+        specialize<'a> std::ptr::drop_in_place<string::String::retain::SetLenOnDrop<'a>> as drop_retain_guard_in_place;
+        unsafe fn drop_retain_guard_in_place<'a>(guard: *mut string::String::retain::SetLenOnDrop<'a>);
+        /*@
+        req thread_token(?t) &*& *guard |-> ?g &*& (*g.s).vec |-> ?v &*&
+            std::vec::Vec_minus_elems(v, ?cap, ?len, ?buf) &*& buf[..len] |-> ?bytes &*&
+            g.del_bytes <= g.idx &*& g.idx <= len &*&
+            is_valid_utf8(take(g.idx - g.del_bytes, bytes)) == true;
+        @*/
+        //@ ens thread_token(t) &*& *guard |-?-> _ &*& *(g.s) |-> ?s &*& <string::String>.own(t, s);
+        //@ on_unwind_ens false;
+    }
+}

@@ -1,0 +1,390 @@
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -2123,6 +2123,8 @@
+     val ghost_stmts : Ast.stmt list
+     val body_imp_loc : Ast.loc
+     val body_tr_defs_ctx : body_tr_defs_ctx
++    val unwind_proof : string -> Ast.stmt list
++    val call_unwind_proof : Ast.loc -> Ast.stmt list
+   end) =
+   struct
+     module State = struct
+@@ -2881,8 +2883,14 @@
+           let bblock_id = translate_basic_block_id bblock_id_cpn in
+           ([ Ast.GotoStmt (loc, bblock_id) ], [ bblock_id ])
+ 
+-    let translate_fn_call (fn_call_data_cpn : FnCallDataRd.t) (loc : Ast.loc) =
++    let translate_fn_call ~unwind_proof (fn_call_data_cpn : FnCallDataRd.t) (loc : Ast.loc) =
+       let open FnCallDataRd in
++      let* call_loc = translate_span_data (call_span_get fn_call_data_cpn) in
++      let annotation = Args.call_unwind_proof call_loc in
++      let translate_call_unwind () =
++        let actions, targets = translate_unwind_action (unwind_action_get fn_call_data_cpn) loc in
++        unwind_proof @ annotation @ actions, targets
++      in
+       if initializes_only_field_from_argument_get fn_call_data_cpn then begin
+         let [operand] = args_get_list fn_call_data_cpn in
+         let* operand_stmts, [value] = translate_operands [(operand, loc)] in
+@@ -2900,7 +2908,7 @@
+             in
+             Ok (stmts, Mir.GotoTerminator (loc, target), [target])
+         | _ -> Error (`TrFnCall "The checked constructor must have a return target")
+-      end else if calls_mutable_field_with_unit_get fn_call_data_cpn && TranslatorArgs.ignore_unwind_paths then begin
++      end else if calls_mutable_field_with_unit_get fn_call_data_cpn then begin
+         let open Ast in
+         let callee = D.decode_operand (func_get fn_call_data_cpn) in
+         let* field = match callee with
+@@ -2936,6 +2944,9 @@
+            can retain ghost lifetimes that rustc erased in the call metadata. *)
+         let reborrow = CallExpr (loc, "create_ref_mut", [], [],
+           [LitPat field], Static) in
++        let reborrow =
++          if TranslatorArgs.ignore_unwind_paths then reborrow
++          else CallExpr (loc, "fn_outcome_result", [], [], [LitPat reborrow], Static) in
+         let field_ref_decl =
+           DeclStmt (loc, [(loc, None, field_ref, Some reborrow, (ref false, ref None))])
+         in
+@@ -2948,15 +2959,29 @@
+               [field_ty.vf_ty; unit_ty; InferredTypeExpr loc], [],
+               [LitPat (Var (loc, field_ref)); LitPat unit], Static)
+         in
+-        let assignment = ExprStmt (AssignExpr (loc, dst,
+-          (if dst_is_mutable then Mutation else Initialization), call)) in
++        let assignment result = ExprStmt (AssignExpr (loc, dst,
++          (if dst_is_mutable then Mutation else Initialization), result)) in
+         let release = PureStmt (loc, ExprStmt (CallExpr (loc, "end_ref_mut",
+           [], [], [LitPat (Var (loc, field_ref))], Static))) in
+         match OptionRd.get (target_get fn_call_data_cpn) with
+         | Something ptr ->
+             let target = translate_basic_block_id (VfMirRd.of_pointer ptr) in
+-            let statements = operand_stmts @ [field_ref_decl; assignment; release] in
+-            Ok ([BlockStmt (loc, [], statements, loc, ref [])], Mir.GotoTerminator (loc, target), [target])
++            let steps, unwind_targets =
++              if TranslatorArgs.ignore_unwind_paths then [assignment call; release], []
++              else
++                let cleanup, unwind_targets =
++                  translate_call_unwind () in
++                let result = Var (loc, "__result") in
++                [SwitchStmt (loc, call, [
++                  SwitchStmtClause (loc, CallExpr (loc, "returning", [], [], [LitPat result], Static),
++                    [assignment result; release]);
++                  SwitchStmtClause (loc, CallExpr (loc, "unwinding", [], [], [], Static),
++                    release :: cleanup)
++                ])], unwind_targets
++            in
++            let statements = operand_stmts @ (field_ref_decl :: steps) in
++            Ok ([BlockStmt (loc, [], statements, loc, ref [])],
++              Mir.GotoTerminator (loc, target), target :: unwind_targets)
+         | _ -> Error (`TrFnCall "The checked FromFn call must have a return target")
+       end else
+       Rocq_writer.rocq_print_application TranslatorArgs.rocq_writer "Call" @@ fun () ->
+@@ -2978,7 +3003,7 @@
+       in
+       let unwind_stmts, unwind_targets =
+         if TranslatorArgs.ignore_unwind_paths then ([], [])
+-        else translate_unwind_action (unwind_action_get fn_call_data_cpn) loc
++        else translate_call_unwind ()
+       in
+       let* dst, dst_is_mutable =
+         Rocq_writer.rocq_print_big_record_field TranslatorArgs.rocq_writer "destination" @@ fun () ->
+@@ -3175,7 +3200,7 @@
+                 ref [] ),
+             targets )
+ 
+-    let translate_terminator_kind (ret_place_id : string)
++    let translate_terminator_kind ~unwind_proof (ret_place_id : string)
+         (tkind_cpn : TerminatorKindRd.t) (loc : Ast.loc) =
+       let open TerminatorKindRd in
+       match get tkind_cpn with
+@@ -3201,7 +3226,7 @@
+       | Unreachable ->
+           Rocq_writer.rocq_print_ident TranslatorArgs.rocq_writer "Unreachable";
+           Ok ([ Ast.Assert (loc, False loc) ], EncodedTerminator, [])
+-      | Call fn_call_data_cpn -> translate_fn_call fn_call_data_cpn loc
++      | Call fn_call_data_cpn -> translate_fn_call ~unwind_proof fn_call_data_cpn loc
+       | Drop drop_data_cpn ->
+           let open DropData in
+           let place_cpn = place_get drop_data_cpn in
+@@ -3232,7 +3257,7 @@
+                          Static ));
+                 ] )
+           in
+-          let* drop_stmts =
++          let* drop_stmts, unwind_targets =
+             let call name targs =
+               Ast.ExprStmt (CallExpr (loc, name, targs, [], [LitPat (AddressOf (loc, place))], Static))
+             in
+@@ -3248,12 +3273,27 @@
+                   | Mir.GenArgLifetime _ -> Ast.InferredTypeExpr loc
+                   | Mir.GenArgConst c -> c))
+               in
+-              Ok [call name targs]
++              let Ast.ExprStmt expr = call name targs in
++              if TranslatorArgs.ignore_unwind_paths then
++                Ok ([Ast.ExprStmt expr] @ freeze_stmts, [])
++              else
++                let unwind_stmts, targets =
++                  translate_unwind_action (unwind_action_get drop_data_cpn) loc
++                in
++                let outcome = Ast.SwitchStmt (loc, expr, [
++                  Ast.SwitchStmtClause (loc,
++                    Ast.CallExpr (loc, "returning", [], [], [Ast.LitPat (Ast.Var (loc, "_drop_result"))], Ast.Static),
++                    freeze_stmts);
++                  Ast.SwitchStmtClause (loc,
++                    Ast.CallExpr (loc, "unwinding", [], [], [], Ast.Static),
++                    freeze_stmts @ unwind_stmts);
++                ]) in
++                Ok ([outcome], targets)
+           in
+           Ok
+-            ( unfreeze_stmts @ drop_stmts @ freeze_stmts,
++            ( unfreeze_stmts @ drop_stmts,
+               Mir.GotoTerminator (loc, target),
+-              [ target ] )
++              target :: unwind_targets )
+       | Assert assert_data_cpn ->
+           (* `Assert { cond, expected, target, unwind }`: continue at `target` if `cond == expected`,
+              otherwise panic (i.e. unwind). With -ignore_unwind_paths the panicking branch is
+@@ -3301,13 +3341,13 @@
+               EncodedTerminator,
+               [] )
+ 
+-    let translate_terminator (ret_place_id : string)
++    let translate_terminator ~unwind_proof (ret_place_id : string)
+         (terminator_cpn : TerminatorRd.t) =
+       let open TerminatorRd in
+       let src_info_cpn = source_info_get terminator_cpn in
+       let* { Mir.span = loc; Mir.scope } = translate_source_info src_info_cpn in
+       let terminator_kind_cpn = kind_get terminator_cpn in
+-      translate_terminator_kind ret_place_id terminator_kind_cpn loc
++      translate_terminator_kind ~unwind_proof ret_place_id terminator_kind_cpn loc
+ 
+     let translate_bin_op (bin_op_cpn : BinOpRd.t) =
+       let open BinOpRd in
+@@ -4024,7 +4064,7 @@
+         let terminator_cpn = terminator_get bblock_cpn in
+         let* terminator_stmts, terminator, successors =
+           Rocq_writer.rocq_print_big_record_field TranslatorArgs.rocq_writer "terminator" @@ fun () ->
+-            translate_terminator ret_place_id terminator_cpn
++            translate_terminator ~unwind_proof:(Args.unwind_proof id) ret_place_id terminator_cpn
+         in
+         let bblock : Mir.basic_block =
+           {
+@@ -4042,6 +4082,60 @@
+           }
+         in
+         Ok (Some bblock)
++
++    (* An unwind proof may return a borrow of a local to its Rust destructor.
++       Keep the compiler's acyclic cleanup in the lexical scope of the call:
++       leaving the scope first would free the same local before its Drop. *)
++    let inline_cleanup_blocks original blocks =
++      let cleanup_ids = List.filter_map (fun block ->
++        if BasicBlockRd.is_cleanup_get block then
++          Some (translate_basic_block_id (BasicBlockRd.id_get block))
++        else None) original in
++      let cleanup, ordinary = List.partition (fun (block : Mir.basic_block) ->
++        List.mem block.id cleanup_ids) blocks in
++      let find_cleanup id = List.find_opt (fun (block : Mir.basic_block) -> block.id = id) cleanup in
++      let visit path id f =
++        if List.mem id path then
++          failwith "A cleanup cycle cannot be inlined";
++        f (id :: path) in
++      let rec statements path items = List.map (statement path) items
++      and statement path item =
++        let open Ast in
++        match item with
++        | GotoStmt (loc, id) ->
++            begin match find_cleanup id with
++            | None -> item
++            | Some block -> visit path id (fun path ->
++                let tail = match block.terminator with
++                  | Mir.GotoTerminator (loc, target) -> [GotoStmt (loc, target)]
++                  | Mir.EncodedTerminator -> [] in
++                BlockStmt (loc, [], statements path (block.statements @ block.terminator_stmts @ tail),
++                  loc, ref []))
++            end
++        | BlockStmt (loc, decls, body, close, locals) ->
++            BlockStmt (loc, decls, statements path body, close, locals)
++        | IfStmt (loc, guard, yes, no) ->
++            IfStmt (loc, guard, statements path yes, statements path no)
++        | SwitchStmt (loc, expression, clauses) ->
++            SwitchStmt (loc, expression, List.map (function
++              | SwitchStmtClause (loc, pattern, body) ->
++                  SwitchStmtClause (loc, pattern, statements path body)
++              | SwitchStmtDefaultClause (loc, body) ->
++                  SwitchStmtDefaultClause (loc, statements path body)) clauses)
++        | _ -> item in
++      let rec successors path id =
++        match find_cleanup id with
++        | None -> [id]
++        | Some block -> visit path id (fun path -> List.concat_map (successors path) block.successors) in
++      ordinary |> List.map (fun (block : Mir.basic_block) ->
++        let terminator_stmts, terminator =
++          match block.terminator with
++          | Mir.GotoTerminator (loc, id) when Option.is_some (find_cleanup id) ->
++              block.terminator_stmts @ [Ast.GotoStmt (loc, id)], Mir.EncodedTerminator
++          | term -> block.terminator_stmts, term in
++        { block with statements = statements [] block.statements;
++          terminator_stmts = statements [] terminator_stmts; terminator;
++          successors = List.concat_map (successors []) block.successors })
+ 
+     let find_blocks (bblocks : Mir.basic_block list) =
+       let open Mir in
+@@ -5276,8 +5370,17 @@
+     let open BodyRd in
+     let var_id_trs_map_ref = ref [] in
+     let* fn_sig_loc = translate_span_data (fn_sig_span_get body_cpn) in
+-    let ghost_stmts_cpn = ghost_stmts_get_list body_cpn in
+-    let* ghost_stmts = ListAux.try_map translate_ghost_stmt ghost_stmts_cpn in
++    let* ghost_annotations = ghost_stmts_get_list body_cpn |> ListAux.try_map translate_annotation in
++    let unwind_annotations, ghost_annotations = List.partition (fun (annot : Mir.annot) ->
++      String.starts_with ~prefix:"/*@~unwind " annot.raw ||
++      String.starts_with ~prefix:"/*@~unwind\n" annot.raw) ghost_annotations in
++    let has_unwind_annotations = unwind_annotations <> [] in
++    let unwind_annotations = ref (List.map (fun (annot : Mir.annot) ->
++      let raw = "/*@       " ^ String.sub annot.raw 10 (String.length annot.raw - 10) in
++      let stmt = VfMirAnnotParser.parse_control_flow_ghost_stmt (translate_annot_to_vf_parser_inp {annot with raw}) in
++      fst (Ast.lexed_loc annot.span), stmt) unwind_annotations) in
++    let ghost_stmts = List.map (fun annot ->
++      VfMirAnnotParser.parse_ghost_stmt (translate_annot_to_vf_parser_inp annot)) ghost_annotations in
+     let* ghost_stmts =
+       ListAux.try_sort LocAux.compare_err_desc
+         (fun s1 s2 ->
+@@ -5323,6 +5426,12 @@
+       let ghost_stmts = ghost_stmts
+       let body_imp_loc = imp_loc
+       let body_tr_defs_ctx = body_tr_defs_ctx
++      let unwind_proof _ = []
++      let call_unwind_proof call_loc =
++        let _, call_end = Ast.lexed_loc call_loc in
++        let matching, rest = List.partition (fun (start, _) -> start = call_end) !unwind_annotations in
++        unwind_annotations := rest;
++        List.map snd matching
+     end) in
+     let vdis_cpn = var_debug_info_get_list body_cpn in
+     (* Since var id translation map is empty var debug info contains the plain Mir ids *)
+@@ -5632,6 +5741,12 @@
+                       translate_basic_block ret_place_id bblock_cpn)
+                     bblocks_cpn
+             in
++            List.iter (fun (_, stmt) -> Ast.static_error (Ast.stmt_loc stmt)
++              "An unwind proof annotation must immediately follow a call" None) !unwind_annotations;
++            let bblocks =
++              if has_unwind_annotations && not Args.ignore_unwind_paths then
++                inline_cleanup_blocks bblocks_cpn bblocks
++              else bblocks in
+             let toplevel_blocks = find_blocks bblocks in
+             let vf_bblocks =
+               translate_basic_blocks_to_stmts toplevel_blocks []
+--- a/src/verifast1.ml
++++ b/src/verifast1.ml
+@@ -369,11 +369,39 @@
+   let push_contextStack () = push_undoStack(); contextStackStack := !contextStack::!contextStackStack
+   let pop_contextStack () = pop_undoStack(); let h::t = !contextStackStack in contextStack := h; contextStackStack := t
+ 
++  (* Inference bindings and their prover equalities must have the same
++     scope. A function or sibling path cannot reuse a branch's typeids or
++     its resolutions of shared MIR locals. *)
++  let rust_type_inference_scopes = ref []
++
++  let trail_rust_type_inference undo =
++    if is_rust then
++      match !rust_type_inference_scopes with
++      | undos :: outer -> rust_type_inference_scopes := (undo :: undos) :: outer
++      | [] -> ()
++
++  let set_inferred_type state constraint_ =
++    let old = !state in
++    trail_rust_type_inference (fun () -> state := old);
++    state := constraint_
++
++  let push_prover_scope () =
++    ctxt#push;
++    if is_rust then rust_type_inference_scopes := [] :: !rust_type_inference_scopes
++
++  let pop_prover_scope () =
++    if is_rust then begin
++      let undos :: outer = !rust_type_inference_scopes in
++      rust_type_inference_scopes := outer;
++      List.iter (fun undo -> undo ()) undos
++    end;
++    ctxt#pop
++
+   (** Remember the current path condition, set of used IDs, and set of dummy fraction terms. *)  
+   let push() =
+     used_ids_stack := (!used_ids_undo_stack, !dummy_frac_terms, !pred_ctor_applications)::!used_ids_stack;
+     used_ids_undo_stack := [];
+-    ctxt#push;
++    push_prover_scope ();
+     push_contextStack ()
+   
+   (** Restore the previous path condition, set of used IDs, and set of dummy fraction terms. *)
+@@ -385,7 +413,7 @@
+     dummy_frac_terms := dummyFracTerms;
+     pred_ctor_applications := predCtorApplications;
+     used_ids_stack := t;
+-    ctxt#pop
++    pop_prover_scope ()
+   
+   (** Execute [cont] in a temporary context. *)
+   let in_temporary_context cont =
+@@ -514,7 +542,7 @@
+     | BoundedGhostTypeParam _ -> ProverInductive
+     | ProjectionType _ -> ProverInductive
+     | Void -> ProverInductive
+-    | InferredType (_, t) -> begin match !t with EqConstraint t -> provertype_of_type t | _ -> t := EqConstraint (InductiveType ("unit", [])); ProverInductive end
++    | InferredType (_, t) -> begin match !t with EqConstraint t -> provertype_of_type t | _ -> set_inferred_type t (EqConstraint (InductiveType ("unit", []))); ProverInductive end
+     | AbstractType _ -> ProverInductive
+     | RefType t -> ProverInductive
+     (* Using expressions of the types below as values is wrong, but we must not crash here because this function is in some cases called by the type checker before it detects that there is a problem and produces a proper error message. *)
+@@ -3233,11 +3261,10 @@
+ 
+   let inferred_type_typeids = Hashtbl.create 100
+   let resolve_inferred_type obj state tp =
+-    state := EqConstraint tp;
++    set_inferred_type state (EqConstraint tp);
+     match Hashtbl.find_opt inferred_type_typeids obj with
+       None -> ()
+-    | Some (typeid_term, resolve_func) ->
+-      resolve_func tp
++    | Some (_, resolve_func) -> resolve_func tp
+ 
+   let rec compatible_pointees t t0 =
+     match (normalize_pointee_type t, normalize_pointee_type t0) with
+@@ -6478,7 +6505,8 @@
+       None ->
+       let typeid_term = mk_typeid_term (Printf.sprintf "placeholder_%d" (Oo.id obj)) in
+       let resolve tp = ctxt#assert_term (ctxt#mk_eq typeid_term (typeid_of_core_core l msg env tp)) in
+-      Hashtbl.replace inferred_type_typeids obj (typeid_term, resolve);
++      trail_rust_type_inference (fun () -> Hashtbl.remove inferred_type_typeids obj);
++      Hashtbl.add inferred_type_typeids obj (typeid_term, resolve);
+       typeid_term
+     | Some (typeid_term, _) ->
+       typeid_term
+@@ -7265,7 +7293,7 @@
+   let rec fix_inferred_type r =
+     match !r with
+       EqConstraint t -> fix_inferred_types_in_type t
+-    | _ -> r := EqConstraint (InductiveType ("unit", []))
++    | _ -> set_inferred_type r (EqConstraint (InductiveType ("unit", [])))
+   and fix_inferred_types_in_type t =
+     match t with
+       InferredType (_, r) -> fix_inferred_type r
+@@ -8279,14 +8307,14 @@
+   let assume t cont =
+     !stats#proverAssume;
+     push_context (Assuming t);
+-    ctxt#push;
++    push_prover_scope ();
+     let result =
+       match ctxt#assume t with
+         Unknown -> cont()
+       | Unsat -> major_success ()
+     in
+     pop_context();
+-    ctxt#pop;
++    pop_prover_scope ();
+     result
+   
+   let assume_opt t cont =

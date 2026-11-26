@@ -1,0 +1,258 @@
+--- a/src/refinement_checker/refinement_checker.ml
++++ b/src/refinement_checker/refinement_checker.ml
+@@ -546,6 +546,8 @@
+               initializes_only_field_from_argument=false;
+               calls_mutable_field_with_unit=false;
+               calls_resolved_mutable_closure=false;
++              returns_byte_slice_as_str=false;
++              returns_mutable_byte_slice_as_str=false;
+               casts_boxed_utf8=false;
+               delegates_string_range_index=false;
+                             local_collect={from_iter={kind=Bool}; required_bodies=[]; forwarding_error=""}
+@@ -897,6 +899,8 @@
+             initializes_only_field_from_argument=false;
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
++            returns_byte_slice_as_str=false;
++            returns_mutable_byte_slice_as_str=false;
+             casts_boxed_utf8=false;
+             delegates_string_range_index=false;
+                         local_collect={from_iter={kind=Bool}; required_bodies=[]; forwarding_error=""}
+@@ -1143,6 +1147,8 @@
+             initializes_only_field_from_argument=false;
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
++            returns_byte_slice_as_str=false;
++            returns_mutable_byte_slice_as_str=false;
+             casts_boxed_utf8=false;
+             delegates_string_range_index=false;
+                         local_collect={from_iter={kind=Bool}; required_bodies=[]; forwarding_error=""}
+@@ -1369,6 +1375,8 @@
+             initializes_only_field_from_argument=false;
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
++            returns_byte_slice_as_str=false;
++            returns_mutable_byte_slice_as_str=false;
+             casts_boxed_utf8=false;
+             delegates_string_range_index=false;
+                         local_collect={from_iter={kind=Bool}; required_bodies=[]; forwarding_error=""}
+@@ -1540,6 +1548,8 @@
+             initializes_only_field_from_argument=false;
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
++            returns_byte_slice_as_str=false;
++            returns_mutable_byte_slice_as_str=false;
+             casts_boxed_utf8=false;
+             delegates_string_range_index=false;
+                         local_collect={from_iter={kind=Bool}; required_bodies=[]; forwarding_error=""}
+--- a/src/rust_frontend/vf_mir/vf_mir.capnp
++++ b/src/rust_frontend/vf_mir/vf_mir.capnp
+@@ -774,9 +774,11 @@
+         initializesOnlyFieldFromArgument @7: Bool; # Certified from the actual external MIR body.
+         callsMutableFieldWithUnit @8: Bool; # Verified shape of FromFn::next.
+         callsResolvedMutableClosure @9: Bool; # Rustc resolved the callback to the field's FnMut closure body.
+-        castsBoxedUtf8 @10: Bool; # Checked round trip through equal-layout owning pointers.
+-        delegatesStringRangeIndex @11: Bool; # Checked call of the concrete, forwarding String Index impl.
+-        localCollect @12: LocalCollect;
++        returnsByteSliceAsStr @10: Bool; # Certified to be only a wide-pointer conversion.
++        returnsMutableByteSliceAsStr @11: Bool;
++        castsBoxedUtf8 @12: Bool; # Checked round trip through equal-layout owning pointers.
++        delegatesStringRangeIndex @13: Bool; # Checked call of the concrete, forwarding String Index impl.
++        localCollect @14: LocalCollect;
+     }
+ 
+     # A checked Iterator::collect forwarding call, without importing MIR.
+--- a/src/rust_frontend/vf_mir_exporter/src/lib.rs
++++ b/src/rust_frontend/vf_mir_exporter/src/lib.rs
+@@ -183,7 +183,9 @@
+                 assert_eq!(preprocessed_contents, contents);
+                 // Refinement uses rustc's mutability, not the verifier's
+                 // permission annotation for an owned stack slot.
+-                ghost_ranges.retain(|annot| annot.kind != preprocessor::GhostRangeKind::Mut);
++                ghost_ranges.retain(|annot| !matches!(annot.kind,
++                    preprocessor::GhostRangeKind::Mut | preprocessor::GhostRangeKind::ByteSliceView
++                   ));
+             }
+             self.source_files.lock().unwrap().push(SourceFile {
+                 path: path.into(),
+@@ -2674,6 +2676,90 @@
+             }
+         }
+ 
++        fn returns_byte_slice_as_str(
++            tcx: TyCtxt<'tcx>,
++            def_id: rustc_hir::def_id::DefId,
++            mutability: mir::Mutability,
++        ) -> bool {
++            let (free, inherent) = match mutability {
++                mir::Mutability::Not => ("str_from_utf8_unchecked", "str_inherent_from_utf8_unchecked"),
++                mir::Mutability::Mut => ("str_from_utf8_unchecked_mut", "str_inherent_from_utf8_unchecked_mut"),
++            };
++            let free = rustc_span::Symbol::intern(free);
++            let inherent = rustc_span::Symbol::intern(inherent);
++            if !tcx.is_diagnostic_item(free, def_id) && !tcx.is_diagnostic_item(inherent, def_id) {
++                return false;
++            }
++            let body = tcx.optimized_mir(def_id);
++            if body.arg_count != 1 {
++                return false;
++            }
++            let arg = body.args_iter().next().unwrap();
++            let ty::Ref(lifetime, bytes, source_mut) = body.local_decls[arg].ty.kind() else {
++                return false;
++            };
++            if *source_mut != mutability || !matches!(bytes.kind(), ty::Slice(el) if *el == tcx.types.u8)
++                || !matches!(body.return_ty().kind(), ty::Ref(target_lifetime, target, target_mut)
++                    if target_lifetime == lifetime && *target_mut == mutability && matches!(target.kind(), ty::Str))
++            {
++                return false;
++            }
++            let entry = &body.basic_blocks[mir::START_BLOCK];
++            if entry.is_cleanup {
++                return false;
++            }
++            let returns = |place: &mir::Place<'_>| {
++                place.local == mir::RETURN_PLACE && place.projection.is_empty()
++            };
++            let reads_arg = |operand: &mir::Operand<'_>| {
++                matches!(operand, mir::Operand::Copy(place) | mir::Operand::Move(place)
++                    if place.local == arg && place.projection.is_empty())
++            };
++            match (&entry.statements[..], &entry.terminator().kind) {
++                ([statement], mir::TerminatorKind::Return) if body.basic_blocks.len() == 1 => {
++                    let mir::StatementKind::Assign(assign) = &statement.kind else { return false };
++                    let (dst, value) = &**assign;
++                    returns(dst) && matches!(value,
++                        mir::Rvalue::Cast(mir::CastKind::Transmute, operand, ty)
++                            if *ty == body.return_ty() && reads_arg(operand))
++                }
++                ([take_address, cast, reborrow], mir::TerminatorKind::Return)
++                    if body.basic_blocks.len() == 1 && mutability == mir::Mutability::Mut =>
++                {
++                    let (
++                        mir::StatementKind::Assign(first),
++                        mir::StatementKind::Assign(second),
++                        mir::StatementKind::Assign(third),
++                    ) = (&take_address.kind, &cast.kind, &reborrow.kind) else { return false };
++                    let (raw_bytes, address) = &**first;
++                    let (raw_str, cast) = &**second;
++                    let (dst, reference) = &**third;
++                    raw_bytes.projection.is_empty() && raw_str.projection.is_empty()
++                        && returns(dst)
++                        && matches!(address, mir::Rvalue::RawPtr(mir::RawPtrKind::Mut, place)
++                            if place.local == arg && matches!(&place.projection[..], [mir::ProjectionElem::Deref]))
++                        && matches!(cast, mir::Rvalue::Cast(mir::CastKind::PtrToPtr, mir::Operand::Move(place), ty)
++                            if place == raw_bytes
++                                && matches!(ty.kind(), ty::RawPtr(target, mir::Mutability::Mut)
++                                    if matches!(target.kind(), ty::Str)))
++                        && matches!(reference, mir::Rvalue::Ref(_, mir::BorrowKind::Mut { .. }, place)
++                            if place.local == raw_str.local && matches!(&place.projection[..], [mir::ProjectionElem::Deref]))
++                }
++                ([], mir::TerminatorKind::Call { func, args, destination, target: Some(target), .. })
++                    if body.basic_blocks.len() == 2 && tcx.is_diagnostic_item(inherent, def_id) =>
++                {
++                    let next = &body.basic_blocks[*target];
++                    let ty::FnDef(callee, _) = *func.ty(body, tcx).kind() else { return false };
++                    args.len() == 1 && reads_arg(&args[0].node) && returns(destination)
++                        && !next.is_cleanup && next.statements.is_empty()
++                        && matches!(next.terminator().kind, mir::TerminatorKind::Return)
++                        && tcx.is_diagnostic_item(free, callee)
++                        && Self::returns_byte_slice_as_str(tcx, callee, mutability)
++                }
++                _ => false,
++            }
++        }
++
+         fn resolve_string_range_index(
+             tcx: TyCtxt<'tcx>,
+             body: &mir::Body<'tcx>,
+@@ -3305,7 +3391,7 @@
+             let func_cpn = fn_call_data_cpn.reborrow().init_func();
+             let func_span_opt = Self::encode_operand(tcx, enc_ctx, func, func_cpn);
+             let annotations: Vec<_> = enc_ctx.annots.extract_if(|annot| {
+-                matches!(annot.kind, GhostRangeKind::GenericArgs)
++                matches!(annot.kind, GhostRangeKind::GenericArgs | GhostRangeKind::ByteSliceView)
+                     && func_span_opt.is_some_and(|span| span.hi() == annot.span().unwrap().lo())
+             }).collect();
+             let annotation = match annotations.as_slice() {
+@@ -3313,7 +3399,13 @@
+                 [annotation] => Some(annotation),
+                 _ => tcx.dcx().span_fatal(*fn_span, "Multiple proof annotations on one call"),
+             };
++            let marker = annotation.map(|annotation| annotation.kind);
+             let fn_def = func.ty(enc_ctx.body(), tcx);
++            if matches!(marker, Some(GhostRangeKind::ByteSliceView))
++                && !matches!(fn_def.kind(), ty::FnDef(..))
++            {
++                tcx.dcx().span_fatal(*fn_span, "This proof annotation requires a statically known function");
++            }
+             if let ty::FnDef(def_id, substitutions) = *fn_def.kind() {
+                 fn_call_data_cpn.set_initializes_only_field_from_argument(
+                     args.len() == 1 && target.is_some() && Self::reads_from_fn_constructor(tcx, def_id),
+@@ -3331,6 +3423,16 @@
+                     && Self::casts_boxed_utf8(tcx, def_id)
+                 {
+                     fn_call_data_cpn.set_casts_boxed_utf8(true);
++                }
++                if marker == Some(GhostRangeKind::ByteSliceView) {
++                    let mutability = [mir::Mutability::Not, mir::Mutability::Mut].into_iter()
++                        .find(|&mutability| Self::returns_byte_slice_as_str(tcx, def_id, mutability));
++                    if let Some(mutability) = mutability.filter(|_| args.len() == 1 && target.is_some()) {
++                        fn_call_data_cpn.set_returns_byte_slice_as_str(true);
++                        fn_call_data_cpn.set_returns_mutable_byte_slice_as_str(mutability == mir::Mutability::Mut);
++                    } else {
++                        tcx.dcx().span_fatal(*fn_span, "Expected a checked byte-slice to str pointer conversion");
++                    }
+                 }
+                 if args.len() == 1 && target.is_some() {
+                     if let Some(direct) = substitutions.no_bound_vars().and_then(|substitutions|
+--- a/src/rust_frontend/vf_mir_exporter/src/preprocessor.rs
++++ b/src/rust_frontend/vf_mir_exporter/src/preprocessor.rs
+@@ -67,6 +67,7 @@
+     GenericArgs,
+     Mut,
+     ClosureContract,
++    ByteSliceView,
+ }
+ 
+ #[derive(Debug)]
+@@ -552,6 +553,8 @@
+                                         GhostRangeKind::GenericArgs
+                                     } else if ghost_range.contents == "/*@~mut@*/" {
+                                             GhostRangeKind::Mut
++                                    } else if ghost_range.contents == "/*@~byte_slice_view@*/" {
++                                        GhostRangeKind::ByteSliceView
+                                     } else if ghost_range.contents.strip_prefix("/*@~contract")
+                                         .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+                                     {
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -2892,7 +2892,27 @@
+         let actions, targets = translate_unwind_action (unwind_action_get fn_call_data_cpn) loc in
+         unwind_proof @ annotation @ actions, targets
+       in
+-      if initializes_only_field_from_argument_get fn_call_data_cpn then begin
++      if returns_byte_slice_as_str_get fn_call_data_cpn then begin
++        let [operand] = args_get_list fn_call_data_cpn in
++        let* operand_stmts, [value] = translate_operands [(operand, loc)] in
++        let* dst, dst_is_mutable = translate_place (destination_get fn_call_data_cpn) loc in
++        (* This copies the complete wide pointer. It neither interprets its
++           bytes as UTF-8 nor grants a str_share borrow. *)
++        let mutability = if returns_mutable_byte_slice_as_str_get fn_call_data_cpn then Mir.Mut else Mir.Not in
++        let str_ref = (str_ref_ty_info loc (Ast.ManifestTypeExpr (loc, Ast.StaticLifetime)) mutability).vf_ty in
++        let assignment = Ast.ExprStmt (Ast.AssignExpr (loc, dst,
++          (if dst_is_mutable then Ast.Mutation else Ast.Initialization),
++          Ast.CastExpr (loc, str_ref, value))) in
++        match OptionRd.get (target_get fn_call_data_cpn) with
++        | Something ptr ->
++            let target = translate_basic_block_id (VfMirRd.of_pointer ptr) in
++            let stmts = match operand_stmts with
++              | [] -> [assignment]
++              | _ -> [Ast.BlockStmt (loc, [], operand_stmts @ [assignment], loc, ref [])]
++            in
++            Ok (stmts, Mir.GotoTerminator (loc, target), [target])
++        | _ -> Error (`TrFnCall "The checked byte-slice conversion must have a return target")
++      end else if initializes_only_field_from_argument_get fn_call_data_cpn then begin
+         let [operand] = args_get_list fn_call_data_cpn in
+         let* operand_stmts, [value] = translate_operands [(operand, loc)] in
+         let* dst, dst_is_mutable = translate_place (destination_get fn_call_data_cpn) loc in

@@ -1,0 +1,11 @@
+--- verified/string.rs
++++ verified/string.rs
+@@ -3974,7 +3974,7 @@
+         // unwind from `splice` that would leave the string in an invalid state
+         // would be from an error growing the allocation, which we protect against
+         // by reserving it preemptively.
+-        unsafe { self.as_mut_vec() }.splice(checked_range, replace_with.bytes());
++        core::mem::forget(unsafe { self.as_mut_vec() }.splice(checked_range, replace_with.bytes()));
+         //@ append_utf8(rep_bs, drop(checked_range.end, bs));
+         //@ append_utf8(take(checked_range.start, bs), append(rep_bs, drop(checked_range.end, bs)));
+         //@ close_points_to(self);

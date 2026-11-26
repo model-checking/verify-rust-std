@@ -1,0 +1,11 @@
+--- a/string.rs
++++ b/string.rs
+@@ -3943,7 +3943,7 @@
+         //@ init_ref_String_raw(self_ref2);
+         //@ close exists::<option<*String>>(some(self_ref2));
+         assert!(
+-            self.is_char_boundary(checked_range.end),
++            self.is_char_boundary(checked_range.start),
+             "end of range should be a character boundary"
+         );
+         //@ open exists::<option<*String>>(some(self_ref2));

@@ -1,0 +1,556 @@
+--- a/src/refinement_checker/refinement_checker.ml
++++ b/src/refinement_checker/refinement_checker.ml
+@@ -547,6 +547,7 @@
+               calls_mutable_field_with_unit=false;
+               calls_resolved_mutable_closure=false;
+               casts_boxed_utf8=false;
++                            local_collect={from_iter={kind=Bool}; required_bodies=[]; forwarding_error=""}
+             };
+             source_info={span}
+           };
+@@ -896,6 +897,7 @@
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
+             casts_boxed_utf8=false;
++                        local_collect={from_iter={kind=Bool}; required_bodies=[]; forwarding_error=""}
+           };
+           source_info={span}
+         };
+@@ -1140,6 +1142,7 @@
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
+             casts_boxed_utf8=false;
++                        local_collect={from_iter={kind=Bool}; required_bodies=[]; forwarding_error=""}
+           };
+           source_info={span}
+         };
+@@ -1364,6 +1367,7 @@
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
+             casts_boxed_utf8=false;
++                        local_collect={from_iter={kind=Bool}; required_bodies=[]; forwarding_error=""}
+           };
+           source_info={span}
+         };
+@@ -1533,6 +1537,7 @@
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
+             casts_boxed_utf8=false;
++                        local_collect={from_iter={kind=Bool}; required_bodies=[]; forwarding_error=""}
+           };
+           source_info={span}
+         };
+--- a/src/rust_frontend/vf_mir/vf_mir.capnp
++++ b/src/rust_frontend/vf_mir/vf_mir.capnp
+@@ -775,6 +775,14 @@
+         callsMutableFieldWithUnit @8: Bool; # Verified shape of FromFn::next.
+         callsResolvedMutableClosure @9: Bool; # Rustc resolved the callback to the field's FnMut closure body.
+         castsBoxedUtf8 @10: Bool; # Checked round trip through equal-layout owning pointers.
++        localCollect @11: LocalCollect;
++    }
++
++    # A checked Iterator::collect forwarding call, without importing MIR.
++    struct LocalCollect {
++        fromIter @0: Ty;
++        requiredBodies @1: List(Text);
++        forwardingError @2: Text; # Empty on successful validation.
+     }
+ 
+     struct DropData {
+--- a/src/rust_frontend/vf_mir_exporter/src/lib.rs
++++ b/src/rust_frontend/vf_mir_exporter/src/lib.rs
+@@ -639,6 +639,7 @@
+         mode: EncKind<'tcx, 'a>,
+         annots: LinkedList<Box<GhostRange>>,
+         mut_annots: Vec<rustc_span::BytePos>,
++        local_bodies: Option<&'a [(mir::Body<'tcx>, Span)]>,
+     }
+ 
+     impl<'tcx, 'a> EncCtx<'tcx, 'a> {
+@@ -654,6 +655,7 @@
+                 mode,
+                 annots,
+                 mut_annots,
++                local_bodies: None,
+             }
+         }
+         pub fn add_req_adt(&mut self, adt: ty::AdtDef<'tcx>) {
+@@ -976,6 +978,7 @@
+                     annot.span().unwrap().data().hi
+                 }).collect::<Vec<_>>();
+                 let mut enc_ctx = EncCtx::new(self.tcx, EncKind::Body(body), annots, mut_annots);
++                enc_ctx.local_bodies = Some(&self.bodies);
+                 Self::encode_body(&mut enc_ctx, body_cpn);
+                 req_adt_defs.extend(enc_ctx.get_req_adts());
+             });
+@@ -2837,6 +2840,289 @@
+             Some(direct)
+         }
+ 
++        fn resolve_collect_forward(
++            tcx: TyCtxt<'tcx>,
++            typing_env: ty::TypingEnv<'tcx>,
++            collect: ty::Instance<'tcx>,
++        ) -> Option<(ty::Instance<'tcx>, Option<&'static str>)> {
++            if !matches!(collect.def, ty::InstanceKind::Item(_))
++                || tcx.def_path_str(collect.def_id()) != "core::iter::Iterator::collect"
++            {
++                return None;
++            }
++            let body = tcx.instance_mir(collect.def);
++            let from_iter = body.basic_blocks.iter().filter(|block| !block.is_cleanup)
++                .filter_map(|block| {
++                    let mir::TerminatorKind::Call { func, .. } = &block.terminator().kind else {
++                        return None;
++                    };
++                    let ty = func.ty(body, tcx);
++                    let ty::FnDef(method, _) = *ty.kind() else { return None };
++                    (tcx.def_path_str(method) == "core::iter::FromIterator::from_iter").then_some(ty)
++                }).next()?;
++            let callee = Self::resolve_call(tcx, typing_env, collect, from_iter)?;
++            if !callee.def_id().is_local() || !matches!(callee.def, ty::InstanceKind::Item(_)) {
++                return None;
++            }
++            let [input] = body.args_iter().collect::<Vec<_>>()[..] else { return None };
++            let error = if !Self::safe_collect_cleanup(tcx, body, input) {
++                Some("Unrecognized Iterator::collect cleanup")
++            } else if !Self::checked_collect_forwarding(tcx, body) {
++                Some("Unrecognized Iterator::collect forwarding body")
++            } else {
++                None
++            };
++            Some((callee, error))
++        }
++
++        fn resolve_call(
++            tcx: TyCtxt<'tcx>,
++            typing_env: ty::TypingEnv<'tcx>,
++            caller: ty::Instance<'tcx>,
++            operand_ty: ty::Ty<'tcx>,
++        ) -> Option<ty::Instance<'tcx>> {
++            let normalized = caller.try_instantiate_mir_and_normalize_erasing_regions(
++                tcx, typing_env, ty::EarlyBinder::bind(tcx, operand_ty)).ok()?;
++            let ty::FnDef(method, arguments) = *normalized.kind() else { return None };
++            ty::Instance::try_resolve(tcx, typing_env, method, arguments.no_bound_vars()?).ok()?
++        }
++
++        // In a generic body the verifier may use a trait contract. Check the
++        // concrete local implementations reachable through those dispatches.
++        fn local_collect_dispatch(
++            tcx: TyCtxt<'tcx>,
++            typing_env: ty::TypingEnv<'tcx>,
++            from_iter: ty::Instance<'tcx>,
++            local_bodies: &[(mir::Body<'tcx>, Span)],
++        ) -> Option<Vec<String>> {
++            let mut pending = vec![from_iter];
++            let mut seen = HashMap::new();
++            let mut paths = Vec::new();
++            while let Some(instance) = pending.pop() {
++                let def = instance.def_id();
++                if let Some(previous) = seen.insert(def, instance) {
++                    if previous != instance {
++                        return None;
++                    }
++                    continue;
++                }
++                paths.push(tcx.def_path_str(def));
++                let body = &local_bodies.iter().find(|(body, _)| body.source.def_id() == def)?.0;
++                for block in body.basic_blocks.iter() {
++                    let mir::TerminatorKind::Call { func, .. } = &block.terminator().kind else {
++                        continue;
++                    };
++                    let fn_ty = func.ty(body, tcx);
++                    let ty::FnDef(method, _) = *fn_ty.kind() else { continue };
++                    if !tcx.opt_associated_item(method).is_some_and(|item| item.container == ty::AssocContainer::Trait) {
++                        continue;
++                    }
++                    let callee = Self::resolve_call(tcx, typing_env, instance, fn_ty)?;
++                    if callee.def_id().is_local() {
++                        if !matches!(callee.def, ty::InstanceKind::Item(_)) {
++                            return None;
++                        }
++                        pending.push(callee);
++                    } else if method.is_local() {
++                        return None;
++                    }
++                }
++            }
++            paths.sort_unstable();
++            Some(paths)
++        }
++
++        fn pure_collect_guard(tcx: TyCtxt<'tcx>, owner: rustc_hir::def_id::DefId, closure: rustc_hir::def_id::DefId) -> bool {
++            if tcx.parent(closure) != owner {
++                return false;
++            }
++            let body = tcx.optimized_mir(closure);
++            let [env, input] = body.args_iter().collect::<Vec<_>>()[..] else { return false };
++            if body.basic_blocks.len() != 1 || body.local_decls[input].ty != tcx.types.usize
++                || body.local_decls[mir::RETURN_PLACE].ty != tcx.types.bool
++            {
++                return false;
++            }
++            let ty::Closure(_, args) = *body.local_decls[env].ty.kind() else { return false };
++            let captures = args.as_closure().upvar_tys();
++            if captures.len() != 1 {
++                return false;
++            }
++            let capture = captures[0];
++            let ty::Ref(_, scalar, mir::Mutability::Not) = *capture.kind() else { return false };
++            if scalar != tcx.types.usize {
++                return false;
++            }
++            let block = &body.basic_blocks[mir::START_BLOCK];
++            let safe_operand = |operand: &mir::Operand<'tcx>| {
++                let place = match operand {
++                    mir::Operand::Copy(place) | mir::Operand::Move(place) => place,
++                    mir::Operand::Constant(c) => return matches!(*c.ty().kind(), ty::Uint(ty::UintTy::Usize) | ty::Bool),
++                    mir::Operand::RuntimeChecks(_) => return false,
++                };
++                let root_ty = body.local_decls[place.local].ty;
++                match place.projection.as_slice() {
++                    [] => root_ty == tcx.types.usize || root_ty == tcx.types.bool
++                        || matches!(*root_ty.kind(), ty::Ref(_, scalar, mir::Mutability::Not) if scalar == tcx.types.usize),
++                    [mir::ProjectionElem::Field(index, field)] =>
++                        place.local == env && index.as_usize() == 0 && *field == capture,
++                    [mir::ProjectionElem::Deref] =>
++                        matches!(*root_ty.kind(), ty::Ref(_, scalar, mir::Mutability::Not) if scalar == tcx.types.usize),
++                    _ => false,
++                }
++            };
++            !block.is_cleanup && block.statements.iter().all(|statement| {
++                match &statement.kind {
++                    mir::StatementKind::Assign(assignment) => {
++                        let (dst, value) = &**assignment;
++                        dst.projection.is_empty() && dst.local != env && dst.local != input && match value {
++                            mir::Rvalue::Use(operand, _) => safe_operand(operand),
++                            mir::Rvalue::BinaryOp(
++                                mir::BinOp::Eq | mir::BinOp::Ne | mir::BinOp::Lt | mir::BinOp::Le
++                                | mir::BinOp::Gt | mir::BinOp::Ge, operands,
++                            ) => safe_operand(&operands.0) && safe_operand(&operands.1)
++                                && operands.0.ty(body, tcx) == tcx.types.usize
++                                && operands.1.ty(body, tcx) == tcx.types.usize,
++                            _ => false,
++                        }
++                    }
++                    mir::StatementKind::StorageLive(_) | mir::StatementKind::StorageDead(_) | mir::StatementKind::Nop => true,
++                    _ => false,
++                }
++            }) && matches!(block.terminator().kind, mir::TerminatorKind::Return)
++        }
++
++        fn safe_collect_cleanup(tcx: TyCtxt<'tcx>, body: &mir::Body<'tcx>, input: mir::Local) -> bool {
++            body.basic_blocks.iter().filter(|block| block.is_cleanup).all(|block| {
++                if block.statements.iter().any(|statement| !matches!(
++                    statement.kind, mir::StatementKind::StorageDead(_) | mir::StatementKind::Nop
++                )) {
++                    return false;
++                }
++                let is_cleanup = |target: mir::BasicBlock| body.basic_blocks[target].is_cleanup;
++                match &block.terminator().kind {
++                    mir::TerminatorKind::Drop { place, target, unwind, .. } =>
++                        place.local == input && place.projection.is_empty() && is_cleanup(*target)
++                            && matches!(unwind, UnwindAction::Terminate(_) | UnwindAction::Unreachable),
++                    mir::TerminatorKind::Goto { target } => is_cleanup(*target),
++                    mir::TerminatorKind::SwitchInt { discr, targets } =>
++                        discr.ty(body, tcx) == tcx.types.bool && targets.all_targets().iter().copied().all(is_cleanup),
++                    mir::TerminatorKind::UnwindResume | mir::TerminatorKind::UnwindTerminate(_) => true,
++                    _ => false,
++                }
++            })
++        }
++
++        // Every normal return forwards the original iterator directly into
++        // FromIterator. The optional prelude is confined to the standard
++        // size-hint, Option, and panic-formatting calls.
++        fn checked_collect_forwarding(tcx: TyCtxt<'tcx>, body: &mir::Body<'tcx>) -> bool {
++            let [input] = body.args_iter().collect::<Vec<_>>()[..] else { return false };
++            let fields_only = |place: &mir::Place<'tcx>| {
++                place.projection.iter().all(|part| matches!(part, mir::ProjectionElem::Field(..)))
++            };
++            let stored_operand = |operand: &mir::Operand<'tcx>| {
++                match operand {
++                    mir::Operand::Copy(place) | mir::Operand::Move(place) => fields_only(place),
++                    mir::Operand::Constant(_) => true,
++                    mir::Operand::RuntimeChecks(_) => false,
++                }
++            };
++            let moves_input = |operand: &mir::Operand<'tcx>| {
++                matches!(operand, mir::Operand::Move(place) if place.local == input && place.projection.is_empty())
++            };
++            let mut forwards_to = None;
++            let mut return_block = None;
++            for (index, block) in body.basic_blocks.iter_enumerated().filter(|(_, block)| !block.is_cleanup) {
++                for statement in &block.statements {
++                    match &statement.kind {
++                        mir::StatementKind::Assign(assignment) => {
++                            let (place, value) = &**assignment;
++                            if !place.projection.is_empty() || place.local == input || place.local == mir::RETURN_PLACE
++                                || match value {
++                                    mir::Rvalue::Use(operand, _) => !stored_operand(operand),
++                                    mir::Rvalue::Ref(_, mir::BorrowKind::Shared, place) => !fields_only(place),
++                                    mir::Rvalue::Aggregate(kind, operands) => {
++                                        let safe_kind = match &**kind {
++                                            mir::AggregateKind::Array(_) | mir::AggregateKind::Tuple => true,
++                                            mir::AggregateKind::Closure(def_id, _) => Self::pure_collect_guard(tcx, body.source.def_id(), *def_id),
++                                            _ => false,
++                                        };
++                                        !safe_kind || !operands.iter().all(stored_operand)
++                                    }
++                                    _ => true,
++                                }
++                            {
++                                return false;
++                            }
++                        }
++                        mir::StatementKind::StorageLive(_) | mir::StatementKind::StorageDead(_) | mir::StatementKind::Nop => {}
++                        _ => return false,
++                    }
++                }
++                match &block.terminator().kind {
++                    mir::TerminatorKind::Call { func, args, destination, target, .. } => {
++                        let ty::FnDef(method, _) = *func.ty(body, tcx).kind() else { return false };
++                        match tcx.def_path_str(method).as_str() {
++                            "core::iter::FromIterator::from_iter" => {
++                                let [iter] = &args[..] else { return false };
++                                let forwarded = moves_input(&iter.node)
++                                    || match (&iter.node, block.statements.last().map(|statement| &statement.kind)) {
++                                        (mir::Operand::Move(place), Some(mir::StatementKind::Assign(assignment))) =>
++                                            assignment.0 == *place
++                                                && matches!(&assignment.1, mir::Rvalue::Use(operand, _) if moves_input(operand)),
++                                        _ => false,
++                                    };
++                                if forwards_to.is_some() || destination.local != mir::RETURN_PLACE
++                                    || !destination.projection.is_empty() || !forwarded
++                                {
++                                    return false;
++                                }
++                                forwards_to = *target;
++                            }
++                            _ if destination.projection.is_empty() && destination.local != mir::RETURN_PLACE
++                                && destination.local != input && Self::checked_collect_prelude_call(tcx, body, method, args) => {}
++                            _ => return false,
++                        }
++                    }
++                    mir::TerminatorKind::Return if return_block.is_none() => return_block = Some(index),
++                    mir::TerminatorKind::Goto { .. } | mir::TerminatorKind::SwitchInt { .. }
++                    | mir::TerminatorKind::Unreachable => {}
++                    _ => return false,
++                }
++            }
++            forwards_to.is_some() && forwards_to == return_block
++        }
++
++        fn checked_collect_prelude_call(
++            tcx: TyCtxt<'tcx>,
++            body: &mir::Body<'tcx>,
++            method: rustc_hir::def_id::DefId,
++            args: &[Spanned<mir::Operand<'tcx>>],
++        ) -> bool {
++            let ty_of = |arg: &Spanned<mir::Operand<'tcx>>| arg.node.ty(body, tcx);
++            let is_option_usize = |ty: ty::Ty<'tcx>| {
++                matches!(*ty.kind(), ty::Adt(def, args)
++                    if tcx.is_diagnostic_item(rustc_span::sym::Option, def.did()) && args.type_at(0) == tcx.types.usize)
++            };
++            match (tcx.def_path_str(method).as_str(), args) {
++                ("core::iter::Iterator::size_hint", [iterator]) =>
++                    matches!(*ty_of(iterator).kind(), ty::Ref(_, inner, mir::Mutability::Not)
++                        if inner == body.local_decls[mir::Local::from_usize(1)].ty),
++                ("core::option::Option::<T>::is_none_or", [option, guard]) =>
++                    is_option_usize(ty_of(option)) && matches!(*ty_of(guard).kind(), ty::Closure(closure, _)
++                        if Self::pure_collect_guard(tcx, body.source.def_id(), closure)),
++                ("core::fmt::rt::Argument::<'_>::new_debug", [value]) =>
++                    matches!(*ty_of(value).kind(), ty::Ref(_, inner, mir::Mutability::Not)
++                        if matches!(*inner.kind(), ty::Tuple(fields)
++                            if fields.len() == 2 && fields[0] == tcx.types.usize && is_option_usize(fields[1]))),
++                // These functions see only formatting arguments and the fixed
++                // panic message. The typed new_debug above excludes user Debug.
++                ("core::fmt::Arguments::<'a>::new", [_, _]) | ("core::panicking::panic_fmt", [_]) => true,
++                _ => false,
++            }
++        }
++
+         fn encode_fn_call_data(
+             tcx: TyCtxt<'tcx>,
+             enc_ctx: &mut EncCtx<'tcx, 'a>,
+@@ -2848,7 +3134,20 @@
+             fn_span: &rustc_span::Span,
+             mut fn_call_data_cpn: fn_call_data_cpn::Builder<'_>,
+         ) {
+-            if let ty::FnDef(def_id, substitutions) = *func.ty(enc_ctx.body(), tcx).kind() {
++
++            let func_cpn = fn_call_data_cpn.reborrow().init_func();
++            let func_span_opt = Self::encode_operand(tcx, enc_ctx, func, func_cpn);
++            let annotations: Vec<_> = enc_ctx.annots.extract_if(|annot| {
++                matches!(annot.kind, GhostRangeKind::GenericArgs)
++                    && func_span_opt.is_some_and(|span| span.hi() == annot.span().unwrap().lo())
++            }).collect();
++            let annotation = match annotations.as_slice() {
++                [] => None,
++                [annotation] => Some(annotation),
++                _ => tcx.dcx().span_fatal(*fn_span, "Multiple proof annotations on one call"),
++            };
++            let fn_def = func.ty(enc_ctx.body(), tcx);
++            if let ty::FnDef(def_id, substitutions) = *fn_def.kind() {
+                 fn_call_data_cpn.set_initializes_only_field_from_argument(
+                     args.len() == 1 && target.is_some() && Self::reads_from_fn_constructor(tcx, def_id),
+                 );
+@@ -2865,10 +3164,27 @@
+                         fn_call_data_cpn.set_calls_resolved_mutable_closure(direct);
+                     }
+                 }
+-            }
+-            let func_cpn = fn_call_data_cpn.reborrow().init_func();
+-            let func_span_opt = Self::encode_operand(tcx, enc_ctx, func, func_cpn);
+-
++                if tcx.def_path_str(def_id) == "core::iter::Iterator::collect" {
++                    let typing_env = enc_ctx.body().typing_env(tcx);
++                    let checked_local = substitutions.no_bound_vars()
++                        .and_then(|args| ty::Instance::try_resolve(tcx, typing_env, def_id, args).ok().flatten())
++                        .and_then(|collect| Self::resolve_collect_forward(tcx, typing_env, collect));
++                    if let Some((from_iter, forwarding_error)) = checked_local {
++                        let mut cert = fn_call_data_cpn.reborrow().init_local_collect();
++                        let ty = ty::Ty::new_fn_def(tcx, from_iter.def_id(), ty::Binder::dummy(from_iter.args));
++                        Self::encode_ty(tcx, enc_ctx, ty, cert.reborrow().init_from_iter());
++                        if let Some(error) = forwarding_error {
++                            cert.set_forwarding_error(error);
++                        } else {
++                            if let Some(paths) = enc_ctx.local_bodies.and_then(|bodies|
++                                Self::local_collect_dispatch(tcx, typing_env, from_iter, bodies))
++                            {
++                                cert.fill_required_bodies(paths.iter().map(String::as_str));
++                            }
++                        }
++                    }
++                }
++            }
+             // Encoding args
+             fn_call_data_cpn.fill_args(args, |arg_cpn, arg| {
+                 Self::encode_operand(tcx, enc_ctx, &arg.node, arg_cpn);
+@@ -2891,21 +3207,11 @@
+             let call_span_data_cpn = fn_call_data_cpn.reborrow().init_call_span();
+             Self::encode_span_data(tcx, &fn_span.data(), call_span_data_cpn);
+ 
+-            if let Some(func_span) = func_span_opt {
+-                let func_span_hi = func_span.hi();
+-                let ghost_generic_arg_lists: Vec<_> = enc_ctx
+-                    .annots
+-                    .extract_if(|annot| {
+-                        annot.kind == GhostRangeKind::GenericArgs
+-                            && annot.span().unwrap().lo() == func_span_hi
+-                    })
+-                    .collect();
+-                assert!(ghost_generic_arg_lists.len() <= 1);
+-                if ghost_generic_arg_lists.len() == 1 {
+-                    let annot_opt_cpn = fn_call_data_cpn.reborrow().init_ghost_generic_arg_list();
+-                    let annot_cpn = annot_opt_cpn.init_something();
+-                    Self::encode_annotation(tcx, &ghost_generic_arg_lists[0], annot_cpn);
+-                }
++            if let Some(annotation) = annotation.filter(|annotation| {
++                annotation.kind == GhostRangeKind::GenericArgs
++            }) {
++                let annot_opt_cpn = fn_call_data_cpn.reborrow().init_ghost_generic_arg_list();
++                Self::encode_annotation(tcx, annotation, annot_opt_cpn.init_something());
+             }
+         }
+ 
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -2110,6 +2110,7 @@
+   type body_tr_defs_ctx = {
+     adt_defs : Mir.adt_def_tr list;
+     directives : Mir.annot list;
++    checked_collect_bodies : string list;
+     fn_specializer : string -> D.generic_arg list -> string * D.generic_arg list;
+   }
+ 
+@@ -2983,6 +2984,58 @@
+             Ok ([BlockStmt (loc, [], statements, loc, ref [])],
+               Mir.GotoTerminator (loc, target), target :: unwind_targets)
+         | _ -> Error (`TrFnCall "The checked FromFn call must have a return target")
++      end else if has_local_collect fn_call_data_cpn then begin
++        let open Ast in
++        let open TerminatorKindRd.LocalCollect in
++        let certificate = local_collect_get fn_call_data_cpn in
++        let forwarding_error = forwarding_error_get certificate in
++        if forwarding_error <> "" then Ast.static_error loc forwarding_error None;
++        let checked_dispatch = required_bodies_get_list certificate in
++        if checked_dispatch = [] then
++          Ast.static_error loc "Could not resolve the local collect dispatch" None;
++        checked_dispatch |> List.iter (fun path ->
++          if not (List.mem path Args.body_tr_defs_ctx.checked_collect_bodies) then
++            Ast.static_error loc ("Missing checked collect body: " ^ path) None);
++        let* from_iter =
++          match D.decode_ty (from_iter_get certificate) with
++          | {kind = FnDef fn} -> Ok fn
++          | _ -> Error (`TrFnCall "Expected a resolved FromIterator function item") in
++        let* iterator_ty =
++          match D.decode_operand (func_get fn_call_data_cpn) with
++          | Constant {const = Val {ty = {kind = FnDef {substs = [{kind = Type iterator}; _]; _}}; _}; _} ->
++              translate_decoded_ty iterator loc
++          | _ -> Error (`TrFnCall "Expected an Iterator::collect function item") in
++        let* arguments = ListAux.try_map (fun arg -> translate_generic_arg arg loc) from_iter.substs in
++        let type_arguments = List.map (function
++          | Mir.GenArgType ty -> ty.vf_ty
++          | Mir.GenArgLifetime _ -> Ast.InferredTypeExpr loc
++          | Mir.GenArgConst arg -> arg) arguments in
++        let [operand] = args_get_list fn_call_data_cpn in
++        let* binders, [iterator] = translate_operands_core true [operand, loc] in
++        let* dst, dst_is_mutable = translate_place (destination_get fn_call_data_cpn) loc in
++        let call name types arg = CallExpr (loc, name, types, [], [LitPat arg], Static) in
++        let prelude = call "std::iter::collect_forwarding_prelude" [iterator_ty.vf_ty] iterator in
++        let builder = call (TrName.translate_def_path from_iter.id.name) type_arguments in
++        let assign value = ExprStmt (AssignExpr (loc, dst, (if dst_is_mutable then Mutation else Initialization), value)) in
++        let cases expression name success cleanup =
++          SwitchStmt (loc, expression, [
++            SwitchStmtClause (loc, CallExpr (loc, "returning", [], [], [LitPat (Var (loc, name))], Static), success);
++            SwitchStmtClause (loc, CallExpr (loc, "unwinding", [], [], [], Static), cleanup)
++          ]) in
++        let steps, unwind_targets =
++          if TranslatorArgs.ignore_unwind_paths then [assign (builder prelude)], []
++          else
++            let cleanup, targets = translate_call_unwind () in
++            let input = TrName.make_tmp_var_name "ready_iterator" in
++            let output = TrName.make_tmp_var_name "collection" in
++            [cases prelude input [cases (builder (Var (loc, input))) output [assign (Var (loc, output))] cleanup] cleanup],
++            targets in
++        match OptionRd.get (target_get fn_call_data_cpn) with
++        | Something ptr ->
++            let target = translate_basic_block_id (VfMirRd.of_pointer ptr) in
++            Ok ([BlockStmt (loc, [], binders @ steps, loc, ref [])],
++              Mir.GotoTerminator (loc, target), target :: unwind_targets)
++        | _ -> Error (`TrFnCall "The checked collect call must have a return target")
+       end else
+       Rocq_writer.rocq_print_application TranslatorArgs.rocq_writer "Call" @@ fun () ->
+       Rocq_writer.rocq_print_argument TranslatorArgs.rocq_writer @@ fun () ->
+@@ -5755,14 +5808,16 @@
+                typeid inside the scope defining that projection's lifetime.
+                The compiler's local declaration span identifies the scope. *)
+             let pending = ref local_decls in
+-            let rec has_projection found = function
++            let rec uses_scoped_type found = function
+               | Ast.ProjectionTypeExpr _ -> true
+-              | ty -> found || Ast.type_expr_fold_open has_projection false ty
++              | Ast.StructTypeExpr (_, Some name, _, _, _)
++                   when String.starts_with ~prefix:"VfFunctionItem$closure" name -> true
++              | ty -> found || Ast.type_expr_fold_open uses_scoped_type false ty
+             in
+             let inside start finish ({loc = local_loc; ty = lazy ty}: Mir.local_decl) =
+               match start, finish, local_loc, ty.vf_ty with
+               | Ast.Lexed (first, _), Ast.Lexed (_, last), Ast.Lexed (point, _),
+-                ty when has_projection false ty ->
++                ty when uses_scoped_type false ty ->
+                   let file, _, _ = point in
+                   let first_file, _, _ = first in
+                   let last_file, _, _ = last in
+@@ -8746,7 +8801,9 @@
+       in
+       let bodies_cpn = regular_bodies @ closures in
+       let body_tr_defs_ctx =
+-        { adt_defs; directives = vf_mir_translator_directives; fn_specializer }
++        let checked_collect_bodies = checked_owners |> List.filter_map (fun (path, body) ->
++          if Capnp.Array.is_empty (ContractRd.annotations_get (BodyRd.contract_get body)) then None else Some path) in
++        { adt_defs; directives = vf_mir_translator_directives; checked_collect_bodies; fn_specializer }
+       in
+       let* bodies_tr_res =
+         Rocq_writer.rocq_print Args.rocq_writer "Definition bodies := ";

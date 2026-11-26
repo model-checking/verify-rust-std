@@ -1,0 +1,109 @@
+diff -ruN a/string.rs b/string.rs
+--- a/string.rs	2026-11-25 21:54:58.552868134 +0800
++++ b/string.rs	2026-11-25 21:54:58.597867721 +0800
+@@ -349,7 +349,6 @@
+ /// [`as_str()`]: String::as_str
+ #[derive(PartialEq, PartialOrd, Eq, Ord)]
+ #[stable(feature = "rust1", since = "1.0.0")]
+-#[lang = "String"]
+ pub struct String {
+     vec: Vec<u8>,
+ }
+@@ -440,7 +439,6 @@
+     /// ```
+     #[inline]
+     #[rustc_const_stable(feature = "const_string_new", since = "1.39.0")]
+-    #[rustc_diagnostic_item = "string_new"]
+     #[stable(feature = "rust1", since = "1.0.0")]
+     #[must_use]
+     pub const fn new() -> String {
+@@ -565,7 +563,6 @@
+     /// [`into_bytes`]: String::into_bytes
+     #[inline]
+     #[stable(feature = "rust1", since = "1.0.0")]
+-    #[rustc_diagnostic_item = "string_from_utf8"]
+     pub fn from_utf8(vec: Vec<u8>) -> Result<String, FromUtf8Error> {
+         match str::from_utf8(&vec) {
+             Ok(..) => Ok(String { vec }),
+@@ -1068,7 +1065,6 @@
+     #[inline]
+     #[must_use]
+     #[stable(feature = "string_as_str", since = "1.7.0")]
+-    #[rustc_diagnostic_item = "string_as_str"]
+     #[rustc_const_stable(feature = "const_vec_string_slice", since = "1.87.0")]
+     pub const fn as_str(&self) -> &str {
+         // SAFETY: String contents are stipulated to be valid UTF-8, invalid contents are an error
+@@ -1091,7 +1087,6 @@
+     #[inline]
+     #[must_use]
+     #[stable(feature = "string_as_str", since = "1.7.0")]
+-    #[rustc_diagnostic_item = "string_as_mut_str"]
+     #[rustc_const_stable(feature = "const_vec_string_slice", since = "1.87.0")]
+     pub const fn as_mut_str(&mut self) -> &mut str {
+         // SAFETY: String contents are stipulated to be valid UTF-8, invalid contents are an error
+@@ -1118,7 +1113,6 @@
+     #[inline]
+     #[stable(feature = "rust1", since = "1.0.0")]
+     #[rustc_confusables("append", "push")]
+-    #[rustc_diagnostic_item = "string_push_str"]
+     pub fn push_str(&mut self, string: &str) {
+         self.vec.extend_from_slice(string.as_bytes())
+     }
+@@ -1821,7 +1815,6 @@
+     #[inline]
+     #[track_caller]
+     #[stable(feature = "insert_str", since = "1.16.0")]
+-    #[rustc_diagnostic_item = "string_insert_str"]
+     pub fn insert_str(&mut self, idx: usize, string: &str) {
+         assert!(self.is_char_boundary(idx));
+ 
+@@ -2688,7 +2681,7 @@
+     reason = "API not fully fleshed out and ready to be stabilized",
+     issue = "27721"
+ )]
+-impl<'b> Pattern for &'b String {
++unsafe impl<'b> Pattern for &'b String {
+     type Searcher<'a> = <&'b str as Pattern>::Searcher<'a>;
+ 
+     fn into_searcher(self, haystack: &str) -> <&'b str as Pattern>::Searcher<'_> {
+@@ -2933,7 +2926,6 @@
+ /// implementation for free.
+ ///
+ /// [`Display`]: fmt::Display
+-#[rustc_diagnostic_item = "ToString"]
+ #[stable(feature = "rust1", since = "1.0.0")]
+ pub trait ToString {
+     /// Converts the given value to a `String`.
+@@ -2948,7 +2940,6 @@
+     /// ```
+     #[rustc_conversion_suggestion]
+     #[stable(feature = "rust1", since = "1.0.0")]
+-    #[rustc_diagnostic_item = "to_string_method"]
+     fn to_string(&self) -> String;
+ }
+ 
+diff -ruN a/str.rs b/str.rs
+--- a/str.rs	2026-11-25 21:54:58.552868134 +0800
++++ b/str.rs	2026-11-25 21:54:58.598867712 +0800
+@@ -791,7 +791,7 @@
+     #[rustc_allow_incoherent_impl]
+     #[must_use = "`self` will be dropped if the result is not used"]
+     #[inline]
+-    pub fn into_string(self: Box<Self>) -> String {
++    pub(crate) fn into_string(self: Box<Self>) -> String {
+         let slice = Box::<[u8]>::from(self);
+         // ignore-tidy-undocumented-unsafe
+         unsafe { String::from_utf8_unchecked(slice.into_vec()) }
+diff -ruN a/vec/mod.rs b/vec/mod.rs
+--- a/vec/mod.rs	2026-11-25 21:54:58.556868098 +0800
++++ b/vec/mod.rs	2026-11-25 21:54:58.598867712 +0800
+@@ -3686,7 +3686,8 @@
+             reason = "currently only used in IO module when global OOM handling is disabled"
+         )
+     )]
+-    pub(crate) fn try_extend_from_slice_of_bytes(
++    #[unstable(feature = "std_internals", issue = "none")]
++    pub fn try_extend_from_slice_of_bytes(
+         &mut self,
+         other: &[u8],
+     ) -> Result<(), TryReserveError> {

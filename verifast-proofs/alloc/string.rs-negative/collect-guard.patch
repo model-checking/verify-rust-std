@@ -1,0 +1,10 @@
+--- a/iter/traits/iterator.rs
++++ b/iter/traits/iterator.rs
+@@ -2095,6 +2095,6 @@
+         if cfg!(debug_assertions) {
+             let hint = self.size_hint();
+-            assert!(hint.1.is_none_or(|high| high >= hint.0), "Malformed size_hint {hint:?}");
++            assert!(hint.1.is_none_or(|high| crate::hint::black_box(high) >= hint.0), "Malformed size_hint {hint:?}");
+         }
+ 
+         FromIterator::from_iter(self)

@@ -1,0 +1,174 @@
+--- a/src/refinement_checker/refinement_checker.ml
++++ b/src/refinement_checker/refinement_checker.ml
+@@ -546,6 +546,7 @@
+               initializes_only_field_from_argument=false;
+               calls_mutable_field_with_unit=false;
+               calls_resolved_mutable_closure=false;
++              casts_boxed_utf8=false;
+             };
+             source_info={span}
+           };
+@@ -894,6 +895,7 @@
+             initializes_only_field_from_argument=false;
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
++            casts_boxed_utf8=false;
+           };
+           source_info={span}
+         };
+@@ -1137,6 +1139,7 @@
+             initializes_only_field_from_argument=false;
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
++            casts_boxed_utf8=false;
+           };
+           source_info={span}
+         };
+@@ -1360,6 +1363,7 @@
+             initializes_only_field_from_argument=false;
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
++            casts_boxed_utf8=false;
+           };
+           source_info={span}
+         };
+@@ -1528,6 +1532,7 @@
+             initializes_only_field_from_argument=false;
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
++            casts_boxed_utf8=false;
+           };
+           source_info={span}
+         };
+--- a/src/rust_frontend/vf_mir/vf_mir.capnp
++++ b/src/rust_frontend/vf_mir/vf_mir.capnp
+@@ -774,6 +774,7 @@
+         initializesOnlyFieldFromArgument @7: Bool; # Certified from the actual external MIR body.
+         callsMutableFieldWithUnit @8: Bool; # Verified shape of FromFn::next.
+         callsResolvedMutableClosure @9: Bool; # Rustc resolved the callback to the field's FnMut closure body.
++        castsBoxedUtf8 @10: Bool; # Checked round trip through equal-layout owning pointers.
+     }
+ 
+     struct DropData {
+--- a/src/rust_frontend/vf_mir_exporter/src/lib.rs
++++ b/src/rust_frontend/vf_mir_exporter/src/lib.rs
+@@ -2664,6 +2664,53 @@
+             }
+         }
+ 
++        fn casts_boxed_utf8(tcx: TyCtxt<'tcx>, def_id: rustc_hir::def_id::DefId) -> bool {
++            if tcx.def_path_str(def_id) != "std::str::from_boxed_utf8_unchecked" {
++                return false;
++            }
++            let body = tcx.optimized_mir(def_id);
++            if body.arg_count != 1 || body.basic_blocks.len() != 3 {
++                return false;
++            }
++            let argument = body.args_iter().next().unwrap();
++            let entry = &body.basic_blocks[mir::START_BLOCK];
++            let mir::TerminatorKind::Call { func, args, destination: raw_bytes, target: Some(cast), .. } =
++                &entry.terminator().kind else { return false };
++            let [arg] = &args[..] else { return false };
++            let (mir::Operand::Copy(input) | mir::Operand::Move(input)) = &arg.node else { return false };
++            let ty::FnDef(into_raw, type_args) = *func.ty(body, tcx).kind() else { return false };
++            let Some(type_args) = type_args.no_bound_vars() else { return false };
++            if entry.is_cleanup || !entry.statements.is_empty()
++                || input.local != argument || !input.projection.is_empty() || !raw_bytes.projection.is_empty()
++                || tcx.def_path_str(into_raw) != "std::boxed::Box::<T>::into_raw" || type_args.len() != 1
++                || !matches!(type_args.type_at(0).kind(), ty::Slice(el) if *el == tcx.types.u8)
++            {
++                return false;
++            }
++            let block = &body.basic_blocks[*cast];
++            let [statement] = &block.statements[..] else { return false };
++            let mir::StatementKind::Assign(assign) = &statement.kind else { return false };
++            let (raw_str, conversion) = &**assign;
++            if block.is_cleanup || !raw_str.projection.is_empty() || !matches!(conversion,
++                mir::Rvalue::Cast(mir::CastKind::PtrToPtr, mir::Operand::Move(place), ty)
++                    if place == raw_bytes && matches!(ty.kind(), ty::RawPtr(pointee, mir::Mutability::Mut)
++                        if matches!(pointee.kind(), ty::Str)))
++            {
++                return false;
++            }
++            let mir::TerminatorKind::Call { func, args, destination, target: Some(ret), .. } =
++                &block.terminator().kind else { return false };
++            let ty::FnDef(from_raw, type_args) = *func.ty(body, tcx).kind() else { return false };
++            let Some(type_args) = type_args.no_bound_vars() else { return false };
++            let last = &body.basic_blocks[*ret];
++            args.len() == 1 && matches!(&args[0].node, mir::Operand::Move(place) if place == raw_str)
++                && destination.local == mir::RETURN_PLACE && destination.projection.is_empty()
++                && tcx.def_path_str(from_raw) == "std::boxed::Box::<T>::from_raw" && type_args.len() == 1
++                && matches!(type_args.type_at(0).kind(), ty::Str)
++                && !last.is_cleanup && last.statements.is_empty()
++                && matches!(last.terminator().kind, mir::TerminatorKind::Return)
++        }
++
+         fn reads_from_fn_constructor(tcx: TyCtxt<'tcx>, def_id: rustc_hir::def_id::DefId) -> bool {
+             if !tcx.is_diagnostic_item(rustc_span::Symbol::intern("iter_from_fn"), def_id) {
+                 return false;
+@@ -2805,6 +2852,11 @@
+                 fn_call_data_cpn.set_initializes_only_field_from_argument(
+                     args.len() == 1 && target.is_some() && Self::reads_from_fn_constructor(tcx, def_id),
+                 );
++                if args.len() == 1 && target.is_some()
++                    && Self::casts_boxed_utf8(tcx, def_id)
++                {
++                    fn_call_data_cpn.set_casts_boxed_utf8(true);
++                }
+                 if args.len() == 1 && target.is_some() {
+                     if let Some(direct) = substitutions.no_bound_vars().and_then(|substitutions|
+                         Self::reads_from_fn_next(tcx, enc_ctx.body().typing_env(tcx), def_id, substitutions))
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -2086,7 +2086,18 @@
+         Ast.static_error loc "Placeholder types are not yet supported" None
+     | Infer -> Ast.static_error loc "Infer types are not yet supported" None
+     | Error -> Ast.static_error loc "Error types are not yet supported" None
+-    | Str -> Ast.static_error loc "Str types are not yet supported" None
++    | Str ->
++        let vf_ty = ManifestTypeExpr (loc, Str) in
++        let unsupported () = Error "A bare str cannot be used as a sized MIR value" in
++        let interp = RustBelt.{
++          size = SizeofExpr (loc, TypeExpr vf_ty);
++          own = (fun _ _ -> unsupported ());
++          shr = (fun _ _ _ -> unsupported ());
++          full_bor_content = (fun _ _ -> unsupported ());
++          points_to = (fun _ _ _ -> unsupported ());
++          pointee_fbc = None;
++        } in
++        Ok { Mir.vf_ty; interp }
+     | Array array_ty_cpn -> translate_array_ty array_ty_cpn loc
+     | Pattern -> Ast.static_error loc "Pattern types are not yet supported" None
+     | Slice ty_cpn -> translate_slice_ty ty_cpn loc
+@@ -2512,7 +2523,7 @@
+       | FnCallResult of Ast.expr
+       | FnCallOutcome of Ast.expr (* 'returning(result)' or 'unwinding' *)
+ 
+-    let translate_fn_call_rexpr (callee_cpn : OperandRd.t)
++    let translate_fn_call_rexpr ~checked_spec (callee_cpn : OperandRd.t)
+         (args_cpn : OperandRd.t list) (call_loc : Ast.loc) (fn_loc : Ast.loc)
+         (ghost_generic_arg_list_opt_cpn : OptionRd.t) =
+       let has_closure_substs =
+@@ -2574,6 +2585,9 @@
+         in
+         Ok (tmp_rvalue_binders, FnCallOutcome call_expr)
+       in
++      match checked_spec with
++      | Some name -> translate_regular_fn_call [] name
++      | None ->
+       let* callee =
+         Rocq_writer.rocq_print_big_record_field TranslatorArgs.rocq_writer "func" @@ fun () ->
+         translate_operand callee_cpn call_loc
+@@ -2956,7 +2970,11 @@
+         ghost_generic_arg_list_get fn_call_data_cpn
+       in
+       let* fn_call_tmp_rval_ctx, fn_call_rexpr =
+-        translate_fn_call_rexpr func_cpn args_cpn loc fn_loc ghost_generic_arg_list_opt_cpn
++        let checked_spec =
++          if casts_boxed_utf8_get fn_call_data_cpn then Some "std::str::cast_utf8_box"
++          else None
++        in
++        translate_fn_call_rexpr ~checked_spec func_cpn args_cpn loc fn_loc ghost_generic_arg_list_opt_cpn
+       in
+       let unwind_stmts, unwind_targets =
+         if TranslatorArgs.ignore_unwind_paths then ([], [])

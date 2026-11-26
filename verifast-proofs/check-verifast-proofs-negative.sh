@@ -11,4 +11,7 @@ cd alloc
       bash verify.sh
     cd ..
   cd ..
+  cd string.rs-negative
+    bash verify.sh
+  cd ..
 cd ..
