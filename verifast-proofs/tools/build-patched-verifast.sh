@@ -38,12 +38,13 @@ fi
 mkdir -p "$cache"
 build_dir="$(mktemp -d "$cache/.build.XXXXXX")"
 publish_dir="$(mktemp -d "$cache/.install.XXXXXX")"
-trap 'rm -rf "$build_dir" "$publish_dir"' EXIT
+deps_stage=""
+trap 'rm -rf "$build_dir" "$publish_dir" "$deps_stage"' EXIT
 export TMPDIR="$build_dir" DUNE_CACHE=disabled
 
 source_archive="${VF_STRING_SOURCE_ARCHIVE:-$build_dir/verifast-26.10.tar.gz}"
 if [[ -z "${VF_STRING_SOURCE_ARCHIVE:-}" ]]; then
-  curl -fLsS -o "$source_archive" https://codeload.github.com/verifast/verifast/tar.gz/refs/tags/26.10
+  curl -fLsS --retry 3 -o "$source_archive" https://codeload.github.com/verifast/verifast/tar.gz/refs/tags/26.10
 fi
 printf '%s  %s\n' d8ac9f2f744216460c440560e2b23de81d57fcdf5384689e4983adca0fadc37a "$source_archive" | shasum -a 256 -c >&2
 tar -xf "$source_archive" -C "$build_dir"
@@ -63,12 +64,19 @@ cat >> "$source_dir/src/rust_frontend/vf_mir_exporter/Cargo.toml" <<'TOML'
 exclude = ["capnproto-rust/capnp", "capnproto-rust/capnpc"]
 TOML
 
-deps="${VF_STRING_VFDEPS:-$build_dir/vfdeps-adf88dc}"
-if [[ -z "${VF_STRING_VFDEPS:-}" ]]; then
+# The prebuilt vfdeps OCaml toolchain expects its installation prefix at /tmp/vfdeps-adf88dc.
+deps="/tmp/vfdeps-adf88dc"
+if [[ -n "${VF_STRING_VFDEPS:-}" && ! -e "$deps" ]]; then
+  ln -s "$(realpath "$VF_STRING_VFDEPS")" "$deps"
+fi
+if [[ ! -x "$deps/bin/dune" ]]; then
   deps_archive="$build_dir/vfdeps-adf88dc-linux.txz"
-  curl -fLsS -o "$deps_archive" https://github.com/verifast/vfdeps/releases/download/25.01/vfdeps-adf88dc-linux.txz
+  curl -fLsS --retry 3 -o "$deps_archive" https://github.com/verifast/vfdeps/releases/download/25.01/vfdeps-adf88dc-linux.txz
   printf '%s  %s\n' 8d022c93d51a1d13ec1e782d767c60462405f6865d5ee416f82d6234e93ee580 "$deps_archive" | shasum -a 256 -c >&2
-  tar -xf "$deps_archive" -C "$build_dir"
+  deps_stage="$(mktemp -d /tmp/.vfdeps.XXXXXX)"
+  tar -xf "$deps_archive" -C "$deps_stage"
+  mv -nT "$deps_stage/vfdeps-adf88dc" "$deps" || true
+  rm -rf "$deps_stage"
 fi
 
 export PATH="$deps/bin:$PATH"
