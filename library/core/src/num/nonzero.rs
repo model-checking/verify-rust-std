@@ -1411,8 +1411,6 @@ macro_rules! nonzero_integer {
             /// # Examples
             ///
             /// ```
-            /// #![feature(nonzero_ops)]
-            ///
             /// # use std::num::NonZero;
             /// #
             /// # fn main() { test().unwrap(); }
@@ -1426,7 +1424,8 @@ macro_rules! nonzero_integer {
             /// ```
             ///
             /// [`checked_mul`]: Self::checked_mul
-            #[unstable(feature = "nonzero_ops", issue = "84186")]
+            #[stable(feature = "nonzero_ops", since = "CURRENT_RUSTC_VERSION")]
+            #[rustc_const_stable(feature = "nonzero_ops", since = "CURRENT_RUSTC_VERSION")]
             #[must_use = "this returns the result of the operation, \
                           without modifying the original"]
             #[inline]
@@ -1437,7 +1436,11 @@ macro_rules! nonzero_integer {
                 self.get().checked_mul(other.get()).is_some_and(|product| product == result.get())
             })]
             pub const unsafe fn unchecked_mul(self, other: Self) -> Self {
-                // SAFETY: The caller ensures there is no overflow.
+                // SAFETY:
+                // - the caller promises that the multiplication does not overflow;
+                // - `self` and `other` are non-zero;
+                // - the only way to get zero from a multiplication without overflow
+                //   is for either factor to be zero.
                 unsafe { Self::new_unchecked(self.get().unchecked_mul(other.get())) }
             }
 
@@ -2153,8 +2156,6 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         /// # Examples
         ///
         /// ```
-        /// #![feature(nonzero_ops)]
-        ///
         /// # use std::num::NonZero;
         /// #
         /// # fn main() { test().unwrap(); }
@@ -2168,7 +2169,8 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         /// ```
         ///
         /// [`checked_add`]: Self::checked_add
-        #[unstable(feature = "nonzero_ops", issue = "84186")]
+        #[stable(feature = "nonzero_ops", since = "CURRENT_RUSTC_VERSION")]
+        #[rustc_const_stable(feature = "nonzero_ops", since = "CURRENT_RUSTC_VERSION")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
@@ -2180,7 +2182,11 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
             self.get().checked_add(other).is_some_and(|sum| sum == result.get())
         })]
         pub const unsafe fn unchecked_add(self, other: $Int) -> Self {
-            // SAFETY: The caller ensures there is no overflow.
+            // SAFETY:
+            // - the caller promises that the addition does not overflow;
+            // - `self` is non-zero;
+            // - the only way to get zero from an addition of unsigned integers
+            //   without overflow is for both addends to be zero.
             unsafe { Self::new_unchecked(self.get().unchecked_add(other)) }
         }
 

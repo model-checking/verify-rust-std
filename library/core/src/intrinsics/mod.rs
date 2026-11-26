@@ -2406,6 +2406,7 @@ pub const fn ptr_guaranteed_cmp<T>(ptr: *const T, other: *const T) -> u8 {
 /// which is UB if any of their inputs are `undef`.)
 #[rustc_nounwind]
 #[rustc_intrinsic]
+#[lang = "raw_eq"]
 pub const unsafe fn raw_eq<T>(a: &T, b: &T) -> bool;
 
 /// Lexicographically compare `[left, left + bytes)` and `[right, right + bytes)`
@@ -2425,6 +2426,7 @@ pub const unsafe fn raw_eq<T>(a: &T, b: &T) -> bool;
 #[rustc_nounwind]
 #[rustc_intrinsic]
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
+#[lang = "compare_bytes"]
 pub const unsafe fn compare_bytes(left: *const u8, right: *const u8, bytes: usize) -> i32;
 
 /// See documentation of [`std::hint::black_box`] for details.
@@ -2714,7 +2716,7 @@ pub const fn ub_checks() -> bool {
 #[inline(always)]
 #[rustc_intrinsic]
 pub const fn overflow_checks() -> bool {
-    cfg!(debug_assertions)
+    cfg!(overflow_checks)
 }
 
 /// Allocates a block of memory at compile time.
