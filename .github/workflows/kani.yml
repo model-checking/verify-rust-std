@@ -48,6 +48,11 @@ jobs:
       # runners get OOM-killed when 4 memory-hungry harnesses (up to ~10 GB
       # each, e.g. the ffi::c_str ones) run concurrently.
       KANI_JOBS: ${{ matrix.os == 'ubuntu-latest' && 2 || '' }}
+      # Compile one library crate at a time on macos-latest: its 7 GB runners
+      # kill the compiler of `core` when the compiler of another crate with
+      # many harnesses runs beside it. The other runners keep cargo's default
+      # (cargo rejects an empty value).
+      CARGO_BUILD_JOBS: ${{ matrix.os == 'macos-latest' && 1 || 'default' }}
     
     steps:
       - name: Remove unnecessary software to free up disk space
