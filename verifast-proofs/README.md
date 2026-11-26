@@ -6,6 +6,7 @@ Specifically, it currently contains the following proofs:
 
 - Partial proof of [LinkedList](alloc/collections/linked_list.rs/)
 - Partial proof of [RawVec](alloc/raw_vec/mod.rs/)
+- Challenge 10 proof of [String](alloc/string.rs/)
 
 See each proof's accompanying README for a tour of the proof and applicable caveats.
 
@@ -23,7 +24,7 @@ To verify a function in a file <code>library/<i>crate</i>/src/<i>mod</i>/<i>file
 1. Copy that file to <code>verifast-proofs/<i>crate</i>/<i>mod</i>/<i>file</i>.rs/original/<i>file</i>.rs</code> as well as to <code>verifast-proofs/<i>crate</i>/<i>mod</i>/<i>file</i>.rs/verified/<i>file</i>.rs</code>.
 2. Create a file <code>verifast-proofs/<i>crate</i>/<i>mod</i>/<i>file</i>.rs/original/lib.rs</code> to serve as crate root for verification, and include <code><b>mod</b> <i>file</i>;</code>. (See the existing proofs for examples.) Copy it to <code>verifast-proofs/<i>crate</i>/<i>mod</i>/<i>file</i>.rs/verified/lib.rs</code>.
 2. Add a VeriFast specification to the function(s) you want to verify, and any other VeriFast annotations to make the proof go through, in <code>verifast-proofs/<i>crate</i>/<i>mod</i>/<i>file</i>.rs/verified/<i>file</i>.rs</code>. While doing so, you will need to change the code slightly so as to be able to insert ghost commands in the correct places. 
-3. Add commands for checking your proof to `verifast-proofs/check-verifast-proofs.mysh`. This includes the following:
+3. Register the proof with `verifast-proofs/check-verifast-proofs.sh`. Each proof check includes the following:
     1. A `verifast` invocation for checking the VeriFast proof.
     2. A `refinement-checker` invocation for checking that the code changes you made in the verified version do not change the meaning of the program. Specifically, this tool checks that the original code *refines* the verified code, i.e. that each behavior of a function in the original version is also a behavior of the corresponding function in the verified version. As a result, if the verified version has been verified to have no bad behaviors, the original version also has no bad behaviors.
     3. A `diff` invocation for checking that the version in `original` is identical to the original version in `library`.
@@ -56,4 +57,4 @@ We then:
 
 Separating steps 2) and 3) lets us distinguish between CI failures caused by incorrect modifications to the verified files (failure in step 2) versus a proof that was once correct, but is just out of date (failure in step 3). Without the copy of the original file, when the `library/` files change, there would be no easy way to tell whether the VeriFast proofs are wrong or just stale.
 
-The [VeriFast](../.github/workflows/verifast.yml) GitHub action will run `verifast-proofs/check-verifast-proofs.mysh`. Check that file to see which version of VeriFast is used.
+The [VeriFast](../.github/workflows/verifast.yml) GitHub action runs `verifast-proofs/check-verifast-proofs.sh`. Each proof's `verify.sh` selects the VeriFast version.

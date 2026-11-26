@@ -1,0 +1,291 @@
+--- a/src/refinement_checker/refinement_checker.ml
++++ b/src/refinement_checker/refinement_checker.ml
+@@ -547,6 +547,7 @@
+               calls_mutable_field_with_unit=false;
+               calls_resolved_mutable_closure=false;
+               casts_boxed_utf8=false;
++              delegates_string_range_index=false;
+                             local_collect={from_iter={kind=Bool}; required_bodies=[]; forwarding_error=""}
+             };
+             source_info={span}
+@@ -897,6 +898,7 @@
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
+             casts_boxed_utf8=false;
++            delegates_string_range_index=false;
+                         local_collect={from_iter={kind=Bool}; required_bodies=[]; forwarding_error=""}
+           };
+           source_info={span}
+@@ -1142,6 +1144,7 @@
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
+             casts_boxed_utf8=false;
++            delegates_string_range_index=false;
+                         local_collect={from_iter={kind=Bool}; required_bodies=[]; forwarding_error=""}
+           };
+           source_info={span}
+@@ -1367,6 +1370,7 @@
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
+             casts_boxed_utf8=false;
++            delegates_string_range_index=false;
+                         local_collect={from_iter={kind=Bool}; required_bodies=[]; forwarding_error=""}
+           };
+           source_info={span}
+@@ -1537,6 +1541,7 @@
+             calls_mutable_field_with_unit=false;
+             calls_resolved_mutable_closure=false;
+             casts_boxed_utf8=false;
++            delegates_string_range_index=false;
+                         local_collect={from_iter={kind=Bool}; required_bodies=[]; forwarding_error=""}
+           };
+           source_info={span}
+--- a/src/rust_frontend/vf_mir/vf_mir.capnp
++++ b/src/rust_frontend/vf_mir/vf_mir.capnp
+@@ -775,7 +775,8 @@
+         callsMutableFieldWithUnit @8: Bool; # Verified shape of FromFn::next.
+         callsResolvedMutableClosure @9: Bool; # Rustc resolved the callback to the field's FnMut closure body.
+         castsBoxedUtf8 @10: Bool; # Checked round trip through equal-layout owning pointers.
+-        localCollect @11: LocalCollect;
++        delegatesStringRangeIndex @11: Bool; # Checked call of the concrete, forwarding String Index impl.
++        localCollect @12: LocalCollect;
+     }
+ 
+     # A checked Iterator::collect forwarding call, without importing MIR.
+--- a/src/rust_frontend/vf_mir_exporter/src/lib.rs
++++ b/src/rust_frontend/vf_mir_exporter/src/lib.rs
+@@ -628,6 +628,9 @@
+     #[derive(Clone, Copy)]
+     enum PlaceKind { MutableRef, SharedRef, Other }
+ 
++    #[derive(Clone, Copy, PartialEq)]
++    enum IndexOperand { String, Range, Bytes, Suffix }
++
+     enum EncKind<'tcx, 'a> {
+         Body(&'a mir::Body<'tcx>),
+         Adt,
+@@ -639,6 +642,7 @@
+         mode: EncKind<'tcx, 'a>,
+         annots: LinkedList<Box<GhostRange>>,
+         mut_annots: Vec<rustc_span::BytePos>,
++        checked_string_range_index: Option<rustc_hir::def_id::DefId>,
+         local_bodies: Option<&'a [(mir::Body<'tcx>, Span)]>,
+     }
+ 
+@@ -655,6 +659,7 @@
+                 mode,
+                 annots,
+                 mut_annots,
++                checked_string_range_index: None,
+                 local_bodies: None,
+             }
+         }
+@@ -948,6 +953,7 @@
+                 .iter()
+                 .map(|(body, _)| body.span.data())
+                 .collect();
++            let checked_string_range_index = Self::checked_string_range_index(self.tcx, &self.bodies);
+             vf_mir_cpn.fill_bodies(&self.bodies, |mut body_cpn, (body, span)| {
+                 Self::encode_span_data(
+                     self.tcx,
+@@ -978,6 +984,7 @@
+                     annot.span().unwrap().data().hi
+                 }).collect::<Vec<_>>();
+                 let mut enc_ctx = EncCtx::new(self.tcx, EncKind::Body(body), annots, mut_annots);
++                enc_ctx.checked_string_range_index = checked_string_range_index;
+                 enc_ctx.local_bodies = Some(&self.bodies);
+                 Self::encode_body(&mut enc_ctx, body_cpn);
+                 req_adt_defs.extend(enc_ctx.get_req_adts());
+@@ -2667,6 +2674,166 @@
+             }
+         }
+ 
++        fn resolve_string_range_index(
++            tcx: TyCtxt<'tcx>,
++            body: &mir::Body<'tcx>,
++            def_id: rustc_hir::def_id::DefId,
++            substitutions: ty::GenericArgsRef<'tcx>,
++        ) -> Option<rustc_hir::def_id::DefId> {
++            if tcx.def_path_str(def_id) != "core::ops::Index::index" || substitutions.len() != 2 {
++                return None;
++            }
++            let as_str = tcx.get_diagnostic_item(rustc_span::Symbol::intern("string_as_str"))?;
++            let signature = tcx.fn_sig(as_str).skip_binder().skip_binder();
++            let ty::Ref(_, string, mir::Mutability::Not) = *signature.inputs().first()?.kind() else {
++                return None;
++            };
++            let ty::Adt(range, args) = substitutions.type_at(1).kind() else { return None };
++            if substitutions.type_at(0) != string
++                || tcx.def_path_str(range.did()) != "core::ops::RangeFrom"
++                || args.len() != 1 || args.type_at(0) != tcx.types.usize
++            {
++                return None;
++            }
++            let instance = ty::Instance::try_resolve(tcx, body.typing_env(tcx), def_id, substitutions)
++                .ok().flatten()?;
++            match instance.def {
++                ty::InstanceKind::Item(impl_id) if impl_id.is_local() => Some(impl_id),
++                _ => None,
++            }
++        }
++
++        fn checked_string_range_index(
++            tcx: TyCtxt<'tcx>,
++            bodies: &[(mir::Body<'tcx>, Span)],
++        ) -> Option<rustc_hir::def_id::DefId> {
++            let mut candidates = bodies.iter().filter_map(|(body, _)| {
++                Self::is_string_range_index_forwarder(tcx, body)
++            });
++            let index = candidates.next()?;
++            if candidates.next().is_some() {
++                return None;
++            }
++            Some(index)
++        }
++
++        fn is_string_range_index_forwarder(
++            tcx: TyCtxt<'tcx>,
++            body: &mir::Body<'tcx>,
++        ) -> Option<rustc_hir::def_id::DefId> {
++            let [string, range] = body.args_iter().collect::<Vec<_>>()[..] else { return None };
++            if body.basic_blocks.iter().filter(|block| !block.is_cleanup).count() != 3 {
++                return None;
++            }
++            for block in body.basic_blocks.iter().filter(|block| block.is_cleanup) {
++                if block.statements.iter().any(|stmt| !matches!(stmt.kind,
++                    mir::StatementKind::StorageDead(_) | mir::StatementKind::Nop))
++                {
++                    return None;
++                }
++                match &block.terminator().kind {
++                    mir::TerminatorKind::UnwindResume | mir::TerminatorKind::UnwindTerminate(_) => (),
++                    mir::TerminatorKind::SwitchInt { discr, .. } if discr.ty(body, tcx) == tcx.types.bool => (),
++                    mir::TerminatorKind::Drop { place, .. }
++                        if place.projection.is_empty() && place.ty(&body.local_decls, tcx).ty == body.local_decls[range].ty => (),
++                    _ => return None,
++                }
++            }
++            // Follow the normal blocks. Their only effects are local moves
++            // and the two calls. With RangeFrom<usize>, cleanup of an unpassed
++            // index has no user destructor.
++            let mut locals = HashMap::from([(string, IndexOperand::String), (range, IndexOperand::Range)]);
++            let mut label = mir::START_BLOCK;
++            for as_str in [true, false] {
++                let block = &body.basic_blocks[label];
++                if block.is_cleanup || !Self::read_index_locals(tcx, body, block, &mut locals) {
++                    return None;
++                }
++                let mir::TerminatorKind::Call { func, args, destination, target: Some(target), .. } =
++                    &block.terminator().kind else { return None };
++                let ty::FnDef(callee, _) = *func.ty(body, tcx).kind() else { return None };
++                let origin = |arg: &mir::Operand<'_>| {
++                    match arg {
++                        mir::Operand::Copy(place) | mir::Operand::Move(place) if place.projection.is_empty() =>
++                            locals.get(&place.local).copied(),
++                        _ => None,
++                    }
++                };
++                if !destination.projection.is_empty() {
++                    return None;
++                }
++                if as_str {
++                    let [receiver] = &args[..] else { return None };
++                    if !tcx.is_diagnostic_item(rustc_span::Symbol::intern("string_as_str"), callee)
++                        || origin(&receiver.node) != Some(IndexOperand::String)
++                        || [string, range, mir::RETURN_PLACE].contains(&destination.local)
++                    {
++                        return None;
++                    }
++                    locals.insert(destination.local, IndexOperand::Bytes);
++                } else {
++                    let [index, slice] = &args[..] else { return None };
++                    if tcx.def_path_str(callee) != "core::slice::SliceIndex::index"
++                        || origin(&index.node) != Some(IndexOperand::Range)
++                        || origin(&slice.node) != Some(IndexOperand::Bytes)
++                    {
++                        return None;
++                    }
++                    locals.insert(destination.local, IndexOperand::Suffix);
++                }
++                label = *target;
++            }
++            let block = &body.basic_blocks[label];
++            (!block.is_cleanup && Self::read_index_locals(tcx, body, block, &mut locals)
++                && locals.get(&mir::RETURN_PLACE) == Some(&IndexOperand::Suffix)
++                && matches!(block.terminator().kind, mir::TerminatorKind::Return)).then_some(body.source.def_id())
++        }
++
++        fn read_index_locals(
++            tcx: TyCtxt<'tcx>,
++            body: &mir::Body<'tcx>,
++            block: &mir::BasicBlockData<'tcx>,
++            locals: &mut HashMap<mir::Local, IndexOperand>,
++        ) -> bool {
++            block.statements.iter().all(|statement| match &statement.kind {
++                mir::StatementKind::StorageLive(local) | mir::StatementKind::StorageDead(local) => {
++                    locals.remove(local);
++                    true
++                }
++                mir::StatementKind::Assign(assign) => {
++                    let (dst, value) = &**assign;
++                    if !dst.projection.is_empty() {
++                        return false;
++                    }
++                    match value {
++                        mir::Rvalue::Use(mir::Operand::Move(src) | mir::Operand::Copy(src), _)
++                            if src.projection.is_empty() =>
++                        {
++                            let Some(origin) = locals.get(&src.local).copied() else { return false };
++                            locals.insert(dst.local, origin);
++                            true
++                        }
++                        mir::Rvalue::Ref(_, mir::BorrowKind::Shared, src)
++                            if matches!(&src.projection[..], [mir::ProjectionElem::Deref]) =>
++                        {
++                            let Some(origin) = locals.get(&src.local).copied() else { return false };
++                            locals.insert(dst.local, origin);
++                            true
++                        }
++                        mir::Rvalue::Use(mir::Operand::Constant(_), _)
++                            if body.local_decls[dst.local].ty == tcx.types.bool =>
++                        {
++                            locals.remove(&dst.local);
++                            true
++                        }
++                        _ => false,
++                    }
++                }
++                mir::StatementKind::Nop => true,
++                _ => false,
++            })
++        }
++
+         fn casts_boxed_utf8(tcx: TyCtxt<'tcx>, def_id: rustc_hir::def_id::DefId) -> bool {
+             if tcx.def_path_str(def_id) != "std::str::from_boxed_utf8_unchecked" {
+                 return false;
+@@ -3151,6 +3318,15 @@
+                 fn_call_data_cpn.set_initializes_only_field_from_argument(
+                     args.len() == 1 && target.is_some() && Self::reads_from_fn_constructor(tcx, def_id),
+                 );
++                if let Some(checked) = enc_ctx.checked_string_range_index {
++                    if args.len() == 2 && target.is_some()
++                        && substitutions.no_bound_vars().and_then(|args| {
++                            Self::resolve_string_range_index(tcx, enc_ctx.body(), def_id, args)
++                        }) == Some(checked)
++                    {
++                        fn_call_data_cpn.set_delegates_string_range_index(true);
++                    }
++                }
+                 if args.len() == 1 && target.is_some()
+                     && Self::casts_boxed_utf8(tcx, def_id)
+                 {
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -3050,6 +3050,7 @@
+       let* fn_call_tmp_rval_ctx, fn_call_rexpr =
+         let checked_spec =
+           if casts_boxed_utf8_get fn_call_data_cpn then Some "std::str::cast_utf8_box"
++          else if delegates_string_range_index_get fn_call_data_cpn then Some "std::ops::Index::index_string_suffix"
+           else None
+         in
+         translate_fn_call_rexpr ~checked_spec func_cpn args_cpn loc fn_loc ghost_generic_arg_list_opt_cpn

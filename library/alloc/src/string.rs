@@ -3845,3 +3845,120 @@ impl From<char> for String {
         c.to_string()
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::kani;
+
+    use super::String;
+    const MAX_BYTES: usize = 8;
+    const MAX_CAPACITY: usize = MAX_BYTES + 1;
+
+    fn bounded_string(first: Option<char>, second: Option<char>) -> String {
+        let len = first.map_or(0, char::len_utf8) + second.map_or(0, char::len_utf8);
+        let spare = usize::from(kani::any::<u8>()).min(MAX_CAPACITY - len);
+        let mut string = String::with_capacity(len + spare);
+        if let Some(first) = first {
+            string.push(first);
+        }
+        if let Some(second) = second {
+            string.push(second);
+        }
+        string
+    }
+
+    #[inline(always)]
+    fn check_remove(input: &str, idx: usize, removed: char, expected: &[u8]) {
+        let mut string = String::from(input);
+        kani::assert(string.remove(idx) == removed, "remove returns the selected scalar");
+        kani::assert(string.as_bytes() == expected, "remove preserves the remaining bytes");
+        kani::cover(true, "remove completes the selected case");
+    }
+
+    #[kani::proof]
+    fn harness_string_remove() {
+        match kani::any::<u8>() % 8 {
+            0 => check_remove("abc", 0, 'a', b"bc"),
+            1 => check_remove("aébc", 1, 'é', b"abc"),
+            2 => check_remove("€ab", 0, '€', b"ab"),
+            3 => check_remove("a🦀", 1, '🦀', b"a"),
+            4 => check_remove("a", 0, 'a', b""),
+            5 => check_remove("\0🐱é", 1, '🐱', "\0é".as_bytes()),
+            6 => check_remove("xé€🦀", 3, '€', "xé🦀".as_bytes()),
+            _ => check_remove("\u{10ffff}β", 0, '\u{10ffff}', "β".as_bytes()),
+        }
+    }
+
+    #[kani::proof]
+    fn harness_string_remove_arbitrary_scalar() {
+        let scalar: char = kani::any();
+        let mut bytes = kani::any::<[u8; 6]>().map(|byte| byte & 0x7f);
+        let index = usize::from(kani::any::<u8>()).min(bytes.len() - 4);
+        let width = scalar.encode_utf8(&mut bytes[index..index + 4]).len();
+        // SAFETY: encode_utf8 writes one complete scalar. Every other byte is initialized ASCII.
+        let mut string = unsafe { String::from_utf8_unchecked(bytes.to_vec()) };
+
+        kani::assert(string.remove(index) == scalar, "remove returns the arbitrary scalar");
+        kani::assert(string.len() == bytes.len() - width, "remove shortens by the scalar width");
+        let output_index = usize::from(kani::any::<u8>()) % bytes.len();
+        if let Some(&byte) = string.as_bytes().get(output_index) {
+            let input_index =
+                if output_index < index { output_index } else { output_index + width };
+            kani::assert(byte == bytes[input_index], "remove preserves the remaining bytes");
+        }
+        kani::cover(output_index < string.len(), "check a byte in the result");
+        kani::cover(width == 1, "remove a one-byte scalar");
+        kani::cover(width == 2, "remove a two-byte scalar");
+        kani::cover(width == 3, "remove a three-byte scalar");
+        kani::cover(width == 4, "remove a four-byte scalar");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn harness_string_remove_inside_char() {
+        let scalar: char = kani::any();
+        let scalar = if scalar.is_ascii() { 'é' } else { scalar };
+        let mut string = bounded_string(Some(scalar), None);
+        let index = 1 + usize::from(kani::any::<u8>()).min(string.len() - 2);
+        kani::cover(index < string.len() && !string.is_char_boundary(index), "inside a scalar");
+        string.remove(index);
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn harness_string_remove_at_end() {
+        let mut string = bounded_string(kani::any(), None);
+        let index = string.len();
+        kani::cover(index == 0, "at the end of an empty string");
+        kani::cover(index > 0, "at the end of a non-empty string");
+        string.remove(index);
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn harness_string_remove_past_end() {
+        let mut string = bounded_string(Some(kani::any()), None);
+        let len = string.len();
+        let index = (len + 1).saturating_add(kani::any::<usize>());
+        kani::cover(index > len, "past the end of the string");
+        string.remove(index);
+    }
+
+    #[kani::proof]
+    fn harness_string_into_boxed_str() {
+        let string = bounded_string(kani::any(), kani::any());
+        let capacity = string.capacity();
+        let len = string.len();
+        let index = usize::from(kani::any::<u8>()) % MAX_BYTES;
+        let byte = string.as_bytes().get(index).copied();
+        let boxed = string.into_boxed_str();
+
+        kani::assert(boxed.len() == len, "boxing preserves the length");
+        kani::assert(boxed.as_bytes().get(index).copied() == byte, "boxing preserves the bytes");
+        kani::cover(index < len, "check an initialized byte after boxing");
+        kani::cover(capacity == 0, "box an empty allocation");
+        kani::cover(capacity == len && len > 0, "box a full allocation");
+        kani::cover(capacity > len && len > 0, "shrink the allocation before boxing");
+    }
+}

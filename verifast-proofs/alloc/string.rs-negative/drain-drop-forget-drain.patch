@@ -1,0 +1,11 @@
+--- verified/string.rs
++++ verified/string.rs
+@@ -6418,7 +6418,7 @@
+         //@ std::vec::end_ref_Vec(vref);
+         vec_len
+     } { //~allow_dead_code
+-        self_vec.drain(this.start..this.end);
++        core::mem::forget(self_vec.drain(this.start..this.end));
+         //@ split_utf8_at_boundary(bs, st);
+         //@ split_utf8_at_boundary(bs, en);
+         //@ append_utf8(take(st, bs), drop(en, bs));

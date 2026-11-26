@@ -1,0 +1,40 @@
+--- a/bin/rust/prelude_core.rsspec
++++ b/bin/rust/prelude_core.rsspec
+@@ -111,11 +111,8 @@
+ }
+ 
+ fix field_ptr_provenance(p: pointer, structTypeid: *_, fieldOffset: i32) -> pointer_provenance;
+-fix field_ptr_provenance_parent(pr: pointer_provenance, fieldOffset: i32) -> pointer;
+-
+-lem_auto(field_ptr_provenance(p, structTypeid, fieldOffset)) field_ptr_provenance_injective(p: pointer, structTypeid: *_, fieldOffset: i32);
+-    req true;
+-    ens field_ptr_provenance_parent(field_ptr_provenance(p, structTypeid, fieldOffset), fieldOffset) == p;
++// Rust field projections retain the base provenance. The provenance
++// and field offset therefore cannot recover the base address.
+ 
+ fix field_ptr(p: pointer, structTypeid: *_, fieldOffset: i32) -> pointer {
+     pointer_ctor(field_ptr_provenance(p, structTypeid, fieldOffset), p.address + fieldOffset, pointer_metadata_none)
+--- a/src/verifast1.ml
++++ b/src/verifast1.ml
+@@ -6516,9 +6516,20 @@
+     in
+     let packed = List.mem Packed attrs in
+     let repr_c = dialect <> Some Rust || List.mem ReprC attrs in
+-    assume_axiom (fun _ _ s -> (sn ^ "_size_limits", s, ctxt#mk_and (ctxt#mk_lt (ctxt#mk_intlit 0) s) (ctxt#mk_le s max_uintptr_term)));
++    (* Generic Rust structs can have zero-sized instantiations. *)
++    let size_lower_bound = if dialect = Some Rust then ctxt#mk_le else ctxt#mk_lt in
++    assume_axiom (fun _ _ s -> (sn ^ "_size_limits", s, ctxt#mk_and (size_lower_bound (ctxt#mk_intlit 0) s) (ctxt#mk_le s max_uintptr_term)));
+     match body_opt with
+     | Some (_, fmap, _) ->
++      if dialect = Some Rust then
++        (* Every real field with a modeled size fits in the containing struct.
++           This bound does not fix a field order or exclude zero-sized fields. *)
++        fmap |> List.iter (function
++          | (field, (lf, Real, ((Bool | Int _ | RustChar | Float | Double
++                                | GhostTypeParam _ | BoundedGhostTypeParam _) as t), _, _)) ->
++              assume_axiom (fun targs_env _ s ->
++                (sn ^ "_" ^ field ^ "_size_bound", s, ctxt#mk_le (sizeof_core lf targs_env t) s))
++          | _ -> ());
+       let rec offset_iter fields current is_first =
+         begin match fields with
+         | [] -> if packed then assume_axiom (fun targs_env targs s -> (sn ^ "_packed_size", s, ctxt#mk_eq s (current targs_env)))

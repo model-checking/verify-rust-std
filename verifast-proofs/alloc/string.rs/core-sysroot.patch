@@ -1,0 +1,104 @@
+diff -ruN a/str/iter.rs b/str/iter.rs
+--- a/str/iter.rs	2026-11-25 21:52:17.392202981 +0800
++++ b/str/iter.rs	2026-11-25 21:52:17.513202100 +0800
+@@ -1589,6 +1589,16 @@
+     pub(super) inner: FlatMap<Chars<'a>, char_mod::EscapeDefault, CharEscapeDefault>,
+ }
+ 
++impl<'a> EscapeDefault<'a> {
++    #[unstable(feature = "std_internals", issue = "none")]
++    pub fn into_parts(
++        self,
++    ) -> (Option<impl Iterator<Item = char>>, Option<Chars<'a>>, Option<impl Iterator<Item = char>>)
++    {
++        self.inner.into_parts()
++    }
++}
++
+ /// The return type of [`str::escape_unicode`].
+ #[stable(feature = "str_escape", since = "1.34.0")]
+ #[derive(Clone, Debug)]
+diff -ruN a/str/pattern.rs b/str/pattern.rs
+--- a/str/pattern.rs	2026-11-25 21:52:17.392202981 +0800
++++ b/str/pattern.rs	2026-11-25 21:52:17.450202559 +0800
+@@ -96,7 +96,7 @@
+ /// assert_eq!("abcdef_z".find(|ch| ch > 'd' && ch < 'y'), Some(4));
+ /// assert_eq!("abcddd_z".find(|ch| ch > 'd' && ch < 'y'), None);
+ /// ```
+-pub trait Pattern: Sized {
++pub unsafe trait Pattern: Sized {
+     /// Associated searcher for this pattern
+     type Searcher<'a>: Searcher<'a>;
+ 
+@@ -559,7 +559,7 @@
+ /// ```
+ /// assert_eq!("Hello world".find('o'), Some(4));
+ /// ```
+-impl Pattern for char {
++unsafe impl Pattern for char {
+     type Searcher<'a> = CharSearcher<'a>;
+ 
+     #[inline]
+@@ -672,7 +672,7 @@
+     char_indices: super::CharIndices<'a>,
+ }
+ 
+-impl<C: MultiCharEq> Pattern for MultiCharEqPattern<C> {
++unsafe impl<C: MultiCharEq> Pattern for MultiCharEqPattern<C> {
+     type Searcher<'a> = MultiCharEqSearcher<'a, C>;
+ 
+     #[inline]
+@@ -827,7 +827,7 @@
+ /// assert_eq!("Hello world".find(['o', 'l']), Some(2));
+ /// assert_eq!("Hello world".find(['h', 'w']), Some(6));
+ /// ```
+-impl<const N: usize> Pattern for [char; N] {
++unsafe impl<const N: usize> Pattern for [char; N] {
+     pattern_methods!('a, CharArraySearcher<'a, N>, MultiCharEqPattern, CharArraySearcher);
+ }
+ 
+@@ -849,7 +849,7 @@
+ /// assert_eq!("Hello world".find(&['o', 'l']), Some(2));
+ /// assert_eq!("Hello world".find(&['h', 'w']), Some(6));
+ /// ```
+-impl<'b, const N: usize> Pattern for &'b [char; N] {
++unsafe impl<'b, const N: usize> Pattern for &'b [char; N] {
+     pattern_methods!('a, CharArrayRefSearcher<'a, 'b, N>, MultiCharEqPattern, CharArrayRefSearcher);
+ }
+ 
+@@ -891,7 +891,7 @@
+ /// assert_eq!("Hello world".find(&['o', 'l'][..]), Some(2));
+ /// assert_eq!("Hello world".find(&['h', 'w'][..]), Some(6));
+ /// ```
+-impl<'b> Pattern for &'b [char] {
++unsafe impl<'b> Pattern for &'b [char] {
+     pattern_methods!('a, CharSliceSearcher<'a, 'b>, MultiCharEqPattern, CharSliceSearcher);
+ }
+ 
+@@ -940,7 +940,7 @@
+ /// assert_eq!("Hello world".find(char::is_uppercase), Some(0));
+ /// assert_eq!("Hello world".find(|c| "aeiou".contains(c)), Some(1));
+ /// ```
+-impl<F> Pattern for F
++unsafe impl<F> Pattern for F
+ where
+     F: FnMut(char) -> bool,
+ {
+@@ -952,7 +952,7 @@
+ /////////////////////////////////////////////////////////////////////////////
+ 
+ /// Delegates to the `&str` impl.
+-impl<'b, 'c> Pattern for &'c &'b str {
++unsafe impl<'b, 'c> Pattern for &'c &'b str {
+     pattern_methods!('a, StrSearcher<'a, 'b>, |&s| s, |s| s);
+ }
+ 
+@@ -970,7 +970,7 @@
+ /// ```
+ /// assert_eq!("Hello world".find("world"), Some(6));
+ /// ```
+-impl<'b> Pattern for &'b str {
++unsafe impl<'b> Pattern for &'b str {
+     type Searcher<'a> = StrSearcher<'a, 'b>;
+ 
+     #[inline]

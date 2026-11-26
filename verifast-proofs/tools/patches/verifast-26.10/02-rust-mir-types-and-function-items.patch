@@ -1,0 +1,974 @@
+--- a/src/frontend/ast.ml
++++ b/src/frontend/ast.ml
+@@ -1120,6 +1120,7 @@
+   struct_attr =
+   | Packed
+   | ReprC
++  | RustZeroSized
+ and constant_value = (* ?constant_value *)
+   IntConst of big_int
+ | BoolConst of bool
+--- a/src/refinement_checker/main.ml
++++ b/src/refinement_checker/main.ml
+@@ -105,12 +105,6 @@
+   let start_offset = line_offsets.(start_line - 1) + start_col in
+   let end_offset = line_offsets.(end_line - 1) + end_col in
+   String.sub contents start_offset (end_offset - start_offset)
+-
+-let closure_parent_def_path def_path =
+-  (* Find the final : in the def_path *)
+-  let last_colon = String.rindex def_path ':' in
+-  assert (String.sub def_path (last_colon - 1) 11 = "::{closure#");
+-  String.sub def_path 0 (last_colon - 1)
+ 
+ let rec bodies_are_identical def_path body0 body1 =
+   body0.def_kind = body1.def_kind &&
+--- a/src/refinement_checker/refinement_checker.ml
++++ b/src/refinement_checker/refinement_checker.ml
+@@ -16,6 +16,11 @@
+ let canonicalize_def_path def_path =
+   (* Use a regex to replace each lifetime (of the form 'abc) in def_path by '_ *)
+   Str.global_replace canonicalize_def_path_re "'_" def_path
++
++let closure_parent_def_path def_path =
++  let last_colon = String.rindex def_path ':' in
++  assert (String.sub def_path (last_colon - 1) 11 = "::{closure#");
++  String.sub def_path 0 (last_colon - 1)
+ 
+ let popn n xs =
+   let rec iter n vs xs =
+@@ -119,6 +124,7 @@
+ | Closure of string * gen_arg list
+ | Never
+ | Tuple of ty list
++| Alias of alias_ty_kind * string * gen_arg list
+ | Param of string
+ | Str
+ | Array of ty * const_expr
+@@ -164,6 +170,14 @@
+ | Closure (id, args) -> Printf.sprintf "Closure %s %s" id (String.concat "; " (List.map string_of_gen_arg args))
+ | Never -> "Never"
+ | Tuple tys -> Printf.sprintf "Tuple [%s]" (String.concat "; " (List.map string_of_ty tys))
++| Alias (kind, id, args) ->
++    let kind = match kind with
++      | Projection -> "projection"
++      | Inherent -> "inherent"
++      | Opaque -> "opaque"
++      | Free -> "free"
++    in
++    Printf.sprintf "Alias (%s) %s [%s]" kind id (String.concat "; " (List.map string_of_gen_arg args))
+ | Param param -> Printf.sprintf "Param %s" param
+ | Str -> "Str"
+ | Array (ty, size) -> Printf.sprintf "Array %s %s" (string_of_ty ty) (string_of_const_expr size)
+@@ -271,7 +285,8 @@
+   | CoroutineWitness -> failwith "TODO: CoroutineWitness"
+   | Never -> Never
+   | Tuple tys -> Tuple (List.map (decode_ty genv) tys)
+-  | Alias _ -> failwith "TODO: Alias"
++  | Alias alias ->
++    Alias (alias.kind, alias.def_id, List.map (decode_gen_arg genv) alias.args)
+   | Param param -> (try List.assoc param genv.types with Not_found -> failwith ("No such type parameter: " ^ param))
+   | Bound -> failwith "TODO: Bound"
+   | Placeholder -> failwith "TODO: Placeholder"
+@@ -513,6 +528,8 @@
+                         {kind=Type {kind=Adt {id={name="std::boxed::Box"}; kind=StructKind; substs=[{kind=Type {kind=Param "T"}}; {kind=Type {kind=Param "A"}}]}}};
+                       ];
+                       late_bound_generic_param_count=1;
++                      item_is_safe=false;
++                      item_is_local=false;
+                     }
+                   }
+                 };
+@@ -853,6 +870,8 @@
+                       {kind=Type {kind=Tuple [{kind=Param "T"}]}};
+                     ];
+                     late_bound_generic_param_count=0;
++                    item_is_safe=false;
++                    item_is_local=false;
+                   }
+                 }
+               };
+@@ -1091,6 +1110,8 @@
+                       {kind=Type {kind=Tuple [{kind=Param "E"}]}};
+                     ];
+                     late_bound_generic_param_count=0;
++                    item_is_safe=false;
++                    item_is_local=false;
+                   }
+                 }
+               };
+@@ -1309,6 +1330,8 @@
+                       {kind=Type {kind=Tuple [{kind=Param "T"}]}};
+                     ];
+                     late_bound_generic_param_count=0;
++                    item_is_safe=false;
++                    item_is_local=false;
+                   }
+                 }
+               };
+@@ -1466,6 +1489,8 @@
+                       {kind=Type {kind=Tuple []}};
+                     ];
+                     late_bound_generic_param_count=0;
++                    item_is_safe=false;
++                    item_is_local=false;
+                   }
+                 }
+               };
+@@ -1962,7 +1987,8 @@
+       if fieldIndex0 <> fieldIndex1 then failwith "Field indices do not match"
+   | BoxAsNonNull _, BoxAsNonNull _ -> ()
+   | Index, Index -> failwith "PlaceElement::Index not supported"
+-  | ConstantIndex, ConstantIndex -> failwith "PlaceElement::ConstantIndex not supported"
++  | ConstantIndex i0, ConstantIndex i1 ->
++    if i0 <> i1 then failwith "Constant slice indices do not match"
+   | Subslice, Subslice -> failwith "PlaceElement::Subslice not supported"
+   | Downcast variant_idx0, Downcast variant_idx1 ->
+     if variant_idx0 <> variant_idx1 then failwith "Variant indices do not match"
+@@ -2298,10 +2324,20 @@
+   let unsafety1 = body1.unsafety in
+   (* We allow private functions to have different unsafety *)
+   if visibility0 = Public && unsafety0 = Safe && unsafety1 = Unsafe then failwith "The two functions have different unsafety";
+-  let generics0 = List.map decode_generic_param_def body0.impl_block_generics in
+-  let generics1 = List.map decode_generic_param_def body1.impl_block_generics in
+-  let generics0 = generics0 @ List.map decode_hir_generic_param body0.hir_generics.params in
+-  let generics1 = generics1 @ List.map decode_hir_generic_param body1.hir_generics.params in
++  let rec body_generic_params bodies path (body: body) =
++    let parameters =
++      List.map decode_generic_param_def body.impl_block_generics @
++      List.map decode_hir_generic_param body.hir_generics.params
++    in
++    if body.def_kind = Closure then
++      let parent_path = closure_parent_def_path path in
++      let parent = List.assoc parent_path bodies in
++      body_generic_params bodies parent_path parent @ parameters
++    else
++      parameters
++  in
++  let generics0 = body_generic_params bodies0 def_path body0 in
++  let generics1 = body_generic_params bodies1 def_path body1 in
+   if List.length generics0 <> List.length generics1 then failwith "The two functions have a different number of generic parameters";
+   let lft_params0, generics0 = List.partition (fun (_, kind) -> kind = Lifetime) generics0 in
+   let lft_params1, generics1 = List.partition (fun (_, kind) -> kind = Lifetime) generics1 in
+--- a/src/refinement_checker/stringifier.ml
++++ b/src/refinement_checker/stringifier.ml
+@@ -26,8 +26,10 @@
+       iter (Printf.sprintf "box_as_NonNull(%s)" inner) rest
+     | Index::rest ->
+       iter (Printf.sprintf "%s[?]" inner) rest
+-    | ConstantIndex::rest ->
+-      iter (Printf.sprintf "%s[constant ?]" inner) rest
++    | ConstantIndex {offset; min_length; from_end}::rest ->
++      iter (Printf.sprintf "%s[%s%s; min %s]" inner
++        (if from_end then "len - " else "") (Stdint.Uint64.to_string offset)
++        (Stdint.Uint64.to_string min_length)) rest
+     | Subslice::rest ->
+       iter (Printf.sprintf "subslice(%s)" inner) rest
+     | Downcast k::rest ->
+--- a/src/rust_frontend/vf_mir/vf_mir.capnp
++++ b/src/rust_frontend/vf_mir/vf_mir.capnp
+@@ -303,6 +303,8 @@
+         id @0: FnDefId;
+         substs @1: List(GenericArg);
+         lateBoundGenericParamCount @2: UInt16; # The generic args are only for the early-bound params.
++        itemIsSafe @3: Bool;
++        itemIsLocal @4: Bool;
+     }
+ 
+     struct FnPtrTy {
+@@ -328,6 +330,7 @@
+     struct ClosureTy {
+         defId @0: Text;
+         substs @1: List(GenericArg);
++        statelessMonomorphic @2: Bool;
+     }
+ 
+     struct AliasTy {
+@@ -456,11 +459,18 @@
+         field @1: FieldData;
+         boxAsNonNull @7: Ty; # The MIR pattern `X.0: std::ptr::Unique<T>` when X is a Box<T>. The Ty is T. Always appears as part of an RValue::Cast(CastKind::BoxDerefTransmute, Operand::Copy(local.BoxAsNonNull)), which we encode as CastKind.transmute (https://github.com/rust-lang/rust/blob/18491d5be00eb3ed2f1ccee2ac5b792694f2a7a0/compiler/rustc_mir_transform/src/elaborate_box_derefs.rs#L71)
+         index @3: Void;
+-        constantIndex @4: Void;
++        constantIndex @4: ConstantIndexData;
+         subslice @5: Void;
+         downcast @2: UInt32;
+         opaqueCast @6: Void;
+     }
++}
++
++struct ConstantIndexData {
++    offset @0: UInt64;
++    minLength @1: UInt64;
++    fromEnd @2: Bool;
++    sharedByteSlice @3: Bool;
+ }
+ 
+ struct Place {
+--- a/src/rust_frontend/vf_mir_exporter/src/lib.rs
++++ b/src/rust_frontend/vf_mir_exporter/src/lib.rs
+@@ -1236,12 +1236,20 @@
+             format!("'__{}", index)
+         }
+ 
++        fn impl_trait_param_name(index: u32) -> String {
++            // The index distinguishes separate occurrences of the same bound.
++            // '$' cannot appear in a source identifier.
++            format!("VfImplTrait${index}")
++        }
++
+         fn encode_generic_param_def(
+             generic_param: &GenericParamDef,
+             mut generic_param_cpn: crate::vf_mir_capnp::generic_param_def::Builder<'_>,
+         ) {
+             if generic_param.is_anonymous_lifetime() {
+                 generic_param_cpn.set_name(&Self::anonymous_early_bound_lifetime_name(generic_param.index));
++            } else if generic_param.name.as_str().starts_with("impl ") {
++                generic_param_cpn.set_name(&Self::impl_trait_param_name(generic_param.index));
+             } else {
+                 generic_param_cpn.set_name(generic_param.name.as_str());
+             }
+@@ -1389,28 +1397,11 @@
+                     def_path
+                 );
+             } else {
+-                let closure_ty = tcx.type_of(def_id).skip_binder();
+-                if let ty::Closure(_, substs) = closure_ty.kind() {
+-                    let sig = substs.as_closure().sig();
+-                    let sig = sig.skip_binder();
+-                    Self::encode_ty(
+-                        tcx,
+-                        enc_ctx,
+-                        sig.output(),
+-                        body_cpn.reborrow().init_output(),
+-                    );
+-                    let mut inputs = Vec::new();
+-                    inputs.push(closure_ty);
+-                    inputs.extend_from_slice(sig.inputs());
+-                    body_cpn.fill_inputs(&inputs, |input_cpn, input| {
+-                        Self::encode_ty(tcx, enc_ctx, *input, input_cpn);
+-                    });
+-                    assert!(
+-                        local_decls_count >= sig.inputs().len() as usize,
+-                        "Local declarations of {} are not at least its args",
+-                        def_path
+-                    );
+-                }
++                Self::encode_ty(tcx, enc_ctx, body.return_ty(), body_cpn.reborrow().init_output());
++                let inputs: Vec<_> = body.args_iter().map(|arg| body.local_decls()[arg].ty).collect();
++                body_cpn.fill_inputs(&inputs, |input_cpn, input| {
++                    Self::encode_ty(tcx, enc_ctx, *input, input_cpn);
++                });
+             }
+ 
+             body_cpn.fill_local_decls(
+@@ -1568,6 +1559,19 @@
+             match n {
+                 hir::ParamName::Plain(ident) => {
+                     let ident_cpn = n_cpn.init_plain();
++                    let tcx = enc_ctx.tcx;
++                    if ident.name.as_str().starts_with("impl ") {
++                        let def_id = def_id.to_def_id();
++                        let generics = tcx.generics_of(tcx.parent(def_id));
++                        let index = generics.param_def_id_to_index(tcx, def_id)
++                            .expect("synthetic type parameter has no generic index");
++                        let ident = rustc_span::symbol::Ident::new(
++                            rustc_span::symbol::Symbol::intern(&Self::impl_trait_param_name(index)),
++                            ident.span,
++                        );
++                        Self::encode_ident(enc_ctx, &ident, ident_cpn);
++                        return;
++                    }
+                     Self::encode_ident(enc_ctx, ident, ident_cpn);
+                 }
+                 hir::ParamName::Fresh => {
+@@ -1867,6 +1871,9 @@
+                 ty::TyKind::Closure(def_id, gen_args) => {
+                     let mut closure_ty_cpn = ty_kind_cpn.init_closure();
+                     closure_ty_cpn.set_def_id(&tcx.def_path_str(*def_id));
++                    let closure = gen_args.as_closure();
++                    closure_ty_cpn.set_stateless_monomorphic(closure.parent_args().is_empty()
++                        && matches!(closure.tupled_upvars_ty().kind(), ty::TyKind::Tuple(fields) if fields.is_empty()));
+                     closure_ty_cpn.fill_substs(gen_args.iter(), |gen_arg_cpn, gen_arg| {
+                         Self::encode_gen_arg(tcx, enc_ctx, gen_arg, gen_arg_cpn);
+                     });
+@@ -1895,7 +1902,11 @@
+                     });
+                 }
+                 ty::TyKind::Param(param_ty) => {
+-                    ty_kind_cpn.set_param(&param_ty.to_string());
++                    if param_ty.name.as_str().starts_with("impl ") {
++                        ty_kind_cpn.set_param(&Self::impl_trait_param_name(param_ty.index));
++                    } else {
++                        ty_kind_cpn.set_param(&param_ty.to_string());
++                    }
+                 }
+                 ty::TyKind::Bound(_, _) => ty_kind_cpn.set_bound(()),
+                 ty::TyKind::Placeholder(_) => ty_kind_cpn.set_placeholder(()),
+@@ -1995,8 +2006,10 @@
+             mut fn_def_ty_cpn: fn_def_ty_cpn::Builder<'_>,
+         ) {
+             let def_path = tcx.def_path_str(*def_id);
+-            let late_bound_generic_param_count =
+-                tcx.fn_sig(*def_id).skip_binder().bound_vars().len();
++            let sig = tcx.fn_sig(*def_id).skip_binder();
++            let late_bound_generic_param_count = sig.bound_vars().len();
++            fn_def_ty_cpn.set_item_is_safe(matches!(sig.safety(), hir::Safety::Safe));
++            fn_def_ty_cpn.set_item_is_local(def_id.is_local());
+             debug!(
+                 "Encoding FnDef for {} with {} late-bound generic params and substs {:?}",
+                 def_path, late_bound_generic_param_count, substs
+@@ -2981,8 +2994,14 @@
+                     place_elm_cpn.set_index(());
+                     PlaceKind::Other
+                 }
+-                mir::ProjectionElem::ConstantIndex{ .. } => {
+-                    place_elm_cpn.set_constant_index(());
++                mir::ProjectionElem::ConstantIndex { offset, min_length, from_end } => {
++                    let mut data = place_elm_cpn.init_constant_index();
++                    data.set_offset(*offset);
++                    data.set_min_length(*min_length);
++                    data.set_from_end(*from_end);
++                    data.set_shared_byte_slice(matches!(place_kind, PlaceKind::SharedRef)
++                        && matches!(ty.kind(), ty::TyKind::Slice(element)
++                            if matches!(element.kind(), ty::TyKind::Uint(ty::UintTy::U8))));
+                     PlaceKind::Other
+                 }
+                 mir::ProjectionElem::Subslice{ .. } => {
+--- a/src/rust_frontend/vf_mir_translator/rust_parser.ml
++++ b/src/rust_frontend/vf_mir_translator/rust_parser.ml
+@@ -1033,13 +1033,17 @@
+     | IdentTypeExpr (lx, None, x) -> (lx, x, [])
+     | ManifestTypeExpr (lx, tp) -> (lx, Printf.sprintf "<impl %s>" (Verifast0.rust_string_of_type tp), [])
+     | ConstructedTypeExpr (lx, x, targs) -> (lx, x, targs)
++    | SliceTypeExpr (lx, elem) when forClause = None ->
++        (lx, Printf.sprintf "<impl [%s]>" (string_of_type_expr elem), [])
+     | _ -> static_error (type_expr_loc tp) "This form of type is not supported here" None
+   in
+   let tpText =
+-    if String.index_opt x ':' = None then
+-      x ^ (if targs = [] then "" else "::<" ^ String.concat ", " (List.map string_of_type_expr targs) ^ ">")
+-    else
+-      Printf.sprintf "<impl %s<%s>>" x (String.concat ", " (List.map string_of_type_expr targs))
++    match tp with
++    | SliceTypeExpr _ -> x
++    | _ when String.index_opt x ':' = None ->
++        x ^ (if targs = [] then "" else "::<" ^ String.concat ", " (List.map string_of_type_expr targs) ^ ">")
++    | _ ->
++        Printf.sprintf "<impl %s<%s>>" x (String.concat ", " (List.map string_of_type_expr targs))
+   in
+   let prefix = match forClause with None -> tpText | Some tp -> Printf.sprintf "<%s as %s>" tpText (string_of_type_expr tp) in
+   let prefix = prefix ^ "::" in
+@@ -1059,7 +1063,18 @@
+   let ds = ds |> List.map (prefix_decl_name l prefix) in
+   List.map (decl_add_type_params l tparams) ds
+ and parse_decl = function%parser
+-  [ (l, Kwd "impl"); parse_type_params_with_bounds as tparams;
++  [ (l, Ident "specialize"); parse_type_params_with_bounds as tparams;
++    [%let generic = function%parser
++      [ (_, String name) ] -> name
++    | [ [%let (lg, name) = parse_simple_path] ] -> name
++    ]; parse_type_args as args;
++    (_, Kwd "as");
++    [%let specialized = function%parser
++      [ (_, Ident name) ] -> name
++    | [ (_, String name) ] -> name
++    ]; (_, Kwd ";") ] ->
++    [FuncSpecializationDecl (l, generic, false, specialized, tparams, args)]
++| [ (l, Kwd "impl"); parse_type_params_with_bounds as tparams;
+     [%let ds = function%parser
+        [
+          (_, Kwd "for"); (_, Ident x); (_, Kwd "="); parse_type as tp;
+@@ -1207,4 +1222,4 @@
+   ] -> ds
+ 
+ let parse_use_decls = function%parser
+-  [ [%let imports = rep parse_use_decl] ] -> List.flatten imports
+\ No newline at end of file
++  [ [%let imports = rep parse_use_decl] ] -> List.flatten imports
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -217,7 +217,7 @@
+         fields : D.aggregate_kind_adt_data_field_info list;
+       }
+     | AggKindTuple
+-    | AggKindClosure
++    | AggKindClosure of string
+ 
+   type field_def_tr = {
+     name : string;
+@@ -337,6 +337,54 @@
+ end
+ 
+ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
++  (* A monomorphic function item has no runtime fields. Its identity is in its
++     type, so use a different nominal zero-sized type for each function. *)
++  let function_item_types = Hashtbl.create 16
++  let checked_local_function_bodies = Hashtbl.create 16
++  let verified_stateless_closures = Hashtbl.create 16
++
++  let function_item_name id =
++    let name = Buffer.create (String.length id + 16) in
++    Buffer.add_string name "VfFunctionItem$";
++    String.iter (function
++      | ('a'..'z' | 'A'..'Z' | '0'..'9') as c -> Buffer.add_char name c
++      | c -> Buffer.add_string name (Printf.sprintf "_%02x" (Char.code c))
++    ) id;
++    Buffer.contents name
++
++  let function_item_type id fn_def loc =
++    let name =
++      match Hashtbl.find_opt function_item_types id with
++      | Some (name, _, _) -> name
++      | None ->
++          let name = function_item_name id in
++          Hashtbl.add function_item_types id (name, loc, fn_def);
++          name
++    in
++    Ast.StructTypeExpr (loc, Some name, None, [], [])
++
++  let function_item_decls () =
++    Hashtbl.fold (fun id (name, loc, (fn_def : D.ty_kind_fn_def_ty option)) decls ->
++      (* A typed value may later be invoked by a safe generic callback. Only
++         external safe functions and local functions whose bodies are checked
++         can be admitted here. Direct calls still use their usual contracts. *)
++      Option.iter (fun (fn_def : D.ty_kind_fn_def_ty) ->
++        if not fn_def.item_is_safe then
++          Ast.static_error loc ("Unsafe function item cannot be used as a value: " ^ id) None;
++        if fn_def.item_is_local && not (Hashtbl.mem checked_local_function_bodies id) then
++          Ast.static_error loc ("Local function item has no verified body: " ^ id) None
++      ) fn_def;
++      let ty = Ast.StructTypeExpr (loc, Some name, None, [], []) in
++      Ast.Struct (loc, name, [], Left ([], [], [], false), [Ast.RustZeroSized]) ::
++      Ast.TypedefDecl (loc, ty, name, []) ::
++      Ast.TypePredDef (loc, [], ty, "own", Right (["t"; "v"], None, Ast.True loc)) ::
++      decls
++    ) function_item_types []
++
++  let stateless_closure_type id loc =
++    if not (Hashtbl.mem verified_stateless_closures id) then
++      Ast.static_error loc "Expected a stateless closure with a verified MIR body" None;
++    function_item_type ("closure::" ^ id) None loc
+   open Ocaml_aux
+   module VfMirAnnotParser = Vf_mir_annot_parser.Make (Args)
+   module VfMirCapnpAlias = Vf_mir_capnp_alias
+@@ -1476,7 +1524,8 @@
+             Mir.GenArgLifetime "'erased")
+     in
+     let vf_ty =
+-      Ast.ManifestTypeExpr
++      if substs = [] then function_item_type id (Some fn_def_ty_cpn) loc
++      else Ast.ManifestTypeExpr
+         (loc, Ast.FuncType (translate_fn_name name substs_cpn))
+     in
+     if substs = [] then Ok { Mir.vf_ty; interp = RustBelt.emp_ty_interp loc }
+@@ -1896,8 +1945,9 @@
+     | FnPtr fn_ptr_ty_cpn -> translate_fn_ptr_ty fn_ptr_ty_cpn loc
+     | Dynamic _ -> Ast.static_error loc "Dynamic types are not yet supported" None
+     | Closure closure_ty_cpn ->
+-        (* This translation is sound provided that closures are consumed only by calls and such calls are rejected by VeriFast. *)
+-        let vf_ty = Ast.ManifestTypeExpr (loc, Ast.StructType (TrTyTuple.tuple0_name, [])) in
++        if not closure_ty_cpn.stateless_monomorphic then
++          Ast.static_error loc "Capturing or generic closures are not yet supported" None;
++        let vf_ty = stateless_closure_type closure_ty_cpn.def_id loc in
+         Ok { Mir.vf_ty; interp = RustBelt.emp_ty_interp loc }
+     | CoroutineClosure ->
+         Ast.static_error loc "Coroutine closure types are not yet supported"
+@@ -2040,9 +2090,10 @@
+       | Deref
+       | Field of string option * int
+       | Downcast of int
++      | ConstantSharedByteIndex of Stdint.Uint64.t * Stdint.Uint64.t
+       | BoxAsNonNull
+ 
+-    let decode_place_element (place_elm : PlaceElementRd.t) : place_element =
++    let decode_place_element loc (place_elm : PlaceElementRd.t) : place_element =
+       let open PlaceElementRd in
+       match get place_elm with
+       | Deref ->
+@@ -2063,13 +2114,28 @@
+           in
+           Field (name, Stdint.Uint32.to_int index)
+       | Downcast variant_index -> Downcast (Stdint.Uint32.to_int variant_index)
+-
+-    let translate_projection (loc : Ast.loc) (elems : place_element list)
++      | ConstantIndex data ->
++        let open VfMirRd.ConstantIndexData in
++        if from_end_get data || not (shared_byte_slice_get data) then
++          Ast.static_error loc "Only constant indices from the start of shared byte slices are supported" None;
++        ConstantSharedByteIndex (offset_get data, min_length_get data)
++
++    let translate_projection shared_slice_borrow (loc : Ast.loc) (elems : place_element list)
+         (e : Ast.expr) (e_is_mutable : bool) :
+         Ast.expr * bool (* result is mutable *) =
+       let rec iter elems =
+         match elems with
+         | [] -> (e, e_is_mutable)
++        | ConstantSharedByteIndex (offset, min_length) :: Deref :: elems when shared_slice_borrow ->
++            let slice, _ = iter elems in
++            let uint_literal n =
++              Ast.IntLit (loc, Big_int.big_int_of_string (Stdint.Uint64.to_string n), true, true, NoLSuffix)
++            in
++            let borrow = Ast.CallExpr (loc, "std::slice::borrow_constant_u8", [], [],
++              [LitPat slice; LitPat (uint_literal offset); LitPat (uint_literal min_length)], Static) in
++            (borrow, false)
++        | ConstantSharedByteIndex _ :: _ ->
++            Ast.static_error loc "A shared slice constant index must be used in a shared borrow" None
+         | Deref :: elems ->
+             let e1, e1_is_mutable = iter elems in
+             (Ast.Deref (loc, e1), true)
+@@ -2096,7 +2162,7 @@
+       in
+       iter elems
+ 
+-    let translate_place (place_cpn : PlaceRd.t) (loc : Ast.loc) :
++    let translate_place ?(shared_slice_borrow = false) (place_cpn : PlaceRd.t) (loc : Ast.loc) :
+         (Ast.expr * bool (* the place is mutable *), _) result =
+       let open PlaceRd in
+       Rocq_writer.rocq_print_tuple TranslatorArgs.rocq_writer @@ fun () ->
+@@ -2112,10 +2178,10 @@
+           Rocq_writer.rocq_print_small_list TranslatorArgs.rocq_writer @@ fun () ->
+             projection_cpn |> List.map @@ fun pe_cpn ->
+               Rocq_writer.rocq_print_small_list_element TranslatorArgs.rocq_writer @@ fun () ->
+-                decode_place_element pe_cpn
++                decode_place_element loc pe_cpn
+       in
+       Ok
+-        (translate_projection loc (List.rev place_elems)
++        (translate_projection shared_slice_borrow loc (List.rev place_elems)
+            (Ast.Var (loc, id))
+            local_is_mutable)
+ 
+@@ -2143,6 +2209,12 @@
+         ( loc,
+           StructTypeExpr (loc, Some TrTyTuple.tuple0_name, None, [], []),
+           InitializerList (loc, []) )
++
++    let translate_function_item_value (fn_def : D.ty_kind_fn_def_ty) loc =
++      if fn_def.substs <> [] || fn_def.late_bound_generic_param_count <> 0 then
++        Ast.static_error loc "Generic function item values are not yet supported" None;
++      let ty = function_item_type fn_def.id.name (Some fn_def) loc in
++      Ast.CastExpr (loc, ty, Ast.InitializerList (loc, []))
+ 
+     let translate_unit_constant (loc : Ast.loc) = Ok `TrUnitConstant
+ 
+@@ -2292,9 +2364,8 @@
+             let rvalue_binder = rvalue_binder_builder tmp_var_name in
+             tmp_rvalue_binders := !tmp_rvalue_binders @ [ rvalue_binder ];
+             Ok (Ast.Var (loc, tmp_var_name))
+-        | `TrTypedConstantFn _ ->
+-            failwith
+-              "Todo: Functions as operand in rvalues are not supported yet"
++        | `TrTypedConstantFn fn_def ->
++            Ok (translate_function_item_value fn_def loc)
+         | `TrTypedConstantScalar expr -> Ok expr
+       in
+       let* oprs =
+@@ -2326,9 +2397,12 @@
+       let has_closure_substs =
+         match D.decode_operand callee_cpn with
+           Constant {const = Val {ty = {kind = FnDef { id = { name }; substs }}}} ->
+-            Printf.printf "%s\n" (String.concat ", " (List.map (fun arg -> string_of_generic_arg (decode_generic_arg arg)) substs));
+             List.exists
+-              (fun arg -> match (arg : D.generic_arg) with { kind = Type { kind = Closure _ } } -> true | _ -> false)
++              (fun (arg : D.generic_arg) ->
++                match arg.kind with
++                | Type {kind = Closure closure} ->
++                    not (closure.stateless_monomorphic && Hashtbl.mem verified_stateless_closures closure.def_id)
++                | _ -> false)
+               substs
+         | _ -> false
+       in
+@@ -3038,8 +3112,16 @@
+     let translate_un_op (un_op_cpn : UnOpRd.t) =
+       let open UnOpRd in
+       match get un_op_cpn with
+-      | Not -> Ok Ast.Not
+-      | Neg -> Ok Ast.Sub
++      | Not -> Ok (fun loc expr -> Ast.Operation (loc, Ast.Not, [expr]))
++      | Neg ->
++          Ok (fun loc expr ->
++              let zero = Ast.IntLit (loc, Big_int.zero_big_int, true, false, NoLSuffix) in
++              Ast.Operation (loc, Ast.Sub, [zero; expr]))
++      | PtrMetadata ->
++          (* The existing len check on a Rust pointer recognizes only slice
++             and str pointers. *)
++          Ok (fun loc expr ->
++              Ast.CallExpr (loc, "len", [], [], [Ast.LitPat expr], Instance))
+       | Undefined _ -> Error (`TrUnOp "Unknown unary operator")
+ 
+     let translate_binary_operation (bin_op_data_cpn : BinaryOpDataRd.t)
+@@ -3088,8 +3170,8 @@
+           let substs_cpn = gen_args_get_list adt_data_cpn in
+           let fields = fields_get_list adt_data_cpn |> List.map D.decode_aggregate_kind_adt_data_field_info in
+           Ok Mir.(AggKindAdt { adt_kind; adt_name; variant_name; fields })
+-      | Closure _ ->
+-          Ok Mir.(AggKindClosure)
++      | Closure data ->
++          Ok (Mir.AggKindClosure (ClosureData.closure_id_get data))
+       | Coroutine -> failwith "Todo: AggregateKind::Coroutine"
+       | CoroutineClosure -> failwith "Todo: AggregateKind::CoroutineClosure"
+       | RawPtr -> failwith "Todo: AggregateKind::RawPtr"
+@@ -3149,11 +3231,11 @@
+             tmp_rvalue_binders @ field_init_stmts
+           in
+           Ok (`TrRvalueAggregate init_stmts_builder)
+-      | AggKindClosure ->
+-          let init_stmts_builder (_lhs_place, _lhs_place_is_mutable) =
+-            tmp_rvalue_binders
+-          in
+-          Ok (`TrRvalueAggregate init_stmts_builder)
++      | AggKindClosure id ->
++          if operand_exprs <> [] || tmp_rvalue_binders <> [] then
++            Ast.static_error loc "Closure captures are not yet supported" None;
++          let ty = stateless_closure_type id loc in
++          Ok (`TrRvalueExpr (Ast.CastExpr (loc, ty, Ast.InitializerList (loc, []))))
+       | AggKindAdt { adt_kind; adt_name; variant_name; fields } -> (
+           match adt_kind with
+           | Enum ->
+@@ -3216,8 +3298,8 @@
+         | `TrTypedConstantRvalueBinderBuilder rvalue_binder_builder ->
+             Ok (`TrRvalueRvalueBinderBuilder rvalue_binder_builder)
+         | `TrUnitConstant -> Ok `TrRvalueUnitConstant
+-        | `TrTypedConstantFn _ ->
+-            Error (`TrRvalue "Invalid operand translation for Rvalue")
++        | `TrTypedConstantFn fn_def ->
++            Ok (`TrRvalueExpr (translate_function_item_value fn_def loc))
+       in
+       match get rvalue_cpn with
+       | Use operand_cpn ->
+@@ -3235,7 +3317,11 @@
+           let bor_kind = BorrowKind.get bor_kind_cpn in
+           let place_cpn = place_get ref_data_cpn in
+           let place_does_not_need_drop = place_does_not_need_drop_get ref_data_cpn in
+-          let* place_expr, place_is_mutable = translate_place place_cpn loc in
++          let* place_expr, place_is_mutable = translate_place ~shared_slice_borrow:(bor_kind = Shared) place_cpn loc in
++          begin match place_expr with
++          | Ast.CallExpr (_, "std::slice::borrow_constant_u8", _, _, _, _) ->
++              Ok (`TrRvalueExpr (result_of_outcome loc place_expr))
++          | _ ->
+           let (path, line, _), _ = Ast.lexed_loc loc in
+           let ignore_ref_creation =
+             bor_kind = Mut
+@@ -3317,6 +3403,7 @@
+                   (loc, "fn_outcome_result", [], [], [ LitPat expr ], Static)
+             in
+             Ok (`TrRvalueExpr expr)
++          end
+       | ThreadLocalRef ->
+           Ast.static_error loc
+             "Thread-local static references are not yet supported" None
+@@ -3513,21 +3600,7 @@
+                        lhs_place,
+                        (if lhs_place_is_mutable then Mutation
+                         else Initialization),
+-                       Ast.Operation
+-                         ( loc,
+-                           operator,
+-                           match operator with
+-                           | Sub ->
+-                               [
+-                                 IntLit
+-                                   ( loc,
+-                                     Big_int.zero_big_int,
+-                                     true,
+-                                     false,
+-                                     NoLSuffix );
+-                                 expr;
+-                               ]
+-                           | _ -> [ expr ] ) ))
++                       operator loc expr ))
+               in
+               match rvalue_binder_stmts with
+               | [] -> Ok [ assign_stmt ]
+@@ -3919,6 +3992,30 @@
+                                   (bb :: path)))))))
+       in
+       iter [] 0 entry_id;
++      (* A Rust for body starts after the compiler-generated next call. A ghost
++         invariant in that body applies at the natural loop's header, before
++         next, and is still checked on entry and on every back edge. Only the
++         invariant marker moves; the MIR statements remain in their blocks. *)
++      let is_invariant = function
++        | Ast.PureStmt (_, Ast.InvariantStmt _) -> true
++        | _ -> false
++      in
++      let has_invariant bb =
++        List.exists is_invariant bb.statements ||
++        List.exists is_invariant bb.terminator_stmts
++      in
++      Hashtbl.iter (fun _ (bb : basic_block) ->
++        match bb.parent, bb.walk_state with
++        | Some head, Exhausted when not bb.is_block_head ->
++            begin match List.partition is_invariant bb.terminator_stmts with
++            | [], _ -> ()
++            | [inv], rest when not (has_invariant head) ->
++                bb.terminator_stmts <- rest;
++                head.statements <- inv :: head.statements
++            | inv :: _, _ ->
++                Ast.static_error (Ast.stmt_loc inv) "Multiple invariants for the same loop" None
++            end
++        | _ -> ()) bblocks_table;
+       !toplevel_blocks
+ 
+     let rec translate_to_vf_basic_block
+@@ -4959,9 +5056,24 @@
+     let def_kind_cpn = def_kind_get body_cpn in
+     let def_kind = DefKind.get def_kind_cpn in
+     match def_kind with
+-    | DefKind.Fn ->
++    | DefKind.Fn | DefKind.Closure ->
++        let closure_body = def_kind = DefKind.Closure in
++        let inputs = inputs_get_list body_cpn |> List.map D.decode_ty in
++        (* MIR erases the receiver region. Introduce a fresh lifetime for the
++           same mutable reference so gen_contract requires exclusive access. *)
++        let inputs, receiver_generics =
++          match closure_body, inputs with
++          | true, {D.kind = Ref receiver} :: rest ->
++              let name = "'_VfClosureEnv$0" in
++              let receiver = {receiver with D.region = {id = name}} in
++              {D.kind = Ref receiver} :: rest, [name, Hir.GenParamLifetime]
++          | _ -> inputs, []
++        in
+         let def_path = def_path_get body_cpn in
+-        let name = TrName.translate_def_path def_path in
++        let name =
++          if closure_body then function_item_name ("closure_body::" ^ def_path)
++          else TrName.translate_def_path def_path
++        in
+         Rocq_writer.rocq_print_tuple Args.rocq_writer @@ fun () ->
+         Rocq_writer.rocq_print_tuple_element Args.rocq_writer begin fun () ->
+           Rocq_writer.rocq_print_string_literal Args.rocq_writer name
+@@ -4973,7 +5085,9 @@
+         let split_name = TrName.split_def_path moduleName name in
+         let impl_block_gens = impl_block_generics_get_list body_cpn |> List.map translate_generic_param_def in
+         let hir_gens_cpn = hir_generics_get body_cpn in
+-        let* gens, gens_loc = translate_hir_generics hir_gens_cpn in
++        let* gens, gens_loc =
++          if closure_body then Ok (receiver_generics, fn_sig_loc) else translate_hir_generics hir_gens_cpn
++        in
+         let early_bound_generic_param_names =
+           generics_get_list body_cpn
+           |> List.map @@ fun generic_param ->
+@@ -5023,7 +5137,6 @@
+                | `Outlives (r1, r2) -> [ (r1, r2) ]
+                | _ -> [])
+         in
+-        let inputs = inputs_get_list body_cpn |> List.map D.decode_ty in
+         Rocq_writer.rocq_print_big_record_field Args.rocq_writer "inputs" begin fun () ->
+           Rocq_writer.rocq_print_small_list Args.rocq_writer @@ fun () ->
+           inputs |> List.iter @@ fun ty ->
+@@ -5231,6 +5344,11 @@
+               let body_sig = mk_fn_decl contract_template None in
+               Some (split_name, body_sig)
+         in
++        (match body with
++         | Ast.Func (_, Ast.Regular, _, _, _, _, _, _, Some _, _, Some _, _, _)
++             when not closure_body && not is_unsafe && not assume_false ->
++             Hashtbl.replace checked_local_function_bodies def_path ()
++         | _ -> ());
+         Ok
+           ( body_sig_opt,
+             (split_name, body),
+@@ -7607,6 +7725,7 @@
+   let rec match_gen_args env (arg1 : Vf_mir_decoder.generic_arg)
+       (arg2 : Vf_mir_decoder.generic_arg) =
+     match (arg1.kind, arg2.kind) with
++    | Lifetime { id = "'_" }, Lifetime _ -> Some env
+     | Lifetime { id = "'static'" }, Lifetime { id = "'static'" } -> Some env
+     | Lifetime { id = id1 }, Lifetime { id = id2 } ->
+         begin match List.assoc_opt id1 env.lifetime_env with
+@@ -7634,6 +7753,12 @@
+     | Never, Never -> Some env
+     | Int intTy1, Int intTy2 -> if intTy1 = intTy2 then Some env else None
+     | UInt uintTy1, UInt uintTy2 -> if uintTy1 = uintTy2 then Some env else None
++    | Char, Char -> Some env
++    | Str, Str -> Some env
++    | Tuple fields1, Tuple fields2 -> match_type_lists env fields1 fields2
++    | Ref r1, Ref r2 when r1.mutability = r2.mutability ->
++        match_gen_args env {kind = Lifetime r1.region} {kind = Lifetime r2.region} >>= fun env ->
++        match_types env r1.ty r2.ty
+     | Adt { id = id1; substs = substs1 }, Adt { id = id2; substs = substs2 } ->
+         if canonicalize_item_name id1.name = canonicalize_item_name id2.name then match_gen_arg_lists env substs1 substs2 else None
+     | ( RawPtr { ty = ty1; mutability = mut1 },
+@@ -7901,6 +8026,13 @@
+         { kind = Type {kind=Adt { id = {name=x}; kind=StructKind; substs = [] }} }
+     | Ast.ConstructedTypeExpr (_, x, targs) ->
+       { kind = Type {kind=Adt { id = {name=x}; kind=StructKind; substs = List.map (generic_arg_of_type_expr tparams) targs }} }
++    | Ast.RustRefTypeExpr (_, Ast.IdentTypeExpr (_, None, name), kind, pointee)
++      when (name = "'_" || List.mem_assoc name tparams) && String.starts_with ~prefix:"'" name ->
++      let {D.kind = Type ty} = generic_arg_of_type_expr tparams pointee in
++      let mutability : D.mutability = match kind with Ast.Mutable -> D.Mut | Ast.Shared -> D.Not in
++      {kind = Type {kind = Ref {region = {id = name}; ty; mutability}}}
++    | Ast.ManifestTypeExpr (_, Str) -> {kind = Type {kind=Str}}
++    | Ast.ManifestTypeExpr (_, RustChar) -> {kind = Type {kind=Char}}
+     | Ast.ManifestTypeExpr (_, Int (Unsigned, FixedWidthRank 0)) -> {kind = Type {kind=UInt U8}}
+     | Ast.ManifestTypeExpr (_, Int (Unsigned, FixedWidthRank 1)) -> {kind = Type {kind=UInt U16}}
+     | Ast.ManifestTypeExpr (_, Int (Unsigned, FixedWidthRank 2)) -> {kind = Type {kind=UInt U32}}
+@@ -7917,6 +8049,9 @@
+ 
+   let translate_vf_mir (extern_specs : string list)
+       (vf_mir_cpn : VfMirRd.VfMir.t) =
++    Hashtbl.clear function_item_types;
++    Hashtbl.clear checked_local_function_bodies;
++    Hashtbl.clear verified_stateless_closures;
+     let job _ =
+       Rocq_writer.rocq_print Args.rocq_writer "From VeriFast Require Export VfMir.\n\n";
+       (* Todo @Nima: we should add necessary inclusions during translation *)
+@@ -7932,6 +8067,20 @@
+                      `crateName=path/to/spec_file.rsspec`"
+                     extern_spec)
+       in
++      let local_spec_names, extern_header_names =
++        List.partition (fun (scope, _) -> scope = "self") extern_header_names
++      in
++      (* The explicit self scope lets a contract for an external operation
++         mention the checked crate's own types. Unlike a header, these
++         packages are checked with the crate's declarations in scope. *)
++      let local_specs = local_spec_names |> Util.flatmap (fun (_, path) ->
++        let ds = VfMirAnnotParser.parse_rsspec_file path in
++        Rust_parser.flatten_module_decls Ast.dummy_loc [] ds)
++      in
++      let local_specs =
++        if Args.ignore_unwind_paths then List.map Rust_parser.result_package_of_outcome_package local_specs
++        else local_specs
++      in
+       let header_names =
+         [
+           ( "std",
+@@ -7955,7 +8104,10 @@
+       let headers, fn_specialization_decls =
+         List.split (List.map header_extract_fn_specialization_decls headers)
+       in
+-      let fn_specialization_decls = List.flatten fn_specialization_decls in
++      let local_specs, local_specialization_decls =
++        List.split (List.map package_extract_fn_specialization_decls local_specs)
++      in
++      let fn_specialization_decls = List.flatten (fn_specialization_decls @ local_specialization_decls) in
+       let fn_specializations = fn_specialization_decls |> List.map @@ fun (l, g_generic, g_specialized, tparams, targs) ->
+         let targs = List.map (generic_arg_of_type_expr tparams) targs in
+         let specialize substs =
+@@ -8088,24 +8240,30 @@
+           traits_cpn
+       in
+       let traits_decls = List.flatten traits_decls in
+-      let bodies_cpn = VfMirRd.VfMir.bodies_get_list vf_mir_cpn in
+-      let bodies_cpn =
+-        bodies_cpn
+-        |> List.filter (fun body_cpn ->
+-               BodyRd.DefKind.get (BodyRd.def_kind_get body_cpn)
+-               <> BodyRd.DefKind.Closure)
+-      in
+-      (* It's okay to ignore closure bodies so long as we crash when we encounter closure types as function call generic arguments. *)
+-      let bodies_cpn =
+-        if Args.skip_specless_fns then
+-          List.filter
+-            (fun body_cpn ->
+-              not
+-                (Capnp.Array.is_empty
+-                   (ContractRd.annotations_get (BodyRd.contract_get body_cpn))))
+-            bodies_cpn
+-        else bodies_cpn
+-      in
++      let all_bodies = VfMirRd.VfMir.bodies_get_list vf_mir_cpn in
++      let regular_bodies, closures = all_bodies |> List.partition (fun body ->
++        BodyRd.DefKind.get (BodyRd.def_kind_get body) <> BodyRd.DefKind.Closure)
++      in
++      let regular_bodies = regular_bodies |> List.filter (fun body ->
++        not Args.skip_specless_fns ||
++        not (Capnp.Array.is_empty (ContractRd.annotations_get (BodyRd.contract_get body))))
++      in
++      let checked_owners = regular_bodies |> List.map BodyRd.def_path_get in
++      let closures = closures |> List.filter (fun body ->
++        let path = BodyRd.def_path_get body in
++        let owner, _ = split_item_name path in
++        List.mem owner checked_owners &&
++        (match BodyRd.inputs_get_list body with
++         | first :: _ ->
++             begin match D.decode_ty first with
++             | {kind = Closure c} | {kind = Ref {mutability = Mut; ty = {kind = Closure c}}} ->
++                 c.def_id = path && c.stateless_monomorphic
++             | _ -> false
++             end
++         | [] -> false))
++      in
++      closures |> List.iter (fun body -> Hashtbl.add verified_stateless_closures (BodyRd.def_path_get body) ());
++      let bodies_cpn = regular_bodies @ closures in
+       let body_tr_defs_ctx =
+         { adt_defs; directives = vf_mir_translator_directives; fn_specializer }
+       in
+@@ -8140,6 +8298,7 @@
+           (modularize_decl module_imports_map)
+           (ty_alias_decls @ traits_decls @ trait_impl_prototypes @ adt_decls @ aux_decls
+          @ adts_full_bor_content_preds @ adts_proof_obligs)
++        @ function_item_decls ()
+         @ ghost_decls
+         @ List.map
+             (modularize_fn_decl module_imports_map)
+@@ -8147,9 +8306,8 @@
+       in
+       Ok
+         ( headers,
+-          Rust_parser.flatten_module_decls Ast.dummy_loc
+-            (List.flatten ghost_imports)
+-            decls,
++          local_specs @ Rust_parser.flatten_module_decls Ast.dummy_loc
++            (List.flatten ghost_imports) decls,
+           Some debug_infos )
+     in
+     match job () with
+--- a/src/verifast.ml
++++ b/src/verifast.ml
+@@ -192,9 +192,28 @@
+               consume_c_object_core_core closeBraceLoc coefpat addr t h env true true $. fun _ h _ ->
+               free_locals_core h locals
+             | RefType t -> (* free locals of which the address is taken *)
+-              let verify_dtor_call = verify_dtor_call (pn, ilist) leminfo funcmap predinstmap sizemap tenv ghostenv h env addr (Some x) in
+-              consume_cxx_object closeBraceLoc coefpat addr t verify_dtor_call true h env @@ fun h env -> 
+-              free_locals_core h locals
++              let has_rust_uninit_struct_chunk =
++                match dialect, unfold_inferred_type t with
++                | Some Rust, StructType _ ->
++                  let points_to_ = generic_points_to__symb () in
++                  List.exists (function
++                    | Chunk ((pred, true), [tp], _, [p; _], _) ->
++                      predname_eq (pred, true) (points_to_, true) &&
++                      unfold_inferred_type tp = unfold_inferred_type t && definitely_equal p addr
++                    | _ -> false) h
++                | _ -> false
++              in
++              if has_rust_uninit_struct_chunk then
++                (* Rust drop glue can leave the entire stack slot in points_to_ form.
++                   Dispose of that permission without requiring its fieldwise form. *)
++                consume_chunk rules h env ghostenv [] [] closeBraceLoc
++                  (generic_points_to__symb (), true) [t] real_unit coefpat (Some 1)
++                  [TermPat addr; SrcPat DummyPat] @@ fun _ h _ _ _ _ _ _ ->
++                free_locals_core h locals
++              else
++                let verify_dtor_call = verify_dtor_call (pn, ilist) leminfo funcmap predinstmap sizemap tenv ghostenv h env addr (Some x) in
++                consume_cxx_object closeBraceLoc coefpat addr t verify_dtor_call true h env @@ fun h env ->
++                free_locals_core h locals
+       in
+       match locals with
+         [] -> cont h env
+--- a/src/verifast1.ml
++++ b/src/verifast1.ml
+@@ -6516,9 +6516,16 @@
+     in
+     let packed = List.mem Packed attrs in
+     let repr_c = dialect <> Some Rust || List.mem ReprC attrs in
+-    (* Generic Rust structs can have zero-sized instantiations. *)
+-    let size_lower_bound = if dialect = Some Rust then ctxt#mk_le else ctxt#mk_lt in
+-    assume_axiom (fun _ _ s -> (sn ^ "_size_limits", s, ctxt#mk_and (size_lower_bound (ctxt#mk_intlit 0) s) (ctxt#mk_le s max_uintptr_term)));
++    if List.mem RustZeroSized attrs then
++      (match dialect, body_opt with
++       | Some Rust, Some (_, [], _) ->
++           assume_axiom (fun _ _ s -> (sn ^ "_size_zero", s, ctxt#mk_eq s (ctxt#mk_intlit 0)))
++       | _ -> static_error l "Zero-sized Rust model types must have no fields" None)
++    else begin
++      (* Generic Rust structs can have zero-sized instantiations. *)
++      let size_lower_bound = if dialect = Some Rust then ctxt#mk_le else ctxt#mk_lt in
++      assume_axiom (fun _ _ s -> (sn ^ "_size_limits", s, ctxt#mk_and (size_lower_bound (ctxt#mk_intlit 0) s) (ctxt#mk_le s max_uintptr_term)))
++    end;
+     match body_opt with
+     | Some (_, fmap, _) ->
+       if dialect = Some Rust then
