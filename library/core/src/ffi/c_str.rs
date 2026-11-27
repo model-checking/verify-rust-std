@@ -874,12 +874,8 @@ const unsafe fn strlen(ptr: *const c_char) -> UsizeNoHighBitMinusOne {
     const_eval_select!(
         @capture { s: *const c_char = ptr } -> UsizeNoHighBitMinusOne:
         if const {
-            let mut len = 0;
-
             // SAFETY: Outer caller has provided a pointer to a valid C string.
-            while unsafe { *s.add(len) } != 0 {
-                len += 1;
-            }
+            let len = unsafe { strlen_loop(s) };
 
             UsizeNoHighBitMinusOne::new(len).unwrap()
         } else {
@@ -893,6 +889,23 @@ const unsafe fn strlen(ptr: *const c_char) -> UsizeNoHighBitMinusOne {
             unsafe { UsizeNoHighBitMinusOne::new_unchecked(strlen(s)) }
         }
     )
+}
+
+/// The loop of `strlen`'s `if const` arm, moved out of it unchanged so that verification harnesses
+/// can name it: items inside the arms of `const_eval_select!` cannot be named from outside.
+///
+/// # Safety
+///
+/// `s` must point to a valid C string.
+const unsafe fn strlen_loop(s: *const c_char) -> usize {
+    let mut len = 0;
+
+    // SAFETY: Outer caller has provided a pointer to a valid C string.
+    while unsafe { *s.add(len) } != 0 {
+        len += 1;
+    }
+
+    len
 }
 
 /// An iterator over the bytes of a [`CStr`], without the nul terminator.
