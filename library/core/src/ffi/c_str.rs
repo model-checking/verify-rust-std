@@ -5,6 +5,8 @@ use safety::{ensures, requires};
 use crate::cmp::Ordering;
 use crate::error::Error;
 use crate::ffi::c_char;
+#[cfg(kani)]
+use crate::forall;
 use crate::intrinsics::const_eval_select;
 use crate::iter::FusedIterator;
 #[cfg(kani)]
@@ -874,12 +876,8 @@ const unsafe fn strlen(ptr: *const c_char) -> UsizeNoHighBitMinusOne {
     const_eval_select!(
         @capture { s: *const c_char = ptr } -> UsizeNoHighBitMinusOne:
         if const {
-            let mut len = 0;
-
             // SAFETY: Outer caller has provided a pointer to a valid C string.
-            while unsafe { *s.add(len) } != 0 {
-                len += 1;
-            }
+            let len = unsafe { strlen_loop(s) };
 
             UsizeNoHighBitMinusOne::new(len).unwrap()
         } else {
@@ -893,6 +891,25 @@ const unsafe fn strlen(ptr: *const c_char) -> UsizeNoHighBitMinusOne {
             unsafe { UsizeNoHighBitMinusOne::new_unchecked(strlen(s)) }
         }
     )
+}
+
+/// The loop of `strlen`'s `if const` arm, moved out of it unchanged so that verification harnesses
+/// can name it: items inside the arms of `const_eval_select!` cannot be named from outside.
+///
+/// # Safety
+///
+/// `s` must point to a valid C string.
+const unsafe fn strlen_loop(s: *const c_char) -> usize {
+    let mut len = 0;
+
+    #[safety::loop_invariant(len <= verify::strlen_ghost_nul_at()
+        && forall!(|i in (0, len)| unsafe { *s.wrapping_add(i) } != 0))]
+    // SAFETY: Outer caller has provided a pointer to a valid C string.
+    while unsafe { *s.add(len) } != 0 {
+        len += 1;
+    }
+
+    len
 }
 
 /// An iterator over the bytes of a [`CStr`], without the nul terminator.
@@ -1418,6 +1435,60 @@ mod verify {
         // single buffer shape.
         kani::cover(len == 0, "non-vacuity: an empty C string (strlen == 0) is reachable");
         kani::cover(len > 0, "non-vacuity: a non-empty C string (strlen > 0) is reachable");
+    }
+
+    // The offset of a nul in the string, for `strlen_loop`'s loop invariant. `strlen_loop` is a
+    // `const fn`, which can't call `kani::any`, so the harness passes it through this static.
+    static mut STRLEN_GHOST_NUL_AT: usize = 0;
+
+    pub(super) fn strlen_ghost_nul_at() -> usize {
+        // SAFETY: Kani is single-threaded.
+        unsafe { STRLEN_GHOST_NUL_AT }
+    }
+
+    // `strlen_loop` on strings of any length: the buffer can be any size up to
+    // `MAX_ALLOCATION_BYTES`, and there's no `kani::unwind`. The string starts at the start of the
+    // buffer, which loses nothing, since the loop only reads forward from `s`.
+    #[kani::proof]
+    #[kani::solver(z3)] // The quantifiers have a symbolic bound, which needs an SMT solver.
+    fn check_strlen_loop_unbounded() {
+        // Fits in the largest object CBMC can address with the `--object-bits 12` that CI passes.
+        const MAX_ALLOCATION_BYTES: usize = 1 << 48;
+
+        // `core` can't call `alloc::alloc`, so this calls Kani's model of the allocator directly.
+        unsafe extern "Rust" {
+            fn __rust_alloc(size: usize, align: usize) -> *mut u8;
+        }
+        let size: usize = kani::any_where(|&n: &usize| n > 0 && n <= MAX_ALLOCATION_BYTES);
+        // SAFETY: `size` is nonzero, and 1 is a valid alignment.
+        let ptr = unsafe { __rust_alloc(size, 1) } as *const c_char;
+        kani::assume(!ptr.is_null());
+
+        // `strlen`'s precondition: a nul within `isize::MAX` bytes of `ptr`, readable up to it.
+        // SAFETY: `&&` short-circuits, so `*ptr.add(nul_at)` is only read once it's readable.
+        let nul_at: usize = kani::any();
+        kani::assume(
+            nul_at < isize::MAX as usize
+                && kani::mem::can_dereference(crate::ptr::slice_from_raw_parts(ptr, nul_at + 1))
+                && unsafe { *ptr.add(nul_at) } == 0,
+        );
+        // SAFETY: Kani is single-threaded.
+        unsafe { STRLEN_GHOST_NUL_AT = nul_at };
+
+        // SAFETY: by the assumptions above, `ptr` is a valid C string.
+        let len = unsafe { super::strlen_loop(ptr) };
+
+        // `strlen`'s postcondition: `len` is the offset of the first nul.
+        // SAFETY: the loop read every byte up to and including `*ptr.add(len)`.
+        assert!(len < isize::MAX as usize);
+        assert!(unsafe { *ptr.add(len) } == 0);
+        assert!(forall!(|i in (0, len)| unsafe { *ptr.wrapping_add(i) } != 0));
+
+        kani::cover(len == 0, "non-vacuity: an empty string");
+        kani::cover(
+            size == MAX_ALLOCATION_BYTES && len == size - 1,
+            "non-vacuity: the longest string in the largest buffer",
+        );
     }
 
     // pub const unsafe fn from_ptr<'a>(ptr: *const c_char) -> &'a CStr  (criterion 3)
